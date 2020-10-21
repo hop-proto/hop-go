@@ -1,0 +1,94 @@
+\documentclass[letterpaper,twocolumn,10pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage{usenix2019_v3}
+\usepackage[%
+    breaklinks=true,colorlinks=true,linkcolor=black,%
+    citecolor=black,urlcolor=black,bookmarks=true,bookmarksopen=false,%
+    pdfauthor={},%
+    pdftitle={},% // TODO: add title
+    pdftex]{hyperref}
+
+\usepackage[english]{babel}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xspace}
+\usepackage[utf8]{inputenc}
+\usepackage{wasysym}
+\usepackage[ruled,vlined]{algorithm2e}
+\usepackage{pdflscape}
+\usepackage{enumitem}
+
+%\usepackage[font=small,skip=8pt]{caption}
+
+\usepackage{subcaption}
+\usepackage{balance}
+\usepackage{float}
+
+\usepackage[protrusion=true,expansion=true,kerning,spacing]{microtype}
+
+\SetExtraKerning{encoding=*,font=*}{\textemdash={120,120}} % Add space around emdashes
+%\DeclareMathOperator{\EX}{\mathbb{E}}% expected value
+
+\newcommand{\todo}[1]{}
+\renewcommand{\todo}[1]{{\color{red} TODO: {#1}}}
+\newcommand{\TODO}[1]{}
+\renewcommand{\TODO}[1]{{\color{red} TODO: {#1}}}
+
+\newcommand{\mynote}[3]{\fbox{\bfseries\sffamily\scriptsize #1}{\small\textsf{\emph{\color{#3}{ #2}}}}}
+\newcommand{\rt}[1]{\mynote{Renata}{#1}{red}}
+\newcommand{\zd}[1]{\mynote{ZD}{#1}{blue}}
+
+%re-define paragraphs
+\def \paragraph [#1] {\vspace{3pt}\noindent{\textbf{#1}\quad}}%
+
+\newcommand\boldblue[1]{\textcolor{blue}{\textbf{#1}}}
+
+\newcommand{\TK}{}
+\renewcommand{\TK}{{\color{red}TK}\xspace}
+
+% Fix URL hyphenation (AH 12/2008)
+\def\UrlBreaks{\do-\do\.\do\@\do\\\do\!\do\_\do\|\do\;\do\>\do\]%
+ \do\)\do\,\do\?\do\'\do+\do\=\do\#}
+\def\UrlBigBreaks{\do\:\do\/}%
+
+\pagestyle{plain}
+\title{\todo{Name!}: A Modern Transport and Remote Access Protocol}
+
+
+\begin{document}
+
+%for single author (just remove % characters)
+%\author{
+%{\rm Liz Izhikevich}\\
+%Stanford University
+%\and
+%{\rm Renata Teixeira}\\
+%Inria, Paris
+%\and
+%{\rm Zakir Durumeric}\\
+%Stanford University
+%} % end author
+
+\maketitle
+
+\begin{abstract}
+
+\todo{write abstract}
+
+\end{abstract}
+
+\input{intro.tex}
+\input{requirements.tex}
+\input{overview.tex}
+\input{transport.tex}
+\input{evaluation.tex}
+\input{related.tex}
+\input{conclusion.tex}
+%\renewcommand*{\bibfont}{\normalsize}
+
+{\footnotesize \balance \bibliographystyle{abbrv}
+\bibliography{reference}}
+
+%\input{appendix.tex}
+
+\end{document}
