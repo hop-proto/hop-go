@@ -23,19 +23,20 @@ const (
 
 const (
 	// TODO(dadrian): These constants are wrong
-	fB       = 1600
-	rHash    = 128
-	rAbsorb  = 128
-	rSqueeze = 128
-	lRatchet = 128
+	fB       = 1600 / 8
+	rHash    = 1088 / 8
+	rKin     = 1088 / 8
+	rKout    = 1088 / 8
+	lRatchet = 256 / 8
 )
 
 // Cyclist is an implementation of the public interface for a Cyclist duplex
 // object as defined in https://eprint.iacr.org/2018/767.pdf.
 type Cyclist struct {
-	phase Phase
-	mode  Mode
-	s     [fB]byte
+	phase             Phase
+	mode              Mode
+	rAbsorb, rSqueeze int
+	s                 [fB]byte
 }
 
 func Split(x []byte, blockSizeInBytes int) [][]byte {
@@ -59,6 +60,8 @@ func Split(x []byte, blockSizeInBytes int) [][]byte {
 //
 // TODO(@dadrian): What are the parameters to Cyclist we're using?
 func NewCyclist() (c *Cyclist) {
+	c.rAbsorb = rHash
+	c.rSqueeze = rHash
 	return
 }
 
@@ -99,6 +102,8 @@ func (c *Cyclist) absorbAny(x []byte, blockSize int, domain byte) {
 
 func (c *Cyclist) absorbKey(key, id, counter []byte) {
 	c.mode = Key
+	c.rAbsorb = rKin
+	c.rSqueeze = rKout
 	// TODO(dadrian): What about R_{kin} and R_{kout}?
 	// TODO(dadrian): Get rid of the malloc here
 	input := make([]byte, 0, len(key)+len(id)+1)
@@ -106,7 +111,7 @@ func (c *Cyclist) absorbKey(key, id, counter []byte) {
 	input = append(input, id...)
 	// TODO(dadrian): Enforce ID lengths?
 	input = append(input, byte(len(id)))
-	c.absorbAny(input, rAbsorb, 2)
+	c.absorbAny(input, c.rAbsorb, 2)
 	// TODO(dadrian): What are valid inputs for counter?
 	if len(counter) > 0 {
 		c.absorbAny(counter, 1, 0)
@@ -116,8 +121,8 @@ func (c *Cyclist) absorbKey(key, id, counter []byte) {
 func (c *Cyclist) crypt(in []byte, decrypt bool) []byte {
 	// TODO(dadrian): Pass this in so that memory allocation isn't necessary
 	out := make([]byte, len(in))
-	splitIn := Split(in, rSqueeze)
-	splitOut := Split(out, rSqueeze)
+	splitIn := Split(in, rKout)
+	splitOut := Split(out, rKout)
 	// TODO(dadrian): This should be R_{kout}
 	for i := range splitIn {
 		// TODO(dadrian): Do this without multiplication?
@@ -140,7 +145,7 @@ func (c *Cyclist) crypt(in []byte, decrypt bool) []byte {
 }
 
 func (c *Cyclist) squeezeAny(length int, domain byte) []byte {
-	y := c.up(min(length, rSqueeze), 0)
+	y := c.up(min(length, c.rSqueeze), 0)
 	for {
 		if len(y) >= length {
 			break
@@ -148,7 +153,7 @@ func (c *Cyclist) squeezeAny(length int, domain byte) []byte {
 		c.down(nil, 0)
 		// TODO(dadrian): Edit up to take the output buffer as a paramter, and
 		// size y before passing it in.
-		y2 := c.up(min(length-len(y), rSqueeze), 0)
+		y2 := c.up(min(length-len(y), c.rSqueeze), 0)
 		y = append(y, y2...)
 	}
 	return y
@@ -178,7 +183,7 @@ func (c *Cyclist) up(outputSize int, domain byte) []byte {
 }
 
 func (c *Cyclist) Absorb(x []byte) {
-	c.absorbAny(x, rAbsorb, byte(3))
+	c.absorbAny(x, c.rAbsorb, byte(3))
 }
 
 func (c *Cyclist) Encrypt(plaintext []byte) []byte {
@@ -211,8 +216,7 @@ func (c *Cyclist) Ratchet() {
 		panic("can't ratched key in unkeyed mode")
 	}
 	// TODO(dadrian): Confirm is this is hex
-	// TODO(dadrian): Define lRatchet
-	c.absorbAny(c.squeezeAny(lRatchet, 0x10), rAbsorb, 0)
+	c.absorbAny(c.squeezeAny(lRatchet, 0x10), c.rAbsorb, 0)
 }
 
 func main() {
