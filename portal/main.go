@@ -22,7 +22,6 @@ const (
 )
 
 const (
-	// TODO(dadrian): These constants are wrong
 	fB       = 1600 / 8
 	rHash    = 1088 / 8
 	rKin     = 1088 / 8
@@ -56,12 +55,15 @@ func Split(x []byte, blockSizeInBytes int) [][]byte {
 	return out
 }
 
-// NewCyclist returns an default-initialized Cyclist
-//
-// TODO(@dadrian): What are the parameters to Cyclist we're using?
-func NewCyclist() (c *Cyclist) {
+func (c *Cyclist) Initialize() {
+	c.mode = Hash
 	c.rAbsorb = rHash
 	c.rSqueeze = rHash
+}
+
+// NewCyclist returns an default-initialized Cyclist.
+func NewCyclist() (c *Cyclist) {
+	c.Initialize()
 	return
 }
 
@@ -104,7 +106,6 @@ func (c *Cyclist) absorbKey(key, id, counter []byte) {
 	c.mode = Key
 	c.rAbsorb = rKin
 	c.rSqueeze = rKout
-	// TODO(dadrian): What about R_{kin} and R_{kout}?
 	// TODO(dadrian): Get rid of the malloc here
 	input := make([]byte, 0, len(key)+len(id)+1)
 	input = append(input, key...)
@@ -123,23 +124,19 @@ func (c *Cyclist) crypt(in []byte, decrypt bool) []byte {
 	out := make([]byte, len(in))
 	splitIn := Split(in, rKout)
 	splitOut := Split(out, rKout)
-	// TODO(dadrian): This should be R_{kout}
+	cu := byte(0x80)
 	for i := range splitIn {
 		// TODO(dadrian): Do this without multiplication?
 		ii := splitIn[i]
 		oi := splitOut[i]
-		domainFlag := byte(0)
-		if i == 0 {
-			// TODO(dadrian): Confirm that this is hex
-			domainFlag = 0x80
-		}
-		tmp := c.up(len(ii), domainFlag)
+		tmp := c.up(len(ii), cu)
 		c.stateAddBytes(ii, tmp, oi)
 		pi := oi
 		if !decrypt {
 			pi = ii
 		}
 		c.down(pi, 0)
+		cu = 0
 	}
 	return out
 }
@@ -199,7 +196,6 @@ func (c *Cyclist) Decrypt(ciphertext []byte) []byte {
 }
 
 func (c *Cyclist) Squeeze(length int) []byte {
-	// TODO(dadrian): Is this a hex byte?
 	return c.squeezeAny(length, 0x40)
 }
 
@@ -207,7 +203,6 @@ func (c *Cyclist) SqueezeKey(length int) []byte {
 	if c.mode != Key {
 		panic("can't squeeze key in unkeyed mode")
 	}
-	// TODO(dadrian): Is this a hex byte?
 	return c.squeezeAny(length, 0x20)
 }
 
@@ -215,7 +210,6 @@ func (c *Cyclist) Ratchet() {
 	if c.mode != Key {
 		panic("can't ratched key in unkeyed mode")
 	}
-	// TODO(dadrian): Confirm is this is hex
 	c.absorbAny(c.squeezeAny(lRatchet, 0x10), c.rAbsorb, 0)
 }
 
