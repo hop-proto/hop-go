@@ -51,16 +51,20 @@ func Split(x []byte, blockSizeInBytes int) [][]byte {
 	return out
 }
 
-func (c *Cyclist) Initialize() {
+func (c *Cyclist) InitializeEmpty() {
 	c.mode = Hash
 	c.rAbsorb = rHash
 	c.rSqueeze = rHash
 }
 
-// NewCyclist returns an default-initialized Cyclist.
-func NewCyclist() (c *Cyclist) {
-	c.Initialize()
-	return
+func (c *Cyclist) Initialize(key, id, counter []byte) {
+	c.mode = Hash
+	c.phase = Up
+	c.rAbsorb = rHash
+	c.rSqueeze = rHash
+	if len(key) > 0 {
+		c.absorbKey(key, id, counter)
+	}
 }
 
 func min(a int, b int) int {
@@ -81,11 +85,18 @@ func (c *Cyclist) arrayAddBytes(src, b, out []byte) {
 	}
 }
 
-func (c *Cyclist) stateAddByteInPlace(b byte, offset int) {
-	// TODO(dadrian): Unit test this.
+func (c *Cyclist) stateAddByte(b byte, offset int) {
+	// TODO(dadrian): Remove the multiplication
 	idx := offset / 8
-	shift := offset % 8
-	x := uint64(b) << (shift * 8)
+	/*
+		// Big Endian?
+		byteIdx := 7 - (offset % 8)
+		shift := byteIdx * 8
+	*/
+	// Little Endian?
+	byteIdx := offset % 8
+	shift := byteIdx * 8
+	x := uint64(b) << shift
 	c.s[idx] ^= x
 }
 
@@ -95,13 +106,25 @@ func (c *Cyclist) stateAddBytes(b []byte) {
 	length := len(b)
 	i := 0
 	for stateIdx := 0; stateIdx < 25; stateIdx++ {
-		for uintIdx := 8; uintIdx > 0; uintIdx-- {
-			c.s[stateIdx] ^= uint64(b[i]) << uintIdx
+		/*
+			Big Endian?
+			for shift := 56; shift >= 0; shift -= 8 {
+				c.s[stateIdx] ^= uint64(b[i]) << shift
+				i++
+				if i >= length {
+					return
+				}
+			}
+		*/
+		// Little Endian?
+		for shift := 0; shift < 64; shift += 8 {
+			c.s[stateIdx] ^= uint64(b[i]) << shift
 			i++
 			if i >= length {
 				return
 			}
 		}
+
 	}
 }
 
@@ -111,11 +134,12 @@ func (c *Cyclist) stateCopyOut(out []byte) {
 	length := len(out)
 	i := 0
 	for stateIdx := 0; stateIdx < 25; stateIdx++ {
-		for uintIdx := 0; uintIdx < 8; uintIdx++ {
-			out[i] = byte(c.s[stateIdx] >> uintIdx)
+		for shift := 0; shift < 64; shift += 8 {
 			if i >= length {
 				return
 			}
+			out[i] = byte(c.s[stateIdx] >> shift)
+			i++
 		}
 	}
 }
@@ -124,16 +148,21 @@ func (c *Cyclist) f() {
 	keccakF1600(&c.s)
 }
 
-func (c *Cyclist) absorbAny(x []byte, blockSize int, domain byte) {
-	for i, xi := range Split(x, blockSize) {
-		var domainFlag byte = 0
-		if i == 0 {
-			domainFlag = domain
-		}
+func (c *Cyclist) absorbAny(x []byte, r int, cd byte) {
+	xLen := len(x)
+	start := 0
+	for {
 		if c.phase != Up {
-			c.up(0, byte(0))
+			c.up(nil, 0)
 		}
-		c.down(xi, domainFlag)
+		splitLen := min(xLen, r)
+		c.down(x[start:splitLen], cd)
+		cd = 0
+		start += splitLen
+		xLen -= splitLen
+		if xLen == 0 {
+			break
+		}
 	}
 }
 
@@ -141,16 +170,18 @@ func (c *Cyclist) absorbKey(key, id, counter []byte) {
 	c.mode = Key
 	c.rAbsorb = rKin
 	c.rSqueeze = rKout
+
+	var kid [rKin]byte
+	klen := len(key)
+	idlen := len(id)
 	// TODO(dadrian): Get rid of the malloc here
-	input := make([]byte, 0, len(key)+len(id)+1)
-	input = append(input, key...)
-	input = append(input, id...)
-	// TODO(dadrian): Enforce ID lengths?
-	input = append(input, byte(len(id)))
-	c.absorbAny(input, c.rAbsorb, 2)
+	copy(kid[0:], key)
+	copy(kid[klen:], id)
+	kid[klen+idlen] = byte(idlen)
+	c.absorbAny(kid[0:klen+idlen+1], c.rAbsorb, 0x02)
 	// TODO(dadrian): What are valid inputs for counter?
 	if len(counter) > 0 {
-		c.absorbAny(counter, 1, 0)
+		c.absorbAny(counter, 1, 0x00)
 	}
 }
 
@@ -161,10 +192,11 @@ func (c *Cyclist) crypt(in []byte, decrypt bool) []byte {
 	splitOut := Split(out, rKout)
 	cu := byte(0x80)
 	for i := range splitIn {
-		// TODO(dadrian): Do this without multiplication?
+		// TODO(dadrian): Do this without multiplication or allocation?
 		ii := splitIn[i]
 		oi := splitOut[i]
-		tmp := c.up(len(ii), cu)
+		tmp := make([]byte, len(ii))
+		c.up(tmp, cu)
 		c.arrayAddBytes(ii, tmp, oi)
 		pi := oi
 		if !decrypt {
@@ -176,46 +208,45 @@ func (c *Cyclist) crypt(in []byte, decrypt bool) []byte {
 	return out
 }
 
-func (c *Cyclist) squeezeAny(length int, domain byte) []byte {
-	y := c.up(min(length, c.rSqueeze), 0)
-	for {
-		if len(y) >= length {
-			break
-		}
+func (c *Cyclist) squeezeAny(yLen int, domain byte) []byte {
+	// TODO(dadrian): Remove allocation
+	y := make([]byte, yLen)
+	upLen := min(yLen, c.rSqueeze)
+	c.up(y[0:upLen], 0)
+	start := upLen
+	yLen -= upLen
+	for yLen != 0 {
 		c.down(nil, 0)
-		// TODO(dadrian): Edit up to take the output buffer as a paramter, and
-		// size y before passing it in.
-		y2 := c.up(min(length-len(y), c.rSqueeze), 0)
-		y = append(y, y2...)
+		upLen = min(yLen, c.rSqueeze)
+		c.up(y[start:upLen], 0)
+		start += upLen
+		yLen -= upLen
 	}
 	return y
 }
 
-func (c *Cyclist) down(x []byte, domain byte) {
+func (c *Cyclist) down(x []byte, cd byte) {
 	c.stateAddBytes(x)
-	c.stateAddByteInPlace(1, len(x))
-	cd := domain
+	c.stateAddByte(1, len(x))
 	if c.mode == Hash {
 		cd &= 1
 	}
-	c.stateAddByteInPlace(cd, fB-1)
+	c.stateAddByte(cd, fB-1)
 	c.phase = Down
 }
 
-func (c *Cyclist) up(outputSize int, domain byte) []byte {
-	if c.mode == Key {
-		c.stateAddByteInPlace(domain, fB-1)
+func (c *Cyclist) up(y []byte, cu byte) {
+	if c.mode != Hash {
+		c.stateAddByte(cu, fB-1)
 	}
 	c.f()
 	c.phase = Up
 	// TODO(dadrian): Figure out how to do this without allocating memory
-	out := make([]byte, outputSize)
-	c.stateCopyOut(out)
-	return out
+	c.stateCopyOut(y)
 }
 
 func (c *Cyclist) Absorb(x []byte) {
-	c.absorbAny(x, c.rAbsorb, byte(3))
+	c.absorbAny(x, c.rAbsorb, 0x03)
 }
 
 func (c *Cyclist) Encrypt(plaintext []byte) []byte {
