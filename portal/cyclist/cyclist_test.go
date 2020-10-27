@@ -84,25 +84,122 @@ func TestStateCopyOut(t *testing.T) {
 	}
 }
 
-func TestCyclistAbsorb(t *testing.T) {
+func TestCyclistFromC(t *testing.T) {
 	k := newDefaultKey()
 	s := "let me absorb"
-	t.Log(len(s))
 	c := Cyclist{}
 	c.Initialize(k, nil, nil)
-	t.Logf("%.16x", c.s)
 	c.Absorb([]byte(s))
-	t.Logf("%.16x", c.s)
 	y := make([]byte, 16)
 	c.Squeeze(y)
-	t.Logf("%.16x", c.s)
 	t.Logf("% x", y)
+	// expectedY generated from C implementation
+	expectedY := []byte{0x53, 0xe5, 0x4c, 0x73, 0x85, 0x30, 0x95, 0x36, 0xbf, 0x89, 0x5c, 0xff, 0x0f, 0x59, 0x3e, 0x51}
+	if !bytes.Equal(expectedY, y) {
+		t.Errorf("squeeze: expected % x, got % x", expectedY, y)
+	}
 	s2 := "we own things, but we have hidden them."
-	t.Log(len(s2))
-	out := make([]byte, len(s2))
-	c1 := []byte{0x80, 0xCE, 0x5C, 0xbc, 0x88, 0xb5, 0xb8, 0x52, 0x9e, 0xa6, 0xe4, 0xef, 0x05, 0x38, 0x96, 0xbc, 0x64, 0xbd, 0x2c, 0x8e, 0xed, 0xbf, 0xc0, 0xdc, 0xb3, 0xea, 0x8f, 0x19, 0x0d, 0xfe, 0xc9, 0xbf, 0x97, 0xce, 0x8c, 0xf8, 0xfe, 0xee, 0x0f}
-	t.Log(len(c1))
-	c.Decrypt(out, c1)
-	t.Logf("p: %s", string(out[0:len(s2)])) // we own things, but we have hidden them.
-	t.Fail()
+	cout := make([]byte, len(s2))
+	c.Encrypt(cout, []byte(s2))
+	// expectedCout generated from C implementation
+	expectedCout := []byte{0xf3, 0xa0, 0x12, 0x25, 0x1d, 0xd2, 0xde, 0x91, 0x73, 0xa8, 0xa0, 0x3c, 0x2b, 0xd9, 0x88, 0x52, 0xa9, 0x49, 0xff, 0x35, 0x2b, 0xcc, 0xf5, 0x21, 0x7e, 0xba, 0x17, 0x32, 0x5b, 0xf6, 0xe8, 0x21, 0x1b, 0x1b, 0x7b, 0x0a, 0x11, 0x3d, 0x2f}
+	if !bytes.Equal(expectedCout, cout) {
+		t.Errorf("encrypt: expected % x, got % x", expectedCout, cout)
+	}
+}
+
+type cyclistTranscriptEntry struct {
+	action string
+	b      []byte
+	length int
+}
+
+type cyclistTranscriptTest struct {
+	name       string
+	transcript []cyclistTranscriptEntry
+}
+
+func assertEquivalentState(t *testing.T, a, b *Cyclist) {
+	var ab [200]byte
+	var bb [200]byte
+	a.stateCopyOut(ab[:])
+	b.stateCopyOut(bb[:])
+	if !bytes.Equal(ab[:], bb[:]) {
+		t.Errorf("cyclist state: expected % x, got % x", ab, bb)
+	}
+}
+
+func runTranscript(t *testing.T, test *cyclistTranscriptTest, initiator, responder *Cyclist) {
+	for i, entry := range test.transcript {
+		t.Logf("test %s, entry %d", test.name, i)
+		switch entry.action {
+		case "absorb":
+			initiator.Absorb(entry.b)
+			responder.Absorb(entry.b)
+			assertEquivalentState(t, initiator, responder)
+		case "squeeze":
+			ib := make([]byte, entry.length)
+			rb := make([]byte, entry.length)
+			initiator.Squeeze(ib)
+			responder.Squeeze(rb)
+			assertEquivalentState(t, initiator, responder)
+			if !bytes.Equal(ib, rb) {
+				t.Errorf("expected squeeze % x, got % x", ib, rb)
+			}
+		case "encrypt-ir":
+			ciphertext := make([]byte, len(entry.b))
+			plaintext := make([]byte, len(ciphertext))
+			initiator.Encrypt(ciphertext, entry.b)
+			responder.Decrypt(plaintext, ciphertext)
+			assertEquivalentState(t, initiator, responder)
+			if !bytes.Equal(entry.b, plaintext) {
+				t.Errorf("expected decrypted data % x to equal input % x", plaintext, entry.b)
+			}
+		case "encrypt-ri":
+			ciphertext := make([]byte, len(entry.b))
+			plaintext := make([]byte, len(ciphertext))
+			responder.Encrypt(ciphertext, entry.b)
+			initiator.Decrypt(plaintext, ciphertext)
+			assertEquivalentState(t, initiator, responder)
+			if !bytes.Equal(entry.b, plaintext) {
+				t.Errorf("expected decrypted data % x to equal input % x", plaintext, entry.b)
+			}
+		default:
+			t.Fatalf("unknown action %s", entry.action)
+		}
+	}
+
+}
+
+func TestCyclistEncryptDecrypt(t *testing.T) {
+	client := Cyclist{}
+	client.Initialize(newDefaultKey(), nil, nil)
+	server := Cyclist{}
+	server.Initialize(newDefaultKey(), nil, nil)
+	test := cyclistTranscriptTest{
+		name: "encrypt-decrypt",
+		transcript: []cyclistTranscriptEntry{
+			{
+				action: "absorb",
+				b:      []byte("the creature has requested gentle handpats."),
+			},
+			{
+				action: "encrypt-ir",
+				b:      []byte("for how long?"),
+			},
+			{
+				action: "encrypt-ri",
+				b:      []byte("until one of us perishes."),
+			},
+			{
+				action: "absorb",
+				b:      []byte("a life well spent!"),
+			},
+			{
+				action: "squeeze",
+				length: 100,
+			},
+		},
+	}
+	runTranscript(t, &test, &client, &server)
 }

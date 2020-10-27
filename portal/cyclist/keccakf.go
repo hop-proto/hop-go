@@ -36,6 +36,9 @@ var rc = [24]uint64{
 
 // keccakF1600 applies the Keccak permutation to a 1600b-wide
 // state represented as a slice of 25 uint64s.
+//
+// This function has been modified from the stdlib implementation to only do 12
+// rounds.
 func keccakF1600(a *[25]uint64) {
 	// Implementation translated from Keccak-inplace.c
 	// in the keccak reference code.

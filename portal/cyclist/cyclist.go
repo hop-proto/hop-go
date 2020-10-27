@@ -1,10 +1,5 @@
 package cyclist
 
-import (
-	"fmt"
-	"os"
-)
-
 // Phase is a enum used to represent internal state of Cyclist
 type Phase int
 
@@ -165,9 +160,14 @@ func (c *Cyclist) stateCopyAndAddBytes(in, out []byte) {
 }
 
 func (c *Cyclist) f() {
-	fmt.Fprintf(os.Stderr, "B: %.16x\n", c.s)
 	keccakF1600(&c.s)
-	fmt.Fprintf(os.Stderr, "A: %.16x\n", c.s)
+	// When debugging against the C implementation, uncomment the following
+	// code. Note that if you print c.s directly on a little endian system, you
+	// will have to read the hex bytes "backwords" in each uint64 to compare to
+	// the bytestream, stateCopyOut is called in order to avoid this.
+	// dbg := make([]byte, 200)
+	// c.stateCopyOut(dbg)
+	// fmt.Fprintf(os.Stderr, "After f(): % x\n", dbg)
 }
 
 func (c *Cyclist) absorbAny(x []byte, r int, cd byte) {

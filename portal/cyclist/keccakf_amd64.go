@@ -10,4 +10,6 @@ package cyclist
 
 //go:noescape
 
+// This function has been modified from the stdlib implementation to only do 12
+// rounds
 func keccakF1600(a *[25]uint64)
