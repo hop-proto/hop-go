@@ -41,7 +41,7 @@ func keccakF1600(a *[25]uint64) {
 	// in the keccak reference code.
 	var t, bc0, bc1, bc2, bc3, bc4, d0, d1, d2, d3, d4 uint64
 
-	for i := 0; i < 24; i += 4 {
+	for i := 12; i < 24; i += 4 {
 		// Combines the 5 steps in each round into 2 steps.
 		// Unrolls 4 rounds per loop and spreads some steps across rounds.
 
