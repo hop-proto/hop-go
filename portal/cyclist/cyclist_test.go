@@ -1,8 +1,15 @@
 package cyclist
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
+	"fmt"
+	"io"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -110,8 +117,18 @@ func TestCyclistFromC(t *testing.T) {
 
 type cyclistTranscriptEntry struct {
 	action string
-	b      []byte
+
+	// Input for absorb, encrypt, and decrypt
+	// Optional expected value for squeeze
+	b []byte
+
+	// Output size for squeeze
 	length int
+
+	// true if decrypt is a separate stage in the transcript from encrypt. When
+	// false, the tests will automatically have the opposite side decrypt any
+	// input to encrypt.
+	explicitDecrypt bool
 }
 
 type cyclistTranscriptTest struct {
@@ -129,7 +146,62 @@ func assertEquivalentState(t *testing.T, a, b *Cyclist) {
 	}
 }
 
+const reTranscriptString = `([\w-]+)\[(\d+)\]:(.*)$`
+
+var reTranscript = regexp.MustCompile(reTranscriptString)
+
+func parseSpacedHexString(spacedHex string) ([]byte, error) {
+	r := strings.NewReader(spacedHex)
+	s := bufio.NewScanner(r)
+	s.Split(bufio.ScanWords)
+	out := make([]byte, 0, len(spacedHex)/3+1)
+	for s.Scan() {
+		i, err := strconv.ParseUint(s.Text(), 16, 8)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, byte(i))
+	}
+	return out, nil
+}
+
+func parseTranscript(r io.Reader) ([]cyclistTranscriptEntry, error) {
+	s := bufio.NewScanner(r)
+	b := make([]byte, 0, 1024*2)
+	s.Buffer(b, 1024*1024)
+	s.Split(bufio.ScanLines)
+	out := make([]cyclistTranscriptEntry, 0, 5)
+	for s.Scan() {
+		line := s.Text()
+		matches := reTranscript.FindStringSubmatch(line)
+		if len(matches) != 4 {
+			return nil, fmt.Errorf("invalid line: %s", line)
+		}
+		action := matches[1]
+		length, err := strconv.Atoi(matches[2])
+		if err != nil {
+			return nil, fmt.Errorf("invalid length: %s", matches[2])
+		}
+		value, err := parseSpacedHexString(matches[3])
+		if err != nil {
+			return nil, fmt.Errorf("invalid byte string value: %s", matches[3])
+		}
+		if len(value) != length {
+			return nil, fmt.Errorf("expected %d bytes, got %d", length, len(value))
+		}
+		entry := cyclistTranscriptEntry{
+			action:          action,
+			b:               value,
+			length:          length, // only matters for squeeze
+			explicitDecrypt: true,
+		}
+		out = append(out, entry)
+	}
+	return out, nil
+}
+
 func runTranscript(t *testing.T, test *cyclistTranscriptTest, initiator, responder *Cyclist) {
+	var previousPlaintext []byte
 	for i, entry := range test.transcript {
 		t.Logf("test %s, entry %d", test.name, i)
 		switch entry.action {
@@ -138,37 +210,61 @@ func runTranscript(t *testing.T, test *cyclistTranscriptTest, initiator, respond
 			responder.Absorb(entry.b)
 			assertEquivalentState(t, initiator, responder)
 		case "squeeze":
-			ib := make([]byte, entry.length)
-			rb := make([]byte, entry.length)
-			initiator.Squeeze(ib)
-			responder.Squeeze(rb)
+			iy := make([]byte, entry.length)
+			ry := make([]byte, entry.length)
+			initiator.Squeeze(iy)
+			responder.Squeeze(ry)
 			assertEquivalentState(t, initiator, responder)
-			if !bytes.Equal(ib, rb) {
-				t.Errorf("expected squeeze % x, got % x", ib, rb)
+			if len(entry.b) > 0 {
+				if !bytes.Equal(entry.b, iy) {
+					t.Errorf("expected squeeze % x, got % x", entry.b, iy)
+				}
+			}
+			if !bytes.Equal(iy, ry) {
+				t.Errorf("expected equal squeezes, initiator gave % x, responder gave % x", iy, ry)
 			}
 		case "encrypt-ir":
 			ciphertext := make([]byte, len(entry.b))
-			plaintext := make([]byte, len(ciphertext))
 			initiator.Encrypt(ciphertext, entry.b)
-			responder.Decrypt(plaintext, ciphertext)
-			assertEquivalentState(t, initiator, responder)
-			if !bytes.Equal(entry.b, plaintext) {
-				t.Errorf("expected decrypted data % x to equal input % x", plaintext, entry.b)
+			previousPlaintext = entry.b
+			if !entry.explicitDecrypt {
+				plaintext := make([]byte, len(ciphertext))
+				responder.Decrypt(plaintext, ciphertext)
+				assertEquivalentState(t, initiator, responder)
+				if !bytes.Equal(entry.b, plaintext) {
+					t.Errorf("expected decrypted data % x to equal input % x", plaintext, entry.b)
+				}
 			}
+		case "decrypt-ir":
+			plaintext := make([]byte, len(entry.b))
+			responder.Decrypt(plaintext, entry.b)
+			if !bytes.Equal(previousPlaintext, plaintext) {
+				t.Errorf("expected decrypted data % x, got % x", previousPlaintext, plaintext)
+			}
+			assertEquivalentState(t, initiator, responder)
 		case "encrypt-ri":
 			ciphertext := make([]byte, len(entry.b))
-			plaintext := make([]byte, len(ciphertext))
 			responder.Encrypt(ciphertext, entry.b)
-			initiator.Decrypt(plaintext, ciphertext)
-			assertEquivalentState(t, initiator, responder)
-			if !bytes.Equal(entry.b, plaintext) {
-				t.Errorf("expected decrypted data % x to equal input % x", plaintext, entry.b)
+			previousPlaintext = entry.b
+			if !entry.explicitDecrypt {
+				plaintext := make([]byte, len(ciphertext))
+				initiator.Decrypt(plaintext, ciphertext)
+				assertEquivalentState(t, initiator, responder)
+				if !bytes.Equal(entry.b, plaintext) {
+					t.Errorf("expected decrypted data % x to equal input % x", plaintext, entry.b)
+				}
 			}
+		case "decrypt-ri":
+			plaintext := make([]byte, len(entry.b))
+			initiator.Decrypt(plaintext, entry.b)
+			if !bytes.Equal(previousPlaintext, plaintext) {
+				t.Errorf("expected decrypted data % x, got % x", previousPlaintext, plaintext)
+			}
+			assertEquivalentState(t, initiator, responder)
 		default:
 			t.Fatalf("unknown action %s", entry.action)
 		}
 	}
-
 }
 
 func TestCyclistEncryptDecrypt(t *testing.T) {
@@ -202,4 +298,30 @@ func TestCyclistEncryptDecrypt(t *testing.T) {
 		},
 	}
 	runTranscript(t, &test, &client, &server)
+}
+
+func TestCyclistAgainstReference(t *testing.T) {
+	implementations := []string{
+		"xkcp",
+	}
+	for _, implementation := range implementations {
+		path := fmt.Sprintf("testdata/%s.txt", implementation)
+		w, err := os.Open(path)
+		if err != nil {
+			t.Fatalf("unable to open %s: %s", path, err)
+		}
+		transcript, err := parseTranscript(w)
+		if err != nil {
+			t.Fatalf("unable to parse transcript %s: %s", path, err)
+		}
+		test := cyclistTranscriptTest{
+			name:       implementation,
+			transcript: transcript,
+		}
+		initiator := Cyclist{}
+		initiator.Initialize(newDefaultKey(), nil, nil)
+		responder := Cyclist{}
+		responder.Initialize(newDefaultKey(), nil, nil)
+		runTranscript(t, &test, &initiator, &responder)
+	}
 }
