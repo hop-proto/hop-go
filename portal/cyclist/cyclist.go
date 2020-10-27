@@ -1,5 +1,10 @@
 package cyclist
 
+import (
+	"fmt"
+	"os"
+)
+
 // Phase is a enum used to represent internal state of Cyclist
 type Phase int
 
@@ -52,14 +57,15 @@ func Split(x []byte, blockSizeInBytes int) [][]byte {
 }
 
 func (c *Cyclist) InitializeEmpty() {
+	c.phase = Up
 	c.mode = Hash
 	c.rAbsorb = rHash
 	c.rSqueeze = rHash
 }
 
 func (c *Cyclist) Initialize(key, id, counter []byte) {
-	c.mode = Hash
 	c.phase = Up
+	c.mode = Hash
 	c.rAbsorb = rHash
 	c.rSqueeze = rHash
 	if len(key) > 0 {
@@ -68,7 +74,7 @@ func (c *Cyclist) Initialize(key, id, counter []byte) {
 }
 
 func min(a int, b int) int {
-	if a <= b {
+	if a < b {
 		return a
 	}
 	return b
@@ -145,7 +151,9 @@ func (c *Cyclist) stateCopyOut(out []byte) {
 }
 
 func (c *Cyclist) f() {
+	fmt.Fprintf(os.Stderr, "B: %.16x\n", c.s)
 	keccakF1600(&c.s)
+	fmt.Fprintf(os.Stderr, "A: %.16x\n", c.s)
 }
 
 func (c *Cyclist) absorbAny(x []byte, r int, cd byte) {
@@ -227,9 +235,9 @@ func (c *Cyclist) squeezeAny(yLen int, domain byte) []byte {
 
 func (c *Cyclist) down(x []byte, cd byte) {
 	c.stateAddBytes(x)
-	c.stateAddByte(1, len(x))
+	c.stateAddByte(0x01, len(x))
 	if c.mode == Hash {
-		cd &= 1
+		cd &= 0x01
 	}
 	c.stateAddByte(cd, fB-1)
 	c.phase = Down
@@ -241,7 +249,6 @@ func (c *Cyclist) up(y []byte, cu byte) {
 	}
 	c.f()
 	c.phase = Up
-	// TODO(dadrian): Figure out how to do this without allocating memory
 	c.stateCopyOut(y)
 }
 

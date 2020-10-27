@@ -2,6 +2,7 @@ package cyclist
 
 import (
 	"bytes"
+	"encoding/binary"
 	"testing"
 )
 
@@ -26,12 +27,21 @@ func assertLeadingStateEquals(t *testing.T, actual, expected []uint64) {
 }
 
 func TestStateAddBytes(t *testing.T) {
+	var b []byte
+	var u []uint64
 	c := Cyclist{}
 	c.InitializeEmpty()
-	c.stateAddBytes([]byte{0x01, 0x02, 0x03, 0x04})
-	assertLeadingStateEquals(t, c.s[:], []uint64{0x0000000004030201})
-	c.stateAddBytes([]byte{0x00, 0x00, 0x00, 0x00, 0x0A, 0x0B, 0x0C, 0x0D, 0x05, 0x06, 0x07})
-	assertLeadingStateEquals(t, c.s[:], []uint64{0x0D0C0B0A04030201, 0x0000000000070605})
+	b = []byte{0x01, 0x02, 0x03, 0x04, 0x00, 0x00, 0x00, 0x00}
+	c.stateAddBytes(b[0:4])
+	u = []uint64{binary.LittleEndian.Uint64(b)}
+	assertLeadingStateEquals(t, c.s[:], u)
+	b = []byte{0x01, 0x02, 0x03, 0x04, 0x0A, 0x0B, 0x0C, 0x0D, 0x05, 0x06, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00}
+	c.stateAddBytes(b)
+	u = []uint64{
+		binary.LittleEndian.Uint64([]byte{0x01 ^ 0x01, 0x02 ^ 0x02, 0x03 ^ 0x03, 0x04 ^ 0x04, 0x0A, 0x0B, 0x0C, 0x0D}),
+		binary.LittleEndian.Uint64([]byte{0x05, 0x06, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00}),
+	}
+	assertLeadingStateEquals(t, c.s[:], u)
 }
 
 func TestStateAddByte(t *testing.T) {
@@ -42,13 +52,11 @@ func TestStateAddByte(t *testing.T) {
 	c.stateAddByte(0x08, fB-8)
 	c.stateAddByte(0x09, fB-9)
 	assertLeadingStateEquals(t, c.s[:], make([]uint64, 23))
-	//var expected23 uint64 = 0x09
-	var expected23 uint64 = 0x0900000000000000
+	var expected23 uint64 = binary.LittleEndian.Uint64([]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09})
 	if c.s[23] != expected23 {
 		t.Errorf("expected c.s[fb-8] = %.2x, got %.2x", expected23, c.s[23])
 	}
-	//var expected24 uint64 = 0x0800000000000201
-	var expected24 uint64 = 0x0102000000000008
+	var expected24 uint64 = binary.LittleEndian.Uint64([]byte{0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x01})
 	if c.s[24] != expected24 {
 		t.Errorf("expected c.s[fb-1] = %.16d, got %.16x", expected24, c.s[24])
 	}
@@ -64,12 +72,14 @@ func TestStateAddByte(t *testing.T) {
 func TestStateCopyOut(t *testing.T) {
 	c := Cyclist{}
 	c.InitializeEmpty()
-	c.s[0] = 0x0102030405060708
-	c.s[1] = 0x090A0B0C0D0E0F00
-	out := make([]byte, 2*8)
+	b1 := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+	b2 := []byte{0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x00}
+	c.s[0] = binary.LittleEndian.Uint64(b1)
+	c.s[1] = binary.LittleEndian.Uint64(b2)
+	out := make([]byte, 13)
 	c.stateCopyOut(out)
-	expected := []byte{0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x00, 0x0F, 0x0E, 0x0D, 0x0C, 0x0B, 0x0A, 0x09}
-	if !bytes.Equal(expected, out) {
+	expected := append(b1, b2...)
+	if !bytes.Equal(expected[0:13], out) {
 		t.Errorf("expected %.16x, actual %.x16x", expected, out)
 	}
 }
@@ -80,9 +90,7 @@ func TestCyclistAbsorb(t *testing.T) {
 	t.Log(len(s))
 	c := Cyclist{}
 	c.Initialize(k, nil, nil)
-	t.Logf("%17x", c.s)
 	c.Absorb([]byte(s))
-	t.Logf("%17x", c.s)
 	y := c.Squeeze(16)
 	t.Logf("% x", y)
 	t.Fail()
