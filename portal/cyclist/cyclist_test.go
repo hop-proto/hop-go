@@ -54,11 +54,11 @@ func TestStateAddByte(t *testing.T) {
 	assertLeadingStateEquals(t, c.s[:], make([]uint64, 23))
 	var expected23 uint64 = binary.LittleEndian.Uint64([]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09})
 	if c.s[23] != expected23 {
-		t.Errorf("expected c.s[fb-8] = %.2x, got %.2x", expected23, c.s[23])
+		t.Errorf("expected c.s[fb-8] = %.16x, got %.16x", expected23, c.s[23])
 	}
 	var expected24 uint64 = binary.LittleEndian.Uint64([]byte{0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x01})
 	if c.s[24] != expected24 {
-		t.Errorf("expected c.s[fb-1] = %.16d, got %.16x", expected24, c.s[24])
+		t.Errorf("expected c.s[fb-1] = %.16x, got %.16x", expected24, c.s[24])
 	}
 	y := make([]byte, fB)
 	c.stateCopyOut(y)
@@ -90,8 +90,12 @@ func TestCyclistAbsorb(t *testing.T) {
 	t.Log(len(s))
 	c := Cyclist{}
 	c.Initialize(k, nil, nil)
+	t.Logf("%.16x", c.s)
 	c.Absorb([]byte(s))
-	y := c.Squeeze(16)
+	t.Logf("%.16x", c.s)
+	y := make([]byte, 16)
+	c.Squeeze(y)
+	t.Logf("%.16x", c.s)
 	t.Logf("% x", y)
 	t.Fail()
 }

@@ -92,7 +92,6 @@ func (c *Cyclist) arrayAddBytes(src, b, out []byte) {
 }
 
 func (c *Cyclist) stateAddByte(b byte, offset int) {
-	// TODO(dadrian): Remove the multiplication
 	idx := offset / 8
 	/*
 		// Big Endian?
@@ -107,8 +106,6 @@ func (c *Cyclist) stateAddByte(b byte, offset int) {
 }
 
 func (c *Cyclist) stateAddBytes(b []byte) {
-	// TODO(dadrian): This is almost definitely wrong.
-	// TODO(dadrian): Unit test this.
 	length := len(b)
 	i := 0
 	for stateIdx := 0; stateIdx < 25; stateIdx++ {
@@ -161,7 +158,7 @@ func (c *Cyclist) absorbAny(x []byte, r int, cd byte) {
 	start := 0
 	for {
 		if c.phase != Up {
-			c.up(nil, 0)
+			c.up(nil, 0x00)
 		}
 		splitLen := min(xLen, r)
 		c.down(x[start:splitLen], cd)
@@ -182,7 +179,6 @@ func (c *Cyclist) absorbKey(key, id, counter []byte) {
 	var kid [rKin]byte
 	klen := len(key)
 	idlen := len(id)
-	// TODO(dadrian): Get rid of the malloc here
 	copy(kid[0:], key)
 	copy(kid[klen:], id)
 	kid[klen+idlen] = byte(idlen)
@@ -210,27 +206,25 @@ func (c *Cyclist) crypt(in []byte, decrypt bool) []byte {
 		if !decrypt {
 			pi = ii
 		}
-		c.down(pi, 0)
+		c.down(pi, 0x00)
 		cu = 0
 	}
 	return out
 }
 
-func (c *Cyclist) squeezeAny(yLen int, domain byte) []byte {
-	// TODO(dadrian): Remove allocation
-	y := make([]byte, yLen)
+func (c *Cyclist) squeezeAny(y []byte, cu byte) {
+	yLen := len(y)
 	upLen := min(yLen, c.rSqueeze)
-	c.up(y[0:upLen], 0)
+	c.up(y[0:upLen], cu)
 	start := upLen
 	yLen -= upLen
 	for yLen != 0 {
 		c.down(nil, 0)
 		upLen = min(yLen, c.rSqueeze)
-		c.up(y[start:upLen], 0)
+		c.up(y[start:upLen], 0x00)
 		start += upLen
 		yLen -= upLen
 	}
-	return y
 }
 
 func (c *Cyclist) down(x []byte, cd byte) {
@@ -268,20 +262,22 @@ func (c *Cyclist) Decrypt(ciphertext []byte) []byte {
 	return c.crypt(ciphertext, true)
 }
 
-func (c *Cyclist) Squeeze(length int) []byte {
-	return c.squeezeAny(length, 0x40)
+func (c *Cyclist) Squeeze(y []byte) {
+	c.squeezeAny(y, 0x40)
 }
 
-func (c *Cyclist) SqueezeKey(length int) []byte {
+func (c *Cyclist) SqueezeKey(y []byte) {
 	if c.mode != Key {
 		panic("can't squeeze key in unkeyed mode")
 	}
-	return c.squeezeAny(length, 0x20)
+	c.squeezeAny(y, 0x20)
 }
 
 func (c *Cyclist) Ratchet() {
 	if c.mode != Key {
 		panic("can't ratched key in unkeyed mode")
 	}
-	c.absorbAny(c.squeezeAny(lRatchet, 0x10), c.rAbsorb, 0)
+	var y [lRatchet]byte
+	c.squeezeAny(y[:], 0x10)
+	c.absorbAny(y[:], c.rAbsorb, 0x00)
 }
