@@ -147,6 +147,23 @@ func (c *Cyclist) stateCopyOut(out []byte) {
 	}
 }
 
+// stateCopyAndAddBytes adds the first len(in) bytes of the state to in, and
+// writes into out.
+func (c *Cyclist) stateCopyAndAddBytes(in, out []byte) {
+	length := len(in)
+	i := 0
+	for stateIdx := 0; stateIdx < 25; stateIdx++ {
+		for shift := 0; shift < 64; shift += 8 {
+			if i >= length {
+				return
+			}
+			out[i] = byte(c.s[stateIdx] >> shift)
+			out[i] ^= in[i]
+			i++
+		}
+	}
+}
+
 func (c *Cyclist) f() {
 	fmt.Fprintf(os.Stderr, "B: %.16x\n", c.s)
 	keccakF1600(&c.s)
@@ -189,27 +206,32 @@ func (c *Cyclist) absorbKey(key, id, counter []byte) {
 	}
 }
 
-func (c *Cyclist) crypt(in []byte, decrypt bool) []byte {
+func (c *Cyclist) crypt(out, in []byte, decrypt bool) {
 	// TODO(dadrian): Pass this in so that memory allocation isn't necessary
-	out := make([]byte, len(in))
-	splitIn := Split(in, rKout)
-	splitOut := Split(out, rKout)
+	var p [rKout]byte
 	cu := byte(0x80)
-	for i := range splitIn {
-		// TODO(dadrian): Do this without multiplication or allocation?
-		ii := splitIn[i]
-		oi := splitOut[i]
-		tmp := make([]byte, len(ii))
-		c.up(tmp, cu)
-		c.arrayAddBytes(ii, tmp, oi)
-		pi := oi
-		if !decrypt {
-			pi = ii
+	ioLen := len(in)
+	start := 0
+	for {
+		splitLen := min(ioLen, rKout)
+		if decrypt {
+			c.up(nil, cu)
+			c.stateCopyAndAddBytes(in[start:splitLen], out[start:])
+			c.down(out[start:splitLen], 0x00)
+		} else {
+			copy(p[:], in[start:splitLen])
+			c.up(nil, cu)
+			c.stateCopyAndAddBytes(in[start:splitLen], out[start:])
+			c.down(p[0:splitLen], 0x00)
 		}
-		c.down(pi, 0x00)
-		cu = 0
+		start += splitLen
+		ioLen -= splitLen
+
+		cu = 0x00
+		if ioLen == 0 {
+			break
+		}
 	}
-	return out
 }
 
 func (c *Cyclist) squeezeAny(y []byte, cu byte) {
@@ -250,16 +272,19 @@ func (c *Cyclist) Absorb(x []byte) {
 	c.absorbAny(x, c.rAbsorb, 0x03)
 }
 
-func (c *Cyclist) Encrypt(plaintext []byte) []byte {
-	// TODO(dadrian): Pass the output buffer?
+func (c *Cyclist) Encrypt(ciphertext, plaintext []byte) {
+	// TODO(dadrian): Is this the correct order for input/output arguments?
 	if c.mode != Key {
 		panic("can't encrypt in unkeyed mode")
 	}
-	return c.crypt(plaintext, false)
+	c.crypt(ciphertext, plaintext, false)
 }
 
-func (c *Cyclist) Decrypt(ciphertext []byte) []byte {
-	return c.crypt(ciphertext, true)
+func (c *Cyclist) Decrypt(plaintext, ciphertext []byte) {
+	if c.mode != Key {
+		panic("can't decrypt in unkeyed mode")
+	}
+	c.crypt(plaintext, ciphertext, true)
 }
 
 func (c *Cyclist) Squeeze(y []byte) {
