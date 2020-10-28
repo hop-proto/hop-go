@@ -56,6 +56,9 @@ func (c *Cyclist) InitializeEmpty() {
 	c.mode = Hash
 	c.rAbsorb = rHash
 	c.rSqueeze = rHash
+	for i := 0; i < len(c.s); i++ {
+		c.s[i] = 0
+	}
 }
 
 func (c *Cyclist) Initialize(key, id, counter []byte) {
@@ -63,6 +66,9 @@ func (c *Cyclist) Initialize(key, id, counter []byte) {
 	c.mode = Hash
 	c.rAbsorb = rHash
 	c.rSqueeze = rHash
+	for i := 0; i < len(c.s); i++ {
+		c.s[i] = 0
+	}
 	if len(key) > 0 {
 		c.absorbKey(key, id, counter)
 	}
