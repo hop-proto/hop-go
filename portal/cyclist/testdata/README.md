@@ -51,3 +51,5 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 ```
+
+To actually run the test, save the transcript file as a `.txt` and add it to the list of implementations in `TestCyclistAgainstReference` in `cyclist_test.go`.
