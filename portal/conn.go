@@ -3,19 +3,22 @@ package portal
 import (
 	"errors"
 	"net"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/cyclist"
 )
 
 type Conn struct {
-	underlyingConn net.Conn
+	underlyingConn *net.UDPConn
 	duplex         cyclist.Cyclist
 	publicDH       PublicDH
 	ephemeral      X25519KeyPair
 	static         X25519KeyPair
 	buf            []byte
 	pos            int
+
+	handshakeFn func() error
 }
 
 // Version is the protocol version being used. Only one version is supported.
@@ -34,7 +37,7 @@ var ErrBufFull = errors.New("write would overflow buffer")
 func (c *Conn) Handshake() error {
 	c.buf = make([]byte, 1024*1024)
 	c.pos = 0
-	return c.clientHandshake()
+	return c.handshakeFn()
 }
 
 func (c *Conn) initializeKeyMaterial() {
@@ -69,10 +72,50 @@ func (c *Conn) clientHandshake() error {
 	return nil
 }
 
-type Config struct{}
+func (c *Conn) serverHandshake() error {
+	_, err := c.underlyingConn.Read(c.buf[c.pos : c.pos+4])
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
-func Client(conn net.Conn, config *Config) *Conn {
-	return &Conn{
+func (c *Conn) Write(b []byte) (n int, err error) {
+	return
+}
+
+func (c *Conn) Close() error {
+	return nil
+}
+
+func (c *Conn) Read(b []byte) (n int, err error) {
+	return
+}
+
+func (c *Conn) LocalAddr() net.Addr {
+	return c.underlyingConn.LocalAddr()
+}
+
+func (c *Conn) RemoteAddr() net.Addr {
+	return c.underlyingConn.RemoteAddr()
+}
+
+func (c *Conn) SetDeadline(t time.Time) error {
+	return c.underlyingConn.SetDeadline(t)
+}
+
+func (c *Conn) SetReadDeadline(t time.Time) error {
+	return c.underlyingConn.SetReadDeadline(t)
+}
+
+func (c *Conn) SetWriteDeadline(t time.Time) error {
+	return c.underlyingConn.SetWriteDeadline(t)
+}
+
+func Client(conn *net.UDPConn, config *Config) *Conn {
+	c := &Conn{
 		underlyingConn: conn,
 	}
+	c.handshakeFn = c.clientHandshake
+	return c
 }
