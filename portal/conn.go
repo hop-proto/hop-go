@@ -1,6 +1,7 @@
 package portal
 
 import (
+	"bytes"
 	"errors"
 	"net"
 	"time"
@@ -18,6 +19,8 @@ type Conn struct {
 	static         X25519KeyPair
 	buf            []byte
 	pos            int
+
+	macBuf [MacLen]byte
 
 	handshakeFn func() error
 }
@@ -83,14 +86,19 @@ func (c *Conn) clientHandshake() error {
 	}
 	logrus.Info(n, c.buf[0:n])
 	sh := ServerHello{}
-	mn, err := sh.deserialize(c.buf[0:n])
+	mn, err := sh.deserialize(c.buf)
 	if err != nil {
 		return err
 	}
-	if mn != n {
-		return ErrBufUnderflow
-	}
 	logrus.Info(sh)
+	if mn+MacLen != n {
+		return ErrInvalidMessage
+	}
+	c.duplex.Absorb(c.buf[0:mn])
+	c.duplex.Squeeze(c.macBuf[:])
+	if !bytes.Equal(c.macBuf[:], c.buf[mn:mn+MacLen]) {
+		return ErrInvalidMessage
+	}
 	return nil
 }
 

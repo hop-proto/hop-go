@@ -64,7 +64,8 @@ func (s *Server) AcceptHandshake() error {
 		if err != nil {
 			return err
 		}
-		_, _, err = s.udpConn.WriteMsgUDP(out[0:n], oob, addr)
+		hs.duplex.Squeeze(out[n : n+MacLen])
+		_, _, err = s.udpConn.WriteMsgUDP(out[0:n+MacLen], oob, addr)
 		// TODO(dadrian): This shouldn't be a return, it needs to be in a loop
 		return err
 	case MessageTypeServerHello, MessageTypeServerAuth:
@@ -140,7 +141,12 @@ func (s *Server) writeServerHello(b []byte, clientAddr *net.UDPAddr, hs *Handsha
 		// TODO(dadrian): This forces an extra allocation, since we can't write the cookie directly to the output buffer
 		Cookie: cookie,
 	}
-	return hello.serialize(b)
+	n, err = hello.serialize(b)
+	if err != nil {
+		return 0, err
+	}
+	hs.duplex.Absorb(b[0:n])
+	return n, err
 }
 
 func NewServer(conn *net.UDPConn, config *Config) *Server {

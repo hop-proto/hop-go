@@ -111,3 +111,6 @@ func (m *ServerHello) deserialize(b []byte) (int, error) {
 	}
 	return 4 + DHLen + CookieLen, nil
 }
+
+type ClientAck struct {
+}
