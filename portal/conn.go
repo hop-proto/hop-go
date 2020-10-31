@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"golang.org/x/crypto/curve25519"
 	"zmap.io/portal/cyclist"
 )
 
@@ -24,12 +25,19 @@ type Conn struct {
 // Version is the protocol version being used. Only one version is supported.
 const Version byte = 0x01
 
+const HeaderLen = 4
+const MacLen = 16
+const DHLen = curve25519.PointSize
+const CookieLen = 32 + 16 + 12
+
 // ProtocolName is the string representation of the parameters used in this version
 const ProtocolName = "noise_NN_XX_cyclist_keccak_p1600_12"
 
-const macLen = 16
-
-var ErrBufFull = errors.New("write would overflow buffer")
+var ErrBufOverflow = errors.New("write would overflow buffer")
+var ErrBufUnderflow = errors.New("read would be past end of buffer")
+var ErrUnexpectedMessage = errors.New("attempted to deserialize unexpected message type")
+var ErrUnsupportedVersion = errors.New("unsupported version")
+var ErrInvalidMessage = errors.New("invalid message")
 
 // Handshake performs the Portal handshake with the remote host. The connection
 // must already be open. It is an error to call Handshake on a connection that
@@ -62,13 +70,27 @@ func (c *Conn) clientHandshake() error {
 	}
 	c.pos += n
 	c.duplex.Absorb(c.buf[0:c.pos])
-	c.duplex.Squeeze(c.buf[c.pos : c.pos+macLen])
-	c.pos += macLen
+	c.duplex.Squeeze(c.buf[c.pos : c.pos+MacLen])
+	c.pos += MacLen
 	n, err = c.underlyingConn.Write(c.buf[0:c.pos])
 	if err != nil {
 		return err
 	}
 	c.pos = 0
+	n, err = c.underlyingConn.Read(c.buf[c.pos:])
+	if err != nil {
+		return err
+	}
+	logrus.Info(n, c.buf[0:n])
+	sh := ServerHello{}
+	mn, err := sh.deserialize(c.buf[0:n])
+	if err != nil {
+		return err
+	}
+	if mn != n {
+		return ErrBufUnderflow
+	}
+	logrus.Info(sh)
 	return nil
 }
 

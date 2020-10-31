@@ -6,7 +6,7 @@ import (
 )
 
 // TODO(dadrian): Actually specify transcripts?
-var clientServerTranscripts = []int{0, 1, 2, 3, 4, 5}
+var clientServerTranscripts = []int{0}
 
 func TestClientServerCompatibility(t *testing.T) {
 	pc, err := net.ListenPacket("udp", "localhost:0")
