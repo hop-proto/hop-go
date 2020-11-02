@@ -90,6 +90,10 @@ func (c *Conn) clientHandshake() error {
 		return err
 	}
 	logrus.Info(n, c.buf[0:n])
+	if n < 4 {
+		return ErrInvalidMessage
+	}
+	c.duplex.Absorb(c.buf[:4])
 	sh := ServerHello{}
 	mn, err := sh.deserialize(c.buf)
 	if err != nil {
@@ -99,18 +103,19 @@ func (c *Conn) clientHandshake() error {
 	if mn+MacLen != n {
 		return ErrInvalidMessage
 	}
-	c.duplex.Absorb(c.buf[0:mn])
+	c.duplex.Absorb(sh.Ephemeral)
+	ephemeralSecret, err := c.ephemeral.DH(sh.Ephemeral)
+	logrus.Debugf("client shared secret: %x", ephemeralSecret)
+	if err != nil {
+		return err
+	}
+	c.duplex.Absorb(ephemeralSecret)
+	c.duplex.Absorb(sh.Cookie)
 	c.duplex.Squeeze(c.macBuf[:])
 	if !bytes.Equal(c.macBuf[:], c.buf[mn:mn+MacLen]) {
 		return ErrInvalidMessage
 	}
-	ephemeralSecret, err := c.ephemeral.DH(sh.Ephemeral)
-	if err != nil {
-		return err
-	}
 	// TODO(dadrian): This needs to go through a KDF?
-	c.duplex.Absorb(ephemeralSecret)
-	c.duplex.Squeeze(c.handshakeKey[:])
 	c.duplex.Initialize(c.handshakeKey[:], []byte(ProtocolName), nil)
 	clientAck := ClientAck{
 		Ephemeral: c.ephemeral.public[:],
@@ -118,13 +123,12 @@ func (c *Conn) clientHandshake() error {
 		SNI:       "david.test",
 	}
 	c.pos = 0
-	n, err = clientAck.serialize(c.buf)
+	n, err = clientAck.serialize(c.buf, &c.duplex)
 	if err != nil {
 		return err
 	}
-	c.duplex.Encrypt(c.encBuf, c.buf[:n])
-	c.duplex.Squeeze(c.encBuf[n : n+MacLen])
-	n, err = c.underlyingConn.Write(c.encBuf[:n+MacLen])
+	c.duplex.Squeeze(c.buf[n : n+MacLen])
+	n, err = c.underlyingConn.Write(c.buf[:n+MacLen])
 	if err != nil {
 		return err
 	}

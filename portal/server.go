@@ -22,52 +22,73 @@ type HandshakeState struct {
 	duplex          cyclist.Cyclist
 	ephemeral       X25519KeyPair
 	clientEphemeral [DHLen]byte
+	sharedSecret    []byte
 	macBuf          [MacLen]byte
 }
 
+type SessionState struct {
+	key []byte
+}
+
 type Server struct {
-	buf     []byte
-	pos     int
+	inBuf   []byte
+	outBuf  []byte
+	encBuf  []byte
+	oob     []byte
 	udpConn *net.UDPConn
+
+	inShutdown atomicBool
+
+	handshakes map[string]*HandshakeState
+	sessions   map[string]*SessionState
 
 	cookieKey    []byte
 	cookieCipher cipher.Block
 }
 
-// TODO(dadrian): This is mostly a stub to be able to respond to a single
-// client. Once I get a hang of what state to track, I'll try to intoduce
-// multiple handshakes.
-func (s *Server) AcceptHandshake() error {
-	// TODO(dadrian): Probably shoudln't initialize this here
-	s.buf = make([]byte, 1024*1024)
-	s.pos = 0
-	oob := make([]byte, 1024)
-	n, oobn, flags, addr, err := s.udpConn.ReadMsgUDP(s.buf[s.pos:], oob)
+func (s *Server) writePacket(pkt []byte, dst *net.UDPAddr) error {
+	_, _, err := s.udpConn.WriteMsgUDP(pkt, nil, dst)
+	return err
+}
+
+func (s *Server) readPacket() error {
+	msgLen, oobn, flags, addr, err := s.udpConn.ReadMsgUDP(s.inBuf, s.oob)
 	if err != nil {
 		return err
 	}
-	logrus.Info(n, oobn, flags, addr)
-	if n < 4 {
-		return errors.New("handshake message too short")
+	logrus.Info(msgLen, oobn, flags, addr)
+	if msgLen < 4 {
+		return ErrInvalidMessage
 	}
-	s.pos += n
-	mt := MessageType(s.buf[0])
+	mt := MessageType(s.inBuf[0])
 	switch mt {
 	case MessageTypeClientHello:
-		hs, err := s.handleClientHello(s.buf[0:s.pos])
+		hs, err := s.handleClientHello(s.inBuf[:msgLen])
 		if err != nil {
 			return err
 		}
-		// TODO(dadrian): Get rid of this allocation
-		out := make([]byte, 1024)
-		n, err = s.writeServerHello(out, addr, hs)
+		logrus.Debugf("client ephemeral: %x", hs.clientEphemeral)
+		hs.sharedSecret, err = hs.ephemeral.DH(hs.clientEphemeral[:])
+		if err != nil {
+			logrus.Errorf("server coudln't X25519: %s", err)
+			return err
+		}
+		logrus.Debugf("server shared secret: %x", hs.sharedSecret[:])
+		n, err := s.writeServerHello(s.outBuf, addr, hs)
 		if err != nil {
 			return err
 		}
-		hs.duplex.Squeeze(out[n : n+MacLen])
-		_, _, err = s.udpConn.WriteMsgUDP(out[0:n+MacLen], oob, addr)
-		// TODO(dadrian): This shouldn't be a return, it needs to be in a loop
-		return err
+		hs.duplex.Squeeze(s.outBuf[n : n+MacLen])
+		if err := s.writePacket(s.outBuf[:n+MacLen], addr); err != nil {
+			return err
+		}
+	case MessageTypeClientAck:
+		hs, err := s.handleClientAck(s.inBuf[:msgLen], addr)
+		if err != nil {
+			return err
+		}
+		// TODO(dadrian): Don't use .String() for this
+		s.handshakes[addr.String()] = hs
 	case MessageTypeServerHello, MessageTypeServerAuth:
 		// Server-side should not receive messages only sent by the server
 		return ErrUnexpectedMessage
@@ -75,6 +96,38 @@ func (s *Server) AcceptHandshake() error {
 		// TODO(dadrian): Make this an explicit error once all handshake message types are handled
 		return errors.New("unimplemented")
 	}
+	return nil
+}
+
+func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (*HandshakeState, error) {
+	return nil, errors.New("clientack unimplemented")
+}
+
+// TODO(dadrian): Should this provide a Listen()-like API? Once a session is established, should we return something?
+func (s *Server) Serve() error {
+	// TODO(dadrian): Probably shoudln't initialize this here
+	// TODO(dadrian): Do we really need three buffers?
+	// TODO(dadrian): Can I make this thread safe?
+	s.inBuf = make([]byte, 1024*1024)
+	s.outBuf = make([]byte, len(s.inBuf))
+	s.encBuf = make([]byte, len(s.inBuf))
+	s.oob = make([]byte, 1024)
+	for !s.inShutdown.isSet() {
+		err := s.readPacket()
+		if err != nil {
+			logrus.Error(err)
+		}
+	}
+	return nil
+}
+
+func (s *Server) ShuttingDown() bool {
+	return s.inShutdown.isSet()
+}
+
+func (s *Server) Close() error {
+	// TODO(dadrian): Make this block until it's actually done
+	s.inShutdown.setTrue()
 	return nil
 }
 
@@ -100,6 +153,11 @@ func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
 		return nil, ErrInvalidMessage
 	}
 	hs.ephemeral.Generate()
+	// TODO(dadrian): Get rid of this copy
+	n = copy(hs.clientEphemeral[:], m.Ephemeral[:DHLen])
+	if n != DHLen {
+		return nil, ErrInvalidDH
+	}
 	return hs, nil
 }
 
@@ -145,7 +203,10 @@ func (s *Server) writeServerHello(b []byte, clientAddr *net.UDPAddr, hs *Handsha
 	if err != nil {
 		return 0, err
 	}
-	hs.duplex.Absorb(b[0:n])
+	hs.duplex.Absorb(b[:4])
+	hs.duplex.Absorb(hs.ephemeral.public[:])
+	hs.duplex.Absorb(hs.sharedSecret[:DHLen])
+	hs.duplex.Absorb(cookie)
 	return n, err
 }
 

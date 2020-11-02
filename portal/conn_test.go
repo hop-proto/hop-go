@@ -3,12 +3,15 @@ package portal
 import (
 	"net"
 	"testing"
+
+	"github.com/sirupsen/logrus"
 )
 
 // TODO(dadrian): Actually specify transcripts?
 var clientServerTranscripts = []int{0}
 
 func TestClientServerCompatibility(t *testing.T) {
+	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	if err != nil {
 		t.Fatalf("unable to listen for packets: %s", err)
@@ -32,9 +35,10 @@ func TestClientServerCompatibility(t *testing.T) {
 		}
 		close(testChan)
 	}()
+	go s.Serve()
 	for transcriptIdx := range testChan {
 		t.Logf("received %d", transcriptIdx)
-		err := s.AcceptHandshake()
-		t.Error(err)
 	}
+	s.Close()
+	t.Fail()
 }

@@ -1,5 +1,7 @@
 package portal
 
+import "zmap.io/portal/cyclist"
+
 // MessageType is a single-byte-wide enum used as the first byte of every message. It can be used to differentiate message types.
 type MessageType byte
 
@@ -131,7 +133,7 @@ type ClientAck struct {
 	SNI       Name
 }
 
-func (m *ClientAck) serialize(b []byte) (int, error) {
+func (m *ClientAck) serialize(b []byte, duplex *cyclist.Cyclist) (int, error) {
 	length := DHLen + CookieLen + 1 + m.SNI.EncodedLength()
 	if len(b) < length {
 		return 0, ErrBufOverflow
@@ -157,10 +159,15 @@ func (m *ClientAck) serialize(b []byte) (int, error) {
 	}
 	x = x[CookieLen:]
 	x[0] = byte(m.SNI.EncodedLength())
-	n, err := m.SNI.serialize(x[1:])
-	pos += n
+	pos++
+	// TODO(dadrian): Get rid of this memory allocation. If Encrypt() can share
+	// the same buffer as the plaintext, then this is easy.
+	tmp := make([]byte, m.SNI.EncodedLength())
+	n, err := m.SNI.serialize(tmp)
 	if err != nil {
 		return pos, ErrInvalidMessage
 	}
+	duplex.Encrypt(x[1:], tmp[:n])
+	pos += n
 	return pos, nil
 }
