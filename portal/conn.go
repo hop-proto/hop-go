@@ -37,6 +37,7 @@ const KeyLen = 16
 const DHLen = curve25519.PointSize
 const CookieLen = 32 + 16 + 12
 const SNILen = 256
+const SessionIDLen = 4
 
 // ProtocolName is the string representation of the parameters used in this version
 const ProtocolName = "noise_NN_XX_cyclist_keccak_p1600_12"

@@ -213,3 +213,52 @@ func EncryptSNI(name string, duplex *cyclist.Cyclist) ([]byte, error) {
 	}
 	return out, nil
 }
+
+type ServerAuth struct {
+	SessionID    []byte
+	Leaf         []byte
+	Intermediate []byte
+}
+
+func (m *ServerAuth) serialize(b []byte) (int, error) {
+	if len(b) < HeaderLen+SessionIDLen+2+len(m.Leaf)+2+len(m.Intermediate) {
+		return 0, ErrBufOverflow
+	}
+	x := b
+	pos := 0
+	x[0] = MessageTypeServerAuth
+	x[1] = 0
+	x[2] = 0
+	x[3] = 0
+	x = x[HeaderLen:]
+	pos += HeaderLen
+	n := copy(x, m.SessionID)
+	pos += n
+	if n != SessionIDLen {
+		return pos, ErrInvalidMessage
+	}
+	x = x[n:]
+	n, err := writeVector(x, m.Leaf)
+	pos += n
+	if err != nil {
+		return pos, err
+	}
+	x = x[n:]
+	n, err = writeVector(x, m.Intermediate)
+	pos += n
+	return pos, err
+}
+
+func writeVector(dst []byte, src []byte) (int, error) {
+	srcLen := len(src)
+	if srcLen > 65535 {
+		return 0, errors.New("input too long for vector")
+	}
+	if len(dst) < 2+srcLen {
+		return 0, errors.New("dst too short")
+	}
+	dst[0] = byte(srcLen >> 8)
+	dst[1] = byte(srcLen)
+	copy(dst[2:], src)
+	return 2 + srcLen, nil
+}
