@@ -32,6 +32,10 @@ func (x *X25519KeyPair) Generate() {
 	curve25519.ScalarBaseMult(&x.public, &x.private)
 }
 
+func (x *X25519KeyPair) PublicFromPrivate() {
+	curve25519.ScalarBaseMult(&x.public, &x.private)
+}
+
 func GenerateNewX25519Keypair() *X25519KeyPair {
 	x := new(X25519KeyPair)
 	x.Generate()

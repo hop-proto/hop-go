@@ -1,6 +1,11 @@
 package portal
 
-import "zmap.io/portal/cyclist"
+import (
+	"errors"
+
+	"github.com/sirupsen/logrus"
+	"zmap.io/portal/cyclist"
+)
 
 // MessageType is a single-byte-wide enum used as the first byte of every message. It can be used to differentiate message types.
 type MessageType byte
@@ -114,27 +119,14 @@ func (m *ServerHello) deserialize(b []byte) (int, error) {
 	return 4 + DHLen + CookieLen, nil
 }
 
-// TODO(dadrian): Look into final definition of Names from Wilson
-type Name string
-
-func (n *Name) EncodedLength() int {
-	return 255
-}
-
-func (n *Name) serialize(b []byte) (int, error) {
-	// TODO(dadrian): Figure out what our actual serialization is
-	x := copy(b, []byte(*n))
-	return x, nil
-}
-
 type ClientAck struct {
-	Ephemeral []byte
-	Cookie    []byte
-	SNI       Name
+	Ephemeral    []byte
+	Cookie       []byte
+	EncryptedSNI []byte
 }
 
-func (m *ClientAck) serialize(b []byte, duplex *cyclist.Cyclist) (int, error) {
-	length := DHLen + CookieLen + 1 + m.SNI.EncodedLength()
+func (m *ClientAck) serialize(b []byte) (int, error) {
+	length := HeaderLen + DHLen + CookieLen + SNILen
 	if len(b) < length {
 		return 0, ErrBufOverflow
 	}
@@ -158,16 +150,66 @@ func (m *ClientAck) serialize(b []byte, duplex *cyclist.Cyclist) (int, error) {
 		return pos, ErrInvalidMessage
 	}
 	x = x[CookieLen:]
-	x[0] = byte(m.SNI.EncodedLength())
-	pos++
-	// TODO(dadrian): Get rid of this memory allocation. If Encrypt() can share
-	// the same buffer as the plaintext, then this is easy.
-	tmp := make([]byte, m.SNI.EncodedLength())
-	n, err := m.SNI.serialize(tmp)
-	if err != nil {
+	n = copy(x, m.EncryptedSNI)
+	pos += n
+	if n != SNILen {
 		return pos, ErrInvalidMessage
 	}
-	duplex.Encrypt(x[1:], tmp[:n])
+	return pos, nil
+}
+
+func (m *ClientAck) deserialize(b []byte) (int, error) {
+	length := HeaderLen + DHLen + CookieLen + SNILen
+	if len(b) < length {
+		return 0, ErrBufUnderflow
+	}
+	x := b
+	pos := 0
+	if x[0] != MessageTypeClientAck {
+		return pos, ErrUnexpectedMessage
+	}
+	x = x[HeaderLen:]
+	pos += HeaderLen
+	m.Ephemeral = make([]byte, DHLen)
+	n := copy(m.Ephemeral, x[:DHLen])
+	if n != DHLen {
+		logrus.Debug("bad DH in clientack")
+		return 0, ErrInvalidMessage
+	}
+	x = x[DHLen:]
+	pos += DHLen
+	m.Cookie = make([]byte, CookieLen)
+	n = copy(m.Cookie, x[:CookieLen])
+	if n != CookieLen {
+		logrus.Debug("bad cookie in clientack")
+		return 0, ErrInvalidMessage
+	}
+	x = x[CookieLen:]
+	pos += CookieLen
+	m.EncryptedSNI = make([]byte, SNILen)
+	n = copy(m.EncryptedSNI, x[:SNILen])
+	if n != SNILen {
+		logrus.Debug("bad SNI in clientack", n)
+		return 0, ErrInvalidMessage
+	}
 	pos += n
 	return pos, nil
+}
+
+// TODO(dadrian): Avoid allocation
+func EncryptSNI(name string, duplex *cyclist.Cyclist) ([]byte, error) {
+	out := make([]byte, SNILen)
+	nameLen := len(name)
+	if nameLen > 255 {
+		return nil, errors.New("invalid SNI name")
+	}
+	out[0] = byte(nameLen)
+	n := copy(out[1:], name)
+	if n != nameLen {
+		return nil, errors.New("invalid SNI name")
+	}
+	for i := n; i < SNILen; i++ {
+		out[i] = 0
+	}
+	return out, nil
 }

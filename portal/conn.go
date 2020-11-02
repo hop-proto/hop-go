@@ -36,6 +36,7 @@ const MacLen = 16
 const KeyLen = 16
 const DHLen = curve25519.PointSize
 const CookieLen = 32 + 16 + 12
+const SNILen = 256
 
 // ProtocolName is the string representation of the parameters used in this version
 const ProtocolName = "noise_NN_XX_cyclist_keccak_p1600_12"
@@ -117,13 +118,20 @@ func (c *Conn) clientHandshake() error {
 	}
 	// TODO(dadrian): This needs to go through a KDF?
 	c.duplex.Initialize(c.handshakeKey[:], []byte(ProtocolName), nil)
+	c.duplex.Absorb([]byte{MessageTypeClientAck, 0, 0, 0})
+	c.duplex.Absorb(c.ephemeral.public[:])
+	c.duplex.Absorb(sh.Cookie)
+	encryptedSNI, err := EncryptSNI("david.test", &c.duplex)
+	if err != nil {
+		return err
+	}
 	clientAck := ClientAck{
-		Ephemeral: c.ephemeral.public[:],
-		Cookie:    sh.Cookie,
-		SNI:       "david.test",
+		Ephemeral:    c.ephemeral.public[:],
+		Cookie:       sh.Cookie,
+		EncryptedSNI: encryptedSNI,
 	}
 	c.pos = 0
-	n, err = clientAck.serialize(c.buf, &c.duplex)
+	n, err = clientAck.serialize(c.buf)
 	if err != nil {
 		return err
 	}

@@ -9,7 +9,6 @@ import (
 	"net"
 
 	"github.com/sirupsen/logrus"
-	"golang.org/x/crypto/sha3"
 	"zmap.io/portal/cyclist"
 )
 
@@ -83,9 +82,14 @@ func (s *Server) readPacket() error {
 			return err
 		}
 	case MessageTypeClientAck:
-		hs, err := s.handleClientAck(s.inBuf[:msgLen], addr)
+		logrus.Debug("about to handle client ack")
+		n, hs, err := s.handleClientAck(s.inBuf[:msgLen], addr)
 		if err != nil {
 			return err
+		}
+		if n != msgLen {
+			logrus.Debug("client ack had extra data")
+			return ErrInvalidMessage
 		}
 		// TODO(dadrian): Don't use .String() for this
 		s.handshakes[addr.String()] = hs
@@ -99,8 +103,24 @@ func (s *Server) readPacket() error {
 	return nil
 }
 
-func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (*HandshakeState, error) {
-	return nil, errors.New("clientack unimplemented")
+func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeState, error) {
+	x := b
+	m := ClientAck{}
+	n, err := m.deserialize(x)
+	if err != nil {
+		logrus.Debugf("unable to handleClientAck: %s", err)
+		return n, nil, err
+	}
+	x = x[n:]
+	hs, err := s.ReplayDuplexFromCookie(m.Cookie, m.Ephemeral, addr)
+	hs.duplex.Squeeze(hs.macBuf[:])
+	if len(x) < MacLen {
+		return n, nil, ErrBufOverflow
+	}
+	if !bytes.Equal(hs.macBuf[:], x[:MacLen]) {
+		return n + MacLen, nil, ErrBufUnderflow
+	}
+	return n + MacLen, hs, err
 }
 
 // TODO(dadrian): Should this provide a Listen()-like API? Once a session is established, should we return something?
@@ -161,7 +181,7 @@ func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
 	return hs, nil
 }
 
-func (s *Server) writeCookie(b []byte, clientAddr net.UDPAddr, hs *HandshakeState) (int, error) {
+func (s *Server) writeCookie(b []byte, clientAddr *net.UDPAddr, hs *HandshakeState) (int, error) {
 	// TODO(dadrian): This is not amenable to swapping the keys out
 	aead, err := cipher.NewGCMWithTagSize(s.cookieCipher, 16)
 	if err != nil {
@@ -174,22 +194,31 @@ func (s *Server) writeCookie(b []byte, clientAddr net.UDPAddr, hs *HandshakeStat
 	// Until we sort out Deck-SANE, just shove a nonce here
 	nonce := b[0:12]
 	plaintextCookie := hs.ephemeral.private[:]
-	h := sha3.New256()
-	h.Write(hs.clientEphemeral[:])
-	// TODO(dadrian): Ensure this is always 4 or 12 bytes
-	h.Write(clientAddr.IP)
-	var port [2]byte
-	port[0] = byte(clientAddr.Port >> 8)
-	port[1] = byte(clientAddr.Port)
-	h.Write(port[:])
-	ad := h.Sum(nil)
+	ad := CookieAD(hs.clientEphemeral[:], clientAddr)
 	enc := aead.Seal(b[12:12], nonce, plaintextCookie, ad)
 	return 12 + len(enc), nil
 }
 
+func (s *Server) decryptCookie(cookie, clientEphemeral []byte, clientAddr *net.UDPAddr) ([]byte, error) {
+	if len(cookie) < CookieLen {
+		return nil, ErrBufUnderflow
+	}
+	aead, err := cipher.NewGCMWithTagSize(s.cookieCipher, 16)
+	if err != nil {
+		return nil, err
+	}
+	nonce := cookie[0:12]
+	encryptedCookie := cookie[12:]
+	ad := CookieAD(clientEphemeral, clientAddr)
+	// TODO(dadrian): Avoid allocation?
+	out := make([]byte, 0, DHLen)
+	out, err = aead.Open(out, nonce, encryptedCookie, ad)
+	return out, err
+}
+
 func (s *Server) writeServerHello(b []byte, clientAddr *net.UDPAddr, hs *HandshakeState) (n int, err error) {
 	cookie := make([]byte, CookieLen)
-	cookieLen, err := s.writeCookie(cookie, *clientAddr, hs)
+	cookieLen, err := s.writeCookie(cookie, clientAddr, hs)
 	if err != nil {
 		return 0, err
 	}
