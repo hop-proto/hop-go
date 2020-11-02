@@ -20,7 +20,10 @@ type Conn struct {
 	buf            []byte
 	pos            int
 
-	macBuf [MacLen]byte
+	encBuf []byte
+
+	macBuf       [MacLen]byte
+	handshakeKey [KeyLen]byte
 
 	handshakeFn func() error
 }
@@ -30,6 +33,7 @@ const Version byte = 0x01
 
 const HeaderLen = 4
 const MacLen = 16
+const KeyLen = 16
 const DHLen = curve25519.PointSize
 const CookieLen = 32 + 16 + 12
 
@@ -47,6 +51,7 @@ var ErrInvalidMessage = errors.New("invalid message")
 // has already performed the portal handshake.
 func (c *Conn) Handshake() error {
 	c.buf = make([]byte, 1024*1024)
+	c.encBuf = make([]byte, len(c.buf))
 	c.pos = 0
 	return c.handshakeFn()
 }
@@ -98,6 +103,30 @@ func (c *Conn) clientHandshake() error {
 	c.duplex.Squeeze(c.macBuf[:])
 	if !bytes.Equal(c.macBuf[:], c.buf[mn:mn+MacLen]) {
 		return ErrInvalidMessage
+	}
+	ephemeralSecret, err := c.ephemeral.DH(sh.Ephemeral)
+	if err != nil {
+		return err
+	}
+	// TODO(dadrian): This needs to go through a KDF?
+	c.duplex.Absorb(ephemeralSecret)
+	c.duplex.Squeeze(c.handshakeKey[:])
+	c.duplex.Initialize(c.handshakeKey[:], []byte(ProtocolName), nil)
+	clientAck := ClientAck{
+		Ephemeral: c.ephemeral.public[:],
+		Cookie:    sh.Cookie,
+		SNI:       "david.test",
+	}
+	c.pos = 0
+	n, err = clientAck.serialize(c.buf)
+	if err != nil {
+		return err
+	}
+	c.duplex.Encrypt(c.encBuf, c.buf[:n])
+	c.duplex.Squeeze(c.encBuf[n : n+MacLen])
+	n, err = c.underlyingConn.Write(c.encBuf[:n+MacLen])
+	if err != nil {
+		return err
 	}
 	return nil
 }

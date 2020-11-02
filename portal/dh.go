@@ -2,9 +2,12 @@ package portal
 
 import (
 	"crypto/rand"
+	"errors"
 
 	"golang.org/x/crypto/curve25519"
 )
+
+var ErrInvalidDH = errors.New("DH keys should be 32 bytes")
 
 type PublicDH struct {
 	Ephemeral []byte
@@ -33,6 +36,11 @@ func GenerateNewX25519Keypair() *X25519KeyPair {
 	x := new(X25519KeyPair)
 	x.Generate()
 	return x
+}
+
+func (x *X25519KeyPair) DH(other []byte) ([]byte, error) {
+	// TODO(dadrian): Do a variant that's operable with a preallocated array
+	return curve25519.X25519(x.private[:], other)
 }
 
 type RandomInMemoryKeyGenerator struct {

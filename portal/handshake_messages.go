@@ -96,7 +96,7 @@ func (m *ServerHello) deserialize(b []byte) (int, error) {
 	if MessageType(x[0]) != MessageTypeServerHello {
 		return 0, ErrUnexpectedMessage
 	}
-	x = b[4:]
+	x = x[4:]
 	// TODO(dadrian): Should we check if reserved fields are zero?
 	m.Ephemeral = make([]byte, DHLen)
 	n := copy(m.Ephemeral, x[:DHLen])
@@ -112,5 +112,55 @@ func (m *ServerHello) deserialize(b []byte) (int, error) {
 	return 4 + DHLen + CookieLen, nil
 }
 
+// TODO(dadrian): Look into final definition of Names from Wilson
+type Name string
+
+func (n *Name) EncodedLength() int {
+	return 255
+}
+
+func (n *Name) serialize(b []byte) (int, error) {
+	// TODO(dadrian): Figure out what our actual serialization is
+	x := copy(b, []byte(*n))
+	return x, nil
+}
+
 type ClientAck struct {
+	Ephemeral []byte
+	Cookie    []byte
+	SNI       Name
+}
+
+func (m *ClientAck) serialize(b []byte) (int, error) {
+	length := DHLen + CookieLen + 1 + m.SNI.EncodedLength()
+	if len(b) < length {
+		return 0, ErrBufOverflow
+	}
+	x := b
+	pos := 0
+	x[0] = MessageTypeClientAck
+	x[1] = 0
+	x[2] = 0
+	x[3] = 0
+	x = x[4:]
+	pos += 4
+	n := copy(x, m.Ephemeral)
+	pos += n
+	if n != DHLen {
+		return pos, ErrInvalidMessage
+	}
+	x = x[DHLen:]
+	n = copy(x, m.Cookie)
+	pos += n
+	if n != CookieLen {
+		return pos, ErrInvalidMessage
+	}
+	x = x[CookieLen:]
+	x[0] = byte(m.SNI.EncodedLength())
+	n, err := m.SNI.serialize(x[1:])
+	pos += n
+	if err != nil {
+		return pos, ErrInvalidMessage
+	}
+	return pos, nil
 }
