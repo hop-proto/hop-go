@@ -262,3 +262,16 @@ func writeVector(dst []byte, src []byte) (int, error) {
 	copy(dst[2:], src)
 	return 2 + srcLen, nil
 }
+
+func readVector(src []byte) ([]byte, error) {
+	srcLen := len(src)
+	if srcLen < 2 {
+		return nil, ErrBufUnderflow
+	}
+	vecLen := (int(src[0]) << 8) + int(src[1])
+	end := 2 + vecLen
+	if srcLen < end {
+		return nil, ErrBufUnderflow
+	}
+	return src[2:end], nil
+}

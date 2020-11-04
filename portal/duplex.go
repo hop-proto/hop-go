@@ -31,13 +31,13 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	out.duplex.Squeeze(macBuf[:])
 	out.duplex.Absorb([]byte{byte(MessageTypeServerHello), 0, 0, 0})
 	out.duplex.Absorb(out.ephemeral.public[:])
-	out.sharedSecret, err = out.ephemeral.DH(out.clientEphemeral[:])
+	out.ee, err = out.ephemeral.DH(out.clientEphemeral[:])
 	if err != nil {
 		return nil, err
 	}
-	out.duplex.Absorb(out.sharedSecret)
+	out.duplex.Absorb(out.ee)
 	out.duplex.Absorb(cookie)
-	out.duplex.Squeeze(macBuf[:])
+	//out.duplex.Squeeze(macBuf[:])
 	return out, nil
 }
 

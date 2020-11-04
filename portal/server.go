@@ -15,18 +15,22 @@ import (
 // TODO(dadrian): Can we precalculate cookie lengths?
 const maxCookieLen = 128
 
-type SessionID []byte
+type SessionID [4]byte
 
 type HandshakeState struct {
 	duplex          cyclist.Cyclist
 	ephemeral       X25519KeyPair
 	clientEphemeral [DHLen]byte
-	sharedSecret    []byte
-	macBuf          [MacLen]byte
+	// TODO(dadrian): Should these be arrays?
+	ee     []byte
+	es     []byte
+	se     []byte
+	macBuf [MacLen]byte
 }
 
 type SessionState struct {
-	key []byte
+	sessionID SessionID
+	key       [16]byte
 }
 
 type Server struct {
@@ -39,10 +43,29 @@ type Server struct {
 	inShutdown atomicBool
 
 	handshakes map[string]*HandshakeState
-	sessions   map[string]*SessionState
+	sessions   map[SessionID]*SessionState
 
 	cookieKey    []byte
 	cookieCipher cipher.Block
+
+	// TODO(dadrian): Different keys for different names
+	staticKey X25519KeyPair
+}
+
+// TODO(dadrian): This is not thread-safe
+func (s *Server) newSessionState() (*SessionState, error) {
+	ss := new(SessionState)
+	for {
+		n, err := rand.Read(ss.sessionID[:])
+		if n != 4 || err != nil {
+			// TODO(dadrian): Should this be a panic or an error?
+			panic("could not read random data")
+		}
+		if _, ok := s.sessions[ss.sessionID]; !ok {
+			s.sessions[ss.sessionID] = ss
+		}
+	}
+	return ss, nil
 }
 
 func (s *Server) writePacket(pkt []byte, dst *net.UDPAddr) error {
@@ -67,12 +90,12 @@ func (s *Server) readPacket() error {
 			return err
 		}
 		logrus.Debugf("client ephemeral: %x", hs.clientEphemeral)
-		hs.sharedSecret, err = hs.ephemeral.DH(hs.clientEphemeral[:])
+		hs.ee, err = hs.ephemeral.DH(hs.clientEphemeral[:])
 		if err != nil {
 			logrus.Errorf("server coudln't X25519: %s", err)
 			return err
 		}
-		logrus.Debugf("server shared secret: %x", hs.sharedSecret[:])
+		logrus.Debugf("server shared secret: %x", hs.ee[:])
 		n, err := s.writeServerHello(s.outBuf, addr, hs)
 		if err != nil {
 			return err
@@ -85,6 +108,7 @@ func (s *Server) readPacket() error {
 		logrus.Debug("about to handle client ack")
 		n, hs, err := s.handleClientAck(s.inBuf[:msgLen], addr)
 		if err != nil {
+			logrus.Debugf("unable to handle client ack: %s", err)
 			return err
 		}
 		if n != msgLen {
@@ -93,6 +117,25 @@ func (s *Server) readPacket() error {
 		}
 		// TODO(dadrian): Don't use .String() for this
 		s.handshakes[addr.String()] = hs
+		ss, err := s.newSessionState()
+		if err != nil {
+			logrus.Debug("could not make new session state")
+			return err
+		}
+		n, err = s.writeServerAuth(s.outBuf, hs, ss)
+		if err != nil {
+			return err
+		}
+		hs.duplex.Encrypt(s.encBuf, s.outBuf[:n])
+		hs.duplex.Squeeze(s.encBuf[n : n+MacLen])
+		hs.es, err = s.staticKey.DH(hs.clientEphemeral[:])
+		logrus.Debugf("server es: %x", hs.es)
+		if err != nil {
+			logrus.Debug("could not calculate DH(es)")
+			return err
+		}
+		hs.duplex.Squeeze(s.encBuf[n+MacLen : n+MacLen+MacLen])
+		s.writePacket(s.encBuf[0:n+MacLen+MacLen], addr)
 	case MessageTypeServerHello, MessageTypeServerAuth:
 		// Server-side should not receive messages only sent by the server
 		return ErrUnexpectedMessage
@@ -118,9 +161,23 @@ func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 		return n, nil, ErrBufOverflow
 	}
 	if !bytes.Equal(hs.macBuf[:], x[:MacLen]) {
-		return n + MacLen, nil, ErrBufUnderflow
+		return n + MacLen, nil, ErrInvalidMessage
 	}
 	return n + MacLen, hs, err
+}
+
+func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState) (int, error) {
+	m := ServerAuth{
+		SessionID:    ss.sessionID[:],
+		Leaf:         s.staticKey.public[:],
+		Intermediate: nil,
+	}
+	n, err := m.serialize(b)
+	hs.duplex.Absorb(b[:HeaderLen])
+	hs.duplex.Absorb(ss.sessionID[:])
+	hs.duplex.Absorb(m.Leaf)
+	hs.duplex.Absorb(m.Intermediate)
+	return n, err
 }
 
 // TODO(dadrian): Should this provide a Listen()-like API? Once a session is established, should we return something?
@@ -166,7 +223,8 @@ func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
 	hs := new(HandshakeState)
 	hs.duplex.InitializeEmpty()
 	hs.duplex.Absorb([]byte(ProtocolName))
-	hs.duplex.Absorb(b[0:n])
+	hs.duplex.Absorb(b[0:HeaderLen])
+	hs.duplex.Absorb(m.Ephemeral)
 	hs.duplex.Squeeze(hs.macBuf[:])
 	// TODO(dadrian): Should this be constant time?
 	if !bytes.Equal(hs.macBuf[:], x) {
@@ -234,7 +292,7 @@ func (s *Server) writeServerHello(b []byte, clientAddr *net.UDPAddr, hs *Handsha
 	}
 	hs.duplex.Absorb(b[:4])
 	hs.duplex.Absorb(hs.ephemeral.public[:])
-	hs.duplex.Absorb(hs.sharedSecret[:DHLen])
+	hs.duplex.Absorb(hs.ee[:DHLen])
 	hs.duplex.Absorb(cookie)
 	return n, err
 }
@@ -254,5 +312,7 @@ func NewServer(conn *net.UDPConn, config *Config) *Server {
 	if err != nil {
 		panic(err.Error())
 	}
+	// TODO(dadrian): This should be on the config object
+	s.staticKey.Generate()
 	return &s
 }

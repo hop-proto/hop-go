@@ -47,6 +47,7 @@ var ErrBufUnderflow = errors.New("read would be past end of buffer")
 var ErrUnexpectedMessage = errors.New("attempted to deserialize unexpected message type")
 var ErrUnsupportedVersion = errors.New("unsupported version")
 var ErrInvalidMessage = errors.New("invalid message")
+var ErrUnknown = errors.New("unknown")
 
 // Handshake performs the Portal handshake with the remote host. The connection
 // must already be open. It is an error to call Handshake on a connection that
@@ -79,7 +80,8 @@ func (c *Conn) clientHandshake() error {
 		return err
 	}
 	c.pos += n
-	c.duplex.Absorb(c.buf[0:c.pos])
+	c.duplex.Absorb(c.buf[0:HeaderLen])
+	c.duplex.Absorb(c.ephemeral.public[:])
 	c.duplex.Squeeze(c.buf[c.pos : c.pos+MacLen])
 	c.pos += MacLen
 	n, err = c.underlyingConn.Write(c.buf[0:c.pos])
