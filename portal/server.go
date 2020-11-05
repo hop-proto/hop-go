@@ -129,16 +129,7 @@ func (s *Server) readPacket() error {
 		if err != nil {
 			return err
 		}
-		hs.duplex.Encrypt(s.encBuf, s.outBuf[:n])
-		hs.duplex.Squeeze(s.encBuf[n : n+MacLen])
-		hs.es, err = s.staticKey.DH(hs.clientEphemeral[:])
-		logrus.Debugf("server es: %x", hs.es)
-		if err != nil {
-			logrus.Debug("could not calculate DH(es)")
-			return err
-		}
-		hs.duplex.Squeeze(s.encBuf[n+MacLen : n+MacLen+MacLen])
-		err = s.writePacket(s.encBuf[0:n+MacLen+MacLen], addr)
+		err = s.writePacket(s.outBuf[0:n], addr)
 		if err != nil {
 			return err
 		}
@@ -179,19 +170,51 @@ func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 }
 
 func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState) (int, error) {
-	m := ServerAuth{
-		SessionID:    ss.sessionID[:],
-		Leaf:         s.staticKey.public[:],
-		Intermediate: nil,
+	leaf := s.staticKey.public[:]
+	var intermediate []byte
+	logrus.Debugf("server: leaf, inter: %x, %x", leaf, intermediate)
+	encCertLen := EncryptedCertificatesLength(leaf, intermediate)
+	if len(b) < HeaderLen+SessionIDLen+encCertLen {
+		return 0, ErrBufUnderflow
 	}
-	n, err := m.serialize(b)
-	hs.duplex.Absorb(b[:HeaderLen])
-	hs.duplex.Absorb(ss.sessionID[:])
-	hs.duplex.Absorb(m.Leaf)
-	if m.Intermediate != nil {
-		hs.duplex.Absorb(m.Intermediate)
+	x := b
+	pos := 0
+	x[0] = MessageTypeServerAuth
+	x[1] = 0
+	x[2] = byte(encCertLen >> 8)
+	x[3] = byte(encCertLen)
+	hs.duplex.Absorb(x[:HeaderLen])
+	x = x[HeaderLen:]
+	pos += HeaderLen
+	copy(x, ss.sessionID[:])
+	hs.duplex.Absorb(x[:SessionIDLen])
+	x = x[SessionIDLen:]
+	pos += SessionIDLen
+	encCerts, err := EncryptCertificates(&hs.duplex, leaf, intermediate)
+	if err != nil {
+		return pos, err
 	}
-	return n, err
+	copy(x, encCerts)
+	x = x[encCertLen:]
+	pos += encCertLen
+	if len(x) < 2*MacLen {
+		return pos, ErrBufUnderflow
+	}
+	hs.duplex.Squeeze(x[:MacLen])
+	logrus.Debugf("server: sa tag %x", x[:MacLen])
+	x = x[MacLen:]
+	pos += MacLen
+	hs.es, err = s.staticKey.DH(hs.clientEphemeral[:])
+	if err != nil {
+		logrus.Debug("could not calculate DH(es)")
+		return pos, err
+	}
+	logrus.Debugf("server es: %x", hs.es)
+	hs.duplex.Absorb(hs.es)
+	hs.duplex.Squeeze(x[:MacLen])
+	x = x[MacLen:]
+	pos += MacLen
+	return pos, nil
 }
 
 // TODO(dadrian): Should this provide a Listen()-like API? Once a session is established, should we return something?

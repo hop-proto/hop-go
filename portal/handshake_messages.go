@@ -217,41 +217,6 @@ func EncryptSNI(name string, duplex *cyclist.Cyclist) ([]byte, error) {
 	return enc, nil
 }
 
-type ServerAuth struct {
-	SessionID    []byte
-	Leaf         []byte
-	Intermediate []byte
-}
-
-func (m *ServerAuth) serialize(b []byte) (int, error) {
-	if len(b) < HeaderLen+SessionIDLen+2+len(m.Leaf)+2+len(m.Intermediate) {
-		return 0, ErrBufOverflow
-	}
-	x := b
-	pos := 0
-	x[0] = MessageTypeServerAuth
-	x[1] = 0
-	x[2] = 0
-	x[3] = 0
-	x = x[HeaderLen:]
-	pos += HeaderLen
-	n := copy(x, m.SessionID)
-	pos += n
-	if n != SessionIDLen {
-		return pos, ErrInvalidMessage
-	}
-	x = x[n:]
-	n, err := writeVector(x, m.Leaf)
-	pos += n
-	if err != nil {
-		return pos, err
-	}
-	x = x[n:]
-	n, err = writeVector(x, m.Intermediate)
-	pos += n
-	return pos, err
-}
-
 func writeVector(dst []byte, src []byte) (int, error) {
 	srcLen := len(src)
 	if srcLen > 65535 {
@@ -266,15 +231,15 @@ func writeVector(dst []byte, src []byte) (int, error) {
 	return 2 + srcLen, nil
 }
 
-func readVector(src []byte) ([]byte, error) {
+func readVector(src []byte) (int, []byte, error) {
 	srcLen := len(src)
 	if srcLen < 2 {
-		return nil, ErrBufUnderflow
+		return 0, nil, ErrBufUnderflow
 	}
 	vecLen := (int(src[0]) << 8) + int(src[1])
 	end := 2 + vecLen
 	if srcLen < end {
-		return nil, ErrBufUnderflow
+		return 0, nil, ErrBufUnderflow
 	}
-	return src[2:end], nil
+	return vecLen, src[2:end], nil
 }

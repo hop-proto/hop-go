@@ -25,6 +25,12 @@ type Conn struct {
 	macBuf       [MacLen]byte
 	handshakeKey [KeyLen]byte
 
+	es []byte
+	se []byte
+
+	sessionID  [SessionIDLen]byte
+	sessionKey [KeyLen]byte
+
 	handshakeFn func() error
 }
 
@@ -145,11 +151,59 @@ func (c *Conn) clientHandshake() error {
 	if err != nil {
 		return err
 	}
-	n, err = c.underlyingConn.Read(c.buf)
+	msgLen, err := c.underlyingConn.Read(c.buf)
 	if err != nil {
 		return err
 	}
-	sa := ServerAuth{}
+	logrus.Debugf("clinet: sa msgLen: %d", msgLen)
+	if msgLen < HeaderLen+SessionIDLen {
+		return ErrBufUnderflow
+	}
+	x := c.buf
+	if x[0] != MessageTypeServerAuth {
+		return ErrInvalidMessage
+	}
+	var encCertLen int
+	encCertLen = (int(x[2]) << 8) + int(x[3])
+	c.duplex.Absorb(x[:HeaderLen])
+	x = x[HeaderLen:]
+	copy(c.sessionID[:], x[:SessionIDLen])
+	c.duplex.Absorb(x[:SessionIDLen])
+	x = x[SessionIDLen:]
+	if len(x) < encCertLen {
+		logrus.Debug("client: no room for certs")
+		return ErrBufUnderflow
+	}
+	leaf, intermediate, err := DecryptCertificates(&c.duplex, x[:encCertLen])
+	if err != nil {
+		logrus.Debug("client: no decrypt certs")
+		return err
+	}
+	logrus.Debugf("client leaft, inter: %x, %x", leaf, intermediate)
+	x = x[encCertLen:]
+	if len(x) < 2*MacLen {
+		logrus.Debug("client: no room for sa macs")
+		return ErrBufUnderflow
+	}
+	c.duplex.Squeeze(c.macBuf[:])
+	logrus.Debugf("client: sa tag: %x", c.macBuf)
+	if !bytes.Equal(c.macBuf[:], x[:MacLen]) {
+		logrus.Debug("client: sa tag mismatch")
+	}
+	x = x[MacLen:]
+	c.es, err = c.ephemeral.DH(leaf)
+	if err != nil {
+		logrus.Debug("client: couldn't do es")
+		return err
+	}
+	logrus.Debugf("client: es %x", c.es)
+	c.duplex.Absorb(c.es)
+	c.duplex.Squeeze(c.macBuf[:])
+	logrus.Debugf("client: sa mac %x", c.macBuf[:])
+	if !bytes.Equal(c.macBuf[:], x[:MacLen]) {
+		logrus.Debug("client: mismatched sa mac")
+		return err
+	}
 	return nil
 }
 
