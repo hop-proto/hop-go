@@ -220,14 +220,15 @@ func (c *Cyclist) crypt(out, in []byte, decrypt bool) {
 	start := 0
 	for {
 		splitLen := min(ioLen, rKout)
+		end := start + splitLen
 		if decrypt {
 			c.up(nil, cu)
-			c.stateCopyAndAddBytes(in[start:splitLen], out[start:])
-			c.down(out[start:splitLen], 0x00)
+			c.stateCopyAndAddBytes(in[start:end], out[start:])
+			c.down(out[start:end], 0x00)
 		} else {
-			copy(p[:], in[start:splitLen])
+			copy(p[:], in[start:end])
 			c.up(nil, cu)
-			c.stateCopyAndAddBytes(in[start:splitLen], out[start:])
+			c.stateCopyAndAddBytes(in[start:end], out[start:])
 			c.down(p[0:splitLen], 0x00)
 		}
 		start += splitLen

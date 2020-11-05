@@ -3,6 +3,7 @@ package portal
 import (
 	"net"
 
+	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -32,12 +33,16 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	out.duplex.Absorb([]byte{byte(MessageTypeServerHello), 0, 0, 0})
 	out.duplex.Absorb(out.ephemeral.public[:])
 	out.ee, err = out.ephemeral.DH(out.clientEphemeral[:])
+	logrus.Debugf("replay server ee: %x", out.ee)
 	if err != nil {
 		return nil, err
 	}
 	out.duplex.Absorb(out.ee)
 	out.duplex.Absorb(cookie)
-	//out.duplex.Squeeze(macBuf[:])
+	out.duplex.Squeeze(out.handshakeKey[:])
+	out.duplex.Squeeze(macBuf[:])
+	logrus.Debugf("server: regen sh mac: %x", macBuf[:])
+	out.duplex.Initialize(out.handshakeKey[:], []byte(ProtocolName), nil)
 	return out, nil
 }
 

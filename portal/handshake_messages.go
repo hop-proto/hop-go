@@ -198,20 +198,23 @@ func (m *ClientAck) deserialize(b []byte) (int, error) {
 
 // TODO(dadrian): Avoid allocation
 func EncryptSNI(name string, duplex *cyclist.Cyclist) ([]byte, error) {
-	out := make([]byte, SNILen)
+	buf := make([]byte, SNILen)
 	nameLen := len(name)
 	if nameLen > 255 {
 		return nil, errors.New("invalid SNI name")
 	}
-	out[0] = byte(nameLen)
-	n := copy(out[1:], name)
+	buf[0] = byte(nameLen)
+	n := copy(buf[1:], name)
 	if n != nameLen {
 		return nil, errors.New("invalid SNI name")
 	}
 	for i := n; i < SNILen; i++ {
-		out[i] = 0
+		buf[i] = 0
 	}
-	return out, nil
+	// TODO(dadrian): Remove allocation
+	enc := make([]byte, SNILen)
+	duplex.Encrypt(enc, buf)
+	return enc, nil
 }
 
 type ServerAuth struct {

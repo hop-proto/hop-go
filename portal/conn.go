@@ -115,10 +115,12 @@ func (c *Conn) clientHandshake() error {
 	}
 	c.duplex.Absorb(ephemeralSecret)
 	c.duplex.Absorb(sh.Cookie)
+	c.duplex.Squeeze(c.handshakeKey[:])
 	c.duplex.Squeeze(c.macBuf[:])
 	if !bytes.Equal(c.macBuf[:], c.buf[mn:mn+MacLen]) {
 		return ErrInvalidMessage
 	}
+	logrus.Debugf("client: sh mac: %x", c.macBuf)
 	// TODO(dadrian): This needs to go through a KDF?
 	c.duplex.Initialize(c.handshakeKey[:], []byte(ProtocolName), nil)
 	c.duplex.Absorb([]byte{MessageTypeClientAck, 0, 0, 0})
@@ -143,6 +145,11 @@ func (c *Conn) clientHandshake() error {
 	if err != nil {
 		return err
 	}
+	n, err = c.underlyingConn.Read(c.buf)
+	if err != nil {
+		return err
+	}
+	sa := ServerAuth{}
 	return nil
 }
 

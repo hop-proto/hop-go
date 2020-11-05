@@ -21,6 +21,7 @@ type HandshakeState struct {
 	duplex          cyclist.Cyclist
 	ephemeral       X25519KeyPair
 	clientEphemeral [DHLen]byte
+	handshakeKey    [KeyLen]byte
 	// TODO(dadrian): Should these be arrays?
 	ee     []byte
 	es     []byte
@@ -56,6 +57,7 @@ type Server struct {
 func (s *Server) newSessionState() (*SessionState, error) {
 	ss := new(SessionState)
 	for {
+		// TODO(dadrian): Remove potential infinite loop
 		n, err := rand.Read(ss.sessionID[:])
 		if n != 4 || err != nil {
 			// TODO(dadrian): Should this be a panic or an error?
@@ -63,6 +65,7 @@ func (s *Server) newSessionState() (*SessionState, error) {
 		}
 		if _, ok := s.sessions[ss.sessionID]; !ok {
 			s.sessions[ss.sessionID] = ss
+			break
 		}
 	}
 	return ss, nil
@@ -135,7 +138,10 @@ func (s *Server) readPacket() error {
 			return err
 		}
 		hs.duplex.Squeeze(s.encBuf[n+MacLen : n+MacLen+MacLen])
-		s.writePacket(s.encBuf[0:n+MacLen+MacLen], addr)
+		err = s.writePacket(s.encBuf[0:n+MacLen+MacLen], addr)
+		if err != nil {
+			return err
+		}
 	case MessageTypeServerHello, MessageTypeServerAuth:
 		// Server-side should not receive messages only sent by the server
 		return ErrUnexpectedMessage
@@ -154,8 +160,14 @@ func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 		logrus.Debugf("unable to handleClientAck: %s", err)
 		return n, nil, err
 	}
+	logrus.Debugf("encrypted SNI[%d]: %x", len(m.EncryptedSNI), m.EncryptedSNI)
 	x = x[n:]
 	hs, err := s.ReplayDuplexFromCookie(m.Cookie, m.Ephemeral, addr)
+	hs.duplex.Absorb(b[0:HeaderLen])
+	hs.duplex.Absorb(m.Ephemeral)
+	hs.duplex.Absorb(m.Cookie)
+	decryptedSNI := make([]byte, SNILen)
+	hs.duplex.Decrypt(decryptedSNI, m.EncryptedSNI)
 	hs.duplex.Squeeze(hs.macBuf[:])
 	if len(x) < MacLen {
 		return n, nil, ErrBufOverflow
@@ -176,7 +188,9 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState)
 	hs.duplex.Absorb(b[:HeaderLen])
 	hs.duplex.Absorb(ss.sessionID[:])
 	hs.duplex.Absorb(m.Leaf)
-	hs.duplex.Absorb(m.Intermediate)
+	if m.Intermediate != nil {
+		hs.duplex.Absorb(m.Intermediate)
+	}
 	return n, err
 }
 
@@ -294,6 +308,7 @@ func (s *Server) writeServerHello(b []byte, clientAddr *net.UDPAddr, hs *Handsha
 	hs.duplex.Absorb(hs.ephemeral.public[:])
 	hs.duplex.Absorb(hs.ee[:DHLen])
 	hs.duplex.Absorb(cookie)
+	hs.duplex.Squeeze(hs.handshakeKey[:])
 	return n, err
 }
 
@@ -301,7 +316,9 @@ func NewServer(conn *net.UDPConn, config *Config) *Server {
 	s := Server{
 		udpConn: conn,
 		// TODO(dadrian): Standardize this?
-		cookieKey: make([]byte, 16),
+		cookieKey:  make([]byte, 16),
+		handshakes: make(map[string]*HandshakeState),
+		sessions:   make(map[SessionID]*SessionState),
 	}
 	// TODO(dadrian): This probably shouldn't happen in this function
 	_, err := rand.Read(s.cookieKey)
