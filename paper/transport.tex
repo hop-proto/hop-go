@@ -3,7 +3,51 @@
 
 \subsection{Channel Multiplexing}
 
-SSTP supports multiple channels within a single encrypted session? connection? tunnel?. It provides both reliable bidirectional bytestreams and data delivery. We borrow and simplify aspects of QUIC streams to implement a reliable stream abstraction. 
+SSTP supports multiple channels within a single encrypted session? connection?
+tunnel?. It provides both reliable bidirectional bytestreams and data delivery.
+We borrow and simplify aspects of QUIC streams to implement a reliable stream
+abstraction. 
 
-An SSTP message is composed of a SessionID, a Counter, Encrypted Data, and MAC. hello We encapsulate channel frames within the Encrypted Data section of the SSTP message, providing authentication and encryption by default for all packets. For simplicitly, we only allow one frame per SSTP message.
+An SSTP message is composed of a SessionID, a Counter, Encrypted Data, and MAC.
+We encapsulate channel \emph{frames} within the Encrypted Data section of the
+SSTP message, providing authentication and encryption by default for all
+packets. For simplicitly, we only allow one frame per SSTP message.
+
+All SSTP channel frames are one of four types: 1) Initiate Request, 2)
+Initiate Response, 3) Data, and 4) Control. \todo{something about unreliable
+channels only needing Data frames?}
+
+\subsubsection{Reliable Channels}
+nce an encrypted SSTP session has been established, the client or server can
+request to initiate a reliable channel. Reliable channels require a single
+round-trip initiation handshake. We do not need a TCP-like 3-way handshake
+because initial sequence numbers (frame counters) for both direcitons of
+communication start at 0. Each channel has a channel ID, so there is no
+confusion between separate channels, and spoofing attacks from non-random
+sequence numbers are already prevented from the encrypted transport protocol.
+
+% Diagram here
+
+\emph{Handshake Initiation Request}: The first message from the initiator to the
+responder contains the Initiate Request Frame. We show the structure of the
+Initiate Request Frame in Figure~\ref{fig:initiate-request-frame}. 
+
+\input{bytefields/initiate_request_frame.tex}
+
+\emph{Handshake Initiation Response}: The second message (responder to initiator) contains the Initiate Response Frame. We show the structure of the
+Initiate Response Frame below.
+
+\input{bytefields/initiate_response_frame.tex}
+
+\emph{Data}: Data frame structure below.
+
+\input{bytefields/data_frame.tex}
+
+\emph{Control}: Control frame structure below.
+
+\input{bytefields/control_frame.tex}
+
+
+
+
 

@@ -1,0 +1,13 @@
+\vspace{2ex}
+\begin{small}
+\begin{bytefield}[bitwidth=7pt,bitheight=15pt]{32}
+    \bitheader{0-31} \\
+    \bitbox{32}{ channel ID } \\
+    \bitbox{8}{type := 0x4} &
+    \bitbox{16}{control type} &
+    \bitbox{8}{reserved := 0x0} \\
+    \bitbox{16}{control data size} &
+    \bitbox{16}{ack range count} \\
+    \bitbox{32}{control data} \\
+\end{bytefield}
+\end{small}
