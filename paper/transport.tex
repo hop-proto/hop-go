@@ -1,1 +1,9 @@
 \section{Transport Protocol}
+
+
+\subsection{Channel Multiplexing}
+
+SSTP supports multiple channels within a single encrypted session? connection? tunnel?. It provides both reliable bidirectional bytestreams and data delivery. We borrow and simplify aspects of QUIC streams to implement a reliable stream abstraction. 
+
+An SSTP message is composed of a SessionID, a Counter, Encrypted Data, and MAC. hello We encapsulate channel frames within the Encrypted Data section of the SSTP message, providing authentication and encryption by default for all packets. For simplicitly, we only allow one frame per SSTP message.
+
