@@ -1,6 +1,31 @@
 \section{Transport Protocol}
 
+\subsection{Discoverable Server}
+To establish a cryptographic session between a client and a discoverable server,
+we base the cryptographic handshake on the Noise XX handshake
+pattern~\cite{noise}. 
 
+Initially, both the client and server are unauthenticated. The client begins by
+creating a client ephemeral key pair ($e_c^{priv}, e_c^{pub}$) and chooses the
+protocol name (or version?). The message type (client hello), protocol, and the
+client ephemeral public key are absorbed into the duplex object, and a message
+authentication code (MAC) is squeezed out. The client then begins the
+session handshake by sending the Client Hello, which contains (i) the message type,
+(ii) the protocol version, (iii) a client ephemeral public key
+($e_c^{pub}$), and (iv) the MAC.
+
+If the Client Hello is successful, the server.. 
+\todo{what about lost hellos?}
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=0.6\columnwidth]{figures/crypto_handshake_discoverable.pdf}
+	\caption{\textbf{Session Establishment}---%
+	\textnormal{}
+	}
+	\label{fig:crypto_handshake_discoverable}
+	\vspace{-5pt}
+\end{figure}
 
 
 \subsection{Channel Multiplexing}
@@ -29,8 +54,8 @@ All SSTP channel frames are one of four types:
 \begin{itemize}
     \item Channel Initiation Request Frame
     \item Channel Initiation Response Frame
-    \item Data Frame
-    \item Control Frame
+    \item Channel Data Frame
+    \item Channel Control Frame
 \end{itemize}
 Once an encrypted SSTP session has been established, either the client or the
 server can request to initiate a shared channel. A channel
