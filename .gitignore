@@ -4,3 +4,5 @@ paper.blg
 paper.log
 paper.out
 paper.pdf
+paper.synctex.gz
+.DS_Store

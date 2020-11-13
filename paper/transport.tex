@@ -3,49 +3,83 @@
 
 \subsection{Channel Multiplexing}
 
-SSTP supports multiple channels within a single encrypted session? connection?
-tunnel?. It provides both reliable bidirectional bytestreams and data delivery.
+SSTP supports multiple channels within a single encrypted session. It provides
+both reliable and unreliable data delivery.
 We borrow and simplify aspects of QUIC streams to implement a reliable stream
 abstraction. 
 
 An SSTP message is composed of a SessionID, a Counter, Encrypted Data, and MAC.
 We encapsulate channel \emph{frames} within the Encrypted Data section of the
 SSTP message, providing authentication and encryption by default for all
-packets. For simplicitly, we only allow one frame per SSTP message.
+packets. For simplicitly, we only one frame is contained in one SSTP message,
+although future extensions may allow multiple frames.
 
-All SSTP channel frames are one of four types: 1) Initiate Request, 2)
-Initiate Response, 3) Data, and 4) Control. \todo{something about unreliable
-channels only needing Data frames?}
-
-\subsubsection{Reliable Channels}
-nce an encrypted SSTP session has been established, the client or server can
-request to initiate a reliable channel. Reliable channels require a single
-round-trip initiation handshake. We do not need a TCP-like 3-way handshake
+All SSTP channel frames are one of four types: 
+\begin{itemize}
+    \item Channel Initiate Request
+    \item Channel Initiate Response
+    \item Data
+    \item Control
+\end{itemize}
+Once an encrypted SSTP session has been established, either the client or the
+server can request to initiate a shared channel. A channel
+handshake is performed to establish the channel. In the absence of the loss
+of a handshake message, channel initiation handshakes will complete in one round
+trip. We do not need a TCP-like 3-way handshake
 because initial sequence numbers (frame counters) for both direcitons of
 communication start at 0. Each channel has a channel ID, so there is no
 confusion between separate channels, and spoofing attacks from non-random
-sequence numbers are already prevented from the encrypted transport protocol.
+sequence numbers are already prevented from the encrypted transport protocol. We show the protocol in Figure~\ref{fig:channel_protocol}.
 
 % Diagram here
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=0.6\columnwidth]{figures/channel_protocol.pdf}
+	\caption{\textbf{Channel Protocol}---%
+	\textnormal{}
+	}
+	\label{fig:channel_protocol}
+	\vspace{-5pt}
+\end{figure}
 
-\emph{Handshake Initiation Request}: The first message from the initiator to the
-responder contains the Initiate Request Frame. We show the structure of the
-Initiate Request Frame in Figure~\ref{fig:initiate-request-frame}. 
+\vspace{5pt} \noindent \textit{Channel Initiate Request:}\quad
+The first message from the initiator to the
+responder contains a Channel Initiate Request Frame. We show the structure of
+the Channel Initiate Request Frame in Figure~\ref{fig:initiate_request_frame}. 
+
+The frame header consists of the Channel ID and the Type. The Mode indicates
+whether the channel will be unreliable or reliable. Handshake frames also
+consist of a maximum frame size and an initial window size that the initiator is
+willing to handle. Channels also denote the
+\emph{Action} that will be performed (e.g., file transfer,
+remote shell). Action labels will be a value agreed upon by both
+the client and the server (or standardized).
 
 \input{bytefields/initiate_request_frame.tex}
 
-\emph{Handshake Initiation Response}: The second message (responder to initiator) contains the Initiate Response Frame. We show the structure of the
+\vspace{5pt} \noindent \textit{Channel Initiate Response:}\quad 
+The second message (responder to initiator) contains a Channel Initiate Response Frame. We show the structure of the
 Initiate Response Frame below.
 
 \input{bytefields/initiate_response_frame.tex}
 
-\emph{Data}: Data frame structure below.
+\vspace{5pt} \noindent \textit{Data:}\quad 
+Data frame structure below.
 
 \input{bytefields/data_frame.tex}
 
-\emph{Control}: Control frame structure below.
+\vspace{5pt} \noindent \textit{Control:}\quad
+Control frame structure below.
 
 \input{bytefields/control_frame.tex}
+
+\subsubsection{Reliable Channels}
+
+
+
+
+
+
 
 
 
