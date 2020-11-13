@@ -1,6 +1,6 @@
 \vspace{2ex}
 \begin{small}
-\begin{bytefield}[bitwidth=7pt,bitheight=15pt]{32}
+\begin{bytefield}[bitwidth=7pt,bitheight=14pt]{32}
     \bitheader{0-31} \\
     \bitbox{32}{ channel ID } \\
     \bitbox{8}{type := 0x0} &
@@ -8,7 +8,7 @@
     \bitbox{16}{max frame size} \\
     \bitbox{32}{initial window size } \\
     \bitbox{16}{action label}
-    \bitbox{16}{initial action data size} \\
-    \bitbox{32}{initial action data} \\
+    \bitbox{16}{initial action data size } \\
+    \bitbox{32}{initial action data } \\
 \end{bytefield}
 \end{small}
