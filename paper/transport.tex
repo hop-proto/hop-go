@@ -32,21 +32,25 @@ If the Client Hello is successful, the server..
 
 SSTP supports multiple channels within a single encrypted session. It borrows
 and simplifies aspects of QUIC streams and TCP to implement a reliable stream
-abstraction, but also provides the option for unreliable data delivery within a channel.
+abstraction, but provides the option for unreliable data delivery within a
+channel as well.
 
 We show the format of an SSTP transport message in
 Figure~\ref{fig:transport_message}. Channel multiplexing is implemented by
 encapsulating a single \emph{channel frame} within the Encrypted Data segment of
 the transport message. Each channel is identified by the Channel ID in the
-channel frame header. We borrow upon QUIC streams and statically allocate even
+channel frame header. We borrow upon QUIC streams and statically allocate
+even-numbered
 channel IDs for client-initiated channels and odd IDs for server-initiated
 channels to avoid collisions in the channel initiation process. 
 % note: QUIC actually does odd for client, even for server. 
 Channel creation is performed through a 2-way handshake when either the client
-or server sends a Channel Initiation Request and the other party
-replies with a Channel Initiation Response. Channels are closed by setting the
-"FIN" bit on a channel frame. Multiple channels can be created and closed
+or server sends a Channel Initiation Request and the other party successfully
+replies with a Channel Initiation Response. Channels are closed by sending a
+frame with the "FIN" bit set to one. Multiple channels can be created and closed
 repeatedly without tearing down the entire SSTP session.
+
+\input{bytefields/transport_message.tex}
 
 \subsection{Authentication and Encryption}
 After the initial SSTP handshake messages, the payload (Encrypted Data) segment
@@ -54,8 +58,9 @@ of all SSTP transport messages are authenticated and encrypted. \todo{more detia
 
 \subsection{Channel Initiation}
 
-Channel creation begins when one party (the initiator) sends a Channel
-Initiation Request with Frame Counter set to 0.
+Channel creation begins when one party (the initiator) sends a message with the
+Frame Counter set to 0. This initial message is the Channel Initiation Request.
+
 %Unlike QUIC, 
 We require that channel creation be explicit with the \texttt{REQ} bit set
 to one. If a duplicate channel initiation request with an existing channel ID is

@@ -1,0 +1,38 @@
+\begin{figure}
+% \vspace{2ex}
+    \centering
+        \begin{small}
+
+            \begin{bytefield}[bitwidth=7pt,bitheight=15pt]{32}
+                \bitheader{0-31}\\
+                % \begin{leftwordgroup}{Header} 
+                    \bitbox{8}{ Type } &
+                    \bitbox{24}{ Reserved (0x0) } \\
+                    \bitbox{32}{ Session ID } \\
+                    \wordbox{2}{ Counter (8 bytes)} \\
+                % \end{leftwordgroup} 
+                %\wordbox{3}{Encrypted Data} \\
+                \bitbox{8}{ Channel ID } &
+                    \bitbox{1}{\rotatebox{90}{\tiny REL}} &
+                    \bitbox{1}{\rotatebox{90}{\tiny ACC}} &
+                    \bitbox{1}{\rotatebox{90}{\tiny ACK}} &
+                    \bitbox{1}{\rotatebox{90}{\tiny FIN}} &
+                \bitbox{4}{ 0x0 } &
+                \bitbox{16}{Data Size} \\
+                \bitbox{16}{Max. Frame Size} & 
+                \bitbox{16}{Window Size} \\
+                \bitbox{8}{Channel Type} & 
+                \bitbox{24}{0x0} \\
+                \wordbox{2}{Frame Number (8 bytes)} \\ 
+                \wordbox{2}{Acknowledgment Number (8 bytes)} \\ 
+                \wordbox[lrt]{1}{Data} \\
+                \skippedwords \\
+                \wordbox[lrb]{1}{} \\
+                \wordbox{4}{MAC (16 bytes)} \\
+            \end{bytefield}
+
+        \end{small}
+    \label{fig:transport_message}
+    \caption{Transport Message}
+    \vspace{-5pt}
+\end{figure}
