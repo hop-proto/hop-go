@@ -1,3 +1,11 @@
+\newcommand{\colorbitbox}[3]{%
+\rlap{\bitbox{#2}{\color{#1}\rule{\width}{\height}}}%
+\bitbox{#2}{#3}}
+\newcommand{\colorwordbox}[3]{%
+\rlap{\wordbox{#2}{\color{#1}\rule{\width}{\height}}}%
+\wordbox{#2}{#3}}
+
+\definecolor{lightgreen}{rgb}{0.9,1,0.9}
 \begin{figure}
 % \vspace{2ex}
     \centering
@@ -12,27 +20,28 @@
                     \wordbox{2}{ Counter (8 bytes)} \\
                 % \end{leftwordgroup} 
                 %\wordbox{3}{Encrypted Data} \\
-                \bitbox{8}{ Channel ID } &
-                    \bitbox{1}{\rotatebox{90}{\tiny REL}} &
-                    \bitbox{1}{\rotatebox{90}{\tiny ACC}} &
-                    \bitbox{1}{\rotatebox{90}{\tiny ACK}} &
-                    \bitbox{1}{\rotatebox{90}{\tiny FIN}} &
-                \bitbox{4}{ 0x0 } &
-                \bitbox{16}{Data Size} \\
-                \bitbox{16}{Max. Frame Size} & 
-                \bitbox{16}{Window Size} \\
-                \bitbox{8}{Channel Type} & 
-                \bitbox{24}{0x0} \\
-                \wordbox{2}{Frame Number (8 bytes)} \\ 
-                \wordbox{2}{Acknowledgment Number (8 bytes)} \\ 
-                \wordbox[lrt]{1}{Data} \\
-                \skippedwords \\
-                \wordbox[lrb]{1}{} \\
+                \colorbitbox{lightgreen}{8}{ Channel ID } &
+                    \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny REL}} &
+                    \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny ACC}} &
+                    \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny ACK}} &
+                    \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny FIN}} &
+                \colorbitbox{lightgreen}{4}{ 0x0 } &
+                \colorbitbox{lightgreen}{16}{Data Size} \\
+                \colorbitbox{lightgreen}{16}{Max. Frame Size} & 
+                \colorbitbox{lightgreen}{16}{Window Size} \\
+                \colorbitbox{lightgreen}{8}{Channel Type} & 
+                \colorbitbox{lightgreen}{24}{0x0} \\
+                \colorwordbox{lightgreen}{2}{Frame Number (8 bytes)} \\ 
+                \colorwordbox{lightgreen}{2}{Acknowledgment Number (8 bytes)} \\ 
+                \colorwordbox{lightgreen}{1}{Data ( * bytes)} \\
+                % \skippedwords \\
+                % \wordbox[lrb]{1}{} \\
                 \wordbox{4}{MAC (16 bytes)} \\
             \end{bytefield}
 
         \end{small}
     \label{fig:transport_message}
-    \caption{Transport Message}
+    \caption{\textbf{SSTP Transport Message}---
+                The channel frame (green) is the Encrypted Data segment of the transport message.}
     \vspace{-5pt}
 \end{figure}
