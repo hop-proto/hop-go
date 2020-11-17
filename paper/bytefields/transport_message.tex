@@ -21,16 +21,17 @@
                 % \end{leftwordgroup} 
                 %\wordbox{3}{Encrypted Data} \\
                 \colorbitbox{lightgreen}{8}{ Channel ID } &
+                    \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny REQ}} &
                     \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny REL}} &
                     \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny ACC}} &
                     \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny ACK}} &
                     \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny FIN}} &
-                \colorbitbox{lightgreen}{4}{ 0x0 } &
-                \colorbitbox{lightgreen}{16}{Data Size} \\
+                \colorbitbox{lightgreen}{3}{ 0x0 } &
+                \colorbitbox{lightgreen}{16}{Data Length} \\
                 \colorbitbox{lightgreen}{16}{Max. Frame Size} & 
                 \colorbitbox{lightgreen}{16}{Window Size} \\
                 \colorbitbox{lightgreen}{8}{Channel Type} & 
-                \colorbitbox{lightgreen}{24}{0x0} \\
+                \colorbitbox{lightgreen}{24}{Padding} \\
                 \colorwordbox{lightgreen}{2}{Frame Number (8 bytes)} \\ 
                 \colorwordbox{lightgreen}{2}{Acknowledgment Number (8 bytes)} \\ 
                 \colorwordbox{lightgreen}{1}{Data ( * bytes)} \\
