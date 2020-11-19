@@ -1,13 +1,82 @@
 package main
 
-type ChannelApp struct {
-	nm *NetworkManager
+import (
+	"fmt"
+	"sync"
+	"time"
+)
+
+type recvfn (func() (int, []byte, bool))
+type sendfn func([]byte)
+type closefn func()
+
+type ChanApp struct {
+	wg sync.WaitGroup
+
+	sendCh chan []byte
+	channelChs [](chan []byte)
+
+	nrecv recvfn // Network recv 
+	nsend sendfn // Network send 
+	nclose closefn // Network close 
+
+	MAX_FRAME_SIZE int
+	MAX_SEND_BUF_SIZE int
 }
 
-func (ca *ChannelApp) start(nm *NetworkManager){
-	ca.nm = nm
+func (ca *ChanApp) init(nrecv recvfn, nsend sendfn, nclose closefn,
+	MAX_FRAME_SIZE int, MAX_SEND_BUF_SIZE int) {
+
+	ca.MAX_FRAME_SIZE = MAX_FRAME_SIZE
+	ca.MAX_SEND_BUF_SIZE = MAX_SEND_BUF_SIZE
+
+	ca.nrecv = nrecv
+	ca.nsend = nsend
+	ca.nclose = nclose
+
+	ca.sendCh = make(chan []byte)
+	ca.channelChs = make([](chan []byte), 256)
+	for i:= 0; i < len(ca.channelChs); i++ {
+		ca.channelChs[i] = make(chan []byte, 64)
+	}
 }
 
-func (ca *ChannelApp) shutdown(){
-	ca.nm.shutdown()
+func (ca *ChanApp) start() {
+	ca.wg.Add(1)
+	go ca.senderThread()
+	ca.wg.Add(1)
+	go ca.receiverThread()
+}
+
+func (ca *ChanApp) senderThread() {
+	defer ca.wg.Done()
+	for frame := range ca.sendCh {
+		fmt.Println("Sending", frame)
+		ca.nsend(frame)
+	}
+	fmt.Println("Sender Closing")
+}
+
+func (ca *ChanApp) receiverThread() {
+	defer ca.wg.Done()
+	for {
+		n, frame, closed := ca.nrecv()
+		if closed {
+			fmt.Println("Receiver Closing")
+			return
+		}
+		fmt.Println("Receiving", n, frame[0:n])
+		ca.send([]byte{4,3,2,1})
+		time.Sleep(time.Second)
+	}
+}
+
+func (ca *ChanApp) shutdown() {
+	close(ca.sendCh)
+	ca.nclose()
+	ca.wg.Wait()
+}
+
+func (ca *ChanApp) send(buf []byte) {
+	ca.sendCh <- buf
 }

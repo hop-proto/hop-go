@@ -10,15 +10,17 @@ import (
 )
 
 var MAX_FRAME_SIZE = 512
+var MAX_SEND_BUF_SIZE = 64
+var LHOST = net.ParseIP("127.0.0.1")
 
 func main() {
-	port, err := strconv.Atoi(os.Args[3])
+	port, err := strconv.Atoi(os.Args[2])
 	checkError(err)
-	caddr := &net.UDPAddr{IP: net.ParseIP(os.Args[2]), Port: port}
+	caddr := &net.UDPAddr{IP: LHOST, Port: port}
 
-	port, err = strconv.Atoi(os.Args[5])
+	port, err = strconv.Atoi(os.Args[3])
 	checkError(err)
-	saddr := &net.UDPAddr{IP: net.ParseIP(os.Args[4]), Port: port}
+	saddr := &net.UDPAddr{IP: LHOST, Port: port}
 
 	conn, err := net.ListenUDP("udp", caddr)
 
@@ -38,10 +40,10 @@ func main() {
 	close := func() {
 		conn.Close()
 	}
-	nm := NetworkManager{}
-	nm.start(recv, send, close, MAX_FRAME_SIZE)
-	ca := ChannelApp{}
-	ca.start(&nm)
+
+	ca := ChanApp{}
+	ca.init(recv, send, close, MAX_FRAME_SIZE, MAX_SEND_BUF_SIZE)
+	ca.start()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -55,7 +57,7 @@ func main() {
 		buf := make([]byte, MAX_FRAME_SIZE)
 		lol := []byte{1,2,3,4}
 		copy(buf, lol)
-		ca.nm.send(buf[:len(lol)])
+		ca.send(buf[:len(lol)])
 	}
 	wg.Wait()
 }
