@@ -13,9 +13,13 @@ type NetworkManager struct {
 	wg sync.WaitGroup
 	sendCh chan []byte
 	close closefn
+	MAX_FRAME_SIZE int
 }
 
-func (nm *NetworkManager) init(recv recvfn, send sendfn, close closefn) {
+func (nm *NetworkManager) start(recv recvfn, send sendfn, close closefn,
+	MAX_FRAME_SIZE int) {
+
+	nm.MAX_FRAME_SIZE = MAX_FRAME_SIZE
 	nm.sendCh = make(chan []byte)
 	nm.close = close
 	nm.wg.Add(1)

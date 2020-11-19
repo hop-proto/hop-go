@@ -9,6 +9,8 @@ import (
 	"strconv"
 )
 
+var MAX_FRAME_SIZE = 512
+
 func main() {
 	port, err := strconv.Atoi(os.Args[3])
 	checkError(err)
@@ -21,7 +23,7 @@ func main() {
 	conn, err := net.ListenUDP("udp", caddr)
 
 	recv := func() (int, []byte, bool) {
-		var buf = make([]byte, 20) //should be maxframesize?
+		var buf = make([]byte, MAX_FRAME_SIZE)
 		n, _, err := conn.ReadFromUDP(buf[0:])
 		if err != nil {
 			return 0, []byte{}, true
@@ -37,17 +39,23 @@ func main() {
 		conn.Close()
 	}
 	nm := NetworkManager{}
-	nm.init(recv, send, close)
+	nm.start(recv, send, close, MAX_FRAME_SIZE)
+	ca := ChannelApp{}
+	ca.start(&nm)
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		time.Sleep(10*time.Second)
-		nm.shutdown()
+		ca.shutdown()
 	}()
 
 	if os.Args[1] == "c" {
-		nm.send([]byte{1,2,3,4})
+		buf := make([]byte, MAX_FRAME_SIZE)
+		lol := []byte{1,2,3,4}
+		copy(buf, lol)
+		ca.nm.send(buf[:len(lol)])
 	}
 	wg.Wait()
 }
