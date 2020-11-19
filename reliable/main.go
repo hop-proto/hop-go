@@ -47,7 +47,7 @@ func main() {
 	}()
 
 	if os.Args[1] == "c" {
-		nm.sendCh <- []byte{1,2,3,4}
+		nm.send([]byte{1,2,3,4})
 	}
 	wg.Wait()
 }

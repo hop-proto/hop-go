@@ -15,34 +15,44 @@ type NetworkManager struct {
 	close closefn
 }
 
-func (n *NetworkManager) init(recv recvfn, send sendfn, close closefn) {
-	n.sendCh = make(chan []byte)
-	n.close = close
-	n.wg.Add(1)
-	go func(){
-		defer n.wg.Done()
-		for {
-			n, frame, closed := recv()
-			if closed {
-				fmt.Println("Receiver Closing")
-				return
-			}
-			fmt.Println(n, frame)
-		}
-	}()
-	n.wg.Add(1)
-	go func() {
-		defer n.wg.Done()
-		for frame := range n.sendCh {
-			fmt.Println(frame)
-			send(frame)
-		}
-		fmt.Println("Sender Closing")
-	} ()
+func (nm *NetworkManager) init(recv recvfn, send sendfn, close closefn) {
+	nm.sendCh = make(chan []byte)
+	nm.close = close
+	nm.wg.Add(1)
+	go nm.senderThread(send)
+	nm.wg.Add(1)
+	go nm.receiverThread(recv)
 }
 
-func (n *NetworkManager) shutdown() {
-	close(n.sendCh)
-	n.close()
-	n.wg.Wait()
+func (nm *NetworkManager) senderThread(send sendfn) {
+	defer nm.wg.Done()
+	for frame := range nm.sendCh {
+		fmt.Println("Sending", frame)
+		send(frame)
+	}
+	fmt.Println("Sender Closing")
+}
+
+func (nm *NetworkManager) receiverThread(recv recvfn) {
+	defer nm.wg.Done()
+	for {
+		n, frame, closed := recv()
+		if closed {
+			fmt.Println("Receiver Closing")
+			return
+		}
+		fmt.Println("Receiving", n, frame[0:n])
+		//nm.send([]byte{4,3,2,1})
+		//time.Sleep(time.Second)
+	}
+}
+
+func (nm *NetworkManager) shutdown() {
+	close(nm.sendCh)
+	nm.close()
+	nm.wg.Wait()
+}
+
+func (nm *NetworkManager) send(buf []byte) {
+	nm.sendCh <- buf
 }
