@@ -55,9 +55,11 @@ func main() {
 
 	if os.Args[1] == "c" {
 		buf := make([]byte, MAX_FRAME_SIZE)
-		lol := []byte{1,2,3,4}
+		lol := []byte{1,0x83,3,4} // Req
 		copy(buf, lol)
 		ca.send(buf[:len(lol)])
+		ca.send([]byte{1, 0x4B}) // Rep
+		ca.send([]byte{1, 0xB}) // Data
 	}
 	wg.Wait()
 }
