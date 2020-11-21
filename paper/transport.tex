@@ -38,15 +38,17 @@ channel as well.
 We show the format of an SSTP transport message in
 Figure~\ref{fig:transport_message}. Channel multiplexing is implemented by
 encapsulating a single \emph{channel frame} (green) within the Encrypted Data segment of
-the transport message. Each channel is identified by the Channel ID in the frame header. We borrow upon QUIC streams and statically allocate
-even-numbered channel IDs for client-initiated channels and odd IDs for
-server-initiated channels to avoid collisions during the channel creation process.
+the transport message. Each channel is identified by the Channel ID in the frame
+header. We statically allocate even-numbered channel IDs for client-initiated
+channels and odd IDs for server-initiated channels to avoid collisions during
+the channel creation process.
 % note: QUIC actually does odd for client, even for server. 
 Channels are created through a 2-way handshake when either the client
 or server sends a Channel Initiation Request and the other party successfully
 replies with a Channel Initiation Response. Channels are closed when both
-parties send and receive a frame with the \texttt{FIN} bit set to one. Multiple channels can be created and closed
-repeatedly without tearing down the entire SSTP session.
+parties send and receive a frame with the \texttt{FIN} bit set to one. Multiple
+channels can be created and closed repeatedly without tearing down the entire
+SSTP session.
 
 \input{bytefields/transport_message.tex}
 
@@ -56,29 +58,25 @@ of all SSTP transport messages are authenticated and encrypted. \todo{Wilson: mo
 
 \subsection{Channel Creation}
 
-Channel creation begins when one party (the initiator) sends a message with the
-Frame Number set to 0 and the \texttt{REQ} bit set to one. This initial message
-is the Channel Initiation Request. A Frame Number of 0
-implies a channel handshake message, and the \texttt{REQ} denotes whether it is
-a request for a new channel or a response to an outstanding channel initiation
-request.
-% Thie REQ bit is technically not necessary to distinguish between request and
-% response, but otherwise we would need to check state (list of outstanding
-% Channel requests) in order to determine. One bit not a big deal.
-The Channel Initiation Request contains non-negotiable channel parameters chosen by the initiator. This
-includes the Channel ID and the Channel Type (reliable or unreliable), as well as the initiator's Maximum Frame Size
-and Receive Window Size. If any of these values need to change during the lifetime of
+The channel creation 2-way handshake begins when one party (the initiator) sends
+a message to the other (the responder) with the
+\texttt{REQ} bit set to one and the Frame Number set to 0. This initial message
+is the Channel Initiation Request. All initial handshake messages for a channel
+must begin with Frame Number 0.
+The Channel Initiation Request contains a non-negotiable Channel ID and Channel Type (reliable or
+unreliable) chosen by the initiator, as well as the initiator's Receive Window
+Size. If any of these values need to change during the lifetime of
 the channel, the channel is closed and a new one is created. Additionally, any
 initial data for the channel can be sent in the Data field.
 
 Upon receipt of a Channel Initiation Request, the responder
-replies with a Channel Initiation Response. Channel Initiation Responses also
-have the Frame Number set to 0, except with
-the \texttt{REQ} bit set to 0. The responder chooses to accept or reject the
+replies with a Channel Initiation Response. Channel Initiation Responses have
+the \texttt{RESP} bit set to 1 and Frame Number 0. 
+% A frame cannot both be a request and a response. 
+The responder chooses to accept or reject the
 channel creation by setting the \texttt{ACC} bit to the appropriate value (1 for
-accept, 0 for reject). The
-Channel ID and Channel Type are echoed back to the initiator, and the responder
-sets its own maximum frame size and receiving window size.
+accept, 0 for reject). The Channel ID and Channel Type are echoed back to the
+initiator, and the responder sets its own Receive Window Size.
 
 After both request and response frames have been received, the channel has been
 created from the perspective of both the initiator and the responder. SSTP only
@@ -86,25 +84,18 @@ requires a 2-way handshake because all initial Frame Numbers start at 0.
 Spoofing attacks caused by non-random initial sequence numbers are prevented
 since the entire frame is authenticated and encrypted within the transport message.
 
-Channel creation handshake messages do not make use of the Acknowledgment Number
-field. If the initiator does not receive a Channel Initiation Response for some
-period of time after sending a request, it will assume that the Channel was not
+Channel creation handshake messages do not use explicit acknowledgments, as the
+response is implicitly an acknowledgment of the request. If the initiator does
+not receive a Channel Initiation Response for some period of time after sending
+a request, it will assume that the Channel was not
 created and that either the request was lost or the response was lost. In either
 case, it will retransmit a request. If the response was lost, the responder may
 already be sending channel data since it assumes the channel has been created.
-In this case, the initiator ignores all channel data until it properly receives
-a Channel Initiation Response for the channel. If the responder receives a
-duplicate request, the newer request takes precedence and all state from the
-previous half-channel is destroyed.
-
-\subsection{Unreliable Channels}
-Once an unreliable channel has been created, both client and server can begin
-sending data to each other without needing to check proper receival or ordering
-of frames.
-However, unlike vanilla UDP, this is not a connectionless communication mode. Both a session and a channel are created beforehand, and all frames are
-authenticated and encrypted by virtue of being encapsulated in an SSTP transport message. The Frame Number is checked to
-distinguish between channel handshake (Frame Number = 0) and data frames, but
-can otherwise be ignored, and the Acknowledgment Number field is ignored. 
+The initiator ignores all channel data and resends Channel Initiation Requests
+until it properly receives a Channel Initiation Response. If the
+responder receives a duplicate request, the newer request takes precedence and
+all state from the previous half-channel is destroyed, and a new channel is
+created from the new request.
 
 \subsection{Reliable Channels}
 We use Frame Numbers and Acknowledgment Numbers for a simple implementation of
@@ -112,22 +103,34 @@ reliable transmission based on TCP. We consider congestion control to be
 orthogonal to reliable transmission within a channel and leave it to future
 work. 
 
-The Frame Number is a 64-bit monotonically increasing sequence number starting
-at 0 that counts individual frames. Channel handshake frames have Frame Number
+The Frame Number is a 32-bit sequence number starting at 0 that counts
+individual frames. Channel handshake messages always have Frame Number
 0, and data always starts at Frame Number 1. In the
-event that the Frame Number reaches the maximum value of $2^{64} - 1$, the
-sender will send \texttt{FIN} frames with the maximum value to signal closing
-the channel.
+event that the Frame Number reaches the maximum value of $2^{32} - 1$, it will
+wraparound back to 0, with \texttt{REQ} and \texttt{RESP} flags unset so as to
+not interpret data messages as a new handshake message. Frame Numbers also
+encode the order of the application data for stream reassembly at the receiver.
 
-When an SSTP message is sent, a retransmission timer is started. Upon receipt,
-the responder will reply with an acknowledgment for the next Frame Number
-expected. If no acknowledgment is received before the retransmission timer
-expires, the frame is resent. Frames containing an acknowledgment for a received
-frame will have the \texttt{ACK} flag set to one.
+When an SSTP message is sent, a retransmission timer is started to recover from
+loss in the network. If the message is received, the responder will reply with an acknowledgment for the next Frame Number
+expected. Every data message will contain an Acknowledgment Number. This 32-bit Acknowledgment Number replaces the 32-bits of Window Size,
+Channel Type, and Reserved fields that are only used during channel creation,
+which saves 4 bytes of control data in every message. If no acknowledgment is
+received before the retransmission timer expires, the frame is resent. 
+
+\subsection{Unreliable Channels}
+For unreliable channels, both client and server can begin
+sending data to each other without needing to check proper receival or ordering
+of frames.
+However, unlike vanilla UDP, this is not a connectionless communication mode.
+Both a session and a channel need to be created beforehand, and all frames are
+authenticated and encrypted by virtue of being encapsulated in an SSTP transport
+message. Both the Frame Number and the Acknowledgment Number fields can be ignored.
 
 \subsection{Channel Tear Down}
-To close a channel, we use the four-way \texttt{FIN-ACK/FIN-ACK} handshake common in most
-TCP implementations. If channel frames are received by an endpoint after a
+To close a channel, we use the four-way \texttt{FIN-ACK/FIN-ACK} handshake
+common in most TCP implementations. If channel frames are received by an
+endpoint after a
 \texttt{FIN} has been sent, the endpoint will continue sending acknowledgments
 with the \texttt{FIN} flag sent to signal closing the channel. Once both
 endpoints have received acknowledgments for both \texttt{FIN}s, the channel is
@@ -136,110 +139,6 @@ closed and the Channel ID can be reused within the SSTP session.
 % that is not intended for the current connection, but since all frames are
 % authenticated this won't occur
 
-
-% An SSTP transport message (for data) is composed of a SessionID, a Counter, Encrypted Data,
-% and MAC. We encapsulate channel \emph{frames} within the Encrypted Data section
-% of the transport message, providing authentication and encryption by default for all
-% packets (Figure~\ref{fig:channel_encapsulation}). For simplicitly, only one
-% frame is contained in an SSTP message, although future extensions may allow
-% multiple frames.
-
-% \begin{figure}[h]
-% 	\centering
-% 	\includegraphics[width=0.9\columnwidth]{figures/channel_encapsulation.pdf}
-% 	\caption{\textbf{Channel Encapsulation}---%
-% 	\textnormal{}
-% 	}
-% 	\label{fig:channel_encapsulation}
-% 	\vspace{-5pt}
-% \end{figure}
-
-
-
-% All SSTP channel frames are one of four types: 
-% \begin{itemize}
-%     \item Channel Initiation Request Frame
-%     \item Channel Initiation Response Frame
-%     \item Channel Data Frame
-%     \item Channel Control Frame
-% \end{itemize}
-% Once an encrypted SSTP session has been established, either the client or the
-% server can request to initiate a shared channel. A channel
-% handshake is performed to establish the channel and mode (reliable or unreliable). In the absence of the loss
-% of a handshake message, channel initiation handshakes will complete in a single
-% round trip. We do not need a TCP-like 3-way handshake
-% because initial sequence numbers (frame counters) for both direcitons of
-% communication start at 0. Each channel is identified by a unique channel ID, so
-% there is no confusion between separate channels, and spoofing attacks from
-% non-random sequence numbers are already prevented from the encrypted transport
-% protocol. We show the channel handshake as well as the tear-down sequence in Figure~\ref{fig:channel_protocol}.
-
-% % Diagram here
-% \begin{figure}[h]
-% 	\centering
-% 	\includegraphics[width=0.6\columnwidth]{figures/channel_protocol.pdf}
-% 	\caption{\textbf{Channel initiation handshake and tear-down}---%
-% 	\textnormal{}
-% 	}
-% 	\label{fig:channel_protocol}
-% 	\vspace{-5pt}
-% \end{figure}
-
-% \vspace{5pt} \noindent \textit{Channel Initiation Request:}\quad
-% The first message from the initiator to the
-% responder contains a Channel Initiation Request Frame. We show the structure of
-% the Channel Initiation Request Frame below.
-
-% \input{bytefields/initiate_request_frame.tex}
-
-% The frame header consists of the Channel ID and the Type. The initiator of the
-% channel chooses whether the channel mode will be unreliable (0x0) or reliable (0x1).
-% The maximum frame size the initiator is willing to receive as well as the
-% initiator's initial window size are established in this first message.
-% Initiation request frames also denote the
-% \emph{Action} that will be performed across the channel (e.g., file transfer,
-% remote shell, network proxy). Action labels will be a value agreed upon by both
-% the client and the server (or standardized ahead of time), and initial action
-% data can optionally be sent as well.
-
-% \vspace{5pt} \noindent \textit{Channel Initiation Response:}\quad 
-% After receiving and processing a channel initiation request, the responder replies with a
-% Channel Initiation Response by echoing the channel ID and either sending a
-% \texttt{REJECT} (0x0) or \texttt{ACCEPT} (0x1) in the response field. We show
-% the structure of the Initiation Response Frame below.
-
-% \input{bytefields/initiate_response_frame.tex}
-
-% If the responder chooses to accept the channel, it also must send a Maximum
-% Frame Size and Initial Window Size, and echo the Action Label requested by the
-% initiatior. The responder may also respond with initial action data.
-
-% \vspace{5pt} \noindent \textit{Data:}\quad 
-% After the channel handshake completes, an encrypted channel is established
-% between the client and server. At this point, either party can begin sending
-% data packets, in the form of a Channel Data Frame. Again, the frame
-% header consists of the channel ID for use in channel multiplexing as well as the
-% frame type (data). For reliable channels, each data frame comes with a Frame
-% Counter (effectively a sequence number with ISN = 0) and a maximum
-% acknowledgement delay before retransmission occurs. We discuss loss recovery and
-% packet reordering in Section~\ref{sec:reliable_channels}. For unreliable channels,
-% these fields are ignored. The remaining Action Data Size and Action Data contain
-% the payload. The Data Frame structure is shown below.
-
-% \input{bytefields/data_frame.tex}
-
-% \vspace{5pt} \noindent \textit{Control:}\quad
-% SSTP uses control frames primarily for managing loss recovery and reordering for
-% reliable channels, but also uses control frames with control type \texttt{END}
-% for either party to indicate that it wishes to end the channel. The encrypted
-% transport session remains even if all channels end. To end a channel, the
-% initiator of the channel end request sends a control frame with control type set
-% to \texttt{END}. The responder can reply with another \texttt{END} frame to
-% completely end the channel. Once both sides have received and acknowledged
-% \texttt{END} control frames (similar to TCP connection closing), the channel
-% ends. We describe other control frame types in Section~\ref{sec:reliable_channels}.The Control Frame structure below. 
-
-% \input{bytefields/control_frame.tex}
 
 
 

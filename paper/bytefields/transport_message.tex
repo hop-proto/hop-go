@@ -22,18 +22,17 @@
                 %\wordbox{3}{Encrypted Data} \\
                 \colorbitbox{lightgreen}{8}{ Channel ID } &
                     \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny REQ}} &
+                    \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny RESP}} &
                     \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny REL}} &
                     \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny ACC}} &
-                    \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny ACK}} &
                     \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny FIN}} &
-                \colorbitbox{lightgreen}{3}{ 0x0 } &
+                \colorbitbox{lightgreen}{3}{ Res. } &
                 \colorbitbox{lightgreen}{16}{Data Length} \\
-                \colorbitbox{lightgreen}{16}{Max. Frame Size} & 
-                \colorbitbox{lightgreen}{16}{Window Size} \\
-                \colorbitbox{lightgreen}{8}{Channel Type} & 
-                \colorbitbox{lightgreen}{24}{Padding} \\
-                \colorwordbox{lightgreen}{2}{Frame Number (8 bytes)} \\ 
-                \colorwordbox{lightgreen}{2}{Acknowledgment Number (8 bytes)} \\ 
+                \colorbitbox{lightgreen}{16}{Window Size} & 
+                \colorbitbox{lightgreen}{8}{Channel Type} &
+                \colorbitbox{lightgreen}{8}{Reserved} \\
+                % \colorwordbox{lightgreen}{1}{Acknowledgment Number (4 bytes)} \\
+                \colorwordbox{lightgreen}{1}{Frame Number (4 bytes)} \\ 
                 \colorwordbox{lightgreen}{1}{Data ( * bytes)} \\
                 % \skippedwords \\
                 % \wordbox[lrb]{1}{} \\
@@ -43,6 +42,11 @@
         \end{small}
     \label{fig:transport_message}
     \caption{\textbf{SSTP Transport Message}---
-                The channel frame (green) is the Encrypted Data segment of the transport message.}
+                The channel frame (green) is the Encrypted Data segment of the
+                transport message. The 32 bits starting at Byte 20 are
+                interpreted as Window Size, Channel Type, and
+                Reserved for channel handshake messages. For data messages in
+                reliable channels it is interpreted as an
+                Acknowledgment Number. }
     \vspace{-5pt}
 \end{figure}
