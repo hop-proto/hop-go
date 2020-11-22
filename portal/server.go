@@ -22,6 +22,8 @@ type HandshakeState struct {
 	ephemeral       X25519KeyPair
 	clientEphemeral [DHLen]byte
 	handshakeKey    [KeyLen]byte
+	clientStatic    [DHLen]byte
+	sessionID       [SessionIDLen]byte
 	// TODO(dadrian): Should these be arrays?
 	ee     []byte
 	es     []byte
@@ -121,6 +123,7 @@ func (s *Server) readPacket() error {
 		// TODO(dadrian): Don't use .String() for this
 		s.handshakes[addr.String()] = hs
 		ss, err := s.newSessionState()
+		copy(hs.sessionID[:], ss.sessionID[:])
 		if err != nil {
 			logrus.Debug("could not make new session state")
 			return err
@@ -130,6 +133,12 @@ func (s *Server) readPacket() error {
 			return err
 		}
 		err = s.writePacket(s.outBuf[0:n], addr)
+		if err != nil {
+			return err
+		}
+	case MessageTypeClientAuth:
+		logrus.Debug("server: received client auth")
+		_, err = s.handleClientAuth(s.inBuf[:msgLen], addr)
 		if err != nil {
 			return err
 		}
@@ -217,6 +226,71 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState)
 	return pos, nil
 }
 
+func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, error) {
+	x := b
+	pos := 0
+	if len(b) < HeaderLen+SessionIDLen+MacLen+MacLen {
+		logrus.Debug("server: client auth too short")
+		return 0, ErrBufUnderflow
+	}
+	if b[0] != MessageTypeClientAuth {
+		return 0, ErrUnexpectedMessage
+	}
+	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
+		return 0, ErrInvalidMessage
+	}
+	hs, ok := s.handshakes[addr.String()]
+	if !ok {
+		logrus.Debugf("server: no handshake state for handshake packet from %s", addr)
+		return pos, ErrUnexpectedMessage
+	}
+	hs.duplex.Absorb(x[:HeaderLen])
+	x = x[HeaderLen:]
+	pos += HeaderLen
+	sessionID := x[:SessionIDLen]
+	if !bytes.Equal(hs.sessionID[:], sessionID) {
+		logrus.Debugf("server: mismatched session ID for %s: expected %x, got %x", addr, hs.sessionID, sessionID)
+		return pos, ErrUnexpectedMessage
+	}
+	_, ok = s.sessions[hs.sessionID]
+	if !ok {
+		logrus.Debugf("server: could not find session ID %x", hs.sessionID)
+		return pos, ErrUnexpectedMessage
+	}
+	hs.duplex.Absorb(sessionID)
+	x = x[SessionIDLen:]
+	pos += SessionIDLen
+	encStatic := x[:DHLen]
+	hs.duplex.Decrypt(hs.clientStatic[:], encStatic)
+	x = x[DHLen:]
+	pos += DHLen
+	hs.duplex.Squeeze(hs.macBuf[:])
+	clientTag := x[:MacLen]
+	if !bytes.Equal(hs.macBuf[:], clientTag) {
+		logrus.Debugf("server: mismatched tag in client auth: expected %x, got %x", hs.macBuf, clientTag)
+		return pos, ErrInvalidMessage
+	}
+	x = x[MacLen:]
+	pos += MacLen
+	var err error
+	hs.se, err = hs.ephemeral.DH(hs.clientStatic[:])
+	if err != nil {
+		logrus.Debugf("server: unable to calculated se: %s", err)
+		return pos, err
+	}
+	logrus.Debugf("server: se %x", hs.se)
+	hs.duplex.Absorb(hs.se)
+	hs.duplex.Squeeze(hs.macBuf[:]) // mac
+	clientMac := x[:MacLen]
+	if !bytes.Equal(hs.macBuf[:], clientMac) {
+		logrus.Debugf("server: mismatched mac in client auth: expected %x, got %x", hs.macBuf, clientMac)
+		return pos, ErrInvalidMessage
+	}
+	x = x[MacLen:]
+	pos += MacLen
+	return pos, nil
+}
+
 // TODO(dadrian): Should this provide a Listen()-like API? Once a session is established, should we return something?
 func (s *Server) Serve() error {
 	// TODO(dadrian): Probably shoudln't initialize this here
@@ -291,6 +365,7 @@ func (s *Server) writeCookie(b []byte, clientAddr *net.UDPAddr, hs *HandshakeSta
 	plaintextCookie := hs.ephemeral.private[:]
 	ad := CookieAD(hs.clientEphemeral[:], clientAddr)
 	enc := aead.Seal(b[12:12], nonce, plaintextCookie, ad)
+
 	return 12 + len(enc), nil
 }
 

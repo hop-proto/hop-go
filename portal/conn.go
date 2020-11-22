@@ -204,6 +204,41 @@ func (c *Conn) clientHandshake() error {
 		logrus.Debug("client: mismatched sa mac")
 		return err
 	}
+	// Client Auth
+	c.pos = 0
+	b := c.buf
+	b[0] = MessageTypeClientAuth
+	b[1] = 0
+	b[2] = 0
+	b[3] = 0
+	c.duplex.Absorb(b[0:4])
+	b = b[4:]
+	c.pos += 4
+	copy(b, c.sessionID[:])
+	c.duplex.Absorb(c.sessionID[:])
+	b = b[SessionIDLen:]
+	c.pos += SessionIDLen
+	c.duplex.Encrypt(b[:DHLen], c.static.public[:])
+	b = b[DHLen:]
+	c.pos += DHLen
+	c.duplex.Squeeze(b[:MacLen]) // tag
+	b = b[MacLen:]
+	c.pos += MacLen
+	c.se, err = c.static.DH(sh.Ephemeral)
+	if err != nil {
+		logrus.Errorf("client: unable to calc se: %s", err)
+		return err
+	}
+	logrus.Debugf("client: se %x", c.se)
+	c.duplex.Absorb(c.se)
+	c.duplex.Squeeze(b[:MacLen]) // mac
+	b = b[MacLen:]
+	c.pos += MacLen
+	n, err = c.underlyingConn.Write(c.buf[0:c.pos])
+	if err != nil {
+		logrus.Errorf("client: unable to send client auth: %s", err)
+		return err
+	}
 	return nil
 }
 
