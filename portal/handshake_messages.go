@@ -17,6 +17,7 @@ const (
 	MessageTypeClientAck               = 0x03
 	MessageTypeServerAuth              = 0x04
 	MessageTypeClientAuth              = 0x05
+	MessageTypeTransport               = 0x10
 )
 
 type HandshakeMessage struct {

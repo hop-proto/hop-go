@@ -11,7 +11,10 @@ import (
 	"zmap.io/portal/cyclist"
 )
 
-type Conn struct {
+// Enforce ClientConn implements net.Conn
+var _ net.Conn = &ClientConn{}
+
+type ClientConn struct {
 	underlyingConn *net.UDPConn
 	duplex         cyclist.Cyclist
 	publicDH       PublicDH
@@ -44,6 +47,10 @@ const DHLen = curve25519.PointSize
 const CookieLen = 32 + 16 + 12
 const SNILen = 256
 const SessionIDLen = 4
+const CounterLen = 8
+
+// TODO(dadrian): Verify this
+const MaxTotalPacketSize = 65535 - 18
 
 // ProtocolName is the string representation of the parameters used in this version
 const ProtocolName = "noise_NN_XX_cyclist_keccak_p1600_12"
@@ -53,19 +60,20 @@ var ErrBufUnderflow = errors.New("read would be past end of buffer")
 var ErrUnexpectedMessage = errors.New("attempted to deserialize unexpected message type")
 var ErrUnsupportedVersion = errors.New("unsupported version")
 var ErrInvalidMessage = errors.New("invalid message")
+var ErrUnknownSession = errors.New("unknown session")
 var ErrUnknown = errors.New("unknown")
 
 // Handshake performs the Portal handshake with the remote host. The connection
 // must already be open. It is an error to call Handshake on a connection that
 // has already performed the portal handshake.
-func (c *Conn) Handshake() error {
+func (c *ClientConn) Handshake() error {
 	c.buf = make([]byte, 1024*1024)
 	c.encBuf = make([]byte, len(c.buf))
 	c.pos = 0
 	return c.handshakeFn()
 }
 
-func (c *Conn) initializeKeyMaterial() {
+func (c *ClientConn) initializeKeyMaterial() {
 	c.ephemeral.Generate()
 	// TODO(dadrian): This should actually be, well, static
 	c.static.Generate()
@@ -73,7 +81,7 @@ func (c *Conn) initializeKeyMaterial() {
 	c.duplex.Absorb([]byte(ProtocolName))
 }
 
-func (c *Conn) clientHandshake() error {
+func (c *ClientConn) clientHandshake() error {
 	c.initializeKeyMaterial()
 	clientHello := ClientHello{
 		Ephemeral: c.ephemeral.public[:],
@@ -242,48 +250,40 @@ func (c *Conn) clientHandshake() error {
 	return nil
 }
 
-func (c *Conn) serverHandshake() error {
-	_, err := c.underlyingConn.Read(c.buf[c.pos : c.pos+4])
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (c *Conn) Write(b []byte) (n int, err error) {
+func (c *ClientConn) Write(b []byte) (n int, err error) {
 	return
 }
 
-func (c *Conn) Close() error {
+func (c *ClientConn) Close() error {
 	return nil
 }
 
-func (c *Conn) Read(b []byte) (n int, err error) {
+func (c *ClientConn) Read(b []byte) (n int, err error) {
 	return
 }
 
-func (c *Conn) LocalAddr() net.Addr {
+func (c *ClientConn) LocalAddr() net.Addr {
 	return c.underlyingConn.LocalAddr()
 }
 
-func (c *Conn) RemoteAddr() net.Addr {
+func (c *ClientConn) RemoteAddr() net.Addr {
 	return c.underlyingConn.RemoteAddr()
 }
 
-func (c *Conn) SetDeadline(t time.Time) error {
+func (c *ClientConn) SetDeadline(t time.Time) error {
 	return c.underlyingConn.SetDeadline(t)
 }
 
-func (c *Conn) SetReadDeadline(t time.Time) error {
+func (c *ClientConn) SetReadDeadline(t time.Time) error {
 	return c.underlyingConn.SetReadDeadline(t)
 }
 
-func (c *Conn) SetWriteDeadline(t time.Time) error {
+func (c *ClientConn) SetWriteDeadline(t time.Time) error {
 	return c.underlyingConn.SetWriteDeadline(t)
 }
 
-func Client(conn *net.UDPConn, config *Config) *Conn {
-	c := &Conn{
+func Client(conn *net.UDPConn, config *Config) *ClientConn {
+	c := &ClientConn{
 		underlyingConn: conn,
 	}
 	c.handshakeFn = c.clientHandshake

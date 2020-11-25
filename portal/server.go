@@ -7,6 +7,8 @@ import (
 	"crypto/rand"
 	"errors"
 	"net"
+	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/cyclist"
@@ -18,6 +20,7 @@ const maxCookieLen = 128
 type SessionID [4]byte
 
 type HandshakeState struct {
+	sync.Mutex
 	duplex          cyclist.Cyclist
 	ephemeral       X25519KeyPair
 	clientEphemeral [DHLen]byte
@@ -32,11 +35,29 @@ type HandshakeState struct {
 }
 
 type SessionState struct {
-	sessionID SessionID
-	key       [16]byte
+	sync.Mutex
+	sessionID  SessionID
+	count      uint64
+	key        [16]byte
+	remoteAddr net.UDPAddr
+}
+
+func (ss *SessionState) incrementCounterLocked(b []byte) {
+	_ = b[7]
+	b[0] = byte(ss.count >> 56)
+	b[1] = byte(ss.count >> 48)
+	b[2] = byte(ss.count >> 40)
+	b[3] = byte(ss.count >> 32)
+	b[4] = byte(ss.count >> 24)
+	b[5] = byte(ss.count >> 16)
+	b[6] = byte(ss.count >> 8)
+	b[7] = byte(ss.count)
+	ss.count++
 }
 
 type Server struct {
+	sync.Mutex
+
 	inBuf   []byte
 	outBuf  []byte
 	encBuf  []byte
@@ -244,6 +265,8 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, error) {
 		logrus.Debugf("server: no handshake state for handshake packet from %s", addr)
 		return pos, ErrUnexpectedMessage
 	}
+	hs.Lock()
+	defer hs.Unlock()
 	hs.duplex.Absorb(x[:HeaderLen])
 	x = x[HeaderLen:]
 	pos += HeaderLen
@@ -410,6 +433,37 @@ func (s *Server) writeServerHello(b []byte, clientAddr *net.UDPAddr, hs *Handsha
 	return n, err
 }
 
+func (s *Server) writeToSession(b []byte, sessionID SessionID) error {
+	pktLen := HeaderLen + SessionIDLen + CounterLen + len(b) + 16
+	if pktLen > MaxTotalPacketSize {
+		return bytes.ErrTooLarge
+	}
+	buf := make([]byte, 0, pktLen)
+	x := buf
+	x[0] = MessageTypeTransport
+	x[1] = 0
+	x[2] = 0
+	x[3] = 0
+	x = x[HeaderLen:]
+	copy(x, sessionID[:])
+	x = x[SessionIDLen:]
+	// TODO(dadrian): Lock
+	ss, ok := s.sessions[sessionID]
+	if !ok {
+		return ErrUnknownSession
+	}
+	counter := x
+	x = x[CounterLen:]
+	copy(x, b)
+	// TODO(dadrian): Encrypt this
+	x = x[len(b):]
+	// TODO(dadrian): Mac
+	ss.Lock()
+	defer ss.Unlock()
+	ss.incrementCounterLocked(counter)
+	return s.writePacket(buf, &ss.remoteAddr)
+}
+
 func NewServer(conn *net.UDPConn, config *Config) *Server {
 	s := Server{
 		udpConn: conn,
@@ -430,4 +484,50 @@ func NewServer(conn *net.UDPConn, config *Config) *Server {
 	// TODO(dadrian): This should be on the config object
 	s.staticKey.Generate()
 	return &s
+}
+
+var _ net.Conn = &ServerConn{}
+
+type ServerConn struct {
+	isClosing atomicBool
+	sessionID SessionID
+	s         *Server
+}
+
+func (c *ServerConn) Close() error {
+	// TODO(dadrian)
+	return nil
+}
+
+func (c *ServerConn) Read(b []byte) (int, error) {
+	// TODO(dadrian)
+	return 0, nil
+}
+
+func (c *ServerConn) Write(b []byte) (int, error) {
+	// TODO(dadrian)
+	return 0, nil
+}
+
+func (c *ServerConn) LocalAddr() net.Addr {
+	// TODO(dadrian)
+	return nil
+}
+
+func (c *ServerConn) RemoteAddr() net.Addr {
+	// TODO(dadrian)
+	return nil
+}
+
+func (c *ServerConn) SetReadDeadline(deadline time.Time) error {
+	// TODO(dadrian)
+	return nil
+}
+
+func (c *ServerConn) SetWriteDeadline(deadline time.Time) error {
+	return nil
+}
+
+func (c *ServerConn) SetDeadline(deadline time.Time) error {
+	return nil
 }
