@@ -5,17 +5,25 @@ To establish a cryptographic session between a client and a discoverable server,
 we base the cryptographic handshake on the Noise XX handshake
 pattern~\cite{noise}. 
 
+
+
 Initially, both the client and server are unauthenticated. The client begins by
-creating a client ephemeral key pair ($e_c^{priv}, e_c^{pub}$) and chooses the
-protocol name (or version?). The message type (client hello), protocol, and the
+sending a Client Hello to the server. The client creates an ephemeral key pair ($e_c^{priv}, e_c^{pub}$) and chooses the
+protocol name (or version?). The protocol name, message type (client hello), protocol version, and the
 client ephemeral public key are absorbed into the duplex object, and a message
 authentication code (MAC) is squeezed out. The client then begins the
 session handshake by sending the Client Hello, which contains (i) the message type,
 (ii) the protocol version, (iii) a client ephemeral public key
 ($e_c^{pub}$), and (iv) the MAC.
 
-If the Client Hello is successful, the server.. 
-\todo{what about lost hellos?}
+When the server receives the Client Hello \todo{what about lost hellos?}, it performs the same logic as the
+client, absorbing the protocol name, message type, protocol version, and client
+ephemeral public key into its own duplex object, and verifies that the MAC
+squeezed out matches the MAC attached to the Client Hello. If so, the server
+replies with a Server Hello, otherwise ignores the Client Hello.
+
+
+
 
 \begin{figure}[h]
 	\centering
