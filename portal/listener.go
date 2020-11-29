@@ -9,7 +9,7 @@ import (
 var ErrUDPOnly = errors.New("portal requires UDP transport")
 
 // Dial matches the interface of net.Dial
-func Dial(network, address string, config *Config) (*Conn, error) {
+func Dial(network, address string, config *Config) (*ClientConn, error) {
 	if network != "udp" {
 		return nil, ErrUDPOnly
 	}
