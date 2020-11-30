@@ -24,6 +24,72 @@ const (
 	rollWidthBites = 1600
 )
 
+// KeccakLanes is a model of the state of Keccak as 25 lanes of 8 bytes each.
+// This is equivalent to modeling the 1600 bits of state (200 bytes) as 25
+// uint64's.
+type KeccakLanes [25]uint64
+
+func rol64(a uint64, offset int) uint64 {
+	return (a << offset) | (a >> (64 - offset))
+}
+
+func (k *KeccakLanes) rollE() {
+	x0 := k[15]
+	x1 := k[16]
+	x2 := k[17]
+	x3 := k[18]
+	x4 := k[19]
+	x5 := k[20]
+	x6 := k[21]
+	x7 := k[22]
+	x8 := k[23]
+	x9 := k[24]
+	t := x0
+	x0 = x1
+	x1 = x2
+	x2 = x3
+	x3 = x4
+	x4 = x5
+	x5 = x6
+	x6 = x7
+	x7 = x8
+	x8 = x9
+	//x9 = ROL64(t, 7) ^ ROL64(x0, 18) ^ (x1 & (x0 >> 1));
+	x9 = rol64(t, 7) ^ rol64(x0, 18) ^ (x1 & (x0 >> 1))
+
+	k[15] = x0
+	k[16] = x1
+	k[17] = x2
+	k[18] = x3
+	k[19] = x4
+	k[20] = x5
+	k[21] = x6
+	k[22] = x7
+	k[23] = x8
+	k[24] = x9
+}
+
+func (k *KeccakLanes) rollC(start int) {
+	x0 := k[20]
+	x1 := k[21]
+	x2 := k[22]
+	x3 := k[23]
+	x4 := k[24]
+	t := x0
+
+	x0 = x1
+	x1 = x2
+	x2 = x3
+	x3 = x4
+	x4 = rol64(t, 7) ^ x0 ^ (x0 >> 3)
+
+	k[20] = x0
+	k[21] = x1
+	k[22] = x2
+	k[23] = x3
+	k[24] = x4
+}
+
 // Kravatte implements the Kravatte deck function, as defined in Section 7 of
 // https://eprint.iacr.org/2016/1188.pdf. It is loosely based on the XKCP
 // implementation of Kravatte by the Keccak Team.
