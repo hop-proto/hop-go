@@ -1,7 +1,6 @@
 package kravatte
 
 import (
-	"github.com/sirupsen/logrus"
 	"zmap.io/portal/snp"
 )
 
@@ -162,8 +161,8 @@ type Kravatte struct {
 	// TODO(dadrian): Are these all the same size?
 	k [25]uint64
 	r [25]uint64
-	x [widthBytes]byte
-	y [widthBytes]byte
+	x [25]uint64
+	y [25]uint64
 	q [widthBytes]byte
 
 	queueOffset int
@@ -187,7 +186,7 @@ func min(a, b int) int {
 	return b
 }
 
-var zero [widthBytes]byte
+var zero [25]uint64
 
 type keccakTest [25]uint64
 
@@ -241,7 +240,7 @@ func (kv *Kravatte) compress(message []byte, lastFlag int) int {
 			rollC(&kv.r)
 			snp.StateAddBytes(&state, message[:widthBytes])
 			keccakF1600(&state)
-			snp.StateExtractAndAddBytes(&state, kv.x[:], kv.x[:])
+			snp.StateAddState(&kv.x, &state) // Add state to x, not vice-versa
 			message = message[widthBytes:]
 			remainingLen -= widthBytes
 			if remainingLen < widthBytes {
@@ -256,31 +255,11 @@ func (kv *Kravatte) compress(message []byte, lastFlag int) int {
 		snp.StateAddBytes(&state, message)
 		snp.StateAddByte(&state, 1, remainingLen)
 		keccakF1600(&state)
-		snp.StateExtractAndAddBytes(&state, kv.x[:], kv.x[:])
+		snp.StateAddState(&kv.x, &state) // Add state to x, not vice-versa
 		rollC(&kv.r)
 		return messageLen
 	}
 	return messageLen - remainingLen
-}
-
-// TODO(dadrian): Implement
-func copyBytesToUint64(dst []uint64, src []byte) int {
-	return len(src)
-}
-
-// TODO(dadrian): Implement
-func copyUint64ToBytes(dst []byte, src []uint64) int {
-	return len(src) / 8
-}
-
-func (kv *Kravatte) rollE(encbuf []byte, flags int) int {
-	// Implement
-	return 1
-}
-
-func (kv *Kravatte) rollC() int {
-	// Implement
-	return 1
 }
 
 // Kra compresses input into the sponge.
@@ -329,100 +308,56 @@ func (kv *Kravatte) Kra(in []byte, flags int) int {
 
 // Vatte squeezes the sponge into the output.
 func (kv *Kravatte) Vatte(out []byte, flags int) int {
-	var encbuf [rollWidthBytes]byte
-	outputByteLen := len(out)
-	outputBitLen := 8 * outputByteLen
-	outputOffset := 0
+	totalOutputLen := len(out)
+	remainingOutputLen := totalOutputLen
 	finalFlag := flags & FlagLastPart
-	if (finalFlag == 0) && (outputBitLen&7 != 0) {
-		return 1
-	}
 	if kv.phase == PhaseCompressing {
 		if kv.queueOffset != 0 {
 			return 1
 		}
 		if (flags & FlagShort) != 0 {
-			copy(kv.y[:], kv.x[:])
+			kv.y = kv.x
 		} else {
 			var state [25]uint64
-			// mInit(state)?
-			copyBytesToUint64(state[:], kv.x[:])
+			state = kv.x
 			keccakF1600(&state)
-			copyUint64ToBytes(kv.y[:], state[:])
+			kv.y = state
 		}
 		kv.phase = PhaseExpanding
-		// TODO(dadrian): Remove debug logs
-		logrus.Debugf("y: %x", kv.y[:])
-		logrus.Debugf("k: %x", kv.k[:])
 	} else if kv.phase != PhaseExpanding {
 		// TODO(dadrian): Should this be a switch?
 		return 1
 	}
 	if kv.queueOffset != 0 {
 		// Data is already queued
-		bitLen := min(outputBitLen, widthBits-kv.queueOffset)
-		byteLen := (bitLen + 7) / 8
-		outputEnd := outputOffset + byteLen
-		queueOffsetBytes := kv.queueOffset / 8
-		queueEnd := queueOffsetBytes + byteLen
-		copy(out[outputOffset:outputEnd], kv.q[queueOffsetBytes:queueEnd])
-		kv.queueOffset += bitLen
-		if kv.queueOffset == widthBits {
+		toOutputLen := min(remainingOutputLen, widthBytes-kv.queueOffset)
+		q := kv.q[kv.queueOffset:]
+		copy(out, q[:toOutputLen])
+		kv.queueOffset += toOutputLen
+		if kv.queueOffset == widthBytes {
 			kv.queueOffset = 0
 		}
-		outputOffset += byteLen
-		outputBitLen -= bitLen
-		if (finalFlag != 0) && (outputBitLen == 0) {
-			bitLen &= 7
-			if bitLen != 0 {
-				// cleanup last incomplete byte
-				out[outputOffset-1] &= (1 << bitLen) - 1
-			}
+		out = out[toOutputLen:]
+		remainingOutputLen -= toOutputLen
+		if (finalFlag != 0) && (remainingOutputLen == 0) {
 			kv.phase = PhaseExpanded
 			return 0
 		}
 	}
-	// WHAT HAPPENS HERE? Somehow Roll functions are called?
-	/*
-	   outputByteLen = (outputBitLen + 7) / 8;
-	   #if defined(KeccakP1600times8_implementation) && !defined(KeccakP1600times8_isFallback)
-	   #if defined(KeccakF1600times8_FastKravatte_supported)
-	   ParallelExpandLoopFast( 8 )
-	   #else
-	   ParallelExpandLoopPlSnP( 8 )
-	   #endif
-	   #endif
-	   #if defined(KeccakP1600times4_implementation) && !defined(KeccakP1600times4_isFallback)
-	   #if defined(KeccakF1600times4_FastKravatte_supported)
-	   ParallelExpandLoopFast( 4 )
-	   #else
-	   ParallelExpandLoopPlSnP( 4 )
-	   #endif
-	   #endif
-	   #if defined(KeccakP1600times2_implementation) && !defined(KeccakP1600times2_isFallback)
-	   #if defined(KeccakF1600times2_FastKravatte_supported)
-	   ParallelExpandLoopFast( 2 )
-	   #else
-	   ParallelExpandLoopPlSnP( 2 )
-	   #endif
-	   #endif
-	*/
-	if outputByteLen != 0 {
+
+	if remainingOutputLen != 0 {
 		var state [25]uint64
 		var byteLen int
 		// mInit(state)?
 		for {
-			byteLen = min(outputByteLen, widthBytes)
-			end := outputOffset + byteLen
-			copyBytesToUint64(state[:], kv.y[:])
-			kv.rollE(encbuf[:], 1)
+			byteLen = min(remainingOutputLen, widthBytes)
+			state = kv.y
+			rollE(&kv.y)
 			keccakF1600(&state)
-			// TODO(dadrian): This is actually an extract and add
-			copyUint64ToBytes(out[outputOffset:end], state[:])
-			logrus.Debugf("out 1: %x", out[outputOffset:end])
-			outputOffset += byteLen
-			outputByteLen -= byteLen
-			if outputByteLen == 0 {
+			snp.StateExtractAndAddStateToBytes(&state, &kv.y, 0, out[:byteLen])
+			out = out[byteLen:]
+			remainingOutputLen -= byteLen
+			if remainingOutputLen == 0 {
 				break
 			}
 		}
@@ -430,19 +365,12 @@ func (kv *Kravatte) Vatte(out []byte, flags int) int {
 			// Put the rest of the expanded data in the queue
 			offset := byteLen
 			byteLen = widthBytes - byteLen
-			end := offset + byteLen
-			// TODO(dadrian): Needs to do an add of roll
-			copyUint64ToBytes(kv.q[offset:end], state[offset:end])
-			kv.queueOffset = 8 * offset
+			q := kv.q[kv.queueOffset:]
+			snp.StateExtractAndAddStateToBytes(&state, &kv.r, offset, q[:byteLen])
+			kv.queueOffset = offset
 		}
 	}
 	if finalFlag != 0 {
-		outputBitLen &= 7
-		if outputBitLen != 0 {
-			// cleanup incomplete byte
-			out[outputOffset-1] &= (1 << outputBitLen) - 1
-			logrus.Debugf("out L: %x", out[outputOffset-1])
-		}
 		kv.phase = PhaseExpanded
 	}
 	return 0
