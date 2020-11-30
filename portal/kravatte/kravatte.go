@@ -1,6 +1,9 @@
 package kravatte
 
-import "github.com/sirupsen/logrus"
+import (
+	"github.com/sirupsen/logrus"
+	"zmap.io/portal/snp"
+)
 
 const (
 	// FlagNone is the zero value and indicates no flags are set.
@@ -24,26 +27,21 @@ const (
 	rollWidthBites = 1600
 )
 
-// KeccakLanes is a model of the state of Keccak as 25 lanes of 8 bytes each.
-// This is equivalent to modeling the 1600 bits of state (200 bytes) as 25
-// uint64's.
-type KeccakLanes [25]uint64
-
 func rol64(a uint64, offset int) uint64 {
 	return (a << offset) | (a >> (64 - offset))
 }
 
-func (k *KeccakLanes) rollE() {
-	x0 := k[15]
-	x1 := k[16]
-	x2 := k[17]
-	x3 := k[18]
-	x4 := k[19]
-	x5 := k[20]
-	x6 := k[21]
-	x7 := k[22]
-	x8 := k[23]
-	x9 := k[24]
+func rollE(state *[25]uint64) {
+	x0 := state[15]
+	x1 := state[16]
+	x2 := state[17]
+	x3 := state[18]
+	x4 := state[19]
+	x5 := state[20]
+	x6 := state[21]
+	x7 := state[22]
+	x8 := state[23]
+	x9 := state[24]
 	t := x0
 	x0 = x1
 	x1 = x2
@@ -57,24 +55,89 @@ func (k *KeccakLanes) rollE() {
 	//x9 = ROL64(t, 7) ^ ROL64(x0, 18) ^ (x1 & (x0 >> 1));
 	x9 = rol64(t, 7) ^ rol64(x0, 18) ^ (x1 & (x0 >> 1))
 
-	k[15] = x0
-	k[16] = x1
-	k[17] = x2
-	k[18] = x3
-	k[19] = x4
-	k[20] = x5
-	k[21] = x6
-	k[22] = x7
-	k[23] = x8
-	k[24] = x9
+	state[15] = x0
+	state[16] = x1
+	state[17] = x2
+	state[18] = x3
+	state[19] = x4
+	state[20] = x5
+	state[21] = x6
+	state[22] = x7
+	state[23] = x8
+	state[24] = x9
 }
 
-func (k *KeccakLanes) rollC(start int) {
-	x0 := k[20]
-	x1 := k[21]
-	x2 := k[22]
-	x3 := k[23]
-	x4 := k[24]
+//func rollC(k *[200]byte) {
+//	x00 := k[20*8+0]
+//	x01 := k[20*8+1]
+//	x02 := k[20*8+2]
+//	x03 := k[20*8+3]
+//	x04 := k[20*8+4]
+//	x05 := k[20*8+5]
+//	x06 := k[20*8+6]
+//	x07 := k[20*8+7]
+//
+//	x10 := k[21*8+0]
+//	x11 := k[21*8+1]
+//	x12 := k[21*8+2]
+//	x13 := k[21*8+3]
+//	x14 := k[21*8+4]
+//	x15 := k[21*8+5]
+//	x16 := k[21*8+6]
+//	x17 := k[21*8+7]
+//
+//	x20 := k[22*8+0]
+//	x21 := k[22*8+1]
+//	x22 := k[22*8+2]
+//	x23 := k[22*8+3]
+//	x24 := k[22*8+4]
+//	x25 := k[22*8+5]
+//	x26 := k[22*8+6]
+//	x27 := k[22*8+7]
+//
+//	x30 := k[23*8+0]
+//	x31 := k[23*8+1]
+//	x32 := k[23*8+2]
+//	x33 := k[23*8+3]
+//	x34 := k[23*8+4]
+//	x35 := k[23*8+5]
+//	x36 := k[23*8+6]
+//	x37 := k[23*8+7]
+//
+//	x40 := k[24*8+0]
+//	x41 := k[24*8+1]
+//	x42 := k[24*8+2]
+//	x43 := k[24*8+3]
+//	x44 := k[24*8+4]
+//	x45 := k[24*8+5]
+//	x46 := k[24*8+6]
+//	x47 := k[24*8+7]
+//
+//	t0 := x00
+//	t1 := x01
+//	t2 := x02
+//	t3 := x03
+//	t4 := x04
+//	t5 := x05
+//	t6 := x06
+//	t7 := x07
+//
+//	// Variables and roll
+//	x0 = x1
+//	x1 = x2
+//	x2 = x3
+//	x3 = x4
+//	x4 = rol64(t, 7) ^ x0 ^ (x0 >> 3)
+//
+//	// Reassign back to k
+//}
+
+func rollC(state *[25]uint64) {
+	x0 := state[20]
+	x1 := state[21]
+	x2 := state[22]
+	x3 := state[23]
+	x4 := state[24]
 	t := x0
 
 	x0 = x1
@@ -83,11 +146,11 @@ func (k *KeccakLanes) rollC(start int) {
 	x3 = x4
 	x4 = rol64(t, 7) ^ x0 ^ (x0 >> 3)
 
-	k[20] = x0
-	k[21] = x1
-	k[22] = x2
-	k[23] = x3
-	k[24] = x4
+	state[20] = x0
+	state[21] = x1
+	state[22] = x2
+	state[23] = x3
+	state[24] = x4
 }
 
 // Kravatte implements the Kravatte deck function, as defined in Section 7 of
@@ -97,14 +160,14 @@ type Kravatte struct {
 	// TODO(dadrian): Some of these probably need to be uint64 arrays, since
 	// Keccak operates on [25]uint64.
 	// TODO(dadrian): Are these all the same size?
-	k [widthBytes]byte
-	r [widthBytes]byte
+	k [25]uint64
+	r [25]uint64
 	x [widthBytes]byte
 	y [widthBytes]byte
 	q [widthBytes]byte
 
-	queueOffsetBits int
-	phase           Phase
+	queueOffset int
+	phase       Phase
 }
 
 // Phase represents a Kravatte phase.
@@ -126,8 +189,78 @@ func min(a, b int) int {
 
 var zero [widthBytes]byte
 
-func (kv *Kravatte) compress(lastFlag int) int {
+type keccakTest [25]uint64
+
+// RefMaskInitialize closely follows the refernce implementation and
+// specification of Kravatte, rather than th XKCP optimized implementation. It
+// implements the first phase of Farfelle as defined in
+// https://eprint.iacr.org/2016/1188.pdf.
+//
+// "First, the key derivation computes a b-bit mask k from the key K".
+func (kv *Kravatte) RefMaskInitialize(key []byte) int {
+	if len(key) >= widthBytes {
+		return 1
+	}
+	key = Pad10NewSlice(key, widthBytes)
+	snp.StateSetBytes(&kv.k, key)
+	keccakF1600(&kv.k)
+	kv.r = kv.k
+	kv.x = zero
+	kv.phase = PhaseCompressing
+	kv.queueOffset = 0
 	return 0
+}
+
+// KraRef implements the input compression phase
+func (kv *Kravatte) KraRef(in []byte) int {
+	return 1
+}
+
+// Pad10NewSlice implements the Pad10 function for a byte slice and given block
+// size length (in bytes). It returns a newly allocated slice.
+func Pad10NewSlice(in []byte, blockByteLen int) []byte {
+	blocks := len(in) / blockByteLen
+	paddingBytes := len(in) % blockByteLen
+	if paddingBytes > 0 {
+		blocks++
+	}
+	byteLen := blocks * blockByteLen
+	out := make([]byte, byteLen)
+	n := copy(out, in)
+	out[n] = 1
+	return out
+}
+
+func (kv *Kravatte) compress(message []byte, lastFlag int) int {
+	messageLen := len(message)
+	remainingLen := len(message)
+	if remainingLen >= widthBytes {
+		var state [25]uint64
+		for {
+			state = kv.k
+			rollC(&kv.r)
+			snp.StateAddBytes(&state, message[:widthBytes])
+			keccakF1600(&state)
+			snp.StateExtractAndAddBytes(&state, kv.x[:], kv.x[:])
+			message = message[widthBytes:]
+			remainingLen -= widthBytes
+			if remainingLen < widthBytes {
+				break
+			}
+		}
+	}
+	if lastFlag != 0 {
+		var state [25]uint64
+		state = kv.k
+		rollC(&kv.r)
+		snp.StateAddBytes(&state, message)
+		snp.StateAddByte(&state, 1, remainingLen)
+		keccakF1600(&state)
+		snp.StateExtractAndAddBytes(&state, kv.x[:], kv.x[:])
+		rollC(&kv.r)
+		return messageLen
+	}
+	return messageLen - remainingLen
 }
 
 // TODO(dadrian): Implement
@@ -152,51 +285,44 @@ func (kv *Kravatte) rollC() int {
 
 // Kra compresses input into the sponge.
 func (kv *Kravatte) Kra(in []byte, flags int) int {
+	inputLen := len(in)
 	finalFlag := flags & FlagLastPart
-	inputBitLen := 8 * len(in)
-	if (finalFlag == 0) && ((inputBitLen & 7) != 0) {
-		return 1
-	}
 	if (flags & FlagInit) != 0 {
 		// Do init
-		copy(kv.r[:], kv.k[:])
-		copy(kv.x[:], zero[:])
-		kv.queueOffsetBits = 0
+		kv.r = kv.k
+		kv.x = zero
+		kv.queueOffset = 0
 	}
-	inputByteOffset := 0
 	if kv.phase != PhaseCompressing {
 		kv.phase = PhaseCompressing
-		kv.queueOffsetBits = 0
-	} else if kv.queueOffsetBits != 0 {
+		kv.queueOffset = 0
+	} else if kv.queueOffset != 0 {
 		// Data is already queued
-		bitLen := min(inputBitLen, widthBits-kv.queueOffsetBits)
-		byteLen := (bitLen + 7) / 8
-		queueOffsetBytes := kv.queueOffsetBits / 8
-
-		copy(kv.q[queueOffsetBytes:], in[inputByteOffset:])
-		inputByteOffset += byteLen
-		inputBitLen -= bitLen
-		kv.queueOffsetBits += bitLen
-		if kv.queueOffsetBits == widthBits {
+		toQueueLen := min(inputLen, widthBytes-kv.queueOffset)
+		copy(kv.q[kv.queueOffset:], in[:toQueueLen])
+		in = in[:toQueueLen]
+		inputLen -= toQueueLen
+		kv.queueOffset += inputLen
+		if kv.queueOffset == widthBytes {
 			// Queue is full
-			kv.compress(0)
-			kv.queueOffsetBits = 0
+			kv.compress(kv.q[:kv.queueOffset], 0)
+			kv.queueOffset = 0
 		} else if finalFlag != 0 {
-			kv.compress(1)
+			kv.compress(kv.q[:kv.queueOffset], 1)
+			kv.queueOffset = 0
 			return 0
 		}
 	}
-	if (inputBitLen >= widthBits) || (finalFlag != 0) {
+	if (inputLen >= widthBytes) || (finalFlag != 0) {
 		// Compress blocks
-		n := kv.compress(finalFlag)
-		inputByteOffset += n
-		inputBitLen -= 8 * n
+		n := kv.compress(in, finalFlag)
+		in = in[n:]
+		inputLen -= n
 	}
-	if inputBitLen != 0 {
+	if inputLen != 0 {
 		// Queue eventual residual message bytes
-		end := inputByteOffset + inputBitLen/8
-		copy(kv.q[:], in[inputByteOffset:end])
-		kv.queueOffsetBits = inputBitLen
+		copy(kv.q[:], in[:inputLen])
+		kv.queueOffset = inputLen
 	}
 	return 0
 }
@@ -212,7 +338,7 @@ func (kv *Kravatte) Vatte(out []byte, flags int) int {
 		return 1
 	}
 	if kv.phase == PhaseCompressing {
-		if kv.queueOffsetBits != 0 {
+		if kv.queueOffset != 0 {
 			return 1
 		}
 		if (flags & FlagShort) != 0 {
@@ -232,17 +358,17 @@ func (kv *Kravatte) Vatte(out []byte, flags int) int {
 		// TODO(dadrian): Should this be a switch?
 		return 1
 	}
-	if kv.queueOffsetBits != 0 {
+	if kv.queueOffset != 0 {
 		// Data is already queued
-		bitLen := min(outputBitLen, widthBits-kv.queueOffsetBits)
+		bitLen := min(outputBitLen, widthBits-kv.queueOffset)
 		byteLen := (bitLen + 7) / 8
 		outputEnd := outputOffset + byteLen
-		queueOffsetBytes := kv.queueOffsetBits / 8
+		queueOffsetBytes := kv.queueOffset / 8
 		queueEnd := queueOffsetBytes + byteLen
 		copy(out[outputOffset:outputEnd], kv.q[queueOffsetBytes:queueEnd])
-		kv.queueOffsetBits += bitLen
-		if kv.queueOffsetBits == widthBits {
-			kv.queueOffsetBits = 0
+		kv.queueOffset += bitLen
+		if kv.queueOffset == widthBits {
+			kv.queueOffset = 0
 		}
 		outputOffset += byteLen
 		outputBitLen -= bitLen
@@ -307,7 +433,7 @@ func (kv *Kravatte) Vatte(out []byte, flags int) int {
 			end := offset + byteLen
 			// TODO(dadrian): Needs to do an add of roll
 			copyUint64ToBytes(kv.q[offset:end], state[offset:end])
-			kv.queueOffsetBits = 8 * offset
+			kv.queueOffset = 8 * offset
 		}
 	}
 	if finalFlag != 0 {
