@@ -6,7 +6,7 @@
                 \begin{bytefield}[bitwidth=7pt,bitheight=15pt]{32}
                     \bitheader{0-31}\\
                     % \begin{leftwordgroup}{Header} 
-                        \bitbox{8}{ Type } &
+                        \bitbox{8}{ Type := 0x6 } &
                         \bitbox{24}{ Reserved (0x0) } \\
                         \bitbox{32}{ Session ID } \\
                         \wordbox{2}{ Counter (8 bytes)} \\

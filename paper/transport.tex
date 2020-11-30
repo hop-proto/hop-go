@@ -8,7 +8,7 @@ pattern~\cite{noise}.
 \begin{figure}[h]
 	\centering
 	\includegraphics[width=0.6\columnwidth]{figures/crypto_handshake_discoverable.pdf}
-	\caption{\textbf{Session Establishment}---%
+	\caption{\textbf{Discoverable Server Session Establishment}---%
 	\textnormal{}
 	}
 	\label{fig:crypto_handshake_discoverable}
@@ -75,15 +75,24 @@ squeezed output MAC is appended.
 
 At this point, both client and server... They still need to be authenticated to
 each other.
+\TODO{}
 
 \input{bytefields/server_auth.tex}
 
-\vspace{5pt} \textit{4) Client Authentication:}\quad 
+\vspace{5pt} \textit{5) Client Authentication:}\quad 
+\TODO{}
 
 \input{bytefields/client_auth.tex}
 
 
+The SSTP discoverable server handshake completes after the client
+authentication. At this point, the client and server share a secret session key
+derived from the client ephemeral, server ephemeral, client static, and server
+static, which provides \TODO{what}. Subsequent transport messages are sent
+through one or more \emph{channels} within the encrypted session.
+
 \subsection{Channel Multiplexing}
+
 
 SSTP supports multiple channels within a single encrypted session. It borrows
 and simplifies aspects of QUIC streams and TCP to implement a reliable stream
