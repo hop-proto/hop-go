@@ -1,0 +1,22 @@
+
+\begin{figure}
+    % \vspace{2ex}
+        \centering
+            \begin{small}
+    
+                \begin{bytefield}[bitwidth=7pt,bitheight=15pt]{32}
+                    % \bitheader{0-31}\\
+                    \bitbox{12}{ Type := 0x2 (1 byte) } &
+                    \bitbox{20}{ Reserved (3 bytes)} \\
+                    \bitbox{32}{ Server Ephemeral $e_s^{pub}$ (32 bytes)} \\
+                    \bitbox{32}{ Cookie (48 bytes)} \\
+                    \bitbox{32}{ MAC (16 bytes) } \\
+                \end{bytefield}
+    
+            \end{small}
+        \caption{\textbf{Server Hello}---
+         }
+        \label{fig:server_hellp}
+        \vspace{-5pt}
+    \end{figure}
+    
