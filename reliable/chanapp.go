@@ -9,11 +9,34 @@ type recvfn (func() (int, []byte, bool))
 type sendfn func([]byte)
 type closefn func()
 
+type RTQueue struct {
+	frames [](*[]byte)
+	count int
+}
+
+func (rtq *RTQueue) Push(frame *[]byte) {
+	rtq.frames = append(rtq.frames, frame)
+	rtq.count++
+}
+
+func (rtq *RTQueue) Pop() {
+	if rtq.count > 0 {
+		rtq.frames = rtq.frames[1:]
+		rtq.count--
+	}
+}
+
+func (rtq *RTQueue) Ack(ack int) {
+	for rtq.count > 0 && getCID(*(rtq.frames[0])) <= ack {
+		rtq.Pop()
+	}
+}
+
 type ChanApp struct {
 	wg sync.WaitGroup
 
 	sendCh chan []byte
-	channelChs [](chan []byte)
+	channelRecvChs [256](chan []byte)
 
 	nrecv recvfn // Network recv 
 	nsend sendfn // Network send 
@@ -33,10 +56,11 @@ func (ca *ChanApp) init(nrecv recvfn, nsend sendfn, nclose closefn,
 	ca.nsend = nsend
 	ca.nclose = nclose
 
-	ca.sendCh = make(chan []byte)
-	ca.channelChs = make([](chan []byte), 256)
-	for i:= 0; i < len(ca.channelChs); i++ {
-		ca.channelChs[i] = make(chan []byte, 64)
+	ca.sendCh = make(chan []byte, MAX_SEND_BUF_SIZE)
+	var chs [256](chan []byte)
+	ca.channelRecvChs = chs
+	for i:= 0; i < len(ca.channelRecvChs); i++ {
+		ca.channelRecvChs[i] = make(chan []byte, 64)
 	}
 }
 
@@ -79,7 +103,7 @@ func (ca *ChanApp) receiverThread() {
 
 func (ca *ChanApp) shutdown() {
 	close(ca.sendCh)
-	for _, ch := range ca.channelChs {
+	for _, ch := range ca.channelRecvChs {
 		close(ch)
 	}
 	ca.nclose()
@@ -87,6 +111,13 @@ func (ca *ChanApp) shutdown() {
 }
 
 func (ca *ChanApp) send(buf []byte) {
+	// nonblocking best effort
+	select {
+		case ca.sendCh <- buf:
+			return
+		default:
+			return
+	}
 	ca.sendCh <- buf
 }
 
@@ -94,7 +125,7 @@ func (ca *ChanApp) routeFrame(frame []byte) {
 	fmt.Println("Routing", frame, "to Channel", getCID(frame))
 	// nonblocking best effort
 	select {
-		case ca.channelChs[getCID(frame)] <- frame:
+		case ca.channelRecvChs[getCID(frame)] <- frame:
 			return
 		default:
 			return
