@@ -1,0 +1,26 @@
+
+\begin{figure}
+    % \vspace{2ex}
+        \centering
+            \begin{small}
+    
+                \begin{bytefield}[bitwidth=7pt,bitheight=15pt]{32}
+                    % \bitheader{0-31}\\
+                    \bitbox{12}{ Type := 0x4 (1 byte) } &
+                    \bitbox{13}{ Leaf Cert. Len (2 bytes)} &
+                    \bitbox{7}{ Res. (1 byte)} \\
+                    \bitbox{32}{ SessionID (4 bytes)} \\
+                    \bitbox{16}{ Leaf Certificate (* bytes) } &
+                    \bitbox{16}{ Intermediate Certs. (* bytes) } \\
+                    \bitbox{32}{ Tag (16 bytes) } \\
+                    \bitbox{32}{ MAC (16 bytes)} \\
+                \end{bytefield}
+    
+            \end{small}
+        
+        \caption{\textbf{Server Authentication}---
+         }
+        \label{fig:server_auth}
+        \vspace{-5pt}
+    \end{figure}
+    

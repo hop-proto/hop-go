@@ -1,48 +1,46 @@
-\newcommand{\colorbitbox}[3]{%
-\rlap{\bitbox{#2}{\color{#1}\rule{\width}{\height}}}%
-\bitbox{#2}{#3}}
-\newcommand{\colorwordbox}[3]{%
-\rlap{\wordbox{#2}{\color{#1}\rule{\width}{\height}}}%
-\wordbox{#2}{#3}}
-
-\definecolor{lightgreen}{rgb}{0.9,1,0.9}
 \begin{figure}
-% \vspace{2ex}
-    \centering
-        \begin{small}
+    % \vspace{2ex}
+        \centering
+            \begin{small}
+    
+                \begin{bytefield}[bitwidth=7pt,bitheight=15pt]{32}
+                    \bitheader{0-31}\\
+                    % \begin{leftwordgroup}{Header} 
+                        \bitbox{8}{ Type := 0x6 } &
+                        \bitbox{24}{ Reserved (0x0) } \\
+                        \bitbox{32}{ Session ID } \\
+                        \wordbox{2}{ Counter (8 bytes)} \\
+                    % \end{leftwordgroup} 
+                    %\wordbox{3}{Encrypted Data} \\
+                    \colorbitbox{lightgreen}{8}{ Channel ID } &
+                        \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny REQ}} &
+                        \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny RESP}} &
+                        \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny REL}} &
+                        \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny ACC}} &
+                        \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny FIN}} &
+                    \colorbitbox{lightgreen}{3}{ Res. } &
+                    \colorbitbox{lightgreen}{16}{Data Length} \\
+                    \colorbitbox{lightgreen}{16}{Window Size} & 
+                    \colorbitbox{lightgreen}{8}{Channel Type} &
+                    \colorbitbox{lightgreen}{8}{Reserved} \\
+                    % \colorwordbox{lightgreen}{1}{Acknowledgment Number (4 bytes)} \\
+                    \colorwordbox{lightgreen}{1}{Frame Number (4 bytes)} \\ 
+                    \colorwordbox{lightgreen}{1}{Data ( * bytes)} \\
+                    % \skippedwords \\
+                    % \wordbox[lrb]{1}{} \\
+                    \wordbox{4}{MAC (16 bytes)} \\
+                \end{bytefield}
+    
+            \end{small}
 
-            \begin{bytefield}[bitwidth=7pt,bitheight=15pt]{32}
-                \bitheader{0-31}\\
-                % \begin{leftwordgroup}{Header} 
-                    \bitbox{8}{ Type } &
-                    \bitbox{24}{ Reserved (0x0) } \\
-                    \bitbox{32}{ Session ID } \\
-                    \wordbox{2}{ Counter (8 bytes)} \\
-                % \end{leftwordgroup} 
-                %\wordbox{3}{Encrypted Data} \\
-                \colorbitbox{lightgreen}{8}{ Channel ID } &
-                    \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny REQ}} &
-                    \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny REL}} &
-                    \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny ACC}} &
-                    \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny ACK}} &
-                    \colorbitbox{lightgreen}{1}{\rotatebox{90}{\tiny FIN}} &
-                \colorbitbox{lightgreen}{3}{ 0x0 } &
-                \colorbitbox{lightgreen}{16}{Data Length} \\
-                \colorbitbox{lightgreen}{16}{Max. Frame Size} & 
-                \colorbitbox{lightgreen}{16}{Window Size} \\
-                \colorbitbox{lightgreen}{8}{Channel Type} & 
-                \colorbitbox{lightgreen}{24}{Padding} \\
-                \colorwordbox{lightgreen}{2}{Frame Number (8 bytes)} \\ 
-                \colorwordbox{lightgreen}{2}{Acknowledgment Number (8 bytes)} \\ 
-                \colorwordbox{lightgreen}{1}{Data ( * bytes)} \\
-                % \skippedwords \\
-                % \wordbox[lrb]{1}{} \\
-                \wordbox{4}{MAC (16 bytes)} \\
-            \end{bytefield}
-
-        \end{small}
-    \label{fig:transport_message}
-    \caption{\textbf{SSTP Transport Message}---
-                The channel frame (green) is the Encrypted Data segment of the transport message.}
-    \vspace{-5pt}
-\end{figure}
+        \caption{\textbf{SSTP Transport Message}---
+                    The channel frame (green) is the Encrypted Data segment of the
+                    transport message. The 32 bits starting at Byte 20 are
+                    interpreted as Window Size, Channel Type, and
+                    Reserved for channel handshake messages. For data messages in
+                    reliable channels it is interpreted as an
+                    Acknowledgment Number. }
+        \label{fig:transport_message}
+        \vspace{-5pt}
+    \end{figure}
+    
