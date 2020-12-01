@@ -1,11 +1,18 @@
 \section{Transport Protocol}
 
+We provide two handshake modes: Discoverable Server and Hidden Server.
+In both modes, the server does not need to keep any state during the handshake.
+
 \subsection{Discoverable Server}
 To establish a cryptographic session between a client and a discoverable server,
 we base the cryptographic handshake on the Noise XX handshake
 pattern~\cite{noise}. 
+However, rather than using separate chains for the
+protocol transcript and key derivation, SSTP incorporates duplex objects to
+reduce the state machine to a single chain and authenticates the whole
+transcript with tags.
 
-\begin{figure}[h]
+\begin{figure}[ht]
 \begin{subfigure}{0.47\columnwidth}
 	\centering
 	\includegraphics[width=1\columnwidth]{figures/crypto_handshake_discoverable.pdf}
@@ -29,62 +36,68 @@ pattern~\cite{noise}.
 
 \vspace{5pt} \textit{1) Client Hello:}\quad 
 Initially, both the client and server are unauthenticated. The client begins by
-sending a Client Hello to the server. The client creates an ephemeral key pair ($e_c^{priv}, e_c^{pub}$) and chooses the
-protocol name (or version?). The protocol name (\TODO{why do we need proto
-name?}), message type (client hello := \texttt{0x1}), protocol version, reserved
-bytes, and the
-client ephemeral public key are absorbed into the duplex object, and a message
-authentication code (MAC) is squeezed out. The client then begins the
-session handshake by sending the Client Hello, which is a concatenation of the
-input bytes to the duplex object with the MAC (Figure~\ref{fig:client_hello}).
+sending a Client Hello to the server. The client creates an ephemeral key pair
+($e_c^{priv}, e_c^{pub}$) and instantiates a duplex object. It absorbs the
+protocol name (\tk), client hello message type (\texttt{0x1}), protocol version, reserved bytes, and the
+client ephemeral public key into the duplex object, and squeezes out a message
+authentication code (MAC). The client then begins the
+session handshake by sending the message type, protocol version, client
+ephemeral, and MAC to the server (Figure~\ref{fig:client_hello}). The client
+will retry \tk number of times to account for lost handshake messages.
 
 \input{bytefields/client_hello.tex}
 
 \vspace{5pt} \textit{2) Server Hello:}\quad 
-When the server receives the Client Hello \todo{what about lost hellos?}, it performs the same logic as the
-client, absorbing the protocol name, message type, protocol version, and
-client's ephemeral public key into its own duplex object to verify the MAC
+When the server receives the Client Hello, it performs the same logic as the
+client. The server instantiates a new duplex object, absorbing the protocol name, message type, protocol version, and
+client ephemeral public key to verify the MAC
 attached to the Client Hello. If the MAC matches, the server
-replies with a Server Hello, otherwise it does not respond to the client.
+replies with a Server Hello, otherwise it does not respond.
 
 The server creates its own ephemeral key pair ($e_s^{priv}, e_s^{pub}$) and
-performs a Diffie-Hellman between the client ephemeral public key and the server
-ephemeral public key. The result of this Diffie-Hellman is used to create a new
-chaining key $ ck := \texttt{DH}(e_s^{priv}, e_c^{pub} ) $. 
-Continuing with the duplex object, the server absorbs the message type (server
-hello := \texttt{0x2}), reserved bytes, the server ephemeral public key, and the
-chaining key. The server also encrypts its
-ephemeral private key via AEAD and uses the resulting ciphertext as a cookie.
+performs a Diffie-Hellman between the client ephemeral and the server
+ephemeral. The result of this Diffie-Hellman $
+\texttt{DH}(e_s^{priv}, e_c^{pub} ) $ is used to key the duplex object, as only
+the client and server have this shared secret. 
+Continuing with the duplex object, the server absorbs the server hello message type (\texttt{0x2}), reserved bytes, server ephemeral public key, and the
+Diffie-Hellman between the client and server ephemeral. The server also absorbs
+a cookie that is sent as part of the server hello, which eliminates the need for
+the server to store any state about client handshakes. 
 The cookie construction is as follows: $\texttt{cookie} := \texttt{AEAD}(K_r,
 e_s^{priv}, H(e_c^{pub}, \texttt{clientIP}, \texttt{clientPort})) $, where $K_r$
-is a key that is rotated every 2 minutes. \todo{what is this used for again?}
-The cookie is also absorbed into the duplex object and a MAC is squeezed out.
-The Server Hello consists of the message type (server hello := 0x2), reserved
-bytes, server ephemeral public key, the cookie, and the MAC
-(Figure~\ref{fig:server_hellp}).
+is a key known only to the server that is rotated every 2 minutes (or up to the
+AEAD encryption limit), and $H$ is a cryptographic hash (e.g., SHA-256).
+The cookie is absorbed into the duplex object and a MAC is squeezed out and
+attached to the Server Hello (Figure~\ref{fig:server_hellp}). The server's
+duplex object is then discarded.
 
 \input{bytefields/server_hello.tex}
 
 \vspace{5pt} \textit{3) Client Acknowledgment:}\quad 
 When the client receives the Server Hello, it likewise computes the shared
-chaining key $ ck := \texttt{DH}(e_c^{priv}, e_s^{pub}) $ and absorbs the
-message type, reserved bytes, server ephemeral public key, chaining key, and
-cookie. The client then verifies the MAC with the output of its duplex object.
+secret $ \texttt{DH}(e_c^{priv}, e_s^{pub}) $ and absorbs the
+server hello message type, reserved bytes, server ephemeral public key,
+Diffie-Hellman result, and cookie into its existing duplex object. The client
+then verifies the MAC with the squeezed output. If the MAC checks out, it
+verifies that the owner of the $e_s$ key pair indeed sent the server hello
+(otherwise the DH result would be different) and
+has the same view of the handshake transcript thus far.
 
-The third message of the handshake protocol is the client acknowledgment
-(Figure~\ref{fig:client_ack}). It includes the message type (Client
-Ack := \texttt{0x3}), reserved bytes, and the client ephemeral public key. It
-echoes the cookie back to the server and also includes an SNI. The SNI consists
+The third message of the handshake protocol is the client acknowledgment (Figure~\ref{fig:client_ack}). It includes the client acknowledgment message type (\texttt{0x3}), reserved bytes, and the client ephemeral public key. It
+echoes the cookie back to the server and includes an encrypted SNI so that the
+server knows which certificates to return to authenticate itself. The plaintext
+SNI consists
 of a 1 byte type indicator of the server ID (e.g., domain name, IoT serial
-number) concatenated with a 255 byte server ID. The fields of the Client
-Acknowledgment message are inputs into the client's duplex object, and the
-squeezed output MAC is appended.
+number) concatenated with a 255 byte server ID. The client continues with its
+duplex object, absorbing the message type, reserved bytes, client ephemeral
+public key, and cookie. It then encrypts the SNI with the state of the duplex
+object.
 
 \input{bytefields/client_ack.tex}
 
 \vspace{5pt} \textit{4) Server Authentication:}\quad 
-
-At this point, both client and server... They still need to be authenticated to
+After receiving the Client Acknowledgment, the server decrypts the cookie, which
+verifies that the cliAt this point, both client and server... They still need to be authenticated to
 each other.
 \TODO{}
 
