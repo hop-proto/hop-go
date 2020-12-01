@@ -48,8 +48,7 @@ will retry \tk number of times to account for lost handshake messages.
 \input{bytefields/client_hello.tex}
 
 \vspace{5pt} \textit{2) Server Hello:}\quad 
-When the server receives the Client Hello, it performs the same logic as the
-client. The server instantiates a new duplex object, absorbing the protocol name, message type, protocol version, and
+When the server receives the Client Hello, it instantiates a new duplex object, absorbing the protocol name, message type, protocol version, and
 client ephemeral public key to verify the MAC
 attached to the Client Hello. If the MAC matches, the server
 replies with a Server Hello, otherwise it does not respond.
@@ -96,8 +95,16 @@ object.
 \input{bytefields/client_ack.tex}
 
 \vspace{5pt} \textit{4) Server Authentication:}\quad 
-After receiving the Client Acknowledgment, the server decrypts the cookie, which
-verifies that the cliAt this point, both client and server... They still need to be authenticated to
+After receiving the Client Acknowledgment, the server decrypts the cookie using
+a hash of the client ephemeral, IP address, and port as the associated data.
+Successful decryption verifies that the server is talking to the same client
+that initiated the Client Hello and locks in the client's
+ephemeral public key. Successful decryption of the cookie also ensures that the
+cookie echoed back was originally encrypted by the server, indicating that the
+client had previously sent a Client Hello without needing to keep state at the
+server.
+At this point, both client and server... They still need to be
+authenticated to
 each other.
 \TODO{}
 
