@@ -65,7 +65,8 @@ the server to store any state about client handshakes.
 The cookie construction is as follows: $\texttt{cookie} := \texttt{AEAD}(K_r,
 e_s^{priv}, H(e_c^{pub}, \texttt{clientIP}, \texttt{clientPort})) $, where $K_r$
 is a key known only to the server that is rotated every 2 minutes (or up to the
-AEAD encryption limit), and $H$ is a cryptographic hash (e.g., SHA-256).
+AEAD encryption limit), and $H$ is a cryptographic hash (e.g., SHA-256). The
+cookie contains both the ciphertext and the authentication tag (32 + 16 bytes).
 The cookie is absorbed into the duplex object and a MAC is squeezed out and
 attached to the Server Hello (Figure~\ref{fig:server_hellp}). The server's
 duplex object is then discarded.
@@ -95,18 +96,31 @@ object.
 \input{bytefields/client_ack.tex}
 
 \vspace{5pt} \textit{4) Server Authentication:}\quad 
-After receiving the Client Acknowledgment, the server decrypts the cookie using
+After receiving the Client Acknowledgment, the server AEAD decrypts the cookie using
 a hash of the client ephemeral, IP address, and port as the associated data.
-Successful decryption verifies that the server is talking to the same client
-that initiated the Client Hello and locks in the client's
-ephemeral public key. Successful decryption of the cookie also ensures that the
+ Successful decryption ensures that the
 cookie echoed back was originally encrypted by the server, indicating that the
 client had previously sent a Client Hello without needing to keep state at the
-server.
-At this point, both client and server... They still need to be
-authenticated to
-each other.
-\TODO{}
+server. Successful decryption of the cookie also verifies that the server is
+talking to the same client that initiated the Client Hello and locks in the
+client's ephemeral public key.
+
+Given the Client Acknowledgment message, the server is able to resimulate the
+duplex object up to this point, even without keeping state associated with the
+initial Client Hello. The server instantiates a new duplex object and absorbs
+all inputs in the order of the handshake messages prior (including the Client
+Acknowledgment message) and squeezes out a MAC to verify the Client
+Acknowledgment MAC. Using this MAC (which is dependent on the state of the
+duplex object), the server decrypts the SNI and searches for the leaf
+certificate and intermediate certificate to authenticate the server ID.
+\todo{something about why there is just 1 intermediate}. Our PKI only uses a
+single intermediate certificate to ensure that the entire Server Authentication
+message fits into a single UDP packet.
+
+The server chooses a random unique 4 byte opaque string as the Session ID, and
+absorbs the Server Authentication message type (\texttt{0x4}), reserved bytes,
+and the Session ID. It encrypts the leaf and intermediate certificate with the
+duplex state
 
 \input{bytefields/server_auth.tex}
 
