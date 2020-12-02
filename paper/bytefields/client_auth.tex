@@ -9,8 +9,8 @@
                     \bitbox{12}{ Type := 0x5 (1 byte) } &
                     \bitbox{20}{ Reserved (3 bytes)} \\
                     \bitbox{32}{ SessionID (4 bytes)} \\
-                    \bitbox{32}{ Static (32 bytes) } \\
-                    \bitbox{32}{ Tag (16 bytes) } \\
+                    \colorbitbox{lightgreen}{32}{ Client Static $s_c^{pub}$ (32 bytes) } \\
+                    \bitbox{32}{ Client Static Authentication Tag (16 bytes) } \\
                     \bitbox{32}{ MAC (16 bytes)} \\
                 \end{bytefield}
     

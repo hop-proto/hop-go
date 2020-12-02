@@ -145,17 +145,42 @@ The client then sends a Client Authentication message to authenticate itself to
 the server. It absorbs the Client Authentication message type (\texttt{0x5}),
 reserved bytes, and Session ID, and uses the duplex material to encrypt the
 client static public key. The client static authentication tag is squeezed out.
-The client then
+The client then absorbs the Diffie-Hellman between the client static and the
+server ephemeral ($ \texttt{DH}(s_c^{priv}, e_s^{pub}) $), and squeezes out a
+MAC for the Client Authentication message (Figure~\ref{fig:client_auth}).
 
 \input{bytefields/client_auth.tex}
 
+When the server receives the Client Authentication Message, it absorbs the
+message type, reserved bytes, and Session ID, then decrypts the client static
+public key using the duplex and the tag as authenticated data. The server then
+checks to see if the client static public key is that of a valid client (in the
+list of authorized keys), and if not drops the session. It also absorbs the
+Diffie-Hellman between the client static and server ephemeral, and verifies that
+the squeezed out MAC matches. This confirms that both parties have identical
+views of the entire session handshake. The SSTP discoverable server handshake completes after the client
+authentication message is verified by the server. 
 
-The SSTP discoverable server handshake completes after the client
-authentication. At this point, the client and server share a secret session key
+\vspace{5pt} \textbf{Key Derivation}\quad 
+At this point, the client and server share a secret
 derived from the client ephemeral, server ephemeral, client static, and server
-static, which provides \TODO{what}. Subsequent transport messages are sent
-through one or more \emph{channels} within the encrypted session. We discuss
-channels in Section~\ref{sec:channels}.
+static. We use the duplex object to derive two encryption keys: one for
+client-to-server transport messages and one for server-to-client transport
+messages. Both client and server perform the following psuedocode:
+
+
+\begin{itemize}
+	\item duplex.ratchet()
+	\item duplex.absorb("client\_to\_server\_key")
+	\item \texttt{client\_to\_server\_key} = duplex.squeeze\_key()
+	\item duplex.ratchet()
+	\item duplex.absorb("server\_to\_client\_key")
+	\item \texttt{server\_to\_client\_key} = duplex.squeeze\_key()
+\end{itemize}
+
+Subsequent transport messages are encrypted using these shared session keys,
+which rotate every $2^{64}$ messages. Transport messages
+are sent through one or more \emph{channels} within the session, which are discussed in Section~\ref{sec:channels}. 
 
 
 \subsection{Hidden Server}
