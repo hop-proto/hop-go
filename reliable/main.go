@@ -11,6 +11,7 @@ import (
 
 var MAX_FRAME_SIZE = 512
 var MAX_SEND_BUF_SIZE = 64
+var MAX_WINDOW_SIZE = 64
 var LHOST = net.ParseIP("127.0.0.1")
 
 func main() {
@@ -42,7 +43,7 @@ func main() {
 	}
 
 	ca := ChanApp{}
-	ca.init(recv, send, close, MAX_FRAME_SIZE, MAX_SEND_BUF_SIZE)
+	ca.init(recv, send, close, MAX_FRAME_SIZE, MAX_SEND_BUF_SIZE, MAX_WINDOW_SIZE)
 	ca.start()
 
 	var wg sync.WaitGroup

@@ -14,6 +14,9 @@ type ChanApp struct {
 
 	sendCh chan []byte
 	channelRecvChs [256](chan []byte)
+	channelWindows [256](Window)
+	channelReadChs [256](chan []byte)
+	channelSendChs [256](chan []byte)
 
 	nrecv recvfn // Network recv 
 	nsend sendfn // Network send 
@@ -21,24 +24,35 @@ type ChanApp struct {
 
 	MAX_FRAME_SIZE int
 	MAX_SEND_BUF_SIZE int
+	MAX_WINDOW_SIZE int
 }
 
 func (ca *ChanApp) init(nrecv recvfn, nsend sendfn, nclose closefn,
-	MAX_FRAME_SIZE int, MAX_SEND_BUF_SIZE int) {
+	MAX_FRAME_SIZE int, MAX_SEND_BUF_SIZE int, MAX_WINDOW_SIZE int) {
 
 	ca.MAX_FRAME_SIZE = MAX_FRAME_SIZE
 	ca.MAX_SEND_BUF_SIZE = MAX_SEND_BUF_SIZE
+	ca.MAX_WINDOW_SIZE = MAX_WINDOW_SIZE
 
 	ca.nrecv = nrecv
 	ca.nsend = nsend
 	ca.nclose = nclose
 
 	ca.sendCh = make(chan []byte, MAX_SEND_BUF_SIZE)
-	var chs [256](chan []byte)
-	ca.channelRecvChs = chs
+
 	for i:= 0; i < len(ca.channelRecvChs); i++ {
 		ca.channelRecvChs[i] = make(chan []byte, 64)
 	}
+	for i:= 0; i < len(ca.channelReadChs); i++ {
+		ca.channelReadChs[i] = make(chan []byte, 64)
+	}
+	for i:= 0; i < len(ca.channelSendChs); i++ {
+		ca.channelSendChs[i] = make(chan []byte, 64)
+	}
+	for i:= 0; i < len(ca.channelWindows); i++ {
+		ca.channelWindows[i].init(MAX_WINDOW_SIZE)
+	}
+
 }
 
 func (ca *ChanApp) start() {
@@ -81,6 +95,12 @@ func (ca *ChanApp) receiverThread() {
 func (ca *ChanApp) shutdown() {
 	close(ca.sendCh)
 	for _, ch := range ca.channelRecvChs {
+		close(ch)
+	}
+	for _, ch := range ca.channelReadChs {
+		close(ch)
+	}
+	for _, ch := range ca.channelSendChs {
 		close(ch)
 	}
 	ca.nclose()
