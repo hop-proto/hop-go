@@ -17,6 +17,7 @@ type ChanApp struct {
 	channelWindows [256](Window)
 	channelReadChs [256](chan []byte)
 	channelSendChs [256](chan []byte)
+	channelAcks    [256]uint32
 
 	nrecv recvfn // Network recv 
 	nsend sendfn // Network send 
@@ -60,6 +61,10 @@ func (ca *ChanApp) start() {
 	go ca.senderThread()
 	ca.wg.Add(1)
 	go ca.receiverThread()
+	for i:= 0; i < 4; i++ {
+		ca.wg.Add(1)
+		go ca.channelRecvThread(i)
+	}
 }
 
 func (ca *ChanApp) senderThread() {
@@ -80,16 +85,37 @@ func (ca *ChanApp) receiverThread() {
 			return
 		}
 		frame := buf[:n]
-		fmt.Println("Receiving", frame)
-		fmt.Println("IsReq", isReq(frame))
-		fmt.Println("IsRep", isRep(frame))
-		fmt.Println("IsData", isData(frame))
 		if isRep(frame) || isData(frame) {
 			ca.routeFrame(frame)
 		} else { // Req Frame
 			fmt.Println("Request Recv")
 		}
 	}
+}
+
+func (ca *ChanApp) channelRecvThread(cid int){
+	defer ca.wg.Done()
+	var lastAcked uint32 = 0
+	for frame := range ca.channelRecvChs[cid] {
+		if isRep(frame) {
+			fmt.Println("Channel ", cid, " received rep frame.")
+		} else {
+			fmt.Println("Channel", cid, "received data frame", getCtr(frame))
+			pushed := ca.channelWindows[cid].push(frame)
+			if !pushed {
+				continue
+			}
+			for ca.channelWindows[cid].hasNextframe(lastAcked) &&
+				len(ca.channelReadChs[cid]) < 64 {
+				popframe := ca.channelWindows[cid].pop()
+				lastAcked++
+				ca.channelReadChs[cid] <- getData(popframe)
+			}
+			updateAck(&ca.channelAcks[cid], lastAcked)
+			fmt.Println("Last Acked:", lastAcked)
+		}
+	}
+	fmt.Println("Channel Recv Thread Closing: ", cid)
 }
 
 func (ca *ChanApp) shutdown() {

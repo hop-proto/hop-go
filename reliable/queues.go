@@ -29,7 +29,7 @@ func (rtq *RTQueue) Ack(ack int) {
 
 type Item struct {
 	value    []byte
-	priority int
+	priority uint32
 	index int
 }
 
@@ -78,18 +78,19 @@ func (w *Window) init(maxsz int) {
 
 func (w *Window) push(frame []byte) bool {
 	if w.len() < w.maxsz {
-		heap.Push(&w.pq, &Item{value: frame, priority: int(frame[0])})
+		heap.Push(&w.pq, &Item{value: frame, priority: getCtr(frame)})
 		return true
 	}
 	return false
 }
 
-func (w *Window) pop() ([]byte, bool) {
-	if w.len() > 0 {
-		item := heap.Pop(&w.pq).(*Item)
-		return item.value, true
-	}
-	return []byte{}, false
+func (w *Window) hasNextframe(lastacked uint32) bool{
+	return w.len() > 0 && w.pq[0].priority == lastacked + 1
+}
+
+func (w *Window) pop() []byte {
+	item := heap.Pop(&w.pq).(*Item)
+	return item.value
 }
 
 func (w *Window) len() int {

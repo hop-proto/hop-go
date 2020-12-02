@@ -60,7 +60,11 @@ func main() {
 		copy(buf, lol)
 		ca.send(buf[:len(lol)])
 		ca.send([]byte{1, 0x4B}) // Rep
-		ca.send([]byte{1, 0xB}) // Data
+		ca.send([]byte{0,0,0,8,  0,0,0,0,  0,0,0,5, 1,2,3,4,5,6,7,8}) // Data
+		ca.send([]byte{0,0,0,8,  0,0,0,0,  0,0,0,4, 1,2,3,4,5,6,7,8}) // Data
+		ca.send([]byte{0,0,0,8,  0,0,0,0,  0,0,0,3, 1,2,3,4,5,6,7,8}) // Data
+		ca.send([]byte{0,0,0,8,  0,0,0,0,  0,0,0,2, 1,2,3,4,5,6,7,8}) // Data
+		ca.send([]byte{0,0,0,8,  0,0,0,0,  0,0,0,1, 1,2,3,4,5,6,7,8}) // Data
 	}
 	wg.Wait()
 }
