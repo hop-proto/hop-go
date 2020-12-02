@@ -9,15 +9,16 @@
                     \bitbox{12}{ Type := 0x3 (1 byte) } &
                     \bitbox{20}{ Reserved (3 bytes)} \\
                     \bitbox{32}{ Client Ephemeral $e_c^{pub}$ (32 bytes)} \\
-                    \bitbox{32}{ Cookie (48 bytes) } \\
-                    \bitbox{32}{ SNI := serverIDtype || serverID (256 bytes) } \\
+                    \colorbitbox{lightgreen}{32}{ Cookie (48 bytes) } \\
+                    \colorbitbox{lightgreen}{32}{ SNI := serverIDtype || serverID (256 bytes) } \\
                     \bitbox{32}{ MAC (16 bytes)} \\
                 \end{bytefield}
     
             \end{small}
         
         \caption{\textbf{Client Acknowledgment}---
-         }
+         \textnormal{The cookie is echoed back to the server and the SNI is
+         encrypted from the duplex construction.}}
         \label{fig:client_ack}
         \vspace{-5pt}
     \end{figure}

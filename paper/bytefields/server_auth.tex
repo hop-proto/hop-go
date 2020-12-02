@@ -10,9 +10,9 @@
                     \bitbox{13}{ Leaf Cert. Len (2 bytes)} &
                     \bitbox{7}{ Res. (1 byte)} \\
                     \bitbox{32}{ SessionID (4 bytes)} \\
-                    \bitbox{16}{ Leaf Certificate (* bytes) } &
-                    \bitbox{16}{ Intermediate Certs. (* bytes) } \\
-                    \bitbox{32}{ Tag (16 bytes) } \\
+                    \colorbitbox{lightgreen}{16}{ Leaf Certificate (* bytes) } &
+                    \colorbitbox{lightgreen}{16}{ Intermediate Certs. (* bytes) } \\
+                    \bitbox{32}{ Certificate Authentication Tag (16 bytes) } \\
                     \bitbox{32}{ MAC (16 bytes)} \\
                 \end{bytefield}
     

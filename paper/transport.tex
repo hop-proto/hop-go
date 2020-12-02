@@ -117,15 +117,35 @@ certificate and intermediate certificate to authenticate the server ID.
 single intermediate certificate to ensure that the entire Server Authentication
 message fits into a single UDP packet.
 
-The server chooses a random unique 4 byte opaque string as the Session ID, and
+At this point, both parties begin keeping session state, but still need to be
+authenticated to each other.
+
+To create the Server Authentication message, the server chooses a random unique 4 byte opaque string as the Session ID, and
 absorbs the Server Authentication message type (\texttt{0x4}), reserved bytes,
-and the Session ID. It encrypts the leaf and intermediate certificate with the
-duplex state
+and the Session ID. It encrypts the leaf and intermediate certificate from the
+duplex construction and squeezes out the authentication tag. The server then
+computes a Diffie-Hellman between the client ephemeral and the server static key
+pair ($ \texttt{DH}(s_s^{priv}, e_c^{pub}) $), and absorbs the DH result. The MAC is squeezed out and attached to the
+Server Authentication Message (Figure~\ref{fig:server_auth}).
 
 \input{bytefields/server_auth.tex}
 
 \vspace{5pt} \textit{5) Client Authentication:}\quad 
-\TODO{}
+Upon receiving the Server Authentication message, the client absorbs the header
+(the server authentication message type, reserved bytes, and Session ID), and
+decrypts the certificates using the duplex material. It also computes and
+absorbs the
+Diffie-Hellman between the client ephemeral and the server static, and verifies
+that the certificates are valid and the MAC is the same. This proves to the
+client that the sender of the Server Authentication message indeed owns the
+server static private key ($s_s^{priv}$) and that both parties have identical
+views of the handshake transcript thus far.
+
+The client then sends a Client Authentication message to authenticate itself to
+the server. It absorbs the Client Authentication message type (\texttt{0x5}),
+reserved bytes, and Session ID, and uses the duplex material to encrypt the
+client static public key. The client static authentication tag is squeezed out.
+The client then
 
 \input{bytefields/client_auth.tex}
 
