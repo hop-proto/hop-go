@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sync"
+	"time"
 )
 
 type recvfn (func() (int, []byte, bool))
@@ -19,6 +20,7 @@ type ChanApp struct {
 	channelSendChs [256](chan []byte)
 	channelAcks    [256]uint32
 	channelConds   [256](*sync.Cond)
+	channelTimers  [256]int32
 
 	nrecv recvfn // Network recv 
 	nsend sendfn // Network send 
@@ -69,6 +71,8 @@ func (ca *ChanApp) start() {
 	for i:= 0; i < 4; i++ {
 		ca.wg.Add(1)
 		go ca.channelRecvThread(i)
+		ca.wg.Add(1)
+		go ca.channelTimerThread(i)
 	}
 }
 
@@ -78,7 +82,7 @@ func (ca *ChanApp) senderThread() {
 		fmt.Println("Sending", frame)
 		ca.nsend(frame)
 	}
-	fmt.Println("Sender Closing")
+	fmt.Println("Channel Sender Closing")
 }
 
 func (ca *ChanApp) receiverThread() {
@@ -86,7 +90,7 @@ func (ca *ChanApp) receiverThread() {
 	for {
 		n, buf, closed := ca.nrecv()
 		if closed {
-			fmt.Println("Receiver Closing")
+			fmt.Println("Chan App Receiver Closing")
 			return
 		}
 		frame := buf[:n]
@@ -130,16 +134,17 @@ func (ca *ChanApp) channelRecvThread(cid int){
 }
 
 func (ca *ChanApp) channelTimerThread(cid int) {
-/*
 	defer ca.wg.Done()
 	for {
-		load atomic channel timer
-		if timer < 0 break
-		sleep 50 ms
-		put atomic timer += 50 ms
-		cond var .signal()
+		timer := readTimer(&ca.channelTimers[cid])
+		if timer < 0 {
+			fmt.Println("Channel Timer", cid, "Closing")
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+		addTimer(&ca.channelTimers[cid], 50)
+		ca.channelConds[cid].Signal()
 	}
-*/
 }
 
 func (ca *ChanApp) channelSendThread(cid int, windowsz int) {
@@ -147,8 +152,8 @@ func (ca *ChanApp) channelSendThread(cid int, windowsz int) {
 	// When do we want to close this thread?
 	// what is the exit condition to call "return"
 	// need to update Window sz to be byte limit
-	var ctr uint32 = 1 // is this right?
-	recvWindowSz := windowsz
+	//var ctr uint32 = 1 // is this right?
+	//recvWindowSz := windowsz
 	for {
 		if len(ca.channelSendChs) ==  0 {
 			ca.channelConds[cid].Wait()
@@ -198,6 +203,9 @@ func (ca *ChanApp) shutdown() {
 	for i := 0; i < len(ca.channelConds); i++ {
 		ca.channelConds[i].Signal()
 	}
+	for i := 0; i < len(ca.channelTimers); i++ {
+		updateTimer(&ca.channelTimers[i], -100)
+	}
 	ca.nclose()
 	ca.wg.Wait()
 	for i := 0; i < len(ca.channelConds); i++ {
@@ -206,6 +214,7 @@ func (ca *ChanApp) shutdown() {
 }
 
 func (ca *ChanApp) readCh(cid int) ([]byte, bool) {
+	// should change this later to byte reading...
 	data, ok := <-ca.channelReadChs[cid]
 	if ok {
 		return data, true
@@ -214,6 +223,7 @@ func (ca *ChanApp) readCh(cid int) ([]byte, bool) {
 }
 
 func (ca *ChanApp) writeCh(cid int, buf []byte) {
+	// should change this later to byte writing ...
 	ca.channelSendChs[cid] <- buf
 	ca.channelConds[cid].Signal()
 }

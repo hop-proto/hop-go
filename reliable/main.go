@@ -11,7 +11,7 @@ import (
 
 var MAX_FRAME_SIZE = 512
 var MAX_SEND_BUF_SIZE = 64
-var MAX_WINDOW_SIZE = 64
+var MAX_WINDOW_SIZE = 1024
 var LHOST = net.ParseIP("127.0.0.1")
 
 func main() {

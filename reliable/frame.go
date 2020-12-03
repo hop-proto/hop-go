@@ -13,6 +13,18 @@ func readAck(ack *uint32) uint32 {
 	return atomic.LoadUint32(ack)
 }
 
+func addTimer(timer *int32, shift int32) {
+	atomic.AddInt32(timer, shift)
+}
+
+func updateTimer(timer *int32, newTimer int32) {
+	atomic.StoreInt32(timer, newTimer)
+}
+
+func readTimer(timer *int32) int32 {
+	return atomic.LoadInt32(timer)
+}
+
 func getCID(frame []byte) int {
 	return int(frame[0])
 }
@@ -26,8 +38,12 @@ func getData(frame []byte) []byte {
 	return frame[12:12+datasz]
 }
 
-func getByte(number uint32, n) {
-	return (number >> (8*n)) & 0xff;
+func getDataSz(frame []byte) int {
+	return int(binary.BigEndian.Uint32([]byte{0,0,frame[2], frame[3]}))
+}
+
+func getByte(number uint32, n int) byte {
+	return byte((number >> (8*n)) & 0xff);
 }
 
 func toBytes(number uint32) []byte {
@@ -37,13 +53,13 @@ func toBytes(number uint32) []byte {
 }
 
 func buildFrame(cid int, flags uint8, cdack uint32, ctr uint32, data []byte) []byte {
-	buf := []byte{}
-	buf = append(buf, []byte{cid, flags})
-	datasz = uint16(len(data))
-	buf = append(buf, []byte{getByte(datasz, 1), getByte(datasz, 0)})
-	buf = append(buf, toBytes(cdack))
-	buf = append(buf, toBytes(ctr))
-	buf = append(buf, data)
+	buf := make([]byte, 0)
+	buf = append(buf, []byte{byte(cid), byte(flags)}...)
+	datasz := uint32(len(data))
+	buf = append(buf, []byte{getByte(datasz, 1), getByte(datasz, 0)}...)
+	buf = append(buf, toBytes(cdack)...)
+	buf = append(buf, toBytes(ctr)...)
+	buf = append(buf, data...)
 	return buf
 }
 
