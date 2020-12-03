@@ -142,7 +142,9 @@ func (ca *ChanApp) channelTimerThread(cid int) {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
-		addTimer(&ca.channelTimers[cid], 50)
+		if timer < 250 {
+			addTimer(&ca.channelTimers[cid], 50)
+		}
 		ca.channelConds[cid].Signal()
 	}
 }
