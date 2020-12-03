@@ -66,11 +66,13 @@ func main() {
 	}()
 
 	if os.Args[1] == "c" {
-		buf := make([]byte, MAX_FRAME_SIZE)
-		lol := []byte{1,0x83,3,4} // Req
-		copy(buf, lol)
-		ca.send(buf[:len(lol)])
-		ca.send([]byte{1, 0x4B}) // Rep
+		ca.send([]byte{1, 0x83 ,0,0,  0,0,0,0,  0,0,0,5, 11, 12, 13, 14, 15}) // Req
+		ca.send([]byte{2, 0x48 ,0,0,  0,0,0,0,  0,0,0,5, 11, 12, 13, 14, 15}) // Rep
+		ca.send([]byte{0,0,0,5,  0,0,0,0,  0,0,0,5, 11, 12, 13, 14, 15}) // Data
+		ca.send([]byte{0,0,0,2,  0,0,0,0,  0,0,0,2, 2, 3}) // Data
+		ca.send([]byte{0,0,0,4,  0,0,0,0,  0,0,0,4, 7, 8, 9, 10}) // Data
+		ca.send([]byte{0,0,0,3,  0,0,0,0,  0,0,0,3, 4, 5, 6}) // Data
+		ca.send([]byte{0,0,0,1,  0,0,0,0,  0,0,0,1, 1}) // Data
 		ca.send([]byte{0,0,0,5,  0,0,0,0,  0,0,0,5, 11, 12, 13, 14, 15}) // Data
 		ca.send([]byte{0,0,0,2,  0,0,0,0,  0,0,0,2, 2, 3}) // Data
 		ca.send([]byte{0,0,0,4,  0,0,0,0,  0,0,0,4, 7, 8, 9, 10}) // Data

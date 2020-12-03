@@ -18,6 +18,7 @@ type ChanApp struct {
 	channelReadChs [256](chan []byte)
 	channelSendChs [256](chan []byte)
 	channelAcks    [256]uint32
+	channelConds   [256](*sync.Cond)
 
 	nrecv recvfn // Network recv 
 	nsend sendfn // Network send 
@@ -54,6 +55,10 @@ func (ca *ChanApp) init(nrecv recvfn, nsend sendfn, nclose closefn,
 		ca.channelWindows[i].init(MAX_WINDOW_SIZE)
 	}
 
+	for i:= 0; i < len(ca.channelConds); i++ {
+		ca.channelConds[i] = &sync.Cond{L: &sync.Mutex{}}
+	}
+
 }
 
 func (ca *ChanApp) start() {
@@ -88,7 +93,7 @@ func (ca *ChanApp) receiverThread() {
 		if isRep(frame) || isData(frame) {
 			ca.routeFrame(frame)
 		} else { // Req Frame
-			fmt.Println("Request Recv")
+			fmt.Println("Channel", getCID(frame), "received request frame")
 		}
 	}
 }
@@ -97,6 +102,10 @@ func (ca *ChanApp) channelRecvThread(cid int){
 	defer ca.wg.Done()
 	var lastAcked uint32 = 0
 	for frame := range ca.channelRecvChs[cid] {
+		if getCtr(frame) <= lastAcked || ca.channelWindows[cid].hasCtr(getCtr(frame)){
+			fmt.Println("Channel", cid, "already Seen Frame", getCtr(frame))
+			continue
+		}
 		if isRep(frame) {
 			fmt.Println("Channel ", cid, " received rep frame.")
 		} else {
@@ -112,22 +121,67 @@ func (ca *ChanApp) channelRecvThread(cid int){
 				fmt.Println("Data", getData(popframe))
 				ca.channelReadChs[cid] <- getData(popframe)
 			}
-			// should we signal a cond variable?
-			// sender thread can wake up and send Ack
-			// if not outgoing data is queued
 			updateAck(&ca.channelAcks[cid], lastAcked)
+			ca.channelConds[cid].Signal()
 			fmt.Println("Last Acked:", lastAcked)
 		}
 	}
 	fmt.Println("Channel Recv Thread Closing: ", cid)
 }
 
+func (ca *ChanApp) channelTimerThread(cid int) {
 /*
-has access to an atomic Ack and atomic timer, RT queue
-we need a thread that updates timer every 50 ms
-*/
-func (ca *ChanApp) channelSendThread(cid int) {
 	defer ca.wg.Done()
+	for {
+		load atomic channel timer
+		if timer < 0 break
+		sleep 50 ms
+		put atomic timer += 50 ms
+		cond var .signal()
+	}
+*/
+}
+
+func (ca *ChanApp) channelSendThread(cid int, windowsz int) {
+	defer ca.wg.Done()
+	// When do we want to close this thread?
+	// what is the exit condition to call "return"
+	// need to update Window sz to be byte limit
+	var ctr uint32 = 1 // is this right?
+	recvWindowSz := windowsz
+	for {
+		if len(ca.channelSendChs) ==  0 {
+			ca.channelConds[cid].Wait()
+		}
+/*
+		sentAcks = false
+
+		latestAck = load atomic ack
+		Update RT queue {
+			pop nodes <= latestAck and record how many bytes Acked
+			latestAck = load atomic ack
+			send RTO with latestAck in ack field and ctr = priority
+				sentAcks = true
+		}
+		
+		recWindowSz -= bytes Acked
+		for windowsz > 0 {
+			latestAck = load atomic ack
+			// nonblocking
+			if data <- ch {
+				send data frame with latestAck in ack field and ctr++
+					sentAcks = true
+				add data frame to RTqueue
+				windowsz -= datasz
+			}
+		}
+		if !sentAcks {
+			latestAck = load atomic ack
+			send empty data frame with latestAck and ctr++
+			add data frame to RTqueue
+		}
+*/
+	}
 }
 
 func (ca *ChanApp) shutdown() {
@@ -141,8 +195,14 @@ func (ca *ChanApp) shutdown() {
 	for _, ch := range ca.channelSendChs {
 		close(ch)
 	}
+	for i := 0; i < len(ca.channelConds); i++ {
+		ca.channelConds[i].Signal()
+	}
 	ca.nclose()
 	ca.wg.Wait()
+	for i := 0; i < len(ca.channelConds); i++ {
+		ca.channelConds[i] = nil
+	}
 }
 
 func (ca *ChanApp) readCh(cid int) ([]byte, bool) {
@@ -154,7 +214,8 @@ func (ca *ChanApp) readCh(cid int) ([]byte, bool) {
 }
 
 func (ca *ChanApp) writeCh(cid int, buf []byte) {
-	ca.channelSendChs[cid] <- buf:
+	ca.channelSendChs[cid] <- buf
+	ca.channelConds[cid].Signal()
 }
 
 func (ca *ChanApp) send(buf []byte) {

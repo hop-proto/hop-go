@@ -66,19 +66,27 @@ func (pq *PriorityQueue) Pop() interface{} {
 }
 
 type Window struct {
+	ctrs map[uint32]bool
 	pq PriorityQueue
 	maxsz int
 }
 
 func (w *Window) init(maxsz int) {
 	w.maxsz = maxsz
+	w.ctrs = make(map[uint32]bool)
 	w.pq = make(PriorityQueue, 0)
 	heap.Init(&w.pq)
 }
 
+func (w *Window) hasCtr(ctr uint32) bool {
+	return w.ctrs[ctr]
+}
+
 func (w *Window) push(frame []byte) bool {
 	if w.len() < w.maxsz {
-		heap.Push(&w.pq, &Item{value: frame, priority: getCtr(frame)})
+		ctr := getCtr(frame)
+		w.ctrs[ctr] = true
+		heap.Push(&w.pq, &Item{value: frame, priority: ctr})
 		return true
 	}
 	return false
@@ -90,6 +98,7 @@ func (w *Window) hasNextframe(lastacked uint32) bool{
 
 func (w *Window) pop() []byte {
 	item := heap.Pop(&w.pq).(*Item)
+	delete(w.ctrs, item.priority)
 	return item.value
 }
 

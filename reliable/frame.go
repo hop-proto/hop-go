@@ -26,6 +26,27 @@ func getData(frame []byte) []byte {
 	return frame[12:12+datasz]
 }
 
+func getByte(number uint32, n) {
+	return (number >> (8*n)) & 0xff;
+}
+
+func toBytes(number uint32) []byte {
+	temp := make([]byte, 4)
+	binary.BigEndian.PutUint32(temp, number)
+	return temp
+}
+
+func buildFrame(cid int, flags uint8, cdack uint32, ctr uint32, data []byte) []byte {
+	buf := []byte{}
+	buf = append(buf, []byte{cid, flags})
+	datasz = uint16(len(data))
+	buf = append(buf, []byte{getByte(datasz, 1), getByte(datasz, 0)})
+	buf = append(buf, toBytes(cdack))
+	buf = append(buf, toBytes(ctr))
+	buf = append(buf, data)
+	return buf
+}
+
 func isData(frame []byte) bool {
 	return (frame[1] & 0xC0 == 0)
 }
