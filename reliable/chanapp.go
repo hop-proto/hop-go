@@ -109,13 +109,25 @@ func (ca *ChanApp) channelRecvThread(cid int){
 				len(ca.channelReadChs[cid]) < 64 {
 				popframe := ca.channelWindows[cid].pop()
 				lastAcked++
+				fmt.Println("Data", getData(popframe))
 				ca.channelReadChs[cid] <- getData(popframe)
 			}
+			// should we signal a cond variable?
+			// sender thread can wake up and send Ack
+			// if not outgoing data is queued
 			updateAck(&ca.channelAcks[cid], lastAcked)
 			fmt.Println("Last Acked:", lastAcked)
 		}
 	}
 	fmt.Println("Channel Recv Thread Closing: ", cid)
+}
+
+/*
+has access to an atomic Ack and atomic timer, RT queue
+we need a thread that updates timer every 50 ms
+*/
+func (ca *ChanApp) channelSendThread(cid int) {
+	defer ca.wg.Done()
 }
 
 func (ca *ChanApp) shutdown() {
@@ -131,6 +143,18 @@ func (ca *ChanApp) shutdown() {
 	}
 	ca.nclose()
 	ca.wg.Wait()
+}
+
+func (ca *ChanApp) readCh(cid int) ([]byte, bool) {
+	data, ok := <-ca.channelReadChs[cid]
+	if ok {
+		return data, true
+	}
+	return []byte{}, false
+}
+
+func (ca *ChanApp) writeCh(cid int, buf []byte) {
+	ca.channelSendChs[cid] <- buf:
 }
 
 func (ca *ChanApp) send(buf []byte) {

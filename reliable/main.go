@@ -53,6 +53,17 @@ func main() {
 		time.Sleep(10*time.Second)
 		ca.shutdown()
 	}()
+	wg.Add(1)
+	go func(){
+		defer wg.Done()
+		for i := 0; i<256; i++{
+			data, ok := ca.readCh(0)
+			if !ok {
+				break
+			}
+			fmt.Println("Reading", data)
+		}
+	}()
 
 	if os.Args[1] == "c" {
 		buf := make([]byte, MAX_FRAME_SIZE)
@@ -60,11 +71,11 @@ func main() {
 		copy(buf, lol)
 		ca.send(buf[:len(lol)])
 		ca.send([]byte{1, 0x4B}) // Rep
-		ca.send([]byte{0,0,0,8,  0,0,0,0,  0,0,0,5, 1,2,3,4,5,6,7,8}) // Data
-		ca.send([]byte{0,0,0,8,  0,0,0,0,  0,0,0,4, 1,2,3,4,5,6,7,8}) // Data
-		ca.send([]byte{0,0,0,8,  0,0,0,0,  0,0,0,3, 1,2,3,4,5,6,7,8}) // Data
-		ca.send([]byte{0,0,0,8,  0,0,0,0,  0,0,0,2, 1,2,3,4,5,6,7,8}) // Data
-		ca.send([]byte{0,0,0,8,  0,0,0,0,  0,0,0,1, 1,2,3,4,5,6,7,8}) // Data
+		ca.send([]byte{0,0,0,5,  0,0,0,0,  0,0,0,5, 11, 12, 13, 14, 15}) // Data
+		ca.send([]byte{0,0,0,2,  0,0,0,0,  0,0,0,2, 2, 3}) // Data
+		ca.send([]byte{0,0,0,4,  0,0,0,0,  0,0,0,4, 7, 8, 9, 10}) // Data
+		ca.send([]byte{0,0,0,3,  0,0,0,0,  0,0,0,3, 4, 5, 6}) // Data
+		ca.send([]byte{0,0,0,1,  0,0,0,0,  0,0,0,1, 1}) // Data
 	}
 	wg.Wait()
 }
