@@ -37,6 +37,7 @@ func (ca *ChannelApp) Start() {
 
 func (ca *ChannelApp) Shutdown() {
 	ca.ca.shutdown()
+	ca.ca = nil
 }
 
 func (ca *ChannelApp) listenChan() *Channel {
