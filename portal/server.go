@@ -42,6 +42,8 @@ type SessionState struct {
 	count      uint64
 	key        [16]byte
 	remoteAddr net.UDPAddr
+
+	handle ServerConn
 }
 
 func (ss *SessionState) incrementCounterLocked(b []byte) {
