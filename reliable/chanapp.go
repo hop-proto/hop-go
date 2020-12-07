@@ -13,7 +13,7 @@ type closefn func()
 type ChanApp struct {
 	wg sync.WaitGroup
 
-	sendCh chan []byte
+	nsendCh chan []byte
 	channelRecvChs [256](chan []byte)
 	channelWindows [256](Window)
 	channelReadChs [256](chan []byte)
@@ -42,7 +42,7 @@ func (ca *ChanApp) init(nrecv recvfn, nsend sendfn, nclose closefn,
 	ca.nsend = nsend
 	ca.nclose = nclose
 
-	ca.sendCh = make(chan []byte, MAX_SEND_BUF_SIZE)
+	ca.nsendCh = make(chan []byte, MAX_SEND_BUF_SIZE)
 
 	for i:= 0; i < len(ca.channelRecvChs); i++ {
 		ca.channelRecvChs[i] = make(chan []byte, 64)
@@ -78,7 +78,7 @@ func (ca *ChanApp) start() {
 
 func (ca *ChanApp) senderThread() {
 	defer ca.wg.Done()
-	for frame := range ca.sendCh {
+	for frame := range ca.nsendCh {
 		fmt.Println("Sending", frame)
 		ca.nsend(frame)
 	}
@@ -149,6 +149,7 @@ func (ca *ChanApp) channelTimerThread(cid int) {
 	}
 }
 
+// should be rearchitected to be easier
 func (ca *ChanApp) channelSendThread(cid int, windowsz int) {
 	defer ca.wg.Done()
 	// When do we want to close this thread?
@@ -159,6 +160,7 @@ func (ca *ChanApp) channelSendThread(cid int, windowsz int) {
 	for {
 		if len(ca.channelSendChs) ==  0 {
 			ca.channelConds[cid].Wait()
+			// could we use a golang Ticker to signal this?
 		}
 /*
 		sentAcks = false
@@ -172,6 +174,9 @@ func (ca *ChanApp) channelSendThread(cid int, windowsz int) {
 		}
 		
 		recWindowSz -= bytes Acked
+		// v does not work exactly cuz, need to know size of data is less than windowsz
+		// probably should be a while look that queries data and checks if can fit
+		// can we have a peeakable channel?
 		for windowsz > 0 {
 			latestAck = load atomic ack
 			// nonblocking
@@ -179,6 +184,7 @@ func (ca *ChanApp) channelSendThread(cid int, windowsz int) {
 				send data frame with latestAck in ack field and ctr++
 					sentAcks = true
 				add data frame to RTqueue
+				// issue is have negative windowsz
 				windowsz -= datasz
 			}
 		}
@@ -192,7 +198,7 @@ func (ca *ChanApp) channelSendThread(cid int, windowsz int) {
 }
 
 func (ca *ChanApp) shutdown() {
-	close(ca.sendCh)
+	close(ca.nsendCh)
 	for _, ch := range ca.channelRecvChs {
 		close(ch)
 	}
@@ -233,12 +239,11 @@ func (ca *ChanApp) writeCh(cid int, buf []byte) {
 func (ca *ChanApp) send(buf []byte) {
 	// nonblocking best effort
 	select {
-		case ca.sendCh <- buf:
+		case ca.nsendCh <- buf:
 			return
 		default:
 			return
 	}
-	ca.sendCh <- buf
 }
 
 func (ca *ChanApp) routeFrame(frame []byte) {

@@ -22,6 +22,7 @@ func main() {
 	saddr := &net.UDPAddr{IP: LHOST, Port: port}
 
 	conn, err := net.ListenUDP("udp", caddr)
+	// conn, err = SSTP.ListenSSTP(...)
 
 	ca := ChannelApp{}
 	ca.Init(conn, saddr, MAX_FRAME_SIZE)

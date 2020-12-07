@@ -86,6 +86,8 @@ func (c *Channel) Write(b []byte) (int, error) {
 	}
 }
 
+// Need to send FIN?
+// Does not necessarily terminate ongoing read/writes
 func (c *Channel) Close() error {
 	c.ca = nil
 	return nil
