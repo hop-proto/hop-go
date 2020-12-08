@@ -3,6 +3,8 @@ package main
 import (
 	"net"
 	"sync"
+	"time"
+	"errors"
 )
 
 // Network Send Buffer Size in Frames
@@ -52,27 +54,41 @@ func (ca *ChannelApp) Shutdown() {
 }
 
 func (ca *ChannelApp) Listener() *ChannelListener {
-	return &ChannelListener{ca: ca.ca}
+	return &ChannelListener{listenerCh: ca.ca.listenerCh}
 }
 
 // Implements net.Listener
 type ChannelListener struct {
-	// Internal Channel Application
-	ca *chanApp
+	// Go Channel used to close listener
+	quit chan struct{}
+	// Go Channel used to deliver Channels
+	listenerCh chan *Channel
 	// Operation Lock
 	mu sync.Mutex
+	// Closed Status
+	closed bool
 }
 
 func (cl *ChannelListener) Accept() (*Channel, error) {
-	cl.mu.Lock()
-	defer cl.mu.Unlock()
-	return &Channel{}, nil
+	select {
+		case <-cl.quit:
+			return nil, errors.New("Channel Listener is closed")
+		case ch, ok := <-cl.listenerCh:
+			if !ok {
+				return ch, errors.New("Channel Application is closed")
+			}
+			return ch, nil
+	}
 }
 
 func (cl *ChannelListener) Close() error {
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
-	cl.ca = nil
+	if cl.closed {
+		return errors.New("Listener already closed")
+	}
+	close(cl.quit)
+	cl.closed = true
 	return nil
 }
 
@@ -97,6 +113,10 @@ type nclosefn func()
 type chanApp struct {
 	wg sync.WaitGroup
 
+	// Go Channel used internally to deliver
+	// Channels to Listeners
+	listenerCh chan *Channel
+
 	// Go Channel used internally to send frames
 	nsendCh chan []byte
 
@@ -117,13 +137,6 @@ type chanApp struct {
 	// Go Channels used internally to route data
 	// to be sent from channel.write() calls
 	channelWriteChs [256](chan []byte)
-
-	// Go Channels used internally to signal
-	// read/write calls that channel
-	// has closed.
-	// close(channelCloseRW[cid]) will
-	// unblock all <-channelCloseRW[cid]
-	channelCloseRW [256](chan struct{})
 
 	// Latest Ack used as an Atomic UInt
 	// atomic go package

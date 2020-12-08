@@ -23,13 +23,23 @@ func (ad *ChAddr) String() string {
 
 // Implements Conn interface
 type Channel struct {
+	// Channel ID
 	cid int
+
+	// Pointer to Internal Chan App
 	ca *chanApp
-	statusMut sync.Mutex
+
+	// Read Deadline Mut / Time
 	rDMut sync.Mutex
 	rDeadline time.Time
+
+	// Write Deadline Mut / Time
 	wDMut sync.Mutex
 	wDeadline time.Time
+
+	// Go Channel used to signal
+	// Read/Writes to exit
+	closeRW chan struct{}
 }
 
 func (c *Channel) Read(b []byte) (int, error) {
