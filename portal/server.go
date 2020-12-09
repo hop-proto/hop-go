@@ -14,24 +14,26 @@ import (
 	"zmap.io/portal/cyclist"
 )
 
-// TODO(dadrian): Can we precalculate cookie lengths?
-const maxCookieLen = 128
+// TODO(dadrian): Update cookies to use Kravatte once it's implemented.
+const cookieLen = 128
 
+// SessionID is an IP-independent identifier of a tunnel.
 type SessionID [4]byte
 
 type HandshakeState struct {
 	sync.Mutex
 	duplex          cyclist.Cyclist
 	ephemeral       X25519KeyPair
+	macBuf          [MacLen]byte
 	clientEphemeral [DHLen]byte
 	handshakeKey    [KeyLen]byte
 	clientStatic    [DHLen]byte
 	sessionID       [SessionIDLen]byte
-	// TODO(dadrian): Should these be arrays?
-	ee     []byte
-	es     []byte
-	se     []byte
-	macBuf [MacLen]byte
+
+	// TODO(dadrian): Rework APIs to make these arrays and avoid copies with the curve25519 API.
+	ee []byte
+	es []byte
+	se []byte
 }
 
 type SessionState struct {
@@ -56,6 +58,8 @@ func (ss *SessionState) incrementCounterLocked(b []byte) {
 }
 
 type Server struct {
+	// TODO(dadrian): Use per-resource locks, instead of one lock for
+	// everything. Not all state needs to be locked at once.
 	sync.Mutex
 
 	inBuf   []byte
@@ -66,8 +70,12 @@ type Server struct {
 
 	inShutdown atomicBool
 
+	listenerOpen bool
+
 	handshakes map[string]*HandshakeState
 	sessions   map[SessionID]*SessionState
+
+	pendingConnections chan *ServerConn
 
 	cookieKey    []byte
 	cookieCipher cipher.Block
@@ -329,16 +337,6 @@ func (s *Server) Serve() error {
 			logrus.Error(err)
 		}
 	}
-	return nil
-}
-
-func (s *Server) ShuttingDown() bool {
-	return s.inShutdown.isSet()
-}
-
-func (s *Server) Close() error {
-	// TODO(dadrian): Make this block until it's actually done
-	s.inShutdown.setTrue()
 	return nil
 }
 
