@@ -4,6 +4,7 @@ import (
 	"net"
 	"time"
 	"errors"
+	"sync"
 	"strconv"
 )
 
@@ -22,74 +23,77 @@ func (ad *ChAddr) String() string {
 
 // Implements Conn interface
 type Channel struct {
-	ca *ChanApp
+	// Channel ID
 	cid int
-	hasRDL bool
-	hasWDL bool
-	readDL time.Time
-	writeDL time.Time
+	// Pointer to Internal Chan App
+	ca *chanApp
+	// Read Deadline Mut / Time
+	rDMut sync.Mutex
+	rDeadline time.Time
+	// Write Deadline Mut / Time
+	wDMut sync.Mutex
+	wDeadline time.Time
+	// Go Channel used to signal
+	// Read/Writes to exit
+	closeRW chan struct{}
+	// Mutex & bool for closing
+	mu sync.Mutex
+	closed bool
 }
 
 func (c *Channel) Read(b []byte) (int, error) {
-	if c.hasRDL {
-		ch := make(chan struct {data []byte; ok bool}, 1)
-		go func() {
-			data, ok := c.ca.readCh(c.cid)
-			ch <- struct{data []byte; ok bool}{data, ok}
-			close(ch)
-		}()
-		result := struct{data []byte; ok bool}{[]byte{}, false}
-		timeout := false
-		select {
-			case result = <- ch:
-			case <- time.After(time.Until(c.readDL)):
-				timeout = true
-		}
-		if result.ok {
-			copy(b, result.data)
-			return len(result.data), nil
-		} else if !timeout {
-			return 0, errors.New("Channel Read is Closed")
-		}
-		return 0, errors.New("Channel Read Timeout")
-	} else {
-		data, ok := c.ca.readCh(c.cid)
-		if ok {
-			copy(b, data)
-			return len(data), nil
-		}
-		return 0, errors.New("Channel Read is Closed")
+	var deadline time.Time
+	c.rDMut.Lock()
+	deadline = c.rDeadline
+	c.rDMut.Unlock()
+	select {
+		case <-c.closeRW:
+			return 0, errors.New("Channel has closed")
+		default:
+			select {
+				case <-c.closeRW:
+					return 0, errors.New("Channel has closed")
+				case data, ok := <-c.ca.channelReadChs[c.cid]:
+					if !ok {
+						return 0, errors.New("Channel Application has closed")
+					}
+					copy(b, data)
+					return len(data), nil
+				case <-time.After(time.Until(deadline)):
+					return 0, errors.New("Read Deadline exceeded")
+			}
 	}
 }
 
 func (c *Channel) Write(b []byte) (int, error) {
-	if c.hasWDL {
-		ch := make(chan bool, 1)
-		go func() {
-			c.ca.writeCh(c.cid, b)
-			ch <- true
-			close(ch)
-		}()
-		timeout := false
-		select {
-			case <- ch:
-			case <- time.After(time.Until(c.writeDL)):
-				timeout = true
-		}
-		if !timeout {
-			return len(b), nil
-		}
-		return 0, errors.New("Channel Write Timeout")
-	} else {
-		c.ca.writeCh(c.cid, b)
-		return len(b), nil
+	var deadline time.Time
+	c.wDMut.Lock()
+	deadline = c.wDeadline
+	c.wDMut.Unlock()
+	select {
+		case <-c.closeRW:
+			return 0, errors.New("Channel has closed")
+		default:
+			select {
+				case <-c.closeRW:
+					return 0, errors.New("Channel has closed")
+				case c.ca.channelWriteChs[c.cid] <- b:
+					c.ca.channelSendConds[c.cid].Signal()
+					return len(b), nil
+				case <-time.After(time.Until(deadline)):
+					return 0, errors.New("Write Deadline exceeded")
+			}
 	}
 }
 
-// Need to send FIN?
-// Does not necessarily terminate ongoing read/writes
 func (c *Channel) Close() error {
-	c.ca = nil
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return errors.New("Channel already closed")
+	}
+	close(c.closeRW)
+	c.closed = true
 	return nil
 }
 
@@ -102,21 +106,31 @@ func (c *Channel) RemoteAddr() net.Addr {
 }
 
 func (c *Channel) SetDeadline(t time.Time) error {
-	c.readDL = t
-	c.writeDL = t
-	c.hasRDL = true
-	c.hasWDL = true
+	c.rDMut.Lock()
+	c.wDMut.Lock()
+	defer c.rDMut.Unlock()
+	defer c.wDMut.Unlock()
+
+	c.rDeadline = t
+	c.wDeadline = t
+
 	return nil
 }
 
 func (c *Channel) SetReadDeadline(t time.Time) error {
-	c.readDL = t
-	c.hasRDL = true
+	c.rDMut.Lock()
+	defer c.rDMut.Unlock()
+
+	c.rDeadline = t
+
 	return nil
 }
 
 func (c *Channel) SetWriteDeadline(t time.Time) error {
-	c.writeDL = t
-	c.hasWDL = true
+	c.wDMut.Lock()
+	defer c.wDMut.Unlock()
+
+	c.wDeadline = t
+
 	return nil
 }

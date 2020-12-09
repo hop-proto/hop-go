@@ -17,14 +17,6 @@ func addTimer(timer *int32, shift int32) {
 	atomic.AddInt32(timer, shift)
 }
 
-func updateTimer(timer *int32, newTimer int32) {
-	atomic.StoreInt32(timer, newTimer)
-}
-
-func readTimer(timer *int32) int32 {
-	return atomic.LoadInt32(timer)
-}
-
 func getCID(frame []byte) int {
 	return int(frame[0])
 }

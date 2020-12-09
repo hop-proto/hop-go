@@ -13,8 +13,8 @@ import (
 var BUF_SIZE = 64
 // Window Size in Bytes
 var WINDOW_SIZE = 4096
-// Clock Cycle
-var CLOCK_CYCLE = 50*time.Millisecond
+// Retransmission Time RTO
+var RTO = 250*time.Millisecond
 
 type ChannelApp struct {
 	// Internal Channel Application
@@ -82,11 +82,16 @@ func (cl *ChannelListener) Accept() (*Channel, error) {
 	select {
 		case <-cl.quit:
 			return nil, errors.New("Channel Listener is closed")
-		case ch, ok := <-cl.listenerCh:
-			if !ok {
-				return ch, errors.New("Channel Application is closed")
+		default:
+			select {
+				case <-cl.quit:
+					return nil, errors.New("Channel Listener is closed")
+				case ch, ok := <-cl.listenerCh:
+					if !ok {
+						return ch, errors.New("Channel Application is closed")
+					}
+					return ch, nil
 			}
-			return ch, nil
 	}
 }
 
@@ -144,17 +149,18 @@ type chanApp struct {
 	channelWindows [256]*Window
 	// Channel Tickers used for clock ticks
 	channelTickers [256](*time.Ticker)
-	// Channel RTO timers used as atomic int
-	channelTimers [256]int32
 	// Go Channels used internally to route contiguous
 	// data sections to channel.read() calls
 	channelReadChs [256](chan []byte)
 	// Go Channels used internally to route data
 	// to be sent from channel.write() calls
 	channelWriteChs [256](chan []byte)
-	// Latest Ack used as an Atomic UInt
+	// Latest Ctr seen used as an Atomic UInt
 	// atomic go package
-	channelLatestAcks [256]uint32
+	channelLatestCtrSeen [256]uint32
+	// Latest Ctr seen used as an Atomic UInt
+	// atomic go package
+	channelLatestAckSeen [256]uint32
 	// Conds to signal Channel Send thread
 	// that Acks / Data are available
 	// to send
@@ -187,17 +193,23 @@ func (ca *chanApp) init(nrecv nrecvfn, nsend nsendfn, nclose nclosefn,
 }
 
 func (ca *chanApp) start() {
-	for i := 0; i < 256; i++ {
-		ca.channelTickers[i] = time.NewTicker(CLOCK_CYCLE)
-	}
 	ca.wg.Add(1)
-	go ca.nsendThread()
+	go ca.nRecvThread()
+	ca.wg.Add(1)
+	go ca.nSendThread()
+	for i := 0; i < 256; i++ {
+		ca.channelTickers[i] = time.NewTicker(RTO)
+		ca.wg.Add(1)
+		go ca.channelRecvThread(i)
+		ca.wg.Add(1)
+		go ca.channelSendThread(i)
+	}
 }
 
 func (ca *chanApp) shutdown() {
 	// Terminates Listeners
 	close(ca.listenerCh)
-	// Terminates the nsendThread
+	// Terminates the nSendThread
 	close(ca.nsendCh)
 	for i := 0; i < 256; i++ {
 		close(ca.channelRecvChs[i])
@@ -206,10 +218,8 @@ func (ca *chanApp) shutdown() {
 		ca.channelSendConds[i].Signal()
 		ca.channelRespConds[i].Signal()
 		ca.channelTickers[i].Stop()
-		// Is this necessary if we use tickers?
-		updateTimer(&ca.channelTimers[i], -100)
 	}
-	// Close Network
+	// Close Network which terminates nRecvThread
 	ca.nclose()
 	ca.wg.Wait()
 	for i := 0; i < 256; i++ {
@@ -221,7 +231,26 @@ func (ca *chanApp) shutdown() {
 	}
 }
 
-func (ca *chanApp) nsendThread() {
+func (ca *chanApp) nRecvThread(){
+	defer ca.wg.Done()
+	for {
+		n, buf, err := ca.nrecv()
+		if err != nil {
+			// Network Conn is closed
+			// Happens when Channel Appplication is shutdown
+			fmt.Println("Network Receiving Thread Exiting")
+			return
+		}
+		frame := buf[:n]
+		// Routing frame to channels is best effort
+		select {
+			case ca.channelRecvChs[getCID(frame)] <- frame:
+			default:
+		}
+	}
+}
+
+func (ca *chanApp) nSendThread() {
 	defer ca.wg.Done()
 	for frame := range ca.nsendCh {
 		fmt.Println("Network Sending", frame)
@@ -239,4 +268,34 @@ func (ca *chanApp) makeCh(cid int) (*Channel, error) {
 	// TODO send req and block on resp cond
 	// set channel active to true
 	return nil, nil
+}
+
+func (ca *chanApp) channelRecvThread(cid int) {
+	defer ca.wg.Done()
+	// whenever we receive a fresh ack call timer.Reset()
+}
+
+func (ca *chanApp) channelSendThread(cid int) {
+	defer ca.wg.Done()
+	/*
+	previousSentAck := -1
+	for {
+		latestCtr := load atomic latest ctr
+		needSendAck := previousSentAck != latestCtr
+		select {
+			case data, ok <- channelWriteChs[cid]:
+				process data into frame
+				send frame with latest ctr
+			case <-channelTickers[cid]:
+				update the RTQueue based on latestAckSeen
+				send stuff in the RTQueue with latest ctr
+			default:
+				if needAck {
+					send no data frame with latestAck
+				}
+		}
+		previousSentAck = latestCtr
+	}
+
+	*/
 }
