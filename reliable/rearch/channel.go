@@ -3,7 +3,7 @@ package main
 import (
 	"net"
 	"time"
-	//"errors"
+	"errors"
 	"sync"
 	"strconv"
 )
@@ -25,32 +25,66 @@ func (ad *ChAddr) String() string {
 type Channel struct {
 	// Channel ID
 	cid int
-
 	// Pointer to Internal Chan App
 	ca *chanApp
-
 	// Read Deadline Mut / Time
 	rDMut sync.Mutex
 	rDeadline time.Time
-
 	// Write Deadline Mut / Time
 	wDMut sync.Mutex
 	wDeadline time.Time
-
 	// Go Channel used to signal
 	// Read/Writes to exit
 	closeRW chan struct{}
+	// Mutex & bool for closing
+	mu sync.Mutex
+	closed bool
 }
 
 func (c *Channel) Read(b []byte) (int, error) {
-	return 0, nil
+	var deadline time.Time
+	c.rDMut.Lock()
+	deadline = c.rDeadline
+	c.rDMut.Unlock()
+	select {
+		case <-c.closeRW:
+			return 0, errors.New("Channel has closed")
+		//case data <-c.ca.readCh(c.cid):
+		//	copy(b, data)
+		//	return len(data), nil
+		case <-time.After(time.Until(deadline)):
+			return 0, errors.New("Read Deadline exceeded")
+	}
 }
 
 func (c *Channel) Write(b []byte) (int, error) {
-	return 0, nil
+	var deadline time.Time
+	c.wDMut.Lock()
+	deadline = c.wDeadline
+	c.wDMut.Unlock()
+	complete := make(chan struct{}, 1)
+	go func(){
+		//c.ca.writeCh(c.cid, b)
+		close(complete)
+	}()
+	select {
+		case <-c.closeRW:
+			return 0, errors.New("Channel has closed")
+		case <-complete:
+			return len(b), nil
+		case <-time.After(time.Until(deadline)):
+			return 0, errors.New("Write Deadline exceeded")
+	}
 }
 
 func (c *Channel) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return errors.New("Channel already closed")
+	}
+	close(c.closeRW)
+	c.closed = true
 	return nil
 }
 

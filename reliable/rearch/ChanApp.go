@@ -7,10 +7,13 @@ import (
 	"errors"
 )
 
-// Network Send Buffer Size in Frames
-var SEND_BUF_SIZE = 64
+// Network Send Buffer Size
+// Channel Recv, Read, Write buf size
+var BUF_SIZE = 64
 // Window Size in Bytes
 var WINDOW_SIZE = 4096
+// Clock Cycle
+var CLOCK_CYCLE = 50*time.Millisecond
 
 type ChannelApp struct {
 	// Internal Channel Application
@@ -39,7 +42,7 @@ func (ca *ChannelApp) Init(conn net.PacketConn, raddr net.Addr, maxFrSz int) {
 	nclose := func() { conn.Close() }
 
 	internal_ca := &chanApp{}
-	internal_ca.init(nrecv, nsend, nclose, maxFrSz, SEND_BUF_SIZE, WINDOW_SIZE)
+	internal_ca.init(nrecv, nsend, nclose, maxFrSz)
 	ca.ca = internal_ca
 }
 
@@ -55,6 +58,11 @@ func (ca *ChannelApp) Shutdown() {
 
 func (ca *ChannelApp) Listener() *ChannelListener {
 	return &ChannelListener{listenerCh: ca.ca.listenerCh}
+}
+
+func (ca *ChannelApp) MakeChannel(cid int) (*Channel, error) {
+	ch, err := ca.ca.makeCh(cid)
+	return ch, err
 }
 
 // Implements net.Listener
@@ -111,44 +119,75 @@ type nsendfn func([]byte)
 type nclosefn func()
 
 type chanApp struct {
+	// Goroutine Wait Group
 	wg sync.WaitGroup
-
+	// Network Recv Fn
+	nrecv nrecvfn
+	// Network Send Fn
+	nsend nsendfn
+	// Network Close Fn
+	nclose nclosefn
+	// Max Frame Size
+	maxFrSz int
 	// Go Channel used internally to deliver
 	// Channels to Listeners
 	listenerCh chan *Channel
-
 	// Go Channel used internally to send frames
 	nsendCh chan []byte
-
 	// Go Channels used internally for routing frames
 	// to channels.
 	channelRecvChs [256](chan []byte)
-
 	// Channel windows
-	// channelWindows [256]window
-
+	channelWindows [256]Window
 	// Channel Tickers used for clock ticks
 	channelTickers [256](*time.Ticker)
-
 	// Go Channels used internally to route contiguous
 	// data sections to channel.read() calls
 	channelReadChs [256](chan []byte)
-
 	// Go Channels used internally to route data
 	// to be sent from channel.write() calls
 	channelWriteChs [256](chan []byte)
-
 	// Latest Ack used as an Atomic UInt
 	// atomic go package
 	channelLatestAcks [256]uint32
-
 	// Conds to signal Channel Send thread
 	// that Acks / Data are available
 	// to send
 	channelSendConds [256](*sync.Cond)
+	// Cond variable to wait for channel
+	// responses
+	channelRespConds [256](*sync.Cond)
+	// Mutex and Channel Active Status
+	channelActiveMu [256]sync.Mutex
+	channelActive [256]bool
 }
 
 func (ca *chanApp) init(nrecv nrecvfn, nsend nsendfn, nclose nclosefn,
-	maxFrSz int, sendBufSz int, windowSz int) {}
+	maxFrSz int) {
+	ca.maxFrSz = maxFrSz
+	ca.nrecv = nrecv
+	ca.nsend = nsend
+	ca.nclose = nclose
+	ca.listenerCh = make(chan *Channel, 256)
+	ca.nsendCh = make(chan []byte, BUF_SIZE)
+	for i := 0; i < 256; i++ {
+		ca.channelRecvChs[i] = make(chan []byte, BUF_SIZE)
+		ca.channelReadChs[i] = make(chan []byte, BUF_SIZE)
+		ca.channelWriteChs[i] = make(chan []byte, BUF_SIZE)
+		ca.channelWindows[i].init(WINDOW_SIZE)
+		ca.channelTickers[i] = time.NewTicker(CLOCK_CYCLE)
+		ca.channelSendConds[i] = &sync.Cond{L: &sync.Mutex{}}
+		ca.channelRespConds[i] = &sync.Cond{L: &sync.Mutex{}}
+	}
+}
 func (ca *chanApp) start() {}
 func (ca *chanApp) shutdown() {}
+
+func (ca *chanApp) makeCh(cid int) (*Channel, error) {
+	ca.channelActiveMu[cid].Lock()
+	defer ca.channelActiveMu[cid].Unlock()
+	if ca.channelActive[cid] {
+		return nil, errors.New("Channel already is active")
+	}
+	return nil, nil
+}
