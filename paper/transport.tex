@@ -2,21 +2,22 @@
 
 \subsection{Session Establishment}
 
-On a successful handshake, the client and server have established a shared
-cryptographic session over which they can communicate through encrypted
-channels indefinitely (?), even in the case of loss of connectivity or IP address migration.
+SSTP relies on a cryptographic handshake to set up an encrypted transport
+tunnel between a client and a server. On a successful handshake, the client and
+server will have established a shared session over which they can communicate
+through encrypted channels, even in the case of loss of connectivity or IP
+address migration.
 
-There are two handshake modes: Discoverable Server and Hidden Server. If a
-server is discoverable, it will respond to all attempted handshakes, revealing
-its presence as an SSTP server. In hidden server mode, it will only respond to
-authenticated client requests, and otherwise will not respond.
+SSTP supports two handshake modes: Discoverable Server and Hidden Server. In
+Discoverable Server mode, an SSTP server will respond to all attempted
+protocol compliant handshakes, revealing its presence as an SSTP server. In
+hidden server mode, it will only respond to authenticated client requests, and otherwise will not respond.
 In both modes, the server does not need to keep any state during the handshake.
 
 \TODO{what to do when handshake messages are lost? David might be implementing
 this already?}
 
-\subsection{Discoverable Server}
-
+\subsubsection{Discoverable Server}
 
 \begin{figure}[ht]
 \begin{subfigure}{0.47\columnwidth}
@@ -34,7 +35,9 @@ this already?}
 \end{subfigure}
 	\vspace{-5pt}
 	\caption{\textbf{Session Establishment}---%
-	\textnormal{}
+	\textnormal{The discoverable server handshake
+	takes 2.5~round-trips, while hidden server takes 1~round-trip but requires
+	that the client be made known about the server out-of-band.}
 	}
 	\label{fig:crypto_handshake}
 \end{figure}
@@ -145,10 +148,8 @@ Using the state of the duplex, which should be identical to that of the
 client's, the server decrypts the SNI. It searches for the leaf certificate and intermediate certificate to authenticate the server ID.
 \todo{something about why there is just 1 intermediate}. Our PKI only uses a
 single intermediate certificate to ensure that the entire Server Authentication
-message fits into a single UDP packet.
-
-At this stage, both parties begin keeping session state, but are not yet
-authenticated to each other.
+message fits into a single UDP packet. At this stage, both parties begin keeping
+session state, but are not yet authenticated to each other.
 
 Continuing from the duplex prior, the server
 absorbs the Server Authentication message type ({0x4}), reserved bytes,
@@ -162,9 +163,8 @@ Server Authentication Message (Figure~\ref{fig:server_auth}).
 
 \input{bytefields/server_auth.tex}
 
-Upon receiving the Server Authentication message, the client absorbs the header
-(the message type, reserved bytes, and Session ID), and
-decrypts the certificates using the duplex material. It also the DH result between the client ephemeral and the server static,
+Upon receiving the Server Authentication message, the client absorbs the message type, reserved bytes, and Session ID, and
+decrypts the certificates using the duplex material. It also calculates the DH result between the client ephemeral and the server static,
 and verifies that the certificates are valid and the MAC is the same. This
 proves to the client that sender of the Server Authentication message owns the
 server static private key ($s_s^{priv}$) (the server is who it says it is) and
@@ -215,8 +215,26 @@ Transport messages are sent through one or more \emph{channels} within the
 session, which are discussed in Section~\ref{sec:channels}. 
 
 
-\subsection{Hidden Server}
-We also support establishing sessions with hidden servers.
+\subsubsection{Hidden Server}
+SSTP also has a Hidden Server mode, which supports connection establishment with
+servers that will not respond to scans targeting the service or any
+unauthenticated clients. However, this requires that the client knows
+the server's static public key. This is useful for secure shell applications
+where the client already knows the identity of the server. The Hidden Server
+SSTP handshake only takes a single round-trip
+(Figure~\ref{fig:crypto_handshake_hidden}).
+
+\vspace{5pt} \noindent\textit{1) Client Authentication:}\quad 
+At first, the client already knows the server's static public key
+($s_s^{pub}$),acquired out-of-band. However, one of our design goals is that the
+server will not reply to anyone who is not a valid client. Therefore, the first
+message in the handshake needs to authenticate the client to the server.
+
+
+\vspace{5pt} \noindent\textit{2) Server Authentication:}\quad 
+
+
+
 
 \subsection{Channel Multiplexing}
 \label{sec:channels}
