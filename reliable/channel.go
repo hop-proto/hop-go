@@ -46,11 +46,13 @@ func (c *Channel) Read(b []byte) (int, error) {
 	c.rDMut.Lock()
 	deadline = c.rDeadline
 	c.rDMut.Unlock()
+	hasDeadline := deadline.IsZero()
 	select {
 		case <-c.closeRW:
 			return 0, errors.New("Channel has closed")
 		default:
-			select {
+			if hasDeadline {
+				select {
 				case <-c.closeRW:
 					return 0, errors.New("Channel has closed")
 				case data, ok := <-c.ca.channelReadChs[c.cid]:
@@ -61,6 +63,18 @@ func (c *Channel) Read(b []byte) (int, error) {
 					return len(data), nil
 				case <-time.After(time.Until(deadline)):
 					return 0, errors.New("Read Deadline exceeded")
+				}
+			} else {
+				select {
+				case <-c.closeRW:
+					return 0, errors.New("Channel has closed")
+				case data, ok := <-c.ca.channelReadChs[c.cid]:
+					if !ok {
+						return 0, errors.New("Channel Application has closed")
+					}
+					copy(b, data)
+					return len(data), nil
+				}
 			}
 	}
 }
@@ -70,18 +84,27 @@ func (c *Channel) Write(b []byte) (int, error) {
 	c.wDMut.Lock()
 	deadline = c.wDeadline
 	c.wDMut.Unlock()
+	hasDeadline := deadline.IsZero()
 	select {
 		case <-c.closeRW:
 			return 0, errors.New("Channel has closed")
 		default:
-			select {
+			if hasDeadline {
+				select {
 				case <-c.closeRW:
 					return 0, errors.New("Channel has closed")
 				case c.ca.channelWriteChs[c.cid] <- b:
-					c.ca.channelSendConds[c.cid].Signal()
 					return len(b), nil
 				case <-time.After(time.Until(deadline)):
 					return 0, errors.New("Write Deadline exceeded")
+				}
+			} else {
+				select {
+				case <-c.closeRW:
+					return 0, errors.New("Channel has closed")
+				case c.ca.channelWriteChs[c.cid] <- b:
+					return len(b), nil
+				}
 			}
 	}
 }

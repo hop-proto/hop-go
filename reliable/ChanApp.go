@@ -161,10 +161,6 @@ type chanApp struct {
 	// Latest Ctr seen used as an Atomic UInt
 	// atomic go package
 	channelLatestAckSeen [256]uint32
-	// Conds to signal Channel Send thread
-	// that Acks / Data are available
-	// to send
-	channelSendConds [256](*sync.Cond)
 	// Cond variable to wait for channel
 	// responses
 	channelRespConds [256](*sync.Cond)
@@ -187,7 +183,6 @@ func (ca *chanApp) init(nrecv nrecvfn, nsend nsendfn, nclose nclosefn,
 		ca.channelWriteChs[i] = make(chan []byte, BUF_SIZE)
 		ca.channelWindows[i] = &Window{}
 		ca.channelWindows[i].init(WINDOW_SIZE)
-		ca.channelSendConds[i] = &sync.Cond{L: &sync.Mutex{}}
 		ca.channelRespConds[i] = &sync.Cond{L: &sync.Mutex{}}
 	}
 }
@@ -215,7 +210,6 @@ func (ca *chanApp) shutdown() {
 		close(ca.channelRecvChs[i])
 		close(ca.channelReadChs[i])
 		close(ca.channelWriteChs[i])
-		ca.channelSendConds[i].Signal()
 		ca.channelRespConds[i].Signal()
 		ca.channelTickers[i].Stop()
 	}
@@ -226,8 +220,14 @@ func (ca *chanApp) shutdown() {
 		// Garbage Collection
 		ca.channelWindows[i] = nil
 		ca.channelTickers[i] = nil
-		ca.channelSendConds[i] = nil
 		ca.channelRespConds[i] = nil
+	}
+}
+
+func (ca *chanApp) send(frame []byte) {
+	select {
+		case ca.nsendCh <- frame:
+		default:
 	}
 }
 
@@ -272,7 +272,40 @@ func (ca *chanApp) makeCh(cid int) (*Channel, error) {
 
 func (ca *chanApp) channelRecvThread(cid int) {
 	defer ca.wg.Done()
+	var latestCtrSeen uint32 = 0
+	for frame := range ca.channelRecvChs[cid] {
+		frameCtr := getCtr(frame)
+		if isReq(frame) {
+			fmt.Println("Channel", cid, "received request frame")
+		} else if isRep(frame) {
+			fmt.Println("Channel", cid, "received response frame")
+		} else { // Data frame
+			oldAckSeen := readCtr(&ca.channelLatestAckSeen[cid])
+			if oldAckSeen != getAck(frame) {
+				ca.channelTickers[cid].Reset(RTO)
+				updateCtr(&ca.channelLatestAckSeen[cid], getAck(frame))
+			}
+			if frameCtr <= latestCtrSeen || ca.channelWindows[cid].hasCtr(frameCtr) {
+				fmt.Println("Channel", cid, "already seen frame", frameCtr)
+				continue
+			}
+			pushed := ca.channelWindows[cid].push(frame)
+			if !pushed {
+				continue
+			}
+			for ca.channelWindows[cid].hasNextFrame(latestCtrSeen) &&
+				len(ca.channelReadChs[cid]) < BUF_SIZE {
+				poppedFrame := ca.channelWindows[cid].pop()
+				latestCtrSeen++
+				fmt.Println("Data", getData(poppedFrame))
+				ca.channelReadChs[cid] <- getData(poppedFrame)
+			}
+			updateCtr(&ca.channelLatestCtrSeen[cid], latestCtrSeen)
+			fmt.Println("Latest Ctr Seen", latestCtrSeen)
+		}
+	}
 	// whenever we receive a fresh ack call timer.Reset()
+
 }
 
 func (ca *chanApp) channelSendThread(cid int) {
