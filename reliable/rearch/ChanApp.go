@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -95,6 +96,8 @@ func (cl *ChannelListener) Close() error {
 	if cl.closed {
 		return errors.New("Listener already closed")
 	}
+	// Terminates all threads blocked on
+	// Accept() calls and future calls
 	close(cl.quit)
 	cl.closed = true
 	return nil
@@ -138,9 +141,11 @@ type chanApp struct {
 	// to channels.
 	channelRecvChs [256](chan []byte)
 	// Channel windows
-	channelWindows [256]Window
+	channelWindows [256]*Window
 	// Channel Tickers used for clock ticks
 	channelTickers [256](*time.Ticker)
+	// Channel RTO timers used as atomic int
+	channelTimers [256]int32
 	// Go Channels used internally to route contiguous
 	// data sections to channel.read() calls
 	channelReadChs [256](chan []byte)
@@ -174,14 +179,56 @@ func (ca *chanApp) init(nrecv nrecvfn, nsend nsendfn, nclose nclosefn,
 		ca.channelRecvChs[i] = make(chan []byte, BUF_SIZE)
 		ca.channelReadChs[i] = make(chan []byte, BUF_SIZE)
 		ca.channelWriteChs[i] = make(chan []byte, BUF_SIZE)
+		ca.channelWindows[i] = &Window{}
 		ca.channelWindows[i].init(WINDOW_SIZE)
-		ca.channelTickers[i] = time.NewTicker(CLOCK_CYCLE)
 		ca.channelSendConds[i] = &sync.Cond{L: &sync.Mutex{}}
 		ca.channelRespConds[i] = &sync.Cond{L: &sync.Mutex{}}
 	}
 }
-func (ca *chanApp) start() {}
-func (ca *chanApp) shutdown() {}
+
+func (ca *chanApp) start() {
+	for i := 0; i < 256; i++ {
+		ca.channelTickers[i] = time.NewTicker(CLOCK_CYCLE)
+	}
+	ca.wg.Add(1)
+	go ca.nsendThread()
+}
+
+func (ca *chanApp) shutdown() {
+	// Terminates Listeners
+	close(ca.listenerCh)
+	// Terminates the nsendThread
+	close(ca.nsendCh)
+	for i := 0; i < 256; i++ {
+		close(ca.channelRecvChs[i])
+		close(ca.channelReadChs[i])
+		close(ca.channelWriteChs[i])
+		ca.channelSendConds[i].Signal()
+		ca.channelRespConds[i].Signal()
+		ca.channelTickers[i].Stop()
+		// Is this necessary if we use tickers?
+		updateTimer(&ca.channelTimers[i], -100)
+	}
+	// Close Network
+	ca.nclose()
+	ca.wg.Wait()
+	for i := 0; i < 256; i++ {
+		// Garbage Collection
+		ca.channelWindows[i] = nil
+		ca.channelTickers[i] = nil
+		ca.channelSendConds[i] = nil
+		ca.channelRespConds[i] = nil
+	}
+}
+
+func (ca *chanApp) nsendThread() {
+	defer ca.wg.Done()
+	for frame := range ca.nsendCh {
+		fmt.Println("Network Sending", frame)
+		ca.nsend(frame)
+	}
+	fmt.Println("Network Sending Thread Exiting")
+}
 
 func (ca *chanApp) makeCh(cid int) (*Channel, error) {
 	ca.channelActiveMu[cid].Lock()
@@ -189,5 +236,7 @@ func (ca *chanApp) makeCh(cid int) (*Channel, error) {
 	if ca.channelActive[cid] {
 		return nil, errors.New("Channel already is active")
 	}
+	// TODO send req and block on resp cond
+	// set channel active to true
 	return nil, nil
 }
