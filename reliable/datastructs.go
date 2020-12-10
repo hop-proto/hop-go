@@ -5,11 +5,11 @@ import (
 )
 
 type RTQueue struct {
-	frames [](*[]byte)
-	count int
+	frames []([]byte)
+	count uint32
 }
 
-func (rtq *RTQueue) Push(frame *[]byte) {
+func (rtq *RTQueue) Push(frame []byte) {
 	rtq.frames = append(rtq.frames, frame)
 	rtq.count++
 }
@@ -21,8 +21,8 @@ func (rtq *RTQueue) Pop() {
 	}
 }
 
-func (rtq *RTQueue) Ack(ack int) {
-	for rtq.count > 0 && getCID(*(rtq.frames[0])) <= ack {
+func (rtq *RTQueue) Ack(ack uint32) {
+	for rtq.count > 0 && uint32(getCtr(rtq.frames[0])) <= ack {
 		rtq.Pop()
 	}
 }

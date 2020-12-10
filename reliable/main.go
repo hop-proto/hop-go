@@ -47,7 +47,7 @@ func main() {
 				fmt.Println(err.Error())
 				break
 			}
-			fmt.Println("Reading", buf[:n])
+			fmt.Println("Ch0 is Reading", buf[:n])
 		}
 	}()
 

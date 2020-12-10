@@ -149,6 +149,8 @@ type chanApp struct {
 	channelRecvChs [256](chan []byte)
 	// Channel windows
 	channelWindows [256]*Window
+	// Channel Retransmission Queues 
+	channelRTQueues [256]*RTQueue
 	// Channel Tickers used for clock ticks
 	channelTickers [256](*time.Ticker)
 	// Go Channels used internally to route contiguous
@@ -189,6 +191,7 @@ func (ca *chanApp) init(nrecv nrecvfn, nsend nsendfn, nclose nclosefn,
 		ca.channelMakeChSignal[i] = make(chan struct{}, 1)
 		ca.channelWindows[i] = &Window{}
 		ca.channelWindows[i].init(WINDOW_SIZE)
+		ca.channelRTQueues[i] = &RTQueue{frames: make([]([]byte), 0)}
 	}
 }
 
@@ -226,6 +229,7 @@ func (ca *chanApp) shutdown() {
 	for i := 0; i < 256; i++ {
 		// Garbage Collection
 		ca.channelWindows[i] = nil
+		ca.channelRTQueues[i] = nil
 		ca.channelTickers[i] = nil
 	}
 }
@@ -356,11 +360,24 @@ func (ca *chanApp) channelSendThread(cid int) {
 				ctr++
 				fmt.Println("Sending Frame", frame)
 				ca.send(frame)
-				//add to RTQueue
-		//	case <-ca.channelTickers[cid]:
-		//		update the RTQueue based on latestAckSeen
-		//		send stuff in the RTQueue with latest ctr
-		//		// increment ctr
+				ca.channelRTQueues[cid].Push(frame)
+				fmt.Println(ca.channelRTQueues[cid].frames)
+		case _, ok := <-ca.channelTickers[cid].C:
+			if !ok {
+				// ticker stopped
+				return
+			}
+			// Update RTQueue based on latest ack seen
+			latestAckSeen := readCtr(&ca.channelLatestAckSeen[cid])
+			ca.channelRTQueues[cid].Ack(latestAckSeen)
+
+			// Send frames with updated Ctrs as Ack
+			latestCtrSeen := readCtr(&ca.channelLatestCtrSeen[cid])
+			for _, fr := range ca.channelRTQueues[cid].frames {
+				frame := append(fr[0:4], toBytes(latestCtrSeen)...)
+				frame = append(frame, fr[8:len(fr)]...)
+				ca.send(frame)
+			}
 		case _, ok := <-ca.channelSendAckChs[cid]:
 				if !ok {
 					// SendAckCh closed
