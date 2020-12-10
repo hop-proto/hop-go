@@ -154,6 +154,7 @@ session state, but are not yet authenticated to each other.
 Continuing from the duplex prior, the server
 absorbs the Server Authentication message type ({0x4}), reserved bytes,
 and the Session ID, which is a random 4 byte opaque string chosen by the server.
+The server static public key is delivered as part of the leaf certificate.
 It encrypts the leaf and intermediate certificate using the current
 duplex state and squeezes out the certificate authentication tag. The server
 then performs a Diffie-Hellman calculation between the client ephemeral and the
@@ -216,22 +217,37 @@ session, which are discussed in Section~\ref{sec:channels}.
 
 
 \subsubsection{Hidden Server}
-SSTP also has a Hidden Server mode, which supports connection establishment with
-servers that will not respond to scans targeting the service or any
-unauthenticated clients. However, this requires that the client knows
-the server's static public key. This is useful for secure shell applications
+SSTP also supports a Hidden Server mode, which allows establishing connections with servers that
+will not respond to any unauthenticated clients, including scans targeting the service. 
+However, this requires that the client knows the server's static public key
+prior to the handshake. This is useful for secure shell applications
 where the client already knows the identity of the server. The Hidden Server
-SSTP handshake only takes a single round-trip
-(Figure~\ref{fig:crypto_handshake_hidden}).
+SSTP handshake will usually complete in a single round-trip
+(Figure~\ref{fig:crypto_handshake_hidden}), barring any lost packets. We follow the Noise IK
+handshake pattern~\cite{noise}.
 
-\vspace{5pt} \noindent\textit{1) Client Authentication:}\quad 
-At first, the client already knows the server's static public key
-($s_s^{pub}$),acquired out-of-band. However, one of our design goals is that the
-server will not reply to anyone who is not a valid client. Therefore, the first
-message in the handshake needs to authenticate the client to the server.
+\vspace{5pt} \noindent\textit{1) Client Hello+Authentication:}\quad 
+Initially, the client knows the server's static public key
+($s_s^{pub}$), acquired out-of-band. However, one of our design goals is that the server will not
+reply to anyone who is not a valid client. Therefore, the first message in the handshake needs to
+authenticate the client to the server. 
 
+\input{bytefields/client_auth_hidden.tex}
 
-\vspace{5pt} \noindent\textit{2) Server Authentication:}\quad 
+The client instantiates a new duplex object and absorbs the protocol name, message type (0x7),
+protocol version, reserved bytes, and client ephemeral public key. It absorbs the DH result between
+the client ephemeral and server static, and uses the duplex material to encrypt its own static
+public key. The Client Static Authentication tag is squeezed out. The client then absorbs the DH
+result between the client static and server static, and encrypts a timestamp to prevent replay
+attacks. A MAC is squeezed from the duplex object and appended to the Client Hello+Authentication
+message (Figure~\ref{fig:client_auth_hidden}).
+
+When the server receives the Client Hello+Authentication message, it instantiates its own duplex
+object and absorbs the protocol name, message type, version, reserved bytes, and client ephemeral as
+sent in the message. The server also absorbs the DH result between the client ephemeral and server
+static, and uses the duplex material to decrypt the client's static public key.
+
+\vspace{5pt} \noindent\textit{2) Server Hello+Authentication:}\quad 
 
 
 
