@@ -24,7 +24,6 @@ func main() {
 	conn, err := net.ListenUDP("udp", caddr)
 	// conn, err = SSTP.ListenSSTP(...)
 
-	fmt.Println("Starting ChannelApp")
 	ca := ChannelApp{}
 	ca.Init(conn, saddr, MAX_FRAME_SIZE)
 	ca.Start()
@@ -41,7 +40,7 @@ func main() {
 		defer wg.Done()
 		for i := 0; i<256; i++{
 			var buf = make([]byte, 1024)
-			ch0 := &Channel{ca: ca.ca}
+			ch0 := &Channel{ca.ca, 0, false, false, time.Now(), time.Now()}
 			ch0.SetDeadline(time.Now())
 			n, err := ch0.Read(buf)
 			if err != nil {
@@ -55,18 +54,16 @@ func main() {
 	if os.Args[1] == "c" {
 		ca.ca.send([]byte{1, 0x83 ,0,0,  0,0,0,0,  0,0,0,5, 11, 12, 13, 14, 15}) // Req
 		ca.ca.send([]byte{2, 0x48 ,0,0,  0,0,0,0,  0,0,0,5, 11, 12, 13, 14, 15}) // Rep
-		// Data
-		ca.ca.send([]byte{0,0,0,5,  0,0,0,1,  0,0,0,5, 11, 12, 13, 14, 15}) // Data
-		ca.ca.send([]byte{0,0,0,2,  0,0,0,1,  0,0,0,2, 2, 3}) // Data
-		ca.ca.send([]byte{0,0,0,4,  0,0,0,2,  0,0,0,4, 7, 8, 9, 10}) // Data
-		ca.ca.send([]byte{0,0,0,3,  0,0,0,4,  0,0,0,3, 4, 5, 6}) // Data
-		ca.ca.send([]byte{0,0,0,1,  0,0,0,4,  0,0,0,1, 1}) // Data
-		// repeat packets
-		ca.ca.send([]byte{0,0,0,5,  0,0,0,5,  0,0,0,5, 11, 12, 13, 14, 15}) // Data
-		ca.ca.send([]byte{0,0,0,2,  0,0,0,6,  0,0,0,2, 2, 3}) // Data
-		ca.ca.send([]byte{0,0,0,4,  0,0,0,6,  0,0,0,4, 7, 8, 9, 10}) // Data
-		ca.ca.send([]byte{0,0,0,3,  0,0,0,6,  0,0,0,3, 4, 5, 6}) // Data
-		ca.ca.send([]byte{0,0,0,1,  0,0,0,6,  0,0,0,1, 1}) // Data
+		ca.ca.send([]byte{0,0,0,5,  0,0,0,0,  0,0,0,5, 11, 12, 13, 14, 15}) // Data
+		ca.ca.send([]byte{0,0,0,2,  0,0,0,0,  0,0,0,2, 2, 3}) // Data
+		ca.ca.send([]byte{0,0,0,4,  0,0,0,0,  0,0,0,4, 7, 8, 9, 10}) // Data
+		ca.ca.send([]byte{0,0,0,3,  0,0,0,0,  0,0,0,3, 4, 5, 6}) // Data
+		ca.ca.send([]byte{0,0,0,1,  0,0,0,0,  0,0,0,1, 1}) // Data
+		ca.ca.send([]byte{0,0,0,5,  0,0,0,0,  0,0,0,5, 11, 12, 13, 14, 15}) // Data
+		ca.ca.send([]byte{0,0,0,2,  0,0,0,0,  0,0,0,2, 2, 3}) // Data
+		ca.ca.send([]byte{0,0,0,4,  0,0,0,0,  0,0,0,4, 7, 8, 9, 10}) // Data
+		ca.ca.send([]byte{0,0,0,3,  0,0,0,0,  0,0,0,3, 4, 5, 6}) // Data
+		ca.ca.send([]byte{0,0,0,1,  0,0,0,0,  0,0,0,1, 1}) // Data
 	}
 	wg.Wait()
 }

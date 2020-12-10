@@ -5,24 +5,12 @@ import (
 	"sync/atomic"
 )
 
-func updateAck(ack *uint32, newack uint32) {
-	atomic.StoreUint32(ack, newack)
+func updateCtr(ctr *uint32, newctr uint32) {
+	atomic.StoreUint32(ctr, newctr)
 }
 
-func readAck(ack *uint32) uint32 {
-	return atomic.LoadUint32(ack)
-}
-
-func addTimer(timer *int32, shift int32) {
-	atomic.AddInt32(timer, shift)
-}
-
-func updateTimer(timer *int32, newTimer int32) {
-	atomic.StoreInt32(timer, newTimer)
-}
-
-func readTimer(timer *int32) int32 {
-	return atomic.LoadInt32(timer)
+func readCtr(ctr *uint32) uint32 {
+	return atomic.LoadUint32(ctr)
 }
 
 func getCID(frame []byte) int {
@@ -31,6 +19,10 @@ func getCID(frame []byte) int {
 
 func getCtr(frame []byte) uint32 {
 	return binary.BigEndian.Uint32([]byte{frame[8],frame[9],frame[10], frame[11]})
+}
+
+func getAck(frame []byte) uint32 {
+	return binary.BigEndian.Uint32([]byte{frame[4],frame[5],frame[6], frame[7]})
 }
 
 func getData(frame []byte) []byte {

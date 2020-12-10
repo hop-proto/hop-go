@@ -103,7 +103,7 @@ func (w *Window) push(frame []byte) bool {
 	return false
 }
 
-func (w *Window) hasNextframe(lastacked uint32) bool{
+func (w *Window) hasNextFrame(lastacked uint32) bool{
 	return w.len() > 0 && w.pq[0].priority == lastacked + 1
 }
 
