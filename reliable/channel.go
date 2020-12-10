@@ -117,6 +117,8 @@ func (c *Channel) Close() error {
 	}
 	close(c.closeRW)
 	c.closed = true
+	// Also need to handle FINs
+	// and set channel active to false
 	return nil
 }
 

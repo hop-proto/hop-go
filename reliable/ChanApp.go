@@ -161,9 +161,11 @@ type chanApp struct {
 	// Latest Ctr seen used as an Atomic UInt
 	// atomic go package
 	channelLatestAckSeen [256]uint32
-	// Cond variable to wait for channel
-	// responses
-	channelRespConds [256](*sync.Cond)
+	// Signals channelSendThread to send ack
+	channelSendAckChs [256](chan struct{})
+	// Signals MakeCh() calls that channel
+	// is available
+	channelMakeChSignal [256](chan struct{})
 	// Mutex and Channel Active Status
 	channelActiveMu [256]sync.Mutex
 	channelActive [256]bool
@@ -181,9 +183,10 @@ func (ca *chanApp) init(nrecv nrecvfn, nsend nsendfn, nclose nclosefn,
 		ca.channelRecvChs[i] = make(chan []byte, BUF_SIZE)
 		ca.channelReadChs[i] = make(chan []byte, BUF_SIZE)
 		ca.channelWriteChs[i] = make(chan []byte, BUF_SIZE)
+		ca.channelSendAckChs[i] = make(chan struct{}, 1)
+		ca.channelMakeChSignal[i] = make(chan struct{}, 1)
 		ca.channelWindows[i] = &Window{}
 		ca.channelWindows[i].init(WINDOW_SIZE)
-		ca.channelRespConds[i] = &sync.Cond{L: &sync.Mutex{}}
 	}
 }
 
@@ -210,7 +213,8 @@ func (ca *chanApp) shutdown() {
 		close(ca.channelRecvChs[i])
 		close(ca.channelReadChs[i])
 		close(ca.channelWriteChs[i])
-		ca.channelRespConds[i].Signal()
+		close(ca.channelSendAckChs[i])
+		close(ca.channelMakeChSignal[i])
 		ca.channelTickers[i].Stop()
 	}
 	// Close Network which terminates nRecvThread
@@ -220,7 +224,6 @@ func (ca *chanApp) shutdown() {
 		// Garbage Collection
 		ca.channelWindows[i] = nil
 		ca.channelTickers[i] = nil
-		ca.channelRespConds[i] = nil
 	}
 }
 
@@ -265,8 +268,9 @@ func (ca *chanApp) makeCh(cid int) (*Channel, error) {
 	if ca.channelActive[cid] {
 		return nil, errors.New("Channel already is active")
 	}
-	// TODO send req and block on resp cond
-	// set channel active to true
+	// TODO send req and block on read from makeCh go channel?
+	// <-channelMakeChSignal[cid]
+	// ca.channelActive[cid] = true
 	return nil, nil
 }
 
@@ -277,8 +281,18 @@ func (ca *chanApp) channelRecvThread(cid int) {
 		frameCtr := getCtr(frame)
 		if isReq(frame) {
 			fmt.Println("Channel", cid, "received request frame")
+			// need to send channel to listenerCh
+			// since auto accept
+			// need to send response
 		} else if isRep(frame) {
 			fmt.Println("Channel", cid, "received response frame")
+			// handle processing logic
+			/* 
+			select {
+				case ca.channelMakeChSignal[cid] <- struct{}{}:
+				default:
+			}
+			*/
 		} else { // Data frame
 			oldAckSeen := readCtr(&ca.channelLatestAckSeen[cid])
 			fmt.Println("Channel", cid, "has seen Ack", oldAckSeen)
@@ -290,6 +304,12 @@ func (ca *chanApp) channelRecvThread(cid int) {
 			}
 			if frameCtr <= latestCtrSeen || ca.channelWindows[cid].hasCtr(frameCtr) {
 				fmt.Println("Channel", cid, "already seen frame", frameCtr)
+				// Signal Send Thread to send frame with latestCtrSeen
+				// Done in nonblocking manner
+				select {
+					case ca.channelSendAckChs[cid] <-struct{}{}:
+					default:
+				}
 				continue
 			}
 			pushed := ca.channelWindows[cid].push(frame)
@@ -304,6 +324,12 @@ func (ca *chanApp) channelRecvThread(cid int) {
 				ca.channelReadChs[cid] <- getData(poppedFrame)
 			}
 			updateCtr(&ca.channelLatestCtrSeen[cid], latestCtrSeen)
+			// Signal Send Thread to send frame with latestCtrSeen
+			// Done in nonblocking manner
+			select {
+				case ca.channelSendAckChs[cid] <-struct{}{}:
+				default:
+			}
 			fmt.Println("Channel", cid, "Latest Contigious Ctr Seen", latestCtrSeen)
 		}
 	}
@@ -312,23 +338,19 @@ func (ca *chanApp) channelRecvThread(cid int) {
 func (ca *chanApp) channelSendThread(cid int) {
 	defer ca.wg.Done()
 	/*
-	previousSentAck := -1
 	for {
-		latestCtr := load atomic latest ctr
-		needSendAck := previousSentAck != latestCtr
 		select {
-			case data, ok <- channelWriteChs[cid]:
+			case data, ok <- ca.channelWriteChs[cid]:
 				process data into frame
 				send frame with latest ctr
-			case <-channelTickers[cid]:
+				add to RTQueue
+			case <-ca.channelTickers[cid]:
 				update the RTQueue based on latestAckSeen
 				send stuff in the RTQueue with latest ctr
-			default:
-				if needAck {
-					send no data frame with latestAck
-				}
+			case <-ca.signalSendAck[cid]
+				load atomic latestCtrseen
+				send frame acking latest ctrseen
 		}
-		previousSentAck = latestCtr
 	}
 
 	*/
