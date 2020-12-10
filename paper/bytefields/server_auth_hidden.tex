@@ -6,10 +6,11 @@
     
                 \begin{bytefield}[bitwidth=7pt,bitheight=15pt]{32}
                     % \bitheader{0-31}\\
-                    \bitbox{12}{ Type := 0x4 (1 byte) } &
+                    \bitbox{12}{ Type := 0x8 (1 byte) } &
                     \bitbox{13}{ Leaf Cert. Len (2 bytes)} &
                     \bitbox{7}{ Res. (1 byte)} \\
                     \bitbox{32}{ SessionID (4 bytes)} \\
+                    \bitbox{32}{ Server Ephemeral $e_s^{pub}$ (32 bytes)} \\
                     \colorbitbox{lightgreen}{16}{ Leaf Certificate (* bytes) } &
                     \colorbitbox{lightgreen}{16}{ Intermediate Certs. (* bytes) } \\
                     \bitbox{32}{ Certificate Authentication Tag (16 bytes) } \\
@@ -18,9 +19,9 @@
     
             \end{small}
         
-        \caption{\textbf{Server Authentication Message}---
+        \caption{\textbf{Server Authentication Message (Hidden Server Mode)}---
          }
-        \label{fig:server_auth}
+        \label{fig:server_auth_hidden}
         \vspace{-5pt}
     \end{figure}
     

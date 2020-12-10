@@ -153,7 +153,7 @@ session state, but are not yet authenticated to each other.
 
 Continuing from the duplex prior, the server
 absorbs the Server Authentication message type ({0x4}), reserved bytes,
-and the Session ID, which is a random 4 byte opaque string chosen by the server.
+and the Session ID, which is a random 4~byte opaque string chosen by the server.
 The server static public key is delivered as part of the leaf certificate.
 It encrypts the leaf and intermediate certificate using the current
 duplex state and squeezes out the certificate authentication tag. The server
@@ -239,22 +239,41 @@ protocol version, reserved bytes, and client ephemeral public key. It absorbs th
 the client ephemeral and server static, and uses the duplex material to encrypt its own static
 public key. The Client Static Authentication tag is squeezed out. The client then absorbs the DH
 result between the client static and server static, and encrypts a timestamp to prevent replay
-attacks. A MAC is squeezed from the duplex object and appended to the Client Hello+Authentication
+attacks. A MAC is squeezed from the duplex object and appended to the Client Authentication
 message (Figure~\ref{fig:client_auth_hidden}).
 
-When the server receives the Client Hello+Authentication message, it instantiates its own duplex
+When the server receives the Client Authentication message, it instantiates its own duplex
 object and absorbs the protocol name, message type, version, reserved bytes, and client ephemeral as
 sent in the message. The server also absorbs the DH result between the client ephemeral and server
-static, and uses the duplex material to decrypt the client's static public key.
+static, and uses the duplex material to decrypt the client's static public key. If the client static
+public key is that of an authorized client, the server continues with the handshake. Otherwise, it
+does not respond. It then absorbs the DH result between the client static and the server static,
+and uses the duplex state to decrypt the timestamp. The server verifies that the timestamp is
+greater than the last timestamp seen from the last valid handshake from the client. If the
+verification fails, the server does not respond to the client.
 
 \vspace{5pt} \noindent\textit{2) Server Hello+Authentication:}\quad 
+Once the server has verified that the client initiating the handshake is an authorized client, the
+server replies with a Server Authentication message. Continuing with its duplex object, it absorbs
+the message type (0x8), reserved bytes, and a random 4~byte session ID. It generates a new ephemeral
+key pair for this session and absorbs the DH result between the client ephemeral and server
+ephemeral. Using the current state of the duplex, the server encrypts the leaf and intermediate
+certificates. \todo{something about hidden servers should only be private servers, so will only host
+a single service and only has 1 leaf certificate? } After encrypting the
+certificates, it uses the duplex to squeeze out a MAC for the Server Authentication message
+(Figure~\ref{fig:server_auth_hidden}).
 
+\input{bytefields/server_auth_hidden.tex}
+
+When the client receives the Server Authentication message, it performs the same operations such
+that the duplex states are identical. It decrypts the certificates to check that they are valid and
+verifies that the MAC squeezed from the full handshake duplex matches the MAC provided by the
+server. 
 
 
 
 \subsection{Channel Multiplexing}
 \label{sec:channels}
-
 
 SSTP supports multiple channels within a single encrypted session. It borrows
 and simplifies aspects of QUIC streams and TCP to implement a reliable stream
@@ -292,8 +311,8 @@ must begin with Frame Number 0.
 The Channel Initiation Request contains a non-negotiable Channel ID and Channel Type (reliable or
 unreliable) chosen by the initiator, as well as the initiator's Receive Window
 Size. If any of these values need to change during the lifetime of
-the channel, the channel is closed and a new one is created. Additionally, any
-initial data for the channel can be sent in the Data field.
+the channel, the channel is closed and a new one is created. The initial data field is ignored in
+the Channel Initiation request.
 
 Upon receipt of a Channel Initiation Request, the responder
 replies with a Channel Initiation Response. Channel Initiation Responses have
@@ -330,7 +349,7 @@ orthogonal to reliable transmission within a channel and leave it to future
 work. 
 
 The Frame Number is a 32-bit sequence number starting at 0 that counts
-individual frames. Channel handshake messages always have Frame Number
+individual frames containing data or FIN messages. Channel handshake messages always have Frame Number
 0, and data always starts at Frame Number 1. In the
 event that the Frame Number reaches the maximum value of $2^{32} - 1$, it will
 wraparound back to 0, with \texttt{REQ} and \texttt{RESP} flags unset so as to
