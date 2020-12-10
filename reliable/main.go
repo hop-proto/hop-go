@@ -33,13 +33,13 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		time.Sleep(10*time.Second)
+		time.Sleep(5*time.Second)
 		ca.Shutdown()
 	}()
 	wg.Add(1)
 	go func(){
 		defer wg.Done()
-		for i := 0; i<256; i++{
+		for i := 0; i<10; i++{
 			var buf = make([]byte, 1024)
 			ch0 := &Channel{ca: ca.ca}
 			n, err := ch0.Read(buf)
@@ -68,12 +68,17 @@ func main() {
 		ca.ca.send([]byte{0,0,0,3,  0,0,0,6,  0,0,0,3, 4, 5, 6}) // Data
 		ca.ca.send([]byte{0,0,0,1,  0,0,0,6,  0,0,0,1, 1}) // Data
 		*/
+		time.Sleep(2*time.Second)
 		ch0 := &Channel{ca: ca.ca}
 		ch0.Write([]byte{1, 2, 3}) // Data
 		ch0.Write([]byte{4, 5}) // Data
 		ch0.Write([]byte{6,7,8,9,10}) // Data
 		ch0.Write([]byte{11, 12, 13}) // Data
 		ch0.Write([]byte{14, 15, 16, 17}) // Data
+	} else {
+		ch0 := &Channel{ca: ca.ca}
+		ch0.Write([]byte{1,2,3,4,5,6,7,8,9}) // Data
+		ch0.Write([]byte{10, 11, 12}) // Data
 	}
 	wg.Wait()
 }

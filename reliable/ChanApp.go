@@ -263,7 +263,6 @@ func (ca *chanApp) nRecvThread(){
 func (ca *chanApp) nSendThread() {
 	defer ca.nwg.Done()
 	for frame := range ca.nsendCh {
-		fmt.Println("Network Sending", frame)
 		ca.nsend(frame)
 	}
 	fmt.Println("Network Sending Thread Exiting")
@@ -358,24 +357,29 @@ func (ca *chanApp) channelSendThread(cid int) {
 				latestCtrSeen := readCtr(&ca.channelLatestCtrSeen[cid])
 				frame := buildFrame(cid, 0, latestCtrSeen, ctr, data)
 				ctr++
-				fmt.Println("Sending Frame", frame)
+				fmt.Println("Channel", cid, "sending Frame", frame)
 				ca.send(frame)
 				ca.channelRTQueues[cid].Push(frame)
-				fmt.Println(ca.channelRTQueues[cid].frames)
 		case _, ok := <-ca.channelTickers[cid].C:
 			if !ok {
 				// ticker stopped
 				return
 			}
 			// Update RTQueue based on latest ack seen
+			if cid == 0 {
+				fmt.Println("Channel", cid, "has RTQueue:", ca.channelRTQueues[cid].frames)
+			}
 			latestAckSeen := readCtr(&ca.channelLatestAckSeen[cid])
 			ca.channelRTQueues[cid].Ack(latestAckSeen)
-
+			if cid == 0 {
+				fmt.Println("Channel", cid, "has updated RTQueue:", ca.channelRTQueues[cid].frames)
+			}
 			// Send frames with updated Ctrs as Ack
 			latestCtrSeen := readCtr(&ca.channelLatestCtrSeen[cid])
 			for _, fr := range ca.channelRTQueues[cid].frames {
 				frame := append(fr[0:4], toBytes(latestCtrSeen)...)
 				frame = append(frame, fr[8:len(fr)]...)
+				fmt.Println("Channel", cid, "restransmitting", frame)
 				ca.send(frame)
 			}
 		case _, ok := <-ca.channelSendAckChs[cid]:
@@ -386,6 +390,7 @@ func (ca *chanApp) channelSendThread(cid int) {
 				latestCtrSeen := readCtr(&ca.channelLatestCtrSeen[cid])
 				// Empty frame with ignored ctr
 				frame := buildFrame(cid, 0, latestCtrSeen, 0, []byte{})
+				fmt.Println("Channel", cid, "sending ack frame", frame)
 				ca.send(frame)
 		}
 	}
