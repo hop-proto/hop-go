@@ -281,7 +281,10 @@ func (ca *chanApp) channelRecvThread(cid int) {
 			fmt.Println("Channel", cid, "received response frame")
 		} else { // Data frame
 			oldAckSeen := readCtr(&ca.channelLatestAckSeen[cid])
-			if oldAckSeen != getAck(frame) {
+			fmt.Println("Channel", cid, "has seen Ack", oldAckSeen)
+			fmt.Println("Channel", cid, "is seeing Ack", getAck(frame))
+			if oldAckSeen < getAck(frame) {
+				// Reset RTO
 				ca.channelTickers[cid].Reset(RTO)
 				updateCtr(&ca.channelLatestAckSeen[cid], getAck(frame))
 			}
@@ -297,15 +300,13 @@ func (ca *chanApp) channelRecvThread(cid int) {
 				len(ca.channelReadChs[cid]) < BUF_SIZE {
 				poppedFrame := ca.channelWindows[cid].pop()
 				latestCtrSeen++
-				fmt.Println("Data", getData(poppedFrame))
+				fmt.Println("Channel", cid, "receiving data", getData(poppedFrame))
 				ca.channelReadChs[cid] <- getData(poppedFrame)
 			}
 			updateCtr(&ca.channelLatestCtrSeen[cid], latestCtrSeen)
-			fmt.Println("Latest Ctr Seen", latestCtrSeen)
+			fmt.Println("Channel", cid, "Latest Contigious Ctr Seen", latestCtrSeen)
 		}
 	}
-	// whenever we receive a fresh ack call timer.Reset()
-
 }
 
 func (ca *chanApp) channelSendThread(cid int) {
