@@ -1,0 +1,26 @@
+
+\begin{figure}
+    % \vspace{2ex}
+        \centering
+            \begin{small}
+    
+                \begin{bytefield}[bitwidth=7pt,bitheight=15pt]{32}
+                    % \bitheader{0-31}\\
+                    \bitbox{12}{ Type := 0x7 (1 byte) } &
+                    \bitbox{12}{ Version (1 byte) } &
+                    \bitbox{8}{ Res. (2 bytes)} \\
+                    \bitbox{32}{ Client Ephemeral $e_c^{pub}$ (32 bytes)} \\
+                    \colorbitbox{lightgreen}{32}{ Client Static $s_c^{pub}$ (32 bytes)} \\
+                    \bitbox{32}{ Client Static Authentication Tag (16 bytes)}\\
+                    \colorbitbox{lightgreen}{32}{ Timestamp (12 bytes) }\\
+                    \bitbox{32}{ MAC (16 bytes) } \\
+                \end{bytefield}
+    
+            \end{small}
+        
+        \caption{\textbf{Client Authentication (Hidden Server Mode)}---
+         }
+        \label{fig:client_auth_hidden}
+        \vspace{-5pt}
+    \end{figure}
+    
