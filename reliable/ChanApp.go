@@ -127,8 +127,10 @@ type nsendfn func([]byte)
 type nclosefn func()
 
 type chanApp struct {
-	// Goroutine Wait Group
-	wg sync.WaitGroup
+	// Network Goroutine Wait Group
+	nwg sync.WaitGroup
+	// Channel Goroutine Wait Group
+	chwg sync.WaitGroup
 	// Network Recv Fn
 	nrecv nrecvfn
 	// Network Send Fn
@@ -191,24 +193,20 @@ func (ca *chanApp) init(nrecv nrecvfn, nsend nsendfn, nclose nclosefn,
 }
 
 func (ca *chanApp) start() {
-	ca.wg.Add(1)
+	ca.nwg.Add(1)
 	go ca.nRecvThread()
-	ca.wg.Add(1)
+	ca.nwg.Add(1)
 	go ca.nSendThread()
 	for i := 0; i < 256; i++ {
 		ca.channelTickers[i] = time.NewTicker(RTO)
-		ca.wg.Add(1)
+		ca.chwg.Add(1)
 		go ca.channelRecvThread(i)
-		ca.wg.Add(1)
+		ca.chwg.Add(1)
 		go ca.channelSendThread(i)
 	}
 }
 
 func (ca *chanApp) shutdown() {
-	// Terminates Listeners
-	close(ca.listenerCh)
-	// Terminates the nSendThread
-	close(ca.nsendCh)
 	for i := 0; i < 256; i++ {
 		close(ca.channelRecvChs[i])
 		close(ca.channelReadChs[i])
@@ -217,9 +215,14 @@ func (ca *chanApp) shutdown() {
 		close(ca.channelMakeChSignal[i])
 		ca.channelTickers[i].Stop()
 	}
+	ca.chwg.Wait()
+	// Terminates Listeners
+	close(ca.listenerCh)
+	// Terminates the nSendThread
+	close(ca.nsendCh)
 	// Close Network which terminates nRecvThread
 	ca.nclose()
-	ca.wg.Wait()
+	ca.nwg.Wait()
 	for i := 0; i < 256; i++ {
 		// Garbage Collection
 		ca.channelWindows[i] = nil
@@ -235,7 +238,7 @@ func (ca *chanApp) send(frame []byte) {
 }
 
 func (ca *chanApp) nRecvThread(){
-	defer ca.wg.Done()
+	defer ca.nwg.Done()
 	for {
 		n, buf, err := ca.nrecv()
 		if err != nil {
@@ -254,7 +257,7 @@ func (ca *chanApp) nRecvThread(){
 }
 
 func (ca *chanApp) nSendThread() {
-	defer ca.wg.Done()
+	defer ca.nwg.Done()
 	for frame := range ca.nsendCh {
 		fmt.Println("Network Sending", frame)
 		ca.nsend(frame)
@@ -275,10 +278,9 @@ func (ca *chanApp) makeCh(cid int) (*Channel, error) {
 }
 
 func (ca *chanApp) channelRecvThread(cid int) {
-	defer ca.wg.Done()
+	defer ca.chwg.Done()
 	var latestCtrSeen uint32 = 0
 	for frame := range ca.channelRecvChs[cid] {
-		frameCtr := getCtr(frame)
 		if isReq(frame) {
 			fmt.Println("Channel", cid, "received request frame")
 			// need to send channel to listenerCh
@@ -293,6 +295,8 @@ func (ca *chanApp) channelRecvThread(cid int) {
 				default:
 			}
 			*/
+		} else if isFin(frame) {
+			// handle Fin Logic
 		} else { // Data frame
 			oldAckSeen := readCtr(&ca.channelLatestAckSeen[cid])
 			fmt.Println("Channel", cid, "has seen Ack", oldAckSeen)
@@ -302,56 +306,70 @@ func (ca *chanApp) channelRecvThread(cid int) {
 				ca.channelTickers[cid].Reset(RTO)
 				updateCtr(&ca.channelLatestAckSeen[cid], getAck(frame))
 			}
-			if frameCtr <= latestCtrSeen || ca.channelWindows[cid].hasCtr(frameCtr) {
-				fmt.Println("Channel", cid, "already seen frame", frameCtr)
+			// Frame has data / not just an Ack Frame
+			if getDataSz(frame) > 0 {
+				frameCtr := getCtr(frame)
+				// Frame not seen before
+				if !(frameCtr <= latestCtrSeen || ca.channelWindows[cid].hasCtr(frameCtr)) {
+					pushed := ca.channelWindows[cid].push(frame)
+					if !pushed {
+						// Window is full
+						continue
+					}
+					// For loop puts all contiguous data frames into read ch buffer
+					for ca.channelWindows[cid].hasNextFrame(latestCtrSeen) &&
+						len(ca.channelReadChs[cid]) < BUF_SIZE {
+						// Window contains frame after the latest frame acknowledged
+						// ReadCh for that CID still has space
+						poppedFrame := ca.channelWindows[cid].pop()
+						latestCtrSeen++
+						fmt.Println("Channel", cid, "receiving data", getData(poppedFrame))
+						ca.channelReadChs[cid] <- getData(poppedFrame)
+					}
+					updateCtr(&ca.channelLatestCtrSeen[cid], latestCtrSeen)
+					fmt.Println("Channel", cid, "Latest Contigious Ctr Seen", latestCtrSeen)
+				}
 				// Signal Send Thread to send frame with latestCtrSeen
+				// basically send an ACK frame
 				// Done in nonblocking manner
 				select {
 					case ca.channelSendAckChs[cid] <-struct{}{}:
 					default:
 				}
-				continue
 			}
-			pushed := ca.channelWindows[cid].push(frame)
-			if !pushed {
-				continue
-			}
-			for ca.channelWindows[cid].hasNextFrame(latestCtrSeen) &&
-				len(ca.channelReadChs[cid]) < BUF_SIZE {
-				poppedFrame := ca.channelWindows[cid].pop()
-				latestCtrSeen++
-				fmt.Println("Channel", cid, "receiving data", getData(poppedFrame))
-				ca.channelReadChs[cid] <- getData(poppedFrame)
-			}
-			updateCtr(&ca.channelLatestCtrSeen[cid], latestCtrSeen)
-			// Signal Send Thread to send frame with latestCtrSeen
-			// Done in nonblocking manner
-			select {
-				case ca.channelSendAckChs[cid] <-struct{}{}:
-				default:
-			}
-			fmt.Println("Channel", cid, "Latest Contigious Ctr Seen", latestCtrSeen)
 		}
 	}
 }
 
 func (ca *chanApp) channelSendThread(cid int) {
-	defer ca.wg.Done()
-	/*
+	defer ca.chwg.Done()
+	var ctr uint32 = 1
 	for {
 		select {
-			case data, ok <- ca.channelWriteChs[cid]:
-				process data into frame
-				send frame with latest ctr
-				add to RTQueue
-			case <-ca.channelTickers[cid]:
-				update the RTQueue based on latestAckSeen
-				send stuff in the RTQueue with latest ctr
-			case <-ca.signalSendAck[cid]
-				load atomic latestCtrseen
-				send frame acking latest ctrseen
+		case data, ok := <-ca.channelWriteChs[cid]:
+				if !ok {
+					// Write Ch has closed
+					return
+				}
+				latestCtrSeen := readCtr(&ca.channelLatestCtrSeen[cid])
+				frame := buildFrame(cid, 0, latestCtrSeen, ctr, data)
+				ctr++
+				fmt.Println("Sending Frame", frame)
+				ca.send(frame)
+				//add to RTQueue
+		//	case <-ca.channelTickers[cid]:
+		//		update the RTQueue based on latestAckSeen
+		//		send stuff in the RTQueue with latest ctr
+		//		// increment ctr
+		case _, ok := <-ca.channelSendAckChs[cid]:
+				if !ok {
+					// SendAckCh closed
+					return
+				}
+				latestCtrSeen := readCtr(&ca.channelLatestCtrSeen[cid])
+				// Empty frame with ignored ctr
+				frame := buildFrame(cid, 0, latestCtrSeen, 0, []byte{})
+				ca.send(frame)
 		}
 	}
-
-	*/
 }

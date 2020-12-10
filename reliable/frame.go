@@ -66,3 +66,7 @@ func isRep(frame []byte) bool {
 func isReq(frame []byte) bool {
 	return (frame[1] & 0x80 != 0)
 }
+
+func isFin(frame []byte) bool {
+	return (frame[1] & 0x8 != 0)
+}

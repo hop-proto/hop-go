@@ -46,7 +46,7 @@ func (c *Channel) Read(b []byte) (int, error) {
 	c.rDMut.Lock()
 	deadline = c.rDeadline
 	c.rDMut.Unlock()
-	hasDeadline := deadline.IsZero()
+	hasDeadline := !deadline.IsZero()
 	select {
 		case <-c.closeRW:
 			return 0, errors.New("Channel has closed")
@@ -84,7 +84,7 @@ func (c *Channel) Write(b []byte) (int, error) {
 	c.wDMut.Lock()
 	deadline = c.wDeadline
 	c.wDMut.Unlock()
-	hasDeadline := deadline.IsZero()
+	hasDeadline := !deadline.IsZero()
 	select {
 		case <-c.closeRW:
 			return 0, errors.New("Channel has closed")
