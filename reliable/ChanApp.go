@@ -347,6 +347,13 @@ func (ca *chanApp) channelRecvThread(cid int) {
 func (ca *chanApp) channelSendThread(cid int) {
 	defer ca.chwg.Done()
 	var ctr uint32 = 1
+
+	// TODO Track RECV WINDOW for receiving side based on bytes
+	// Response received in channel init contains window size in bytes
+	// Need to set this as a chanApp variable
+	// Send simply needs to keep a local RECV Window Size variable
+	// Data writes may need to "peek" channelWriteChs to avoid sending frames
+	// when there is not enough space in the RECV Window
 	for {
 		select {
 		case data, ok := <-ca.channelWriteChs[cid]:
