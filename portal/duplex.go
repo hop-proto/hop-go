@@ -44,6 +44,7 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	out.duplex.Squeeze(macBuf[:])
 	logrus.Debugf("server: regen sh mac: %x", macBuf[:])
 	out.duplex.Initialize(out.handshakeKey[:], []byte(ProtocolName), nil)
+	out.remoteAddr = clientAddr
 	return out, nil
 }
 

@@ -2,15 +2,17 @@ package portal
 
 import (
 	"net"
+	"sync"
 	"testing"
 
 	"github.com/sirupsen/logrus"
+	"gotest.tools/assert"
 )
 
 // TODO(dadrian): Actually specify transcripts?
 var clientServerTranscripts = []int{0}
 
-func TestClientServerCompatibility(t *testing.T) {
+func TestClientServerCompatibilityHandshake(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	if err != nil {
@@ -18,27 +20,23 @@ func TestClientServerCompatibility(t *testing.T) {
 	}
 	udpC := pc.(*net.UDPConn)
 	s := NewServer(udpC, nil)
-	testChan := make(chan int)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
-		for i := range clientServerTranscripts {
-			t.Logf("sending %d", i)
-			testChan <- i
-			c, err := Dial("udp", pc.LocalAddr().String(), nil)
-			if err != nil {
-				t.Errorf("could not connect on transcript %d: %s", i, err)
-				continue
-			}
-			if err := c.Handshake(); err != nil {
-				t.Errorf("error in handshake index %d: %s", i, err)
-			}
-			c.Close()
-		}
-		close(testChan)
+		c, err := Dial("udp", pc.LocalAddr().String(), &Config{})
+		assert.NilError(t, err)
+		err = c.Handshake()
+		assert.Check(t, err)
+		ss := s.sessions[c.sessionID]
+		assert.Assert(t, ss)
+		assert.Equal(t, c.sessionID, ss.sessionID)
+		assert.Equal(t, c.sessionKey, ss.key)
+		s.Close()
+		wg.Done()
 	}()
-	go s.Serve()
-	for transcriptIdx := range testChan {
-		t.Logf("received %d", transcriptIdx)
-	}
-	s.Close()
-	t.Fail()
+	go func() {
+		s.Serve()
+	}()
+	// TODO(dadrian): Remove the wait group once Server.Close works
+	wg.Wait()
 }

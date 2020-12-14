@@ -4,17 +4,22 @@ import (
 	"bytes"
 	"errors"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"golang.org/x/crypto/curve25519"
 	"zmap.io/portal/cyclist"
 )
 
 // Enforce ClientConn implements net.Conn
-var _ net.Conn = &ClientConn{}
+var _ net.Conn = &Client{}
 
-type ClientConn struct {
+// Client implements net.Conn
+//
+// TODO(dadrian): Further document
+type Client struct {
+	m sync.Mutex
+
 	underlyingConn *net.UDPConn
 	duplex         cyclist.Cyclist
 	publicDH       PublicDH
@@ -33,47 +38,21 @@ type ClientConn struct {
 
 	sessionID  [SessionIDLen]byte
 	sessionKey [KeyLen]byte
-
-	handshakeFn func() error
 }
-
-// Version is the protocol version being used. Only one version is supported.
-const Version byte = 0x01
-
-const HeaderLen = 4
-const MacLen = 16
-const KeyLen = 16
-const DHLen = curve25519.PointSize
-const CookieLen = 32 + 16 + 12
-const SNILen = 256
-const SessionIDLen = 4
-const CounterLen = 8
-
-// TODO(dadrian): Verify this
-const MaxTotalPacketSize = 65535 - 18
-
-// ProtocolName is the string representation of the parameters used in this version
-const ProtocolName = "noise_NN_XX_cyclist_keccak_p1600_12"
-
-var ErrBufOverflow = errors.New("write would overflow buffer")
-var ErrBufUnderflow = errors.New("read would be past end of buffer")
-var ErrUnexpectedMessage = errors.New("attempted to deserialize unexpected message type")
-var ErrUnsupportedVersion = errors.New("unsupported version")
-var ErrInvalidMessage = errors.New("invalid message")
-var ErrUnknownSession = errors.New("unknown session")
-var ErrUnknown = errors.New("unknown")
 
 // Handshake performs the Portal handshake with the remote host. The connection
 // must already be open. It is an error to call Handshake on a connection that
 // has already performed the portal handshake.
-func (c *ClientConn) Handshake() error {
+func (c *Client) Handshake() error {
+	c.m.Lock()
+	defer c.m.Unlock()
 	c.buf = make([]byte, 1024*1024)
 	c.encBuf = make([]byte, len(c.buf))
 	c.pos = 0
-	return c.handshakeFn()
+	return c.clientHandshake()
 }
 
-func (c *ClientConn) initializeKeyMaterial() {
+func (c *Client) initializeKeyMaterial() {
 	c.ephemeral.Generate()
 	// TODO(dadrian): This should actually be, well, static
 	c.static.Generate()
@@ -81,7 +60,7 @@ func (c *ClientConn) initializeKeyMaterial() {
 	c.duplex.Absorb([]byte(ProtocolName))
 }
 
-func (c *ClientConn) clientHandshake() error {
+func (c *Client) clientHandshake() error {
 	c.initializeKeyMaterial()
 	clientHello := ClientHello{
 		Ephemeral: c.ephemeral.public[:],
@@ -250,42 +229,63 @@ func (c *ClientConn) clientHandshake() error {
 	return nil
 }
 
-func (c *ClientConn) Write(b []byte) (n int, err error) {
-	return
+func (c *Client) writeTransport(plaintext []byte) (int, error) {
+	// TODO(dadrian): Implement encryption
+	return c.underlyingConn.Write(plaintext)
 }
 
-func (c *ClientConn) Close() error {
-	return nil
+func (c *Client) Write(b []byte) (n int, err error) {
+	c.m.Lock()
+	defer c.m.Unlock()
+	return c.writeTransport(b)
 }
 
-func (c *ClientConn) Read(b []byte) (n int, err error) {
-	return
+// Close gracefully shutds down the connection. Repeated calls to close will error.
+func (c *Client) Close() error {
+	c.m.Lock()
+	// TODO(dadrian): Do we send a protocol close message?
+	defer c.m.Unlock()
+	return c.underlyingConn.Close()
 }
 
-func (c *ClientConn) LocalAddr() net.Addr {
+func (c *Client) Read(b []byte) (n int, err error) {
+	return 0, errors.New("unimplemented")
+}
+
+// LocalAddr returns the underlying UDP address.
+//
+// TODO(dadrian): Should this be a subspace address?
+func (c *Client) LocalAddr() net.Addr {
 	return c.underlyingConn.LocalAddr()
 }
 
-func (c *ClientConn) RemoteAddr() net.Addr {
+// RemoteAddr returns the underlying remote UDP address.
+//
+// TODO(dadrian): Should this be a subspace address?
+func (c *Client) RemoteAddr() net.Addr {
 	return c.underlyingConn.RemoteAddr()
 }
 
-func (c *ClientConn) SetDeadline(t time.Time) error {
+// SetDeadline implements net.Conn.
+func (c *Client) SetDeadline(t time.Time) error {
 	return c.underlyingConn.SetDeadline(t)
 }
 
-func (c *ClientConn) SetReadDeadline(t time.Time) error {
+// SetReadDeadline implements net.Conn.
+func (c *Client) SetReadDeadline(t time.Time) error {
 	return c.underlyingConn.SetReadDeadline(t)
 }
 
-func (c *ClientConn) SetWriteDeadline(t time.Time) error {
+// SetWriteDeadline implements net.Conn.
+func (c *Client) SetWriteDeadline(t time.Time) error {
 	return c.underlyingConn.SetWriteDeadline(t)
 }
 
-func Client(conn *net.UDPConn, config *Config) *ClientConn {
-	c := &ClientConn{
+// NewClient returns a Client configured as specified, using the underlying UDP
+// connection. The Client has not yet completed a handshake.
+func NewClient(conn *net.UDPConn, config *Config) *Client {
+	c := &Client{
 		underlyingConn: conn,
 	}
-	c.handshakeFn = c.clientHandshake
 	return c
 }

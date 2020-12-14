@@ -8,7 +8,7 @@ import (
 	"errors"
 	"net"
 	"sync"
-	"time"
+	"sync/atomic"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/cyclist"
@@ -21,7 +21,6 @@ const cookieLen = 128
 type SessionID [4]byte
 
 type HandshakeState struct {
-	sync.Mutex
 	duplex          cyclist.Cyclist
 	ephemeral       X25519KeyPair
 	macBuf          [MacLen]byte
@@ -34,6 +33,8 @@ type HandshakeState struct {
 	ee []byte
 	es []byte
 	se []byte
+
+	remoteAddr *net.UDPAddr
 }
 
 type SessionState struct {
@@ -43,7 +44,7 @@ type SessionState struct {
 	key        [16]byte
 	remoteAddr net.UDPAddr
 
-	handle ServerConn
+	handle *Conn
 }
 
 func (ss *SessionState) incrementCounterLocked(b []byte) {
@@ -59,6 +60,11 @@ func (ss *SessionState) incrementCounterLocked(b []byte) {
 	ss.count++
 }
 
+const (
+	flagHaltingServe = 1
+	flagClosed       = 1 << 1
+)
+
 type Server struct {
 	// TODO(dadrian): Use per-resource locks, instead of one lock for
 	// everything. Not all state needs to be locked at once.
@@ -70,14 +76,14 @@ type Server struct {
 	oob     []byte
 	udpConn *net.UDPConn
 
-	inShutdown atomicBool
+	flags int32
 
-	listenerOpen bool
+	listenerClosed bool
 
 	handshakes map[string]*HandshakeState
 	sessions   map[SessionID]*SessionState
 
-	pendingConnections chan *ServerConn
+	pendingConnections chan *Conn
 
 	cookieKey    []byte
 	cookieCipher cipher.Block
@@ -169,13 +175,21 @@ func (s *Server) readPacket() error {
 		}
 	case MessageTypeClientAuth:
 		logrus.Debug("server: received client auth")
-		_, err = s.handleClientAuth(s.inBuf[:msgLen], addr)
+		_, hs, err := s.handleClientAuth(s.inBuf[:msgLen], addr)
 		if err != nil {
 			return err
 		}
+		logrus.Debug("server: finishHandshakeLocked")
+		s.finishHandshakeLocked(hs)
+		// TODO(dadrian): Don't use remote addr as the key
+		delete(s.handshakes, hs.remoteAddr.String())
+		logrus.Debug("server: deleted")
 	case MessageTypeServerHello, MessageTypeServerAuth:
 		// Server-side should not receive messages only sent by the server
 		return ErrUnexpectedMessage
+	case MessageTypeTransport:
+		// TODO(dadrian)
+		return errors.New("unimplemented transport")
 	default:
 		// TODO(dadrian): Make this an explicit error once all handshake message types are handled
 		return errors.New("unimplemented")
@@ -257,38 +271,36 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState)
 	return pos, nil
 }
 
-func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, error) {
+func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeState, error) {
 	x := b
 	pos := 0
 	if len(b) < HeaderLen+SessionIDLen+MacLen+MacLen {
 		logrus.Debug("server: client auth too short")
-		return 0, ErrBufUnderflow
+		return 0, nil, ErrBufUnderflow
 	}
 	if b[0] != MessageTypeClientAuth {
-		return 0, ErrUnexpectedMessage
+		return 0, nil, ErrUnexpectedMessage
 	}
 	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
-		return 0, ErrInvalidMessage
+		return 0, nil, ErrInvalidMessage
 	}
 	hs, ok := s.handshakes[addr.String()]
 	if !ok {
 		logrus.Debugf("server: no handshake state for handshake packet from %s", addr)
-		return pos, ErrUnexpectedMessage
+		return pos, nil, ErrUnexpectedMessage
 	}
-	hs.Lock()
-	defer hs.Unlock()
 	hs.duplex.Absorb(x[:HeaderLen])
 	x = x[HeaderLen:]
 	pos += HeaderLen
 	sessionID := x[:SessionIDLen]
 	if !bytes.Equal(hs.sessionID[:], sessionID) {
 		logrus.Debugf("server: mismatched session ID for %s: expected %x, got %x", addr, hs.sessionID, sessionID)
-		return pos, ErrUnexpectedMessage
+		return pos, nil, ErrUnexpectedMessage
 	}
 	_, ok = s.sessions[hs.sessionID]
 	if !ok {
 		logrus.Debugf("server: could not find session ID %x", hs.sessionID)
-		return pos, ErrUnexpectedMessage
+		return pos, nil, ErrUnexpectedMessage
 	}
 	hs.duplex.Absorb(sessionID)
 	x = x[SessionIDLen:]
@@ -301,7 +313,7 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, error) {
 	clientTag := x[:MacLen]
 	if !bytes.Equal(hs.macBuf[:], clientTag) {
 		logrus.Debugf("server: mismatched tag in client auth: expected %x, got %x", hs.macBuf, clientTag)
-		return pos, ErrInvalidMessage
+		return pos, nil, ErrInvalidMessage
 	}
 	x = x[MacLen:]
 	pos += MacLen
@@ -309,7 +321,7 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, error) {
 	hs.se, err = hs.ephemeral.DH(hs.clientStatic[:])
 	if err != nil {
 		logrus.Debugf("server: unable to calculated se: %s", err)
-		return pos, err
+		return pos, nil, err
 	}
 	logrus.Debugf("server: se %x", hs.se)
 	hs.duplex.Absorb(hs.se)
@@ -317,23 +329,40 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, error) {
 	clientMac := x[:MacLen]
 	if !bytes.Equal(hs.macBuf[:], clientMac) {
 		logrus.Debugf("server: mismatched mac in client auth: expected %x, got %x", hs.macBuf, clientMac)
-		return pos, ErrInvalidMessage
+		return pos, nil, ErrInvalidMessage
 	}
 	x = x[MacLen:]
 	pos += MacLen
-	return pos, nil
+	return pos, hs, nil
 }
 
-// TODO(dadrian): Should this provide a Listen()-like API? Once a session is established, should we return something?
+// Serve blocks until the server is closed.
 func (s *Server) Serve() error {
+	state := atomic.LoadInt32(&s.flags)
+	newState := state & ^flagClosed
+	newState &= ^flagHaltingServe
+	if state&flagClosed != 0 {
+		for !atomic.CompareAndSwapInt32(&s.flags, state, newState) {
+			state = atomic.LoadInt32(&s.flags)
+			newState := state & ^flagClosed
+			newState &= ^flagHaltingServe
+		}
+	}
+	logrus.Errorf("state server start: %b", state & ^flagClosed)
 	// TODO(dadrian): Probably shoudln't initialize this here
 	// TODO(dadrian): Do we really need three buffers?
-	// TODO(dadrian): Can I make this thread safe?
 	s.inBuf = make([]byte, 1024*1024)
 	s.outBuf = make([]byte, len(s.inBuf))
 	s.encBuf = make([]byte, len(s.inBuf))
 	s.oob = make([]byte, 1024)
-	for !s.inShutdown.isSet() {
+	for {
+		state := atomic.LoadInt32(&s.flags)
+		if state&flagHaltingServe != 0 {
+			return nil
+		}
+		if state&flagClosed != 0 {
+			return nil
+		}
 		err := s.readPacket()
 		if err != nil {
 			logrus.Error(err)
@@ -438,6 +467,7 @@ func (s *Server) writeToSession(b []byte, sessionID SessionID) error {
 	if pktLen > MaxTotalPacketSize {
 		return bytes.ErrTooLarge
 	}
+	// TODO(dadrian): Avoid memory allocation
 	buf := make([]byte, 0, pktLen)
 	x := buf
 	x[0] = MessageTypeTransport
@@ -447,8 +477,9 @@ func (s *Server) writeToSession(b []byte, sessionID SessionID) error {
 	x = x[HeaderLen:]
 	copy(x, sessionID[:])
 	x = x[SessionIDLen:]
-	// TODO(dadrian): Lock
+	s.Lock()
 	ss, ok := s.sessions[sessionID]
+	s.Unlock()
 	if !ok {
 		return ErrUnknownSession
 	}
@@ -464,6 +495,44 @@ func (s *Server) writeToSession(b []byte, sessionID SessionID) error {
 	return s.writePacket(buf, &ss.remoteAddr)
 }
 
+func (s *Server) finishHandshakeLocked(hs *HandshakeState) error {
+	sid := hs.sessionID
+	ss := s.sessions[sid]
+	if ss == nil {
+		return ErrUnknownSession
+	}
+	// TODO(dadrian): This maybe shouldn't be a channel if we want to only
+	// buffer a specific number of bytes, not packets.
+	// TODO(dadrian): Figure out these sizes from a configuration
+	c := new(Conn)
+	c.in = make(chan []byte)
+	c.out = make(chan []byte)
+	c.signal = make(chan int)
+	c.sessionID = sid
+	ss.handle = c
+	select {
+	case s.pendingConnections <- c:
+		return nil
+	default:
+		// TODO(dadrian): Maybe this should timeout?
+		// TODO(dadrian): This should be aligned with max pending handshakes in configuration.
+		return errors.New("too many pending connections")
+	}
+}
+
+// RemoteAddrFor returns the current net.Addr associated with a given session.
+func (s *Server) RemoteAddrFor(sessionID SessionID) net.Addr {
+	s.Lock()
+	defer s.Unlock()
+	ss := s.sessions[sessionID]
+	if ss == nil {
+		return nil
+	}
+	return &ss.remoteAddr
+}
+
+// NewServer returns a Server listening on the provided UDP connection. The
+// returned Server object is a valid net.Listener.
 func NewServer(conn *net.UDPConn, config *Config) *Server {
 	s := Server{
 		udpConn: conn,
@@ -471,6 +540,8 @@ func NewServer(conn *net.UDPConn, config *Config) *Server {
 		cookieKey:  make([]byte, 16),
 		handshakes: make(map[string]*HandshakeState),
 		sessions:   make(map[SessionID]*SessionState),
+		// TODO(dadrian): Should come from the config
+		pendingConnections: make(chan *Conn, 10),
 	}
 	// TODO(dadrian): This probably shouldn't happen in this function
 	_, err := rand.Read(s.cookieKey)
@@ -484,50 +555,4 @@ func NewServer(conn *net.UDPConn, config *Config) *Server {
 	// TODO(dadrian): This should be on the config object
 	s.staticKey.Generate()
 	return &s
-}
-
-var _ net.Conn = &ServerConn{}
-
-type ServerConn struct {
-	isClosing atomicBool
-	sessionID SessionID
-	s         *Server
-}
-
-func (c *ServerConn) Close() error {
-	// TODO(dadrian)
-	return nil
-}
-
-func (c *ServerConn) Read(b []byte) (int, error) {
-	// TODO(dadrian)
-	return 0, nil
-}
-
-func (c *ServerConn) Write(b []byte) (int, error) {
-	// TODO(dadrian)
-	return 0, nil
-}
-
-func (c *ServerConn) LocalAddr() net.Addr {
-	// TODO(dadrian)
-	return nil
-}
-
-func (c *ServerConn) RemoteAddr() net.Addr {
-	// TODO(dadrian)
-	return nil
-}
-
-func (c *ServerConn) SetReadDeadline(deadline time.Time) error {
-	// TODO(dadrian)
-	return nil
-}
-
-func (c *ServerConn) SetWriteDeadline(deadline time.Time) error {
-	return nil
-}
-
-func (c *ServerConn) SetDeadline(deadline time.Time) error {
-	return nil
 }
