@@ -8,7 +8,6 @@ import (
 	"errors"
 	"net"
 	"sync"
-	"sync/atomic"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/cyclist"
@@ -66,17 +65,14 @@ const (
 )
 
 type Server struct {
-	// TODO(dadrian): Use per-resource locks, instead of one lock for
-	// everything. Not all state needs to be locked at once.
-	sync.Mutex
-
 	inBuf   []byte
 	outBuf  []byte
 	encBuf  []byte
 	oob     []byte
 	udpConn *net.UDPConn
 
-	flags int32
+	// TODO(dadrian): #concurrency
+	closed bool
 
 	listenerClosed bool
 
@@ -338,31 +334,13 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 
 // Serve blocks until the server is closed.
 func (s *Server) Serve() error {
-	state := atomic.LoadInt32(&s.flags)
-	newState := state & ^flagClosed
-	newState &= ^flagHaltingServe
-	if state&flagClosed != 0 {
-		for !atomic.CompareAndSwapInt32(&s.flags, state, newState) {
-			state = atomic.LoadInt32(&s.flags)
-			newState := state & ^flagClosed
-			newState &= ^flagHaltingServe
-		}
-	}
-	logrus.Errorf("state server start: %b", state & ^flagClosed)
 	// TODO(dadrian): Probably shoudln't initialize this here
 	// TODO(dadrian): Do we really need three buffers?
 	s.inBuf = make([]byte, 1024*1024)
 	s.outBuf = make([]byte, len(s.inBuf))
 	s.encBuf = make([]byte, len(s.inBuf))
 	s.oob = make([]byte, 1024)
-	for {
-		state := atomic.LoadInt32(&s.flags)
-		if state&flagHaltingServe != 0 {
-			return nil
-		}
-		if state&flagClosed != 0 {
-			return nil
-		}
+	for !s.closed {
 		err := s.readPacket()
 		if err != nil {
 			logrus.Error(err)
@@ -477,9 +455,8 @@ func (s *Server) writeToSession(b []byte, sessionID SessionID) error {
 	x = x[HeaderLen:]
 	copy(x, sessionID[:])
 	x = x[SessionIDLen:]
-	s.Lock()
+	// TODO(dadrian): #concurrency
 	ss, ok := s.sessions[sessionID]
-	s.Unlock()
 	if !ok {
 		return ErrUnknownSession
 	}
@@ -489,8 +466,7 @@ func (s *Server) writeToSession(b []byte, sessionID SessionID) error {
 	// TODO(dadrian): Encrypt this
 	x = x[len(b):]
 	// TODO(dadrian): Mac
-	ss.Lock()
-	defer ss.Unlock()
+	// TODO(dadrian): #concurrency
 	ss.incrementCounterLocked(counter)
 	return s.writePacket(buf, &ss.remoteAddr)
 }
@@ -522,8 +498,7 @@ func (s *Server) finishHandshakeLocked(hs *HandshakeState) error {
 
 // RemoteAddrFor returns the current net.Addr associated with a given session.
 func (s *Server) RemoteAddrFor(sessionID SessionID) net.Addr {
-	s.Lock()
-	defer s.Unlock()
+	// TODO(dadrian): #concurrency
 	ss := s.sessions[sessionID]
 	if ss == nil {
 		return nil

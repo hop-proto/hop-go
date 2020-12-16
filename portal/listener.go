@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"sync/atomic"
 )
 
 // ErrUDPOnly is returned when non-UDP connections are attempted or used.
@@ -53,27 +52,11 @@ func (s *Server) LocalAddr() net.Addr {
 // Close stops the listener, but any active sessions will remain open.
 func (s *Server) Close() error {
 	// Check to see if we already stopped or are stopping listening
-	state := atomic.LoadInt32(&s.flags)
-	if state&flagClosed != 0 || state&flagHaltingServe != 0 {
-		return io.EOF
+	if !s.closed {
+		s.closed = false
+		return nil
 	}
-	for !atomic.CompareAndSwapInt32(&s.flags, state, state|flagHaltingServe) {
-		state = atomic.LoadInt32(&s.flags)
-		// Someone else just set the halting flag
-		if state&flagHaltingServe != 0 || state&flagClosed != 0 {
-			return io.EOF
-		}
-	}
-	// We set the halting flag
-	state |= flagHaltingServe
-	close(s.pendingConnections)
-	newState := state & flagClosed
-	for !atomic.CompareAndSwapInt32(&s.flags, state, newState) {
-		state = atomic.LoadInt32(&s.flags)
-		newState = state & ^flagHaltingServe
-		newState |= flagClosed
-	}
-	return nil
+	return io.EOF
 }
 
 // Listen returns a $PROTOCOL_NAME listener configured as specified.

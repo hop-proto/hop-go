@@ -36,7 +36,7 @@ type Client struct {
 	es []byte
 	se []byte
 
-	sessionID  [SessionIDLen]byte
+	sessionID  SessionID
 	sessionKey [KeyLen]byte
 }
 
