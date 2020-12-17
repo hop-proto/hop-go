@@ -1,3 +1,63 @@
 \section{Identify Forwarding}
 
-SSTP supports identity forwarding as a first-class feature.
+In this section, we present a protocol for secure identity forwarding. The purpose of delegation is
+for the user (the principal) to grant a party (the delegate) permission to perform some operation on
+a target (the server). We
+abide by the Secure Delegation Principle defined by Kogan et al.~\cite{kogan2017guardian-agent},
+which allows a delegate to act under a principal's credentials only after the principal can verify
+and enforce the delegate's intent. This intent includes the identity of the delegate used for the
+delegation instance, a set of commands or operations the delegate can issue, to whom the delegate
+can issue these commands, and when the delegate can issue them. 
+
+
+
+
+\subsection{Connection Flow}
+
+At a high level, the delegate requests that the principal grants permission for it to perform a
+series of operations on the server, i.e., the \emph{intent}. If the principal approves the intent
+request, it establishes an SSTP tunnel with the server, proxied through the delegate. The principal
+communicates the identity and intent of the delegate to the server over the SSTP tunnel. If the
+server also approves the intent, the delegate can then establish an SSTP tunnel with the server
+using the identity approved by the principal and can execute the specified commands.
+
+\subsubsection{Intent Request}
+Initially, the principal and the delegate have already established an SSTP tunnel between them.
+The delegate first makes an intent request for the principal to approve or deny. To do so, 
+it initiates a reliable Delegation Channel with the Principal, and sends an \emph{Intent Request} over this
+channel. The message data contains a type identifier indicating that it is an Intent Request, and
+contains the \emph{Intent Message} which is a serialization of an the following fields: the ID, address, and port of the destination
+server, an ephemeral public key used as the delegate's temporary identifier, a list of allowed
+channel types and operations specific to those channels (e.g., commands to be run over a shell
+channel), and a timestamp for when the delegate's permissions expires. \todo{how to dictate when the
+delegate can issue commands. Should it be time based, number of uses, something else?} The principal checks this Intent Request against its security policy and either approves
+or denies the request. If it denies the request, it will reply with an Intent Denied message
+indicating the reason it was denied. \todo{do we really need an Accept Intent Request message type?
+Maybe for symmetry, but it doesn't seem to be required}.
+
+\subsubsection{Intent Communication}
+The principal needs to communicate the intent to the server in order to grant the
+delegate permission to establish an SSTP tunnel with the server. The server will then also be able
+to enforce that the delegate only executes the actions specified in the Intent Request. However, the
+principal may not necessarily have connectivity to the server. If it approves the Intent Request,
+the principal will initiate a Network Proxy channel with the delegate, asking to it to proxy a connection to the server. The delegate forwards
+any messages sent through the Network Proxy channel to the server over UDP, and any replies
+from the server are forwarded back to the principal. The principal then establishes an SSTP
+tunnel with the server and initiates a Delegation Channel. It relays the Intent Message to the
+server via an \emph{Intent Communication} message over this channel, which simply contains a type
+identifier and the Intent Message as the payload. The server then replies with either an Accept
+Intent Communication message or a Deny Intent Communication message, specifying a reason. At this
+point, the server is aware of the delegate's identity, the actions it wishes to execute, and when it
+will execute them. Note that
+the communication between the principal and the server are through the SSTP tunnel, so any Intent
+Communication messages
+cannot be read or tampered by the delegate. 
+
+\subsubsection{Perform Intent}
+Once the server has accepted the intent, the principal sends a \emph{Perform Intent} message to the
+delegate via the Delegation Channel from before. The delegate will then establish its own SSTP
+tunnel with the server, using the ephemeral public key specified in the Intent Request as its client
+static in the SSTP handshake protocol. It can then execute its actions as specified in the Intent
+Request. The server can optionally prove to the principal that it received valid delegated
+permissions for the actions via the proxied Delegation Channel with the principal. Otherwise, the
+principal and tear down any Delegation Channels created as part of the session.
