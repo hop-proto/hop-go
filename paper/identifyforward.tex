@@ -22,13 +22,13 @@ communicates the identity and intent of the delegate to the server over the SSTP
 server also approves the intent, the delegate can then establish its own SSTP tunnel with the server
 using the identity approved by the principal and execute the specified actions.
 
-\begin{figure}[ht]
+\begin{figure}
     \includegraphics[width=1\columnwidth]{figures/delegation_protocol.pdf}
     \vspace{-5pt}
     \caption{\textbf{Secure Delegation Protocol}---%
     \textnormal{}
     }
-    \label{fig:crypto_handshake}
+    \label{fig:delegation_protocol}
     \end{figure}
 
 \subsubsection{Intent Request}
@@ -70,4 +70,5 @@ tunnel with the server, using the ephemeral public key specified in the Intent R
 static in the SSTP handshake protocol. It can then execute its actions as specified in the Intent
 Request. The server can optionally prove to the principal that it received valid delegated
 permissions for the actions via the proxied Delegation Channel with the principal. Otherwise, the
-principal and tear down any Delegation Channels created as part of the delegation session.
+principal and tear down any Delegation Channels created as part of the delegation session. The
+protocol connection flow is shown in Figure~\ref{fig:delegation_protocol}.
