@@ -108,18 +108,11 @@ func (c *Cyclist) stateAddByte(b byte, offset int) {
 
 func (c *Cyclist) stateAddBytes(b []byte) {
 	length := len(b)
+	if length == 0 {
+		return
+	}
 	i := 0
 	for stateIdx := 0; stateIdx < 25; stateIdx++ {
-		/*
-			Big Endian?
-			for shift := 56; shift >= 0; shift -= 8 {
-				c.s[stateIdx] ^= uint64(b[i]) << shift
-				i++
-				if i >= length {
-					return
-				}
-			}
-		*/
 		// Little Endian?
 		for shift := 0; shift < 64; shift += 8 {
 			c.s[stateIdx] ^= uint64(b[i]) << shift

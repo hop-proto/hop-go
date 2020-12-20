@@ -5,6 +5,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"net"
 	"sync"
@@ -19,6 +20,10 @@ const cookieLen = 128
 // SessionID is an IP-independent identifier of a tunnel.
 type SessionID [4]byte
 
+// HandshakeState tracks state across the lifetime of a handshake, starting with
+// the ClientHello. A HandshakeState may be allocated on ClientHello, it does
+// not need to be stored until after the ClientAck since enough state is
+// contained within the cookie to reconstruct the HandshakeState.
 type HandshakeState struct {
 	duplex          cyclist.Cyclist
 	ephemeral       X25519KeyPair
@@ -36,6 +41,8 @@ type HandshakeState struct {
 	remoteAddr *net.UDPAddr
 }
 
+// SessionState contains the cryptographic state associated with a SessionID
+// after the successful completion of a handshake.
 type SessionState struct {
 	sync.Mutex
 	sessionID  SessionID
@@ -157,6 +164,7 @@ func (s *Server) readPacket() error {
 		s.handshakes[addr.String()] = hs
 		ss, err := s.newSessionState()
 		copy(hs.sessionID[:], ss.sessionID[:])
+		ss.remoteAddr = *addr
 		if err != nil {
 			logrus.Debug("could not make new session state")
 			return err
@@ -184,8 +192,15 @@ func (s *Server) readPacket() error {
 		// Server-side should not receive messages only sent by the server
 		return ErrUnexpectedMessage
 	case MessageTypeTransport:
-		// TODO(dadrian)
-		return errors.New("unimplemented transport")
+		logrus.Debugf("server: received transport message from %s", addr)
+		// TODO(dadrian): Avoid allocation
+		plaintext := make([]byte, 65535)
+		n, err := s.handleTransport(addr, s.inBuf[:msgLen], plaintext)
+		if err != nil {
+			return err
+		}
+		logrus.Debugf("server: read plaintext %x from %s", plaintext[:n], addr)
+		return nil
 	default:
 		// TODO(dadrian): Make this an explicit error once all handshake message types are handled
 		return errors.New("unimplemented")
@@ -332,6 +347,40 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	return pos, hs, nil
 }
 
+func (s *Server) handleTransport(addr *net.UDPAddr, msg []byte, plaintext []byte) (int, error) {
+	if len(msg) < HeaderLen+SessionIDLen+CounterLen+MacLen {
+		return 0, ErrBufUnderflow
+	}
+	b := msg
+	if MessageType(b[0]) != MessageTypeTransport {
+		return 0, ErrUnexpectedMessage
+	}
+	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
+		logrus.Debugf("server: transport message not zeroed %x", b[:4])
+		return 0, ErrInvalidMessage
+	}
+	b = b[HeaderLen:]
+	var sessionID SessionID
+	copy(sessionID[:], b[:SessionIDLen])
+	b = b[SessionIDLen:]
+	counter := binary.LittleEndian.Uint64(b)
+	logrus.Debugf("server: handling transport from %s with counter %d", addr, counter)
+	b = b[CounterLen:]
+	ss, ok := s.sessions[sessionID]
+	if !ok {
+		return 0, ErrUnknownSession
+	}
+	// TODO(dadrian): Decryption
+	dataLen := len(b) - MacLen
+	if len(plaintext) < dataLen {
+		return 0, ErrBufOverflow
+	}
+	copy(plaintext, b[:dataLen])
+	ss.handle.in <- plaintext[:dataLen]
+	// TODO(dadrian): Mac verification
+	return dataLen, nil
+}
+
 // Serve blocks until the server is closed.
 func (s *Server) Serve() error {
 	// TODO(dadrian): Probably shoudln't initialize this here
@@ -441,12 +490,12 @@ func (s *Server) writeServerHello(b []byte, clientAddr *net.UDPAddr, hs *Handsha
 }
 
 func (s *Server) writeToSession(b []byte, sessionID SessionID) error {
-	pktLen := HeaderLen + SessionIDLen + CounterLen + len(b) + 16
+	pktLen := HeaderLen + SessionIDLen + CounterLen + len(b) + MacLen
 	if pktLen > MaxTotalPacketSize {
 		return bytes.ErrTooLarge
 	}
 	// TODO(dadrian): Avoid memory allocation
-	buf := make([]byte, 0, pktLen)
+	buf := make([]byte, pktLen)
 	x := buf
 	x[0] = MessageTypeTransport
 	x[1] = 0
@@ -481,10 +530,11 @@ func (s *Server) finishHandshakeLocked(hs *HandshakeState) error {
 	// buffer a specific number of bytes, not packets.
 	// TODO(dadrian): Figure out these sizes from a configuration
 	c := new(Conn)
-	c.in = make(chan []byte)
-	c.out = make(chan []byte)
+	c.in = make(chan []byte, 10)
+	c.out = make(chan []byte, 10)
 	c.signal = make(chan int)
 	c.sessionID = sid
+	c.s = s
 	ss.handle = c
 	select {
 	case s.pendingConnections <- c:

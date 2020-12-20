@@ -70,5 +70,6 @@ func Listen(network, laddr string, config *Config) (net.Listener, error) {
 	}
 	inner := pktConn.(*net.UDPConn)
 	s := NewServer(inner, config)
+	go s.Serve()
 	return s, nil
 }

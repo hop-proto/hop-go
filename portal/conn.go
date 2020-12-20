@@ -59,8 +59,10 @@ func (c *Conn) Read(b []byte) (int, error) {
 func (c *Conn) Write(b []byte) (int, error) {
 	c.m.Lock()
 	defer c.m.Unlock()
-	c.out <- b
-	<-c.signal
+	err := c.s.writeToSession(b, c.sessionID)
+	if err != nil {
+		return 0, nil
+	}
 	return len(b), nil
 }
 
