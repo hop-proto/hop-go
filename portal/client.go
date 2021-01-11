@@ -2,7 +2,7 @@ package portal
 
 import (
 	"bytes"
-	"errors"
+	"encoding/binary"
 	"net"
 	"sync"
 	"time"
@@ -38,6 +38,8 @@ type Client struct {
 
 	sessionID  SessionID
 	sessionKey [KeyLen]byte
+
+	readBuf bytes.Buffer
 }
 
 // Handshake performs the Portal handshake with the remote host. The connection
@@ -230,26 +232,108 @@ func (c *Client) clientHandshake() error {
 }
 
 func (c *Client) writeTransport(plaintext []byte) (int, error) {
+	buf := make([]byte, HeaderLen+SessionIDLen+CounterLen+len(plaintext)+MacLen)
+	n := 0
+	x := buf
+	x[0] = MessageTypeTransport
+	x[1] = 0
+	x[2] = 0
+	x[3] = 0
+	x = x[4:]
+	n += 4
+	copy(x, c.sessionID[:])
+	x = x[SessionIDLen:]
+	n += SessionIDLen
+	// TODO(dadrian): Tracks sequence numbers
+	copy(x, []byte{1, 2, 3, 4, 5, 6, 7, 8})
+	x = x[CounterLen:]
+	n += CounterLen
 	// TODO(dadrian): Implement encryption
-	return c.underlyingConn.Write(plaintext)
+	copy(x, plaintext)
+	x = x[len(plaintext):]
+	n += len(plaintext)
+	c.duplex.Absorb(buf[0:n])
+	c.duplex.Squeeze(x[:MacLen])
+	n += MacLen
+	written, err := c.underlyingConn.Write(buf)
+	if written != n {
+		panic("fuck")
+	}
+	return len(plaintext), err
 }
 
+func (c *Client) readTransport(msg []byte) ([]byte, error) {
+	if len(msg) < HeaderLen+SessionIDLen+CounterLen+MacLen {
+		return nil, ErrInvalidMessage
+	}
+	x := msg
+	if x[0] != MessageTypeTransport {
+		return nil, ErrUnexpectedMessage
+	}
+	if x[1] != 0 || x[2] != 0 || x[3] != 0 {
+		return nil, ErrInvalidMessage
+	}
+	x = x[HeaderLen:]
+	var sessionID SessionID
+	copy(sessionID[:], x[:SessionIDLen])
+	if c.sessionID != sessionID {
+		return nil, ErrUnknownSession
+	}
+	x = x[SessionIDLen:]
+	counter := binary.LittleEndian.Uint64(x)
+	x = x[CounterLen:]
+	logrus.Debugf("client: handling transport message from %s with counter %d", c.RemoteAddr(), counter)
+	dataLen := len(x) - MacLen
+	// TODO(dadrian): Decryption
+	// TODO(dadrian): Mac verification
+	out := make([]byte, dataLen)
+	copy(out, x[:dataLen])
+	return out, nil
+}
+
+// Write implements net.Conn.
 func (c *Client) Write(b []byte) (n int, err error) {
-	c.m.Lock()
-	defer c.m.Unlock()
+	// TODO(dadrian): #concurrency
 	return c.writeTransport(b)
 }
 
 // Close gracefully shutds down the connection. Repeated calls to close will error.
 func (c *Client) Close() error {
-	c.m.Lock()
+	// TODO(dadrian): #concurrency
 	// TODO(dadrian): Do we send a protocol close message?
-	defer c.m.Unlock()
 	return c.underlyingConn.Close()
 }
 
-func (c *Client) Read(b []byte) (n int, err error) {
-	return 0, errors.New("unimplemented")
+// Read implements net.Conn.
+func (c *Client) Read(b []byte) (int, error) {
+	// TODO(dadrian): #concurrency
+	// TODO(dadrian): Enforce handshake has happened
+	// TODO(dadrian): Share code with server-side conn?
+	// TODO(dadrian): Avoid allocation?
+	if c.readBuf.Len() > 0 {
+		n, err := c.readBuf.Read(b)
+		if c.readBuf.Len() == 0 {
+			c.readBuf.Reset()
+		}
+		return n, err
+	}
+	ciphertext := make([]byte, 65535)
+	msgLen, err := c.underlyingConn.Read(ciphertext)
+	if err != nil {
+		return 0, err
+	}
+	plaintext, err := c.readTransport(ciphertext[:msgLen])
+	if err != nil {
+		return 0, err
+	}
+	n := copy(b, plaintext)
+	if n == len(plaintext) {
+		return n, nil
+	}
+	// Buffer leftovers
+	// TODO(dadrian): Handle this error?
+	_, err = c.readBuf.Write(plaintext[n:])
+	return n, err
 }
 
 // LocalAddr returns the underlying UDP address.

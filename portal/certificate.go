@@ -1,7 +1,10 @@
 package portal
 
-// This is a temporary hack to just get static keys in the protocol
-// TODO(dadrian): Implement certificate structure for real
+// Certificate currently contains a single static key pair. This is a hack to
+// get static keys into the protocol. The full certificate is defined in the
+// specification.
+//
+// TODO(dadrian): Implement certificate structure from the specification.
 type Certificate struct {
 	Public []byte
 	key    *X25519KeyPair
@@ -11,7 +14,6 @@ type Certificate struct {
 func (c *Certificate) serialize(dst []byte) (int, error) {
 	if c.key != nil {
 		return copy(dst, c.key.public[:]), nil
-	} else {
-		return copy(dst, c.Public), nil
 	}
+	return copy(dst, c.Public), nil
 }
