@@ -1,9 +1,8 @@
 \section{Granting Authorization}
-In this section, we present a protocol for authorization grants \todo{secure
-delegation?} with SSTP. One of the goals of SSTP is to provide first-class support for the ability
+In this section, we present a protocol for authorization grants using SSTP. One of the goals of SSTP is to provide first-class support for the ability
 for a principal (the user) to grant a third-party client permission to perform some action on a
 target server. 
-Existing protocols such as SSH do not support such use cases, and workarounds such as ssh-agent
+Existing protocols such as SSH do not natively support such use cases, and workarounds such as ssh-agent
 forwarding are insecure~\cite{kogan2017guardian-agent}.
 We abide by the Secure Delegation Principle defined by Kogan et al.~\cite{kogan2017guardian-agent}, which allows a client to act under a principal's authority only after the principal can verify
 and enforce the client's intent. This intent includes the identity of the client used for the
@@ -17,10 +16,11 @@ Broadly speaking, the process works as follows. We assume that the client has al
 authenticated to the principal and shares an SSTP connection with it. The client requests that the principal grants permission for it to perform an
 action on the server, i.e., the \emph{intent}. If the principal approves the intent
 request, it establishes an SSTP tunnel with the server, proxied through the client. The principal
-communicates the identity and intent of the client to the server over the SSTP tunnel. If the
-server also approves the intent, the client can then establish its own SSTP tunnel with the server
-using the identity approved by the principal and execute the specified action. The server enforces
-that any action executed by the client (using the current identity) is performed at most once.
+communicates the identity and intent of the client to the server over the newly created SSTP tunnel.
+If the server also approves the intent, the client can then establish its own SSTP tunnel with the
+server using the identity approved by the principal and execute the specified action. The server
+enforces that any action executed by the client (using the current identity) is performed at most
+once.
 
 \begin{figure}
     \includegraphics[width=1\columnwidth]{figures/authorization_grant.pdf}
@@ -31,43 +31,63 @@ that any action executed by the client (using the current identity) is performed
     \label{fig:authorization_grant}
     \end{figure}
 
+\subsubsection{Authorization Grant Channel}
+Authorization Grant Channels are used by the principal, client, and server to run
+the authorization grant protocol. 
+Each channel message is of the form \texttt{Type $||$ Data}, where the single byte \texttt{Type}
+field is one of: \texttt{INTENT\_REQUEST},
+\texttt{INTENT\_COMMUNICATION}, \texttt{INTENT\_CONFIRMATION}, or \texttt{INTENT\_DENIED}. For
+Intent Requests and Intent Communications, the \texttt{Data} field is the \emph{Intent} (Figure~\ref{fig:intent}), which contains a hash of the ephemeral public key the client will
+use as its temporary identifier, the name and port of the server it wishes to connect to, a single channel type, and any associated data for the channel
+(e.g., a command to be run). The \texttt{Data} field in Intent Confirmation messages contain a
+timestamp deadline set by the server for the client to complete the SSTP handshake, and
+Intent Denied messages will indicate the reason the authorization grant was denied.
+
+\input{bytefields/intent.tex}
+
 \subsubsection{Intent Request}
-The client first makes an intent request for the principal to approve or deny. To do so, 
-it initiates a reliable Authorization Grant Channel with the Principal, and sends an \emph{Intent Request} over this
-channel. The message data contains a type identifier indicating that it is an Intent Request, and
-includes an \emph{Intent Message}. The Intent Message is a serialization of the following fields: the name and
-port of the destination server, a hash of the ephemeral public key used as the client's temporary
-identifier, a single channel type, and any associated data for the channel type (e.g., a
-command to be run). The principal checks this Intent Request against its security policy and either approves
-or denies the request. If it denies the request, it will reply with an Intent Denied message
-indicating the reason it was denied.
+The client first makes an Intent Request for the principal to approve or deny. To do so, 
+it initiates a reliable Authorization Grant Channel with the principal, and sends an Intent Request
+over this channel. The principal checks the Intent against its security policy and either
+approves or denies the request. If it denies the request, it will reply with an Intent Denied
+message indicating the reason it was denied. The client can then choose to either tear down the
+Authorization Grant Channel or attempt a new Intent Request.
 
 \subsubsection{Intent Communication}
-If the principal approves the Intent Request, it communicates the intent to the server in order to
-grant the client permission to establish an SSTP tunnel with the server. The server will then also
-be able to enforce that the client only executes the actions specified in the Intent Request.
-However, the principal may not necessarily have connectivity to the server. Therefore,
-the principal will initiate a Network Proxy channel with the client, asking it to proxy a connection to the server. The client forwards
+Once the principal approves the Intent Request, it communicates the Intent to the server.
+Because the principal may not necessarily have direct connectivity to the server, it initiates a
+reliable
+Network Proxy channel with the client and has the client proxy a connection to the server. The client forwards
 any messages sent through the Network Proxy channel to the server over UDP, and any replies
-from the server are forwarded back to the principal. The principal then establishes an SSTP
-tunnel with the server and initiates an Authorization Grant Channel. It relays the Intent Message to the
-server via an \emph{Intent Communication} message over this channel, which simply contains a type
-identifier and the Intent Message as the payload. At this
-point, the server is aware of the client's identity, the actions it wishes to execute, and who is
-granting them authorization. It then replies with either an Accept
-Intent Communication message or a Deny Intent Communication message. If it accepts, the server
-sets a timer equal to the length of an SSTP handshake timeout \todo{make sure
-this is defined somewhere} for the client to successfully complete an SSTP handshake with the
-server. Note that
+from the server are forwarded back to the principal through the Network Proxy channel. Through this channel, the principal establishes an SSTP
+tunnel with the server and initiates a new reliable Authorization Grant Channel. It then relays the Intent to
+the server via an Intent Communication message. At this
+point, the server has a hash of the client's identity, the action it wishes to execute, and who is
+granting them authorization. If the server accepts the Intent, it sets a deadline for the client to
+complete an SSTP handshake and sends the principal an Intent
+Confirmation message. Otherwise, it sends an Intent Denied message with a reason. Note that
 the communication between the principal and the server is end-to-end by virtue of SSTP, so any
-Intent Communication messages cannot be read or tampered by the client. 
+Intent Communication messages cannot be read nor tampered with by the client. 
 
-\subsubsection{Perform Intent}
-Once the server has accepted the intent, the principal sends a \emph{Perform Intent} message to the
-delegate via the Authorization Grant Channel from before. This message is simply a signal to the client
-that it now has permissions to execute the requested actions on the server and only contains a message type identifier. The client will then establish its own SSTP
-tunnel with the server, using the ephemeral public key specified in the Intent Request as its client
-static in the SSTP handshake protocol. It can then execute its actions as specified in the Intent
-Request. The principal can now tear down any Authorization Grant Channels created as part of the
-authorization grant, and end the SSTP session with the server. The
+\subsubsection{Intent Confirmation}
+The principal forwards the response from the server (either the Intent Confirmation or the Intent
+Denied) to the client via the Authorization Grant Channel from before. If the client receives the
+Intent Confirmation, it has until the deadline indicated in the Intent Confirmation message to
+establish its own SSTP tunnel with the server using its newly authorized credentials. At this point,
+the principal tears down any Authorization Grant and Network Proxy channels created as
+part of the authorization grant, and ends the SSTP session with the server. If the client receives
+an Intent Denied, it can choose to either tear down all channels created as part of the
+authorization grant or attempt a new Intent Request with the Principal. 
+
+\subsubsection{Completed Authorization Grant}
+After the Intent Confirmation, the client establishes an SSTP tunnel with the server using the ephemeral public key specified in the Intent Request as its client
+static. At the Client Authentication step of the SSTP handshake (recall from Section~\ref{sec:client_auth}), the
+server first checks if the supplied client static is in the list of authorized keys. Since the
+client is using the ephemeral key specified in the Intent, this check will fail. The server then
+hashes the supplied key and checks to see if the hashed key is among any outstanding authorization
+grants on the server. If so, the server continues with the handshake. The deadline
+specified in the Intent Confirmation is used to limit the number of outstanding authorization grants
+on the server. If the client is unable to complete the SSTP handshake before the deadline expires,
+the server drops the authorization grant and the client will have to re-request with the Principal. \todo{should
+we define this deadline or let it be set by the server?} The
 protocol connection flow is shown in Figure~\ref{fig:authorization_grant}.

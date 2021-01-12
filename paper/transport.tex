@@ -173,6 +173,7 @@ that it is the actual owner of the Server ID. It also verifies that the
 handshake transcript is identical.
 
 \vspace{5pt} \noindent\textit{5) Client Authentication:}\quad 
+\label{sec:client_auth}
 The client then sends a Client Authentication message (Figure~\ref{fig:client_auth}) to authenticate itself to
 the server. It absorbs the Client Authentication message type ({0x5}),
 reserved bytes, and Session ID. Using the current duplex state, it

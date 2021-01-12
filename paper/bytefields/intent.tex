@@ -1,0 +1,25 @@
+
+\begin{figure}
+    % \vspace{2ex}
+    \centering
+        \begin{small}
+            \begin{bytefield}[bitwidth=7pt,bitheight=15pt]{32}
+                % \bitheader{0-31}\\
+                \colorbitbox{lightgreen}{32}{ SHA-3(Client Ephemeral) (32 bytes)} \\
+                \colorbitbox{lightgreen}{32}{ SNI (256 bytes) } \\
+                \colorbitbox{lightgreen}{8}{ Port (2 bytes) } &
+                \colorbitbox{lightgreen}{14}{ Channel Type (1 byte)} &
+                \colorbitbox{lightgreen}{10}{ Reserved (1 byte)} \\
+                \colorbitbox{lightgreen}{32}{ Associated Data ( * bytes)}
+            \end{bytefield}
+
+        \end{small}
+    
+    \caption{\textbf{Intent}---
+        \textnormal{
+            temp
+        }}
+    \label{fig:intent}
+    \vspace{-5pt}
+\end{figure}
+    
