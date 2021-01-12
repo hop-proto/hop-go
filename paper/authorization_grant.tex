@@ -11,7 +11,7 @@ authorization grant, a single command the client can issue, and to whom the clie
 can issue the command. 
 
 
-\subsection{Authorization Grant Protocol}
+
 
 Broadly speaking, the process works as follows. We assume that the client has already been
 authenticated to the principal and shares an SSTP connection with it. The client requests that the principal grants permission for it to perform an
@@ -23,16 +23,11 @@ server using the identity approved by the principal and execute the specified ac
 enforces that any action executed by the client (using the current identity) is performed at most
 once.
 
-\begin{figure}
-    \includegraphics[width=1\columnwidth]{figures/authorization_grant.pdf}
-    \vspace{-5pt}
-    \caption{\textbf{Authorization Grant Protocol}---%
-    \textnormal{}
-    }
-    \label{fig:authorization_grant}
-    \end{figure}
+This differs from GuardianAgent in that there is no session ``hand-off''.
 
-\subsubsection{Authorization Grant Channel}
+
+
+\subsection{Authorization Grant Channel}
 Authorization Grant Channels are reliable SSTP channels used to run
 the authorization grant protocol. 
 Each channel message is of the form \texttt{Type $||$ Data}, where the single byte \texttt{Type}
@@ -44,7 +39,28 @@ use as its temporary identifier, the name and port of the server it wishes to co
 timestamp deadline set by the server for the client to complete the SSTP handshake, and
 Intent Denied messages will indicate the reason the authorization grant was denied.
 
+
 \input{bytefields/intent.tex}
+
+\subsection{Network Proxy Channel}
+In many cases, the principal may not necessarily have direct connectivity to the server. Therefore,
+in order to establish an SSTP tunnel between the principal and the server, the client proxies the connection. We can do this using a reliable SSTP Network Proxy Channel between the
+principal and the client. To initiate a Network Proxy Channel, the principal sends a Channel
+Initiation Request with the Network Proxy channel type and the server's name and port (specified in
+the Intent) as the initial data. Once the channel has been established, the client decapsulates all
+data frames sent through the channel and forwards them to the server, and likewise collects
+responses and forwards them back to the principal through the channel. 
+
+\subsection{Authorization Grant Protocol}
+
+\begin{figure}
+    \includegraphics[width=1\columnwidth]{figures/authorization_grant.pdf}
+    \vspace{-5pt}
+    \caption{\textbf{Authorization Grant Protocol}---%
+    \textnormal{}
+    }
+    \label{fig:authorization_grant}
+\end{figure}
 
 \subsubsection{Intent Request}
 The client first makes an Intent Request for the principal to approve or deny. To do so, 
@@ -55,12 +71,14 @@ message indicating the reason it was denied. The client can then choose to eithe
 Authorization Grant Channel or attempt a new Intent Request.
 
 \subsubsection{Intent Communication}
-Once the principal approves the Intent Request, it communicates the Intent to the server.
-Because the principal may not necessarily have direct connectivity to the server, it initiates a
-reliable
-Network Proxy channel with the client and has the client proxy a connection to the server. The client forwards
-any messages sent through the Network Proxy channel to the server over UDP, and any replies
-from the server are forwarded back to the principal through the Network Proxy channel. Through this channel, the principal establishes an SSTP
+Once the principal approves the Intent Request, it communicates the Intent to the server by
+initiating a reliable Network Proxy channel with the client.
+% Because the principal may not necessarily have direct connectivity to the server, it initiates a
+% reliable
+% Network Proxy channel with the client and has the client proxy a connection to the server. The client forwards
+% any messages sent through the Network Proxy channel to the server over UDP, and any replies
+% from the server are forwarded back to the principal through the Network Proxy channel. 
+Through this channel, the principal establishes an SSTP
 tunnel with the server and initiates a new reliable Authorization Grant Channel. It then relays the Intent to
 the server via an Intent Communication message. At this
 point, the server has a hash of the client's identity, the action it wishes to execute, and who is
