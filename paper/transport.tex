@@ -187,8 +187,9 @@ Client Authentication MAC.
 When the server receives the Client Authentication Message, it absorbs the
 message type, reserved bytes, and Session ID, then decrypts the client static
 public key using the duplex and the client static authentication tag. 
-The server  checks to see if the client static public key is that of a valid
-client (i.e., in the list of authorized keys), and if not drops the session and
+The server checks to see if the client static public key is that of a valid
+client (i.e., in the list of authorized keys or given access via an Authorization Grant (see Section~\ref{sec:authorization_grant})). If the
+client is not authorized, the server drops the session and
 destroys all state. It then absorbs the Diffie-Hellman between the client static
 and server ephemeral, and verifies that the squeezed out MAC matches. This
 confirms that both parties have identical

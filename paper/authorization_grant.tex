@@ -1,4 +1,5 @@
 \section{Granting Authorization}
+\label{sec:authorization_grant}
 In this section, we present a protocol for authorization grants using SSTP. One of the goals of SSTP is to provide first-class support for the ability
 for a principal (the user) to grant a third-party client permission to perform some action on a
 target server. 
@@ -32,7 +33,7 @@ once.
     \end{figure}
 
 \subsubsection{Authorization Grant Channel}
-Authorization Grant Channels are used by the principal, client, and server to run
+Authorization Grant Channels are reliable SSTP channels used to run
 the authorization grant protocol. 
 Each channel message is of the form \texttt{Type $||$ Data}, where the single byte \texttt{Type}
 field is one of: \texttt{INTENT\_REQUEST},
@@ -89,5 +90,6 @@ grants on the server. If so, the server continues with the handshake. The deadli
 specified in the Intent Confirmation is used to limit the number of outstanding authorization grants
 on the server. If the client is unable to complete the SSTP handshake before the deadline expires,
 the server drops the authorization grant and the client will have to re-request with the Principal. \todo{should
-we define this deadline or let it be set by the server?} The
+we define this deadline or let it be set by the server?} Once the action is complete, the server
+ends the SSTP connection with the client. The
 protocol connection flow is shown in Figure~\ref{fig:authorization_grant}.
