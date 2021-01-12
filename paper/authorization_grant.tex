@@ -33,10 +33,10 @@ the authorization grant protocol.
 Each channel message is of the form \texttt{Type $||$ Data}, where the single byte \texttt{Type}
 field is one of: \texttt{INTENT\_REQUEST},
 \texttt{INTENT\_COMMUNICATION}, \texttt{INTENT\_CONFIRMATION}, or \texttt{INTENT\_DENIED}. For
-Intent Requests and Intent Communications, the \texttt{Data} field is the \emph{Intent} (Figure~\ref{fig:intent}), which contains a hash of the ephemeral public key the client will
-use as its temporary identifier, the name and port of the server it wishes to connect to, a single channel type, and any associated data for the channel
+Intent Requests and Intent Communications, the \texttt{Data} field is the \emph{Intent} (Figure~\ref{fig:intent}), which contains a hash of an ephemeral public key the client will
+use as its ``temporary'' client static in the authorization grant, the name and port of the server it wishes to connect to, a single channel type, and any associated data for the channel
 (e.g., a command to be run). The \texttt{Data} field in Intent Confirmation messages contain a
-timestamp deadline set by the server for the client to complete the SSTP handshake, and
+timestamp deadline set by the server for the client to complete the SSTP handshake.
 Intent Denied messages will indicate the reason the authorization grant was denied.
 
 
@@ -96,7 +96,7 @@ establish its own SSTP tunnel with the server using its newly authorized credent
 the principal tears down any Authorization Grant and Network Proxy channels created as
 part of the authorization grant, and ends the SSTP session with the server. If the client receives
 an Intent Denied, it can choose to either tear down all channels created as part of the
-authorization grant or attempt a new Intent Request with the Principal. 
+authorization grant or attempt a new Intent Request with the principal. 
 
 \subsubsection{Completed Authorization Grant}
 After the Intent Confirmation, the client establishes an SSTP tunnel with the server using the ephemeral public key specified in the Intent Request as its client
