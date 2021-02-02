@@ -1,4 +1,4 @@
-.PHONY: all clean dist print
+.PHONY: all clean dist print open
 
 P = paper
 
@@ -29,3 +29,6 @@ dist:	$P.ps.gz
 
 clean:
 	$(RM) $P.log $P.aux $P.bbl $P.blg $P.out $P.dvi $P.ps $P.ps.gz texput.log
+
+open: $P.pdf
+	open $<	
