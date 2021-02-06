@@ -306,3 +306,10 @@ func (c *Cyclist) Ratchet() {
 	c.squeezeAny(y[:], 0x10)
 	c.absorbAny(y[:], c.rAbsorb, 0x00)
 }
+
+// NewCyclist returns an initalized Cyclist object
+func NewCyclist() *Cyclist {
+	c := new(Cyclist)
+	c.InitializeEmpty()
+	return c
+}

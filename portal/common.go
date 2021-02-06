@@ -29,6 +29,11 @@ const (
 	CounterLen   = 8
 )
 
+// Derived protocol size constants
+const (
+	HelloLen = HeaderLen + DHLen
+)
+
 // ErrBufOverflow is returned when write would go off the end off a buffer.
 var ErrBufOverflow = errors.New("write would overflow buffer")
 

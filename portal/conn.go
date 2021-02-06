@@ -9,6 +9,10 @@ import (
 
 var _ net.Conn = &Conn{}
 
+// Conn implements net.Conn. All methods are safe to call concurrently from
+// multiple threads, and data will be sent in the order that it is received.
+// Once a Conn is closed, calls to Write will fail, and calls to Read will fail
+// after any pending data is read.
 type Conn struct {
 	m sync.Mutex
 

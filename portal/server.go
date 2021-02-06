@@ -44,7 +44,7 @@ type HandshakeState struct {
 // SessionState contains the cryptographic state associated with a SessionID
 // after the successful completion of a handshake.
 type SessionState struct {
-	sync.Mutex
+	m          sync.Mutex
 	sessionID  SessionID
 	count      uint64
 	key        [16]byte

@@ -64,12 +64,8 @@ func (c *Client) initializeKeyMaterial() {
 
 func (c *Client) clientHandshake() error {
 	c.initializeKeyMaterial()
-	clientHello := ClientHello{
-		Ephemeral: c.ephemeral.public[:],
-	}
 	logrus.Debugf("c.ephemeral: %x", c.ephemeral)
-	logrus.Debugf("clientHello: %v", clientHello)
-	n, err := clientHello.serialize(c.buf[c.pos:])
+	n, err := serializeToHello(&c.duplex, c.buf, &c.ephemeral)
 	if err != nil {
 		c.pos = 0
 		return err

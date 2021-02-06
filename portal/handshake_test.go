@@ -6,6 +6,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
+	"gotest.tools/assert/cmp"
+	"zmap.io/portal/cyclist"
 )
 
 // TODO(dadrian): Actually specify transcripts?
@@ -28,4 +30,14 @@ func TestClientServerCompatibilityHandshake(t *testing.T) {
 	assert.Assert(t, ss != nil)
 	assert.DeepEqual(t, c.sessionID, ss.sessionID)
 	assert.Equal(t, c.sessionKey, ss.key)
+}
+
+func TestBufferSizes(t *testing.T) {
+	short := make([]byte, HeaderLen+4)
+	key := GenerateNewX25519Keypair()
+	duplex := cyclist.Cyclist{}
+	duplex.InitializeEmpty()
+	n, err := serializeToHello(&duplex, short, key)
+	assert.Check(t, cmp.Equal(ErrBufOverflow, err))
+	assert.Check(t, cmp.Equal(0, n))
 }

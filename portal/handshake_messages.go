@@ -20,34 +20,29 @@ const (
 	MessageTypeTransport               = 0x10
 )
 
-type HandshakeMessage struct {
-	HeaderWord [4]byte
-	Body       []byte // This might not work because the length might not be known without parsing?
-}
+// IsHandshakeType returns true if the message type is part of the handshake, not the transport.
+func (mt MessageType) IsHandshakeType() bool { return (byte(mt) & byte(0x0F)) != 0 }
 
 type ClientHello struct {
 	Ephemeral []byte
 }
 
-func (m *ClientHello) serialize(b []byte) (int, error) {
-	if len(b) < 4+DHLen {
+func serializeToHello(duplex *cyclist.Cyclist, b []byte, keyPair *X25519KeyPair) (int, error) {
+	if len(b) < HelloLen {
 		return 0, ErrBufOverflow
 	}
-	if len(m.Ephemeral) != DHLen {
-		return 0, ErrInvalidMessage
-	}
-	// Type = ClientHello (0x01)
-	b[0] = 0x01
-	b[1] = Version
-	// Reserved
-	b[2] = 0
-	b[3] = 0
+	// Header
+	b[0] = byte(MessageTypeClientHello) // Type = ClientHello (0x01)
+	b[1] = Version                      // Version
+	b[2] = 0                            // Reserved
+	b[3] = 0                            // Reserved
+	duplex.Absorb(b[0:4])
+
 	// Ephemeral
-	n := copy(b[4:], m.Ephemeral)
-	if n != len(m.Ephemeral) {
-		return 0, ErrBufOverflow
-	}
-	return 4 + n, nil
+	copy(b[4:], keyPair.public[:])
+	duplex.Absorb(keyPair.public[:])
+
+	return HelloLen, nil
 }
 
 func (m *ClientHello) deserialize(b []byte) (int, error) {
