@@ -71,10 +71,6 @@ func (c *Client) clientHandshake() error {
 		return err
 	}
 	c.pos += n
-	c.duplex.Absorb(c.buf[0:HeaderLen])
-	c.duplex.Absorb(c.ephemeral.public[:])
-	c.duplex.Squeeze(c.buf[c.pos : c.pos+MacLen])
-	c.pos += MacLen
 	n, err = c.underlyingConn.Write(c.buf[0:c.pos])
 	if err != nil {
 		return err

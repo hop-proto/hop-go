@@ -31,17 +31,22 @@ func serializeToHello(duplex *cyclist.Cyclist, b []byte, keyPair *X25519KeyPair)
 	if len(b) < HelloLen {
 		return 0, ErrBufOverflow
 	}
+	x := b
 	// Header
-	b[0] = byte(MessageTypeClientHello) // Type = ClientHello (0x01)
-	b[1] = Version                      // Version
-	b[2] = 0                            // Reserved
-	b[3] = 0                            // Reserved
-	duplex.Absorb(b[0:4])
+	x[0] = byte(MessageTypeClientHello) // Type = ClientHello (0x01)
+	x[1] = Version                      // Version
+	x[2] = 0                            // Reserved
+	x[3] = 0                            // Reserved
+	duplex.Absorb(x[0:HeaderLen])
+	x = x[HeaderLen:]
 
 	// Ephemeral
-	copy(b[4:], keyPair.public[:])
+	copy(x, keyPair.public[:])
 	duplex.Absorb(keyPair.public[:])
+	x = x[DHLen:]
 
+	// Mac
+	duplex.Squeeze(x[:MacLen])
 	return HelloLen, nil
 }
 

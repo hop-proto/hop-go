@@ -49,8 +49,6 @@ type SessionState struct {
 	count      uint64
 	key        [16]byte
 	remoteAddr net.UDPAddr
-
-	handle *Conn
 }
 
 func (ss *SessionState) incrementCounterLocked(b []byte) {
@@ -85,8 +83,6 @@ type Server struct {
 
 	handshakes map[string]*HandshakeState
 	sessions   map[SessionID]*SessionState
-
-	pendingConnections chan *Conn
 
 	cookieKey    []byte
 	cookieCipher cipher.Block
@@ -376,7 +372,9 @@ func (s *Server) handleTransport(addr *net.UDPAddr, msg []byte, plaintext []byte
 		return 0, ErrBufOverflow
 	}
 	copy(plaintext, b[:dataLen])
-	ss.handle.in <- plaintext[:dataLen]
+	// TODO(dadrian): Make this a callback
+	logrus.Debugf("server: session %x: plaintext: %x", ss.sessionID, plaintext)
+	//ss.handle.in <- plaintext[:dataLen]
 	// TODO(dadrian): Mac verification
 	return dataLen, nil
 }
@@ -526,24 +524,8 @@ func (s *Server) finishHandshakeLocked(hs *HandshakeState) error {
 	if ss == nil {
 		return ErrUnknownSession
 	}
-	// TODO(dadrian): This maybe shouldn't be a channel if we want to only
-	// buffer a specific number of bytes, not packets.
-	// TODO(dadrian): Figure out these sizes from a configuration
-	c := new(Conn)
-	c.in = make(chan []byte, 10)
-	c.out = make(chan []byte, 10)
-	c.signal = make(chan int)
-	c.sessionID = sid
-	c.s = s
-	ss.handle = c
-	select {
-	case s.pendingConnections <- c:
-		return nil
-	default:
-		// TODO(dadrian): Maybe this should timeout?
-		// TODO(dadrian): This should be aligned with max pending handshakes in configuration.
-		return errors.New("too many pending connections")
-	}
+	// TODO(add to some queue)?
+	return nil
 }
 
 // RemoteAddrFor returns the current net.Addr associated with a given session.
@@ -565,8 +547,6 @@ func NewServer(conn *net.UDPConn, config *Config) *Server {
 		cookieKey:  make([]byte, 16),
 		handshakes: make(map[string]*HandshakeState),
 		sessions:   make(map[SessionID]*SessionState),
-		// TODO(dadrian): Should come from the config
-		pendingConnections: make(chan *Conn, 10),
 	}
 	// TODO(dadrian): This probably shouldn't happen in this function
 	_, err := rand.Read(s.cookieKey)

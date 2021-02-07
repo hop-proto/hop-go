@@ -31,7 +31,7 @@ const (
 
 // Derived protocol size constants
 const (
-	HelloLen = HeaderLen + DHLen
+	HelloLen = HeaderLen + DHLen + MacLen
 )
 
 // ErrBufOverflow is returned when write would go off the end off a buffer.
