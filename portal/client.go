@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"zmap.io/portal/cyclist"
 )
 
 // Enforce ClientConn implements net.Conn
@@ -18,15 +17,13 @@ var _ net.Conn = &Client{}
 //
 // TODO(dadrian): Further document
 type Client struct {
-	m sync.Mutex
+	m  sync.Mutex
+	hs HandshakeState
 
 	underlyingConn *net.UDPConn
-	duplex         cyclist.Cyclist
-	publicDH       PublicDH
-	ephemeral      X25519KeyPair
-	static         X25519KeyPair
-	buf            []byte
-	pos            int
+
+	buf []byte
+	pos int
 
 	encBuf []byte
 
@@ -55,83 +52,52 @@ func (c *Client) Handshake() error {
 }
 
 func (c *Client) initializeKeyMaterial() {
-	c.ephemeral.Generate()
+	c.hs.duplex.InitializeEmpty()
+	c.hs.ephemeral.Generate()
+
 	// TODO(dadrian): This should actually be, well, static
-	c.static.Generate()
-	c.duplex.InitializeEmpty()
-	c.duplex.Absorb([]byte(ProtocolName))
+	c.hs.static.Generate()
+
+	c.hs.duplex.Absorb([]byte(ProtocolName))
 }
 
 func (c *Client) clientHandshake() error {
 	c.initializeKeyMaterial()
-	logrus.Debugf("c.ephemeral: %x", c.ephemeral)
-	n, err := serializeToHello(&c.duplex, c.buf, &c.ephemeral)
-	if err != nil {
-		c.pos = 0
-		return err
-	}
-	c.pos += n
-	n, err = c.underlyingConn.Write(c.buf[0:c.pos])
+	logrus.Debugf("client: public ephemeral: %x", c.hs.ephemeral.public)
+	n, err := writeClientHello(&c.hs, c.buf)
 	if err != nil {
 		return err
 	}
-	c.pos = 0
-	n, err = c.underlyingConn.Read(c.buf[c.pos:])
+	n, err = c.underlyingConn.Write(c.buf[:n])
 	if err != nil {
 		return err
 	}
-	logrus.Info(n, c.buf[0:n])
+	// TODO(dadrian): Use ReadMsgUDP
+	n, err = c.underlyingConn.Read(c.buf)
+	if err != nil {
+		return err
+	}
+	logrus.Debugf("client: recv %x", c.buf[:n])
 	if n < 4 {
 		return ErrInvalidMessage
 	}
-	c.duplex.Absorb(c.buf[:4])
-	sh := ServerHello{}
-	mn, err := sh.deserialize(c.buf)
+	n, err = readServerHello(&c.hs, c.buf)
 	if err != nil {
 		return err
 	}
-	logrus.Info(sh)
-	if mn+MacLen != n {
-		return ErrInvalidMessage
-	}
-	c.duplex.Absorb(sh.Ephemeral)
-	ephemeralSecret, err := c.ephemeral.DH(sh.Ephemeral)
-	logrus.Debugf("client shared secret: %x", ephemeralSecret)
+
+	c.hs.RekeyFromSqueeze()
+
+	n, err = c.hs.writeClientAck(c.buf, "david.test")
 	if err != nil {
 		return err
 	}
-	c.duplex.Absorb(ephemeralSecret)
-	c.duplex.Absorb(sh.Cookie)
-	c.duplex.Squeeze(c.handshakeKey[:])
-	c.duplex.Squeeze(c.macBuf[:])
-	if !bytes.Equal(c.macBuf[:], c.buf[mn:mn+MacLen]) {
-		return ErrInvalidMessage
-	}
-	logrus.Debugf("client: sh mac: %x", c.macBuf)
-	// TODO(dadrian): This needs to go through a KDF?
-	c.duplex.Initialize(c.handshakeKey[:], []byte(ProtocolName), nil)
-	c.duplex.Absorb([]byte{MessageTypeClientAck, 0, 0, 0})
-	c.duplex.Absorb(c.ephemeral.public[:])
-	c.duplex.Absorb(sh.Cookie)
-	encryptedSNI, err := EncryptSNI("david.test", &c.duplex)
+
+	_, err = c.underlyingConn.Write(c.buf[:n])
 	if err != nil {
 		return err
 	}
-	clientAck := ClientAck{
-		Ephemeral:    c.ephemeral.public[:],
-		Cookie:       sh.Cookie,
-		EncryptedSNI: encryptedSNI,
-	}
-	c.pos = 0
-	n, err = clientAck.serialize(c.buf)
-	if err != nil {
-		return err
-	}
-	c.duplex.Squeeze(c.buf[n : n+MacLen])
-	n, err = c.underlyingConn.Write(c.buf[:n+MacLen])
-	if err != nil {
-		return err
-	}
+
 	msgLen, err := c.underlyingConn.Read(c.buf)
 	if err != nil {
 		return err
@@ -146,16 +112,17 @@ func (c *Client) clientHandshake() error {
 	}
 	var encCertLen int
 	encCertLen = (int(x[2]) << 8) + int(x[3])
-	c.duplex.Absorb(x[:HeaderLen])
+	c.hs.duplex.Absorb(x[:HeaderLen])
+
 	x = x[HeaderLen:]
 	copy(c.sessionID[:], x[:SessionIDLen])
-	c.duplex.Absorb(x[:SessionIDLen])
+	c.hs.duplex.Absorb(x[:SessionIDLen])
 	x = x[SessionIDLen:]
 	if len(x) < encCertLen {
 		logrus.Debug("client: no room for certs")
 		return ErrBufUnderflow
 	}
-	leaf, intermediate, err := DecryptCertificates(&c.duplex, x[:encCertLen])
+	leaf, intermediate, err := DecryptCertificates(&c.hs.duplex, x[:encCertLen])
 	if err != nil {
 		logrus.Debug("client: no decrypt certs")
 		return err
@@ -166,20 +133,20 @@ func (c *Client) clientHandshake() error {
 		logrus.Debug("client: no room for sa macs")
 		return ErrBufUnderflow
 	}
-	c.duplex.Squeeze(c.macBuf[:])
+	c.hs.duplex.Squeeze(c.macBuf[:])
 	logrus.Debugf("client: sa tag: %x", c.macBuf)
 	if !bytes.Equal(c.macBuf[:], x[:MacLen]) {
 		logrus.Debug("client: sa tag mismatch")
 	}
 	x = x[MacLen:]
-	c.es, err = c.ephemeral.DH(leaf)
+	c.es, err = c.hs.ephemeral.DH(leaf)
 	if err != nil {
 		logrus.Debug("client: couldn't do es")
 		return err
 	}
 	logrus.Debugf("client: es %x", c.es)
-	c.duplex.Absorb(c.es)
-	c.duplex.Squeeze(c.macBuf[:])
+	c.hs.duplex.Absorb(c.es)
+	c.hs.duplex.Squeeze(c.macBuf[:])
 	logrus.Debugf("client: sa mac %x", c.macBuf[:])
 	if !bytes.Equal(c.macBuf[:], x[:MacLen]) {
 		logrus.Debug("client: mismatched sa mac")
@@ -192,27 +159,27 @@ func (c *Client) clientHandshake() error {
 	b[1] = 0
 	b[2] = 0
 	b[3] = 0
-	c.duplex.Absorb(b[0:4])
+	c.hs.duplex.Absorb(b[0:4])
 	b = b[4:]
 	c.pos += 4
 	copy(b, c.sessionID[:])
-	c.duplex.Absorb(c.sessionID[:])
+	c.hs.duplex.Absorb(c.sessionID[:])
 	b = b[SessionIDLen:]
 	c.pos += SessionIDLen
-	c.duplex.Encrypt(b[:DHLen], c.static.public[:])
+	c.hs.duplex.Encrypt(b[:DHLen], c.hs.static.public[:])
 	b = b[DHLen:]
 	c.pos += DHLen
-	c.duplex.Squeeze(b[:MacLen]) // tag
+	c.hs.duplex.Squeeze(b[:MacLen]) // tag
 	b = b[MacLen:]
 	c.pos += MacLen
-	c.se, err = c.static.DH(sh.Ephemeral)
+	c.se, err = c.hs.static.DH(c.hs.clientEphemeral[:])
 	if err != nil {
 		logrus.Errorf("client: unable to calc se: %s", err)
 		return err
 	}
 	logrus.Debugf("client: se %x", c.se)
-	c.duplex.Absorb(c.se)
-	c.duplex.Squeeze(b[:MacLen]) // mac
+	c.hs.duplex.Absorb(c.se)
+	c.hs.duplex.Squeeze(b[:MacLen]) // mac
 	b = b[MacLen:]
 	c.pos += MacLen
 	n, err = c.underlyingConn.Write(c.buf[0:c.pos])
@@ -244,8 +211,8 @@ func (c *Client) writeTransport(plaintext []byte) (int, error) {
 	copy(x, plaintext)
 	x = x[len(plaintext):]
 	n += len(plaintext)
-	c.duplex.Absorb(buf[0:n])
-	c.duplex.Squeeze(x[:MacLen])
+	c.hs.duplex.Absorb(buf[0:n])
+	c.hs.duplex.Squeeze(x[:MacLen])
 	n += MacLen
 	written, err := c.underlyingConn.Write(buf)
 	if written != n {

@@ -11,7 +11,6 @@ import (
 	"sync"
 
 	"github.com/sirupsen/logrus"
-	"zmap.io/portal/cyclist"
 )
 
 // TODO(dadrian): Update cookies to use Kravatte once it's implemented.
@@ -19,27 +18,6 @@ const cookieLen = 128
 
 // SessionID is an IP-independent identifier of a tunnel.
 type SessionID [4]byte
-
-// HandshakeState tracks state across the lifetime of a handshake, starting with
-// the ClientHello. A HandshakeState may be allocated on ClientHello, it does
-// not need to be stored until after the ClientAck since enough state is
-// contained within the cookie to reconstruct the HandshakeState.
-type HandshakeState struct {
-	duplex          cyclist.Cyclist
-	ephemeral       X25519KeyPair
-	macBuf          [MacLen]byte
-	clientEphemeral [DHLen]byte
-	handshakeKey    [KeyLen]byte
-	clientStatic    [DHLen]byte
-	sessionID       [SessionIDLen]byte
-
-	// TODO(dadrian): Rework APIs to make these arrays and avoid copies with the curve25519 API.
-	ee []byte
-	es []byte
-	se []byte
-
-	remoteAddr *net.UDPAddr
-}
 
 // SessionState contains the cryptographic state associated with a SessionID
 // after the successful completion of a handshake.
@@ -84,7 +62,7 @@ type Server struct {
 	handshakes map[string]*HandshakeState
 	sessions   map[SessionID]*SessionState
 
-	cookieKey    []byte
+	cookieKey    [KeyLen]byte
 	cookieCipher cipher.Block
 
 	// TODO(dadrian): Different keys for different names
@@ -131,18 +109,11 @@ func (s *Server) readPacket() error {
 			return err
 		}
 		logrus.Debugf("client ephemeral: %x", hs.clientEphemeral)
-		hs.ee, err = hs.ephemeral.DH(hs.clientEphemeral[:])
-		if err != nil {
-			logrus.Errorf("server coudln't X25519: %s", err)
-			return err
-		}
-		logrus.Debugf("server shared secret: %x", hs.ee[:])
-		n, err := s.writeServerHello(s.outBuf, addr, hs)
+		n, err := writeServerHello(hs, s.outBuf)
 		if err != nil {
 			return err
 		}
-		hs.duplex.Squeeze(s.outBuf[n : n+MacLen])
-		if err := s.writePacket(s.outBuf[:n+MacLen], addr); err != nil {
+		if err := s.writePacket(s.outBuf[:n], addr); err != nil {
 			return err
 		}
 	case MessageTypeClientAck:
@@ -205,29 +176,40 @@ func (s *Server) readPacket() error {
 }
 
 func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeState, error) {
-	x := b
-	m := ClientAck{}
-	n, err := m.deserialize(x)
-	if err != nil {
-		logrus.Debugf("unable to handleClientAck: %s", err)
-		return n, nil, err
+	var buf [SNILen]byte
+	length := HeaderLen + DHLen + CookieLen + SNILen + MacLen
+	if len(b) < length {
+		return 0, nil, ErrBufUnderflow
 	}
-	logrus.Debugf("encrypted SNI[%d]: %x", len(m.EncryptedSNI), m.EncryptedSNI)
-	x = x[n:]
-	hs, err := s.ReplayDuplexFromCookie(m.Cookie, m.Ephemeral, addr)
-	hs.duplex.Absorb(b[0:HeaderLen])
-	hs.duplex.Absorb(m.Ephemeral)
-	hs.duplex.Absorb(m.Cookie)
-	decryptedSNI := make([]byte, SNILen)
-	hs.duplex.Decrypt(decryptedSNI, m.EncryptedSNI)
+	if b[0] != MessageTypeClientAck {
+		return 0, nil, ErrUnexpectedMessage
+	}
+	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
+		return 0, nil, ErrUnexpectedMessage
+	}
+	header := b[0:HeaderLen]
+	b = b[HeaderLen:]
+	ephemeral := b[:DHLen]
+	b = b[DHLen:]
+
+	cookie := b[:CookieLen]
+	b = b[CookieLen:]
+
+	hs, err := s.ReplayDuplexFromCookie(cookie, ephemeral, addr)
+	hs.duplex.Absorb(header)
+	hs.duplex.Absorb(ephemeral)
+	hs.duplex.Absorb(cookie)
+	hs.duplex.Decrypt(buf[:], b[:SNILen])
+	logrus.Debugf("server: got raw decrypted SNI %x: ", buf)
+
+	b = b[SNILen:]
+
 	hs.duplex.Squeeze(hs.macBuf[:])
-	if len(x) < MacLen {
-		return n, nil, ErrBufOverflow
+
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
+		return length, nil, ErrInvalidMessage
 	}
-	if !bytes.Equal(hs.macBuf[:], x[:MacLen]) {
-		return n + MacLen, nil, ErrInvalidMessage
-	}
-	return n + MacLen, hs, err
+	return length, hs, err
 }
 
 func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState) (int, error) {
@@ -397,94 +379,18 @@ func (s *Server) Serve() error {
 }
 
 func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
-	m := ClientHello{}
-	x := b
-	n, err := m.deserialize(x)
+	// TODO(dadrian): Avoid this allocation? It's kind of big to do on an
+	// unauthenticated handshake.
+	hs := new(HandshakeState)
+	n, err := readClientHello(hs, b)
 	if err != nil {
 		return nil, err
 	}
-	x = x[n:]
-	if len(x) != MacLen {
-		logrus.Info("bad len", len(b), len(x), MacLen)
-		return nil, ErrInvalidMessage
-	}
-	hs := new(HandshakeState)
-	hs.duplex.InitializeEmpty()
-	hs.duplex.Absorb([]byte(ProtocolName))
-	hs.duplex.Absorb(b[0:HeaderLen])
-	hs.duplex.Absorb(m.Ephemeral)
-	hs.duplex.Squeeze(hs.macBuf[:])
-	// TODO(dadrian): Should this be constant time?
-	if !bytes.Equal(hs.macBuf[:], x) {
+	if n != len(b) {
 		return nil, ErrInvalidMessage
 	}
 	hs.ephemeral.Generate()
-	// TODO(dadrian): Get rid of this copy
-	n = copy(hs.clientEphemeral[:], m.Ephemeral[:DHLen])
-	if n != DHLen {
-		return nil, ErrInvalidDH
-	}
 	return hs, nil
-}
-
-func (s *Server) writeCookie(b []byte, clientAddr *net.UDPAddr, hs *HandshakeState) (int, error) {
-	// TODO(dadrian): This is not amenable to swapping the keys out
-	aead, err := cipher.NewGCMWithTagSize(s.cookieCipher, 16)
-	if err != nil {
-		return 0, err
-	}
-	// TODO(dadrian): Figure out the nonce?
-	if n, err := rand.Read(b[0:12]); err != nil {
-		return n, err
-	}
-	// Until we sort out Deck-SANE, just shove a nonce here
-	nonce := b[0:12]
-	plaintextCookie := hs.ephemeral.private[:]
-	ad := CookieAD(hs.clientEphemeral[:], clientAddr)
-	enc := aead.Seal(b[12:12], nonce, plaintextCookie, ad)
-
-	return 12 + len(enc), nil
-}
-
-func (s *Server) decryptCookie(cookie, clientEphemeral []byte, clientAddr *net.UDPAddr) ([]byte, error) {
-	if len(cookie) < CookieLen {
-		return nil, ErrBufUnderflow
-	}
-	aead, err := cipher.NewGCMWithTagSize(s.cookieCipher, 16)
-	if err != nil {
-		return nil, err
-	}
-	nonce := cookie[0:12]
-	encryptedCookie := cookie[12:]
-	ad := CookieAD(clientEphemeral, clientAddr)
-	// TODO(dadrian): Avoid allocation?
-	out := make([]byte, 0, DHLen)
-	out, err = aead.Open(out, nonce, encryptedCookie, ad)
-	return out, err
-}
-
-func (s *Server) writeServerHello(b []byte, clientAddr *net.UDPAddr, hs *HandshakeState) (n int, err error) {
-	cookie := make([]byte, CookieLen)
-	cookieLen, err := s.writeCookie(cookie, clientAddr, hs)
-	if err != nil {
-		return 0, err
-	}
-	cookie = cookie[0:cookieLen]
-	hello := ServerHello{
-		Ephemeral: hs.ephemeral.public[:],
-		// TODO(dadrian): This forces an extra allocation, since we can't write the cookie directly to the output buffer
-		Cookie: cookie,
-	}
-	n, err = hello.serialize(b)
-	if err != nil {
-		return 0, err
-	}
-	hs.duplex.Absorb(b[:4])
-	hs.duplex.Absorb(hs.ephemeral.public[:])
-	hs.duplex.Absorb(hs.ee[:DHLen])
-	hs.duplex.Absorb(cookie)
-	hs.duplex.Squeeze(hs.handshakeKey[:])
-	return n, err
 }
 
 func (s *Server) writeToSession(b []byte, sessionID SessionID) error {
@@ -544,16 +450,15 @@ func NewServer(conn *net.UDPConn, config *Config) *Server {
 	s := Server{
 		udpConn: conn,
 		// TODO(dadrian): Standardize this?
-		cookieKey:  make([]byte, 16),
 		handshakes: make(map[string]*HandshakeState),
 		sessions:   make(map[SessionID]*SessionState),
 	}
 	// TODO(dadrian): This probably shouldn't happen in this function
-	_, err := rand.Read(s.cookieKey)
+	_, err := rand.Read(s.cookieKey[:])
 	if err != nil {
 		panic(err.Error())
 	}
-	s.cookieCipher, err = aes.NewCipher(s.cookieKey)
+	s.cookieCipher, err = aes.NewCipher(s.cookieKey[:])
 	if err != nil {
 		panic(err.Error())
 	}

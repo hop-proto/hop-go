@@ -1,7 +1,12 @@
 package portal
 
 import (
+	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"errors"
+	"net"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/cyclist"
@@ -23,11 +28,84 @@ const (
 // IsHandshakeType returns true if the message type is part of the handshake, not the transport.
 func (mt MessageType) IsHandshakeType() bool { return (byte(mt) & byte(0x0F)) != 0 }
 
-type ClientHello struct {
-	Ephemeral []byte
+// HandshakeState tracks state across the lifetime of a handshake, starting with
+// the ClientHello. A HandshakeState may be allocated on ClientHello, it does
+// not need to be stored until after the ClientAck since enough state is
+// contained within the cookie to reconstruct the HandshakeState.
+type HandshakeState struct {
+	duplex    cyclist.Cyclist
+	ephemeral X25519KeyPair
+	static    *X25519KeyPair
+
+	macBuf          [MacLen]byte
+	clientEphemeral [DHLen]byte
+	handshakeKey    [KeyLen]byte
+	clientStatic    [DHLen]byte
+	sessionID       [SessionIDLen]byte
+
+	cookieKey *[KeyLen]byte // server only
+
+	cookie []byte // client only
+
+	// TODO(dadrian): Rework APIs to make these arrays and avoid copies with the curve25519 API.
+	ee []byte
+	es []byte
+	se []byte
+
+	remoteAddr *net.UDPAddr
 }
 
-func serializeToHello(duplex *cyclist.Cyclist, b []byte, keyPair *X25519KeyPair) (int, error) {
+func (hs *HandshakeState) writeCookie(b []byte) (int, error) {
+	// TODO(dadrian): Avoid allocating memory. Store a cipher on HandshakeState,
+	// but only if cipher.Block is thread-safe. But not sure how we'd avoid
+	// allocating memory for the NewGCM call. Hopefully this can be avoided when
+	// we switch to Kravatte.
+	cookieCipher, err := aes.NewCipher(hs.cookieKey[:])
+	if err != nil {
+		return 0, err
+	}
+	aead, err := cipher.NewGCMWithTagSize(cookieCipher, 16)
+	if err != nil {
+		return 0, err
+	}
+
+	// Until we sort out Deck-SANE, just shove a nonce here
+	if n, err := rand.Read(b[0:12]); err != nil || n != 12 {
+		panic("could not read random for cookie")
+	}
+	nonce := b[0:12]
+	plaintextCookie := hs.ephemeral.private[:]
+	ad := CookieAD(&hs.clientEphemeral, hs.remoteAddr)
+	enc := aead.Seal(b[12:12], nonce, plaintextCookie, ad)
+	return len(enc) + 12, nil // CookieLen
+}
+
+func (hs *HandshakeState) decryptCookie(b []byte) (int, error) {
+	if len(b) < CookieLen {
+		return 0, ErrBufUnderflow
+	}
+	cookieCipher, err := aes.NewCipher(hs.cookieKey[:])
+	if err != nil {
+		return 0, err
+	}
+	aead, err := cipher.NewGCMWithTagSize(cookieCipher, 16)
+	if err != nil {
+		return 0, err
+	}
+	nonce := b[0:12]
+	encryptedCookie := b[12:CookieLen]
+	ad := CookieAD(&hs.clientEphemeral, hs.remoteAddr)
+	// TODO(dadrian): Avoid allocation?
+	out := make([]byte, 0, DHLen)
+	out, err = aead.Open(hs.ephemeral.private[0:0], nonce, encryptedCookie, ad)
+	if len(out) != DHLen {
+		return 0, ErrInvalidMessage
+	}
+	hs.ephemeral.PublicFromPrivate()
+	return CookieLen, nil
+}
+
+func writeClientHello(hs *HandshakeState, b []byte) (int, error) {
 	if len(b) < HelloLen {
 		return 0, ErrBufOverflow
 	}
@@ -37,21 +115,21 @@ func serializeToHello(duplex *cyclist.Cyclist, b []byte, keyPair *X25519KeyPair)
 	x[1] = Version                      // Version
 	x[2] = 0                            // Reserved
 	x[3] = 0                            // Reserved
-	duplex.Absorb(x[0:HeaderLen])
+	hs.duplex.Absorb(x[0:HeaderLen])
 	x = x[HeaderLen:]
 
 	// Ephemeral
-	copy(x, keyPair.public[:])
-	duplex.Absorb(keyPair.public[:])
+	copy(x, hs.ephemeral.public[:])
+	hs.duplex.Absorb(hs.ephemeral.public[:])
 	x = x[DHLen:]
 
 	// Mac
-	duplex.Squeeze(x[:MacLen])
+	hs.duplex.Squeeze(x[:MacLen])
 	return HelloLen, nil
 }
 
-func (m *ClientHello) deserialize(b []byte) (int, error) {
-	if len(b) < HeaderLen+DHLen {
+func readClientHello(hs *HandshakeState, b []byte) (int, error) {
+	if len(b) < HelloLen {
 		return 0, ErrBufUnderflow
 	}
 	if MessageType(b[0]) != MessageTypeClientHello {
@@ -60,162 +138,168 @@ func (m *ClientHello) deserialize(b []byte) (int, error) {
 	if b[1] != Version {
 		return 0, ErrUnsupportedVersion
 	}
-	// TODO(dadrian): Should we check if reserved fields are zero?
-	// TODO(dadrian): Avoid allocation?
-	m.Ephemeral = make([]byte, DHLen)
-	b = b[4:]
-	copy(m.Ephemeral, b[:DHLen])
-	b = b[DHLen:]
-	return 4 + DHLen, nil
-}
-
-type ServerHello struct {
-	Ephemeral []byte
-	Cookie    []byte
-}
-
-func (m *ServerHello) serialize(b []byte) (int, error) {
-	if len(b) < HeaderLen+DHLen+len(m.Cookie) {
-		return 0, ErrBufOverflow
-	}
-	x := b
-	x[0] = MessageTypeServerHello
-	x[1] = 0
-	x[2] = 0
-	x[3] = 0
-	x = x[4:]
-	n := copy(x[0:DHLen], m.Ephemeral)
-	if n != DHLen {
+	if b[2] != 0 || b[3] != 0 {
 		return 0, ErrInvalidMessage
 	}
-	x = x[DHLen:]
-	n = copy(x, m.Cookie)
-	if n != len(m.Cookie) {
-		return 0, ErrBufOverflow
+	hs.duplex.Absorb(b[:HeaderLen])
+	b = b[HeaderLen:]
+	copy(hs.clientEphemeral[:], b[:DHLen])
+	hs.duplex.Absorb(b[:DHLen])
+	b = b[DHLen:]
+	hs.duplex.Squeeze(hs.macBuf[:])
+	// TODO(dadrian): #constanttime
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
+		return 0, ErrInvalidMessage
 	}
-	return 4 + DHLen + n, nil
+	return HelloLen, nil
 }
 
-func (m *ServerHello) deserialize(b []byte) (int, error) {
-	if len(b) < HeaderLen+DHLen+CookieLen {
+func writeServerHello(hs *HandshakeState, b []byte) (int, error) {
+	if len(b) < HeaderLen+DHLen+CookieLen+MacLen {
 		return 0, ErrBufOverflow
 	}
-	x := b
-	if MessageType(x[0]) != MessageTypeServerHello {
+
+	// Header
+	b[0] = MessageTypeServerHello
+	b[1] = 0
+	b[2] = 0
+	b[3] = 0
+	hs.duplex.Absorb(b[:HeaderLen])
+	b = b[HeaderLen:]
+
+	// Ephemeral
+	copy(b, hs.ephemeral.public[:])
+	hs.duplex.Absorb(b[:DHLen])
+	b = b[DHLen:]
+
+	secret, err := hs.ephemeral.DH(hs.clientEphemeral[:])
+	if err != nil {
+		return 0, err
+	}
+	hs.duplex.Absorb(secret)
+
+	// Cookie
+	n, err := hs.writeCookie(b)
+	if err != nil {
+		return 0, err
+	}
+	if n != CookieLen {
+		return 0, ErrBufOverflow
+	}
+	hs.duplex.Absorb(b[:CookieLen])
+	b = b[CookieLen:]
+
+	// Mac
+	hs.duplex.Squeeze(b[:MacLen])
+
+	return HeaderLen + DHLen + CookieLen + MacLen, nil
+}
+
+func readServerHello(hs *HandshakeState, b []byte) (int, error) {
+	if len(b) < HeaderLen+DHLen+CookieLen+MacLen {
+		return 0, ErrBufOverflow
+	}
+
+	// Header
+	if MessageType(b[0]) != MessageTypeServerHello {
 		return 0, ErrUnexpectedMessage
 	}
-	x = x[4:]
-	// TODO(dadrian): Should we check if reserved fields are zero?
-	m.Ephemeral = make([]byte, DHLen)
-	n := copy(m.Ephemeral, x[:DHLen])
-	if n != DHLen {
+	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
 		return 0, ErrInvalidMessage
 	}
-	x = x[DHLen:]
-	m.Cookie = make([]byte, CookieLen)
-	n = copy(m.Cookie, x[:CookieLen])
-	if n != CookieLen {
+	hs.duplex.Absorb(b[:HeaderLen])
+	b = b[HeaderLen:]
+
+	// Server Ephemeral
+	copy(hs.clientEphemeral[:], b[:DHLen])
+	hs.duplex.Absorb(b[:DHLen])
+	b = b[DHLen:]
+	secret, err := hs.ephemeral.DH(hs.clientEphemeral[:])
+	if err != nil {
+		return 0, err
+	}
+	hs.duplex.Absorb(secret)
+
+	// Cookie
+	hs.cookie = make([]byte, CookieLen)
+	copy(hs.cookie, b[:CookieLen])
+	hs.duplex.Absorb(b[:CookieLen])
+	b = b[CookieLen:]
+
+	// Mac
+	hs.duplex.Squeeze(hs.macBuf[:])
+	logrus.Debugf("client: sh mac %x", hs.macBuf)
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
 		return 0, ErrInvalidMessage
 	}
-	return 4 + DHLen + CookieLen, nil
+
+	return HeaderLen + DHLen + CookieLen + MacLen, nil
 }
 
-type ClientAck struct {
-	Ephemeral    []byte
-	Cookie       []byte
-	EncryptedSNI []byte
+func (hs *HandshakeState) RekeyFromSqueeze() {
+	hs.duplex.Squeeze(hs.handshakeKey[:])
+	hs.duplex.Initialize(hs.handshakeKey[:], []byte(ProtocolName), nil)
 }
 
-func (m *ClientAck) serialize(b []byte) (int, error) {
-	length := HeaderLen + DHLen + CookieLen + SNILen
-	if len(b) < length {
-		return 0, ErrBufOverflow
+func (hs *HandshakeState) EncryptSNI(dst []byte, name string) error {
+	var buf [SNILen]byte
+	if len(dst) < SNILen {
+		return ErrBufUnderflow
 	}
-	x := b
-	pos := 0
-	x[0] = MessageTypeClientAck
-	x[1] = 0
-	x[2] = 0
-	x[3] = 0
-	x = x[4:]
-	pos += 4
-	n := copy(x, m.Ephemeral)
-	pos += n
-	if n != DHLen {
-		return pos, ErrInvalidMessage
-	}
-	x = x[DHLen:]
-	n = copy(x, m.Cookie)
-	pos += n
-	if n != CookieLen {
-		return pos, ErrInvalidMessage
-	}
-	x = x[CookieLen:]
-	n = copy(x, m.EncryptedSNI)
-	pos += n
-	if n != SNILen {
-		return pos, ErrInvalidMessage
-	}
-	return pos, nil
-}
-
-func (m *ClientAck) deserialize(b []byte) (int, error) {
-	length := HeaderLen + DHLen + CookieLen + SNILen
-	if len(b) < length {
-		return 0, ErrBufUnderflow
-	}
-	x := b
-	pos := 0
-	if x[0] != MessageTypeClientAck {
-		return pos, ErrUnexpectedMessage
-	}
-	x = x[HeaderLen:]
-	pos += HeaderLen
-	m.Ephemeral = make([]byte, DHLen)
-	n := copy(m.Ephemeral, x[:DHLen])
-	if n != DHLen {
-		logrus.Debug("bad DH in clientack")
-		return 0, ErrInvalidMessage
-	}
-	x = x[DHLen:]
-	pos += DHLen
-	m.Cookie = make([]byte, CookieLen)
-	n = copy(m.Cookie, x[:CookieLen])
-	if n != CookieLen {
-		logrus.Debug("bad cookie in clientack")
-		return 0, ErrInvalidMessage
-	}
-	x = x[CookieLen:]
-	pos += CookieLen
-	m.EncryptedSNI = make([]byte, SNILen)
-	n = copy(m.EncryptedSNI, x[:SNILen])
-	if n != SNILen {
-		logrus.Debug("bad SNI in clientack", n)
-		return 0, ErrInvalidMessage
-	}
-	pos += n
-	return pos, nil
-}
-
-// TODO(dadrian): Avoid allocation
-func EncryptSNI(name string, duplex *cyclist.Cyclist) ([]byte, error) {
-	buf := make([]byte, SNILen)
 	nameLen := len(name)
 	if nameLen > 255 {
-		return nil, errors.New("invalid SNI name")
+		return errors.New("invalid SNI name")
 	}
 	buf[0] = byte(nameLen)
 	n := copy(buf[1:], name)
 	if n != nameLen {
-		return nil, errors.New("invalid SNI name")
+		return errors.New("invalid SNI name")
 	}
-	for i := n; i < SNILen; i++ {
-		buf[i] = 0
+	hs.duplex.Encrypt(dst, buf[:])
+	return nil
+}
+
+func (hs *HandshakeState) writeClientAck(b []byte, name string) (int, error) {
+	length := HeaderLen + DHLen + CookieLen + SNILen + MacLen
+	if len(b) < length {
+		return 0, ErrBufOverflow
 	}
-	// TODO(dadrian): Remove allocation
-	enc := make([]byte, SNILen)
-	duplex.Encrypt(enc, buf)
-	return enc, nil
+
+	// Header
+	b[0] = MessageTypeClientAck
+	b[1] = 0
+	b[2] = 0
+	b[3] = 0
+	hs.duplex.Absorb(b[:HeaderLen])
+	b = b[HeaderLen:]
+
+	// DH
+	copy(b, hs.clientEphemeral[:DHLen])
+	hs.duplex.Absorb(b[:DHLen])
+	b = b[DHLen:]
+
+	// Cookie
+	n := copy(b, hs.cookie)
+	if n != CookieLen {
+		logrus.Debugf("unexpected cookie length: %d (expected %d)", n, CookieLen)
+		return HeaderLen + DHLen + n, ErrInvalidMessage
+	}
+	hs.duplex.Absorb(b[:CookieLen])
+	b = b[CookieLen:]
+
+	// Encrypted SNI
+	copy(b, "lol no SNI yet")
+	err := hs.EncryptSNI(b, name)
+	if err != nil {
+		return HeaderLen + DHLen + CookieLen, ErrInvalidMessage
+	}
+	b = b[SNILen:]
+
+	// Mac
+	hs.duplex.Squeeze(b[:MacLen])
+	b = b[MacLen:]
+
+	return length, nil
 }
 
 func writeVector(dst []byte, src []byte) (int, error) {

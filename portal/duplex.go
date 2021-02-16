@@ -9,19 +9,19 @@ import (
 )
 
 func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAddr *net.UDPAddr) (*HandshakeState, error) {
-	var macBuf [MacLen]byte
+	out := new(HandshakeState)
+	copy(out.clientEphemeral[:], clientEphemeral)
+	out.remoteAddr = clientAddr
+	out.cookieKey = &s.cookieKey
 
 	// Pull the private key out of the cookie
-	serverPrivate, err := s.decryptCookie(cookie, clientEphemeral, clientAddr)
+	n, err := out.decryptCookie(cookie)
 	if err != nil {
 		return nil, err
 	}
-
-	// Fill in the ephemerals
-	out := new(HandshakeState)
-	copy(out.clientEphemeral[:], clientEphemeral)
-	copy(out.ephemeral.private[:], serverPrivate)
-	out.ephemeral.PublicFromPrivate()
+	if n != CookieLen {
+		return nil, ErrInvalidMessage
+	}
 
 	// Replay the duplex
 	out.duplex.InitializeEmpty()
@@ -30,7 +30,8 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	// maybe the constants should just be bytes?
 	out.duplex.Absorb([]byte{byte(MessageTypeClientHello), Version, 0, 0})
 	out.duplex.Absorb(clientEphemeral)
-	out.duplex.Squeeze(macBuf[:])
+	out.duplex.Squeeze(out.macBuf[:])
+	logrus.Debugf("server: regen ch mac: %x", out.macBuf[:])
 	out.duplex.Absorb([]byte{byte(MessageTypeServerHello), 0, 0, 0})
 	out.duplex.Absorb(out.ephemeral.public[:])
 	out.ee, err = out.ephemeral.DH(out.clientEphemeral[:])
@@ -41,16 +42,17 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	out.duplex.Absorb(out.ee)
 	out.duplex.Absorb(cookie)
 	out.duplex.Squeeze(out.handshakeKey[:])
-	out.duplex.Squeeze(macBuf[:])
-	logrus.Debugf("server: regen sh mac: %x", macBuf[:])
+	out.duplex.Squeeze(out.macBuf[:])
+	logrus.Debugf("server: regen sh mac: %x", out.macBuf[:])
 	out.duplex.Initialize(out.handshakeKey[:], []byte(ProtocolName), nil)
 	out.remoteAddr = clientAddr
 	return out, nil
 }
 
-func CookieAD(clientEphemeral []byte, clientAddr *net.UDPAddr) []byte {
+func CookieAD(ephemeral *[DHLen]byte, clientAddr *net.UDPAddr) []byte {
+	// TODO(dadrian): Remove the memory allocation
 	h := sha3.New256()
-	h.Write(clientEphemeral)
+	h.Write(ephemeral[:])
 	// TODO(dadrian): Ensure this is always 4 or 12 bytes
 	h.Write(clientAddr.IP)
 	var port [2]byte
