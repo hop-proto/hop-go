@@ -41,9 +41,9 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	}
 	out.duplex.Absorb(out.ee)
 	out.duplex.Absorb(cookie)
-	out.duplex.Squeeze(out.handshakeKey[:])
 	out.duplex.Squeeze(out.macBuf[:])
 	logrus.Debugf("server: regen sh mac: %x", out.macBuf[:])
+	out.duplex.Squeeze(out.handshakeKey[:])
 	out.duplex.Initialize(out.handshakeKey[:], []byte(ProtocolName), nil)
 	return out, nil
 }
