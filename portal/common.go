@@ -23,7 +23,7 @@ const (
 	MacLen       = 16
 	KeyLen       = 16
 	DHLen        = curve25519.PointSize
-	CookieLen    = 32 + 16 + 12
+	CookieLen    = 32 + 12 + 16 // 32 bytes of secret, 12 bytes of nonce, 16 bytes of GCM tag
 	SNILen       = 256
 	SessionIDLen = 4
 	CounterLen   = 8

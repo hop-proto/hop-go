@@ -56,6 +56,7 @@ func (c *Client) initializeKeyMaterial() {
 	c.hs.ephemeral.Generate()
 
 	// TODO(dadrian): This should actually be, well, static
+	c.hs.static = new(X25519KeyPair)
 	c.hs.static.Generate()
 
 	c.hs.duplex.Absorb([]byte(ProtocolName))
@@ -172,7 +173,7 @@ func (c *Client) clientHandshake() error {
 	c.hs.duplex.Squeeze(b[:MacLen]) // tag
 	b = b[MacLen:]
 	c.pos += MacLen
-	c.se, err = c.hs.static.DH(c.hs.clientEphemeral[:])
+	c.se, err = c.hs.static.DH(c.hs.remoteEphemeral[:])
 	if err != nil {
 		logrus.Errorf("client: unable to calc se: %s", err)
 		return err

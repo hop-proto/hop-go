@@ -38,7 +38,7 @@ type HandshakeState struct {
 	static    *X25519KeyPair
 
 	macBuf          [MacLen]byte
-	clientEphemeral [DHLen]byte
+	remoteEphemeral [DHLen]byte
 	handshakeKey    [KeyLen]byte
 	clientStatic    [DHLen]byte
 	sessionID       [SessionIDLen]byte
@@ -75,7 +75,8 @@ func (hs *HandshakeState) writeCookie(b []byte) (int, error) {
 	}
 	nonce := b[0:12]
 	plaintextCookie := hs.ephemeral.private[:]
-	ad := CookieAD(&hs.clientEphemeral, hs.remoteAddr)
+	ad := CookieAD(&hs.remoteEphemeral, hs.remoteAddr)
+	logrus.Debugf("encrypt: cookie ad: %x", ad)
 	enc := aead.Seal(b[12:12], nonce, plaintextCookie, ad)
 	return len(enc) + 12, nil // CookieLen
 }
@@ -94,10 +95,10 @@ func (hs *HandshakeState) decryptCookie(b []byte) (int, error) {
 	}
 	nonce := b[0:12]
 	encryptedCookie := b[12:CookieLen]
-	ad := CookieAD(&hs.clientEphemeral, hs.remoteAddr)
+	ad := CookieAD(&hs.remoteEphemeral, hs.remoteAddr)
+	logrus.Debugf("decrypt: cookie ad: %x", ad)
 	// TODO(dadrian): Avoid allocation?
-	out := make([]byte, 0, DHLen)
-	out, err = aead.Open(hs.ephemeral.private[0:0], nonce, encryptedCookie, ad)
+	out, err := aead.Open(hs.ephemeral.private[:0], nonce, encryptedCookie, ad)
 	if len(out) != DHLen {
 		return 0, ErrInvalidMessage
 	}
@@ -115,7 +116,7 @@ func writeClientHello(hs *HandshakeState, b []byte) (int, error) {
 	x[1] = Version                      // Version
 	x[2] = 0                            // Reserved
 	x[3] = 0                            // Reserved
-	hs.duplex.Absorb(x[0:HeaderLen])
+	hs.duplex.Absorb(x[:HeaderLen])
 	x = x[HeaderLen:]
 
 	// Ephemeral
@@ -125,6 +126,7 @@ func writeClientHello(hs *HandshakeState, b []byte) (int, error) {
 
 	// Mac
 	hs.duplex.Squeeze(x[:MacLen])
+	logrus.Debugf("client: client hello mac: %x", x[:MacLen])
 	return HelloLen, nil
 }
 
@@ -143,11 +145,12 @@ func readClientHello(hs *HandshakeState, b []byte) (int, error) {
 	}
 	hs.duplex.Absorb(b[:HeaderLen])
 	b = b[HeaderLen:]
-	copy(hs.clientEphemeral[:], b[:DHLen])
+	copy(hs.remoteEphemeral[:], b[:DHLen])
 	hs.duplex.Absorb(b[:DHLen])
 	b = b[DHLen:]
 	hs.duplex.Squeeze(hs.macBuf[:])
 	// TODO(dadrian): #constanttime
+	logrus.Debugf("server: calculated client hello mac: %x", hs.macBuf)
 	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
 		return 0, ErrInvalidMessage
 	}
@@ -172,7 +175,7 @@ func writeServerHello(hs *HandshakeState, b []byte) (int, error) {
 	hs.duplex.Absorb(b[:DHLen])
 	b = b[DHLen:]
 
-	secret, err := hs.ephemeral.DH(hs.clientEphemeral[:])
+	secret, err := hs.ephemeral.DH(hs.remoteEphemeral[:])
 	if err != nil {
 		return 0, err
 	}
@@ -180,6 +183,7 @@ func writeServerHello(hs *HandshakeState, b []byte) (int, error) {
 
 	// Cookie
 	n, err := hs.writeCookie(b)
+	logrus.Debugf("server: generated cookie %x", b[:n])
 	if err != nil {
 		return 0, err
 	}
@@ -211,10 +215,10 @@ func readServerHello(hs *HandshakeState, b []byte) (int, error) {
 	b = b[HeaderLen:]
 
 	// Server Ephemeral
-	copy(hs.clientEphemeral[:], b[:DHLen])
+	copy(hs.remoteEphemeral[:], b[:DHLen])
 	hs.duplex.Absorb(b[:DHLen])
 	b = b[DHLen:]
-	secret, err := hs.ephemeral.DH(hs.clientEphemeral[:])
+	secret, err := hs.ephemeral.DH(hs.remoteEphemeral[:])
 	if err != nil {
 		return 0, err
 	}
@@ -224,6 +228,7 @@ func readServerHello(hs *HandshakeState, b []byte) (int, error) {
 	hs.cookie = make([]byte, CookieLen)
 	copy(hs.cookie, b[:CookieLen])
 	hs.duplex.Absorb(b[:CookieLen])
+	logrus.Debugf("client: read cookie %x", hs.cookie)
 	b = b[CookieLen:]
 
 	// Mac
@@ -274,7 +279,7 @@ func (hs *HandshakeState) writeClientAck(b []byte, name string) (int, error) {
 	b = b[HeaderLen:]
 
 	// DH
-	copy(b, hs.clientEphemeral[:DHLen])
+	copy(b, hs.ephemeral.public[:DHLen])
 	hs.duplex.Absorb(b[:DHLen])
 	b = b[DHLen:]
 

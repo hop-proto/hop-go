@@ -108,7 +108,9 @@ func (s *Server) readPacket() error {
 		if err != nil {
 			return err
 		}
-		logrus.Debugf("client ephemeral: %x", hs.clientEphemeral)
+		logrus.Debugf("server: client ephemeral: %x", hs.remoteEphemeral)
+		hs.cookieKey = &s.cookieKey
+		hs.remoteAddr = addr
 		n, err := writeServerHello(hs, s.outBuf)
 		if err != nil {
 			return err
@@ -117,10 +119,10 @@ func (s *Server) readPacket() error {
 			return err
 		}
 	case MessageTypeClientAck:
-		logrus.Debug("about to handle client ack")
+		logrus.Debug("server: about to handle client ack")
 		n, hs, err := s.handleClientAck(s.inBuf[:msgLen], addr)
 		if err != nil {
-			logrus.Debugf("unable to handle client ack: %s", err)
+			logrus.Debugf("server: unable to handle client ack: %s", err)
 			return err
 		}
 		if n != msgLen {
@@ -187,15 +189,19 @@ func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
 		return 0, nil, ErrUnexpectedMessage
 	}
-	header := b[0:HeaderLen]
+	header := b[:HeaderLen]
 	b = b[HeaderLen:]
 	ephemeral := b[:DHLen]
 	b = b[DHLen:]
+	logrus.Debugf("server: got client ephemeral again: %x", ephemeral)
 
 	cookie := b[:CookieLen]
 	b = b[CookieLen:]
 
 	hs, err := s.ReplayDuplexFromCookie(cookie, ephemeral, addr)
+	if err != nil {
+		return 0, nil, err
+	}
 	hs.duplex.Absorb(header)
 	hs.duplex.Absorb(ephemeral)
 	hs.duplex.Absorb(cookie)
@@ -247,7 +253,7 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState)
 	logrus.Debugf("server: sa tag %x", x[:MacLen])
 	x = x[MacLen:]
 	pos += MacLen
-	hs.es, err = s.staticKey.DH(hs.clientEphemeral[:])
+	hs.es, err = s.staticKey.DH(hs.remoteEphemeral[:])
 	if err != nil {
 		logrus.Debug("could not calculate DH(es)")
 		return pos, err
@@ -372,7 +378,7 @@ func (s *Server) Serve() error {
 	for !s.closed {
 		err := s.readPacket()
 		if err != nil {
-			logrus.Error(err)
+			logrus.Errorf("server: %s", err)
 		}
 	}
 	return nil
@@ -382,6 +388,8 @@ func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
 	// TODO(dadrian): Avoid this allocation? It's kind of big to do on an
 	// unauthenticated handshake.
 	hs := new(HandshakeState)
+	hs.duplex.InitializeEmpty()
+	hs.duplex.Absorb([]byte(ProtocolName))
 	n, err := readClientHello(hs, b)
 	if err != nil {
 		return nil, err

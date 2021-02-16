@@ -10,7 +10,7 @@ import (
 
 func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAddr *net.UDPAddr) (*HandshakeState, error) {
 	out := new(HandshakeState)
-	copy(out.clientEphemeral[:], clientEphemeral)
+	copy(out.remoteEphemeral[:], clientEphemeral)
 	out.remoteAddr = clientAddr
 	out.cookieKey = &s.cookieKey
 
@@ -34,7 +34,7 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	logrus.Debugf("server: regen ch mac: %x", out.macBuf[:])
 	out.duplex.Absorb([]byte{byte(MessageTypeServerHello), 0, 0, 0})
 	out.duplex.Absorb(out.ephemeral.public[:])
-	out.ee, err = out.ephemeral.DH(out.clientEphemeral[:])
+	out.ee, err = out.ephemeral.DH(out.remoteEphemeral[:])
 	logrus.Debugf("replay server ee: %x", out.ee)
 	if err != nil {
 		return nil, err
@@ -45,7 +45,6 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	out.duplex.Squeeze(out.macBuf[:])
 	logrus.Debugf("server: regen sh mac: %x", out.macBuf[:])
 	out.duplex.Initialize(out.handshakeKey[:], []byte(ProtocolName), nil)
-	out.remoteAddr = clientAddr
 	return out, nil
 }
 
