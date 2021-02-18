@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
@@ -26,12 +27,15 @@ func TestClientServerCompatibilityHandshake(t *testing.T) {
 	assert.NilError(t, err)
 	err = c.Handshake()
 	assert.Check(t, err)
+	time.Sleep(time.Second)
 	ss := s.sessions[c.sessionID]
 	assert.Assert(t, ss != nil)
 	assert.DeepEqual(t, c.sessionID, ss.sessionID)
 	var zero [KeyLen]byte
-	assert.Check(t, cmp.Equal(c.sessionKey, ss.key))
-	assert.Check(t, c.sessionKey != zero)
+	assert.Check(t, cmp.Equal(c.client_to_server_key, ss.client_to_server_key))
+	assert.Check(t, cmp.Equal(c.server_to_client_key, ss.server_to_client_key))
+	assert.Check(t, c.client_to_server_key != zero)
+	assert.Check(t, c.server_to_client_key != zero)
 }
 
 func TestBufferSizes(t *testing.T) {

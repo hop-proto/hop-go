@@ -33,8 +33,9 @@ type Client struct {
 	es []byte
 	se []byte
 
-	sessionID  SessionID
-	sessionKey [KeyLen]byte
+	sessionID            SessionID
+	client_to_server_key [KeyLen]byte
+	server_to_client_key [KeyLen]byte
 
 	readBuf bytes.Buffer
 }
@@ -89,6 +90,7 @@ func (c *Client) clientHandshake() error {
 
 	c.hs.RekeyFromSqueeze()
 
+	// Client Ack
 	n, err = c.hs.writeClientAck(c.buf, "david.test")
 	if err != nil {
 		return err
@@ -99,6 +101,7 @@ func (c *Client) clientHandshake() error {
 		return err
 	}
 
+	// Server Auth
 	msgLen, err := c.underlyingConn.Read(c.buf)
 	if err != nil {
 		return err
@@ -115,40 +118,18 @@ func (c *Client) clientHandshake() error {
 	}
 
 	// Client Auth
-	c.pos = 0
-	b := c.buf
-	b[0] = MessageTypeClientAuth
-	b[1] = 0
-	b[2] = 0
-	b[3] = 0
-	c.hs.duplex.Absorb(b[0:4])
-	b = b[4:]
-	c.pos += 4
-	copy(b, c.sessionID[:])
-	c.hs.duplex.Absorb(c.sessionID[:])
-	b = b[SessionIDLen:]
-	c.pos += SessionIDLen
-	c.hs.duplex.Encrypt(b[:DHLen], c.hs.static.public[:])
-	b = b[DHLen:]
-	c.pos += DHLen
-	c.hs.duplex.Squeeze(b[:MacLen]) // tag
-	b = b[MacLen:]
-	c.pos += MacLen
-	c.se, err = c.hs.static.DH(c.hs.remoteEphemeral[:])
+	n, err = c.hs.writeClientAuth(c.buf)
 	if err != nil {
-		logrus.Errorf("client: unable to calc se: %s", err)
 		return err
 	}
-	logrus.Debugf("client: se %x", c.se)
-	c.hs.duplex.Absorb(c.se)
-	c.hs.duplex.Squeeze(b[:MacLen]) // mac
-	b = b[MacLen:]
-	c.pos += MacLen
-	n, err = c.underlyingConn.Write(c.buf[0:c.pos])
+	_, err = c.underlyingConn.Write(c.buf[:n])
 	if err != nil {
 		logrus.Errorf("client: unable to send client auth: %s", err)
 		return err
 	}
+
+	c.hs.deriveFinalKeys(&c.client_to_server_key, &c.server_to_client_key)
+	c.sessionID = c.hs.sessionID
 	return nil
 }
 

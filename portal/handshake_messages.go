@@ -378,6 +378,60 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	return fullLength, nil
 }
 
+func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
+	length := HeaderLen + SessionIDLen + DHLen + MacLen + MacLen
+	if len(b) < length {
+		return 0, ErrBufUnderflow
+	}
+
+	// Header
+	b[0] = MessageTypeClientAuth
+	b[1] = 0
+	b[2] = 0
+	b[3] = 0
+	hs.duplex.Absorb(b[:HeaderLen])
+	b = b[HeaderLen:]
+
+	// SessionID
+	copy(b, hs.sessionID[:])
+	hs.duplex.Absorb(hs.sessionID[:])
+	b = b[SessionIDLen:]
+
+	// Encrypted Static
+	hs.duplex.Encrypt(b[:DHLen], hs.static.public[:])
+	b = b[DHLen:]
+
+	// Tag
+	hs.duplex.Squeeze(b[:MacLen])
+	b = b[MacLen:]
+
+	// DH (se)
+	var err error
+	hs.se, err = hs.static.DH(hs.remoteEphemeral[:])
+	if err != nil {
+		logrus.Debugf("client: unable to calculate se: %s", err)
+		return HeaderLen + SessionIDLen + DHLen + MacLen, err
+	}
+	logrus.Debugf("client: se: %x", hs.se)
+	hs.duplex.Absorb(hs.se)
+
+	// Mac
+	hs.duplex.Squeeze(b[:MacLen])
+	b = b[MacLen:]
+
+	return length, nil
+}
+
+func (hs *HandshakeState) deriveFinalKeys(client_to_server_key, server_to_client_key *[KeyLen]byte) error {
+	hs.duplex.Ratchet()
+	hs.duplex.Absorb([]byte("client_to_server_key"))
+	hs.duplex.Squeeze(client_to_server_key[:])
+	hs.duplex.Ratchet()
+	hs.duplex.Absorb([]byte("server_to_client_key"))
+	hs.duplex.Squeeze(server_to_client_key[:])
+	return nil
+}
+
 func writeVector(dst []byte, src []byte) (int, error) {
 	srcLen := len(src)
 	if srcLen > 65535 {

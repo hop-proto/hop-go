@@ -22,11 +22,12 @@ type SessionID [4]byte
 // SessionState contains the cryptographic state associated with a SessionID
 // after the successful completion of a handshake.
 type SessionState struct {
-	m          sync.Mutex
-	sessionID  SessionID
-	count      uint64
-	key        [16]byte
-	remoteAddr net.UDPAddr
+	m                    sync.Mutex
+	sessionID            SessionID
+	count                uint64
+	client_to_server_key [KeyLen]byte
+	server_to_client_key [KeyLen]byte
+	remoteAddr           net.UDPAddr
 }
 
 func (ss *SessionState) incrementCounterLocked(b []byte) {
@@ -441,6 +442,10 @@ func (s *Server) finishHandshakeLocked(hs *HandshakeState) error {
 		return ErrUnknownSession
 	}
 	// TODO(add to some queue)?
+	err := hs.deriveFinalKeys(&ss.client_to_server_key, &ss.server_to_client_key)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
