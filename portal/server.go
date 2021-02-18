@@ -223,6 +223,7 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState)
 	var intermediate []byte
 	logrus.Debugf("server: leaf, inter: %x, %x", leaf, intermediate)
 	encCertLen := EncryptedCertificatesLength(leaf, intermediate)
+	logrus.Debugf("server: encrypted cert len: %d", encCertLen)
 	if len(b) < HeaderLen+SessionIDLen+encCertLen {
 		return 0, ErrBufUnderflow
 	}
@@ -236,6 +237,7 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState)
 	x = x[HeaderLen:]
 	pos += HeaderLen
 	copy(x, ss.sessionID[:])
+	logrus.Debugf("server: session ID %x", ss.sessionID[:])
 	hs.duplex.Absorb(x[:SessionIDLen])
 	x = x[SessionIDLen:]
 	pos += SessionIDLen

@@ -307,6 +307,77 @@ func (hs *HandshakeState) writeClientAck(b []byte, name string) (int, error) {
 	return length, nil
 }
 
+func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
+	minLength := HeaderLen + SessionIDLen + 2*MacLen
+	if len(b) < minLength {
+		return 0, ErrBufUnderflow
+	}
+
+	// Header
+	if b[0] != MessageTypeServerAuth {
+		return 0, ErrUnexpectedMessage
+	}
+	if b[1] != 0 {
+		return 0, ErrInvalidMessage
+	}
+	// TODO(dadrian): Should we just get this out of UDP packet length?
+	encryptedCertLen := (int(b[2]) << 8) + int(b[3])
+	logrus.Debugf("client: got encrypted cert length %d", encryptedCertLen)
+	fullLength := minLength + encryptedCertLen
+	if len(b) < fullLength {
+		return 0, ErrBufOverflow
+	}
+	hs.duplex.Absorb(b[:HeaderLen])
+	b = b[HeaderLen:]
+
+	// SessionID
+	copy(hs.sessionID[:], b[:SessionIDLen])
+	hs.duplex.Absorb(hs.sessionID[:])
+	logrus.Debugf("client: got session ID %x", hs.sessionID)
+	b = b[SessionIDLen:]
+
+	// Certs
+	encryptedCertificates := b[:encryptedCertLen]
+	b = b[encryptedCertLen:]
+
+	// Decrypt the certificates, but don't read them yet
+	leaf, intermediate, err := DecryptCertificates(&hs.duplex, encryptedCertificates)
+	if err != nil {
+		logrus.Debugf("client: error decrypting certificates: %s", err)
+		return 0, err
+	}
+	logrus.Debugf("client: leaf, intermediate: %x, %x", leaf, intermediate)
+
+	// Tag (Encrypted Certs)
+	hs.duplex.Squeeze(hs.macBuf[:])
+	logrus.Debugf("client: calculated sa tag: %x", hs.macBuf)
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
+		logrus.Debugf("client: sa tag mismatch, got %x, wanted %x", b[:MacLen], hs.macBuf)
+		return 0, ErrInvalidMessage
+	}
+	b = b[MacLen:]
+
+	// DH
+	// TODO(dadrian): Avoid this allocation?
+	hs.es, err = hs.ephemeral.DH(leaf)
+	if err != nil {
+		logrus.Debugf("client: could not calculate es: %s", err)
+		return 0, err
+	}
+	logrus.Debugf("client: es: %x", hs.es)
+	hs.duplex.Absorb(hs.es)
+
+	// Mac
+	hs.duplex.Squeeze(hs.macBuf[:])
+	logrus.Debugf("client: calculated sa mac: %x", hs.macBuf)
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
+		logrus.Debugf("client: expected sa mac %x, got %x", hs.macBuf, b[:MacLen])
+	}
+	b = b[MacLen:]
+
+	return fullLength, nil
+}
+
 func writeVector(dst []byte, src []byte) (int, error) {
 	srcLen := len(src)
 	if srcLen > 65535 {

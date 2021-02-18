@@ -30,7 +30,7 @@ func TestClientServerCompatibilityHandshake(t *testing.T) {
 	assert.Assert(t, ss != nil)
 	assert.DeepEqual(t, c.sessionID, ss.sessionID)
 	var zero [KeyLen]byte
-	assert.Equal(t, c.sessionKey, ss.key)
+	assert.Check(t, cmp.Equal(c.sessionKey, ss.key))
 	assert.Check(t, c.sessionKey != zero)
 }
 
