@@ -17,42 +17,59 @@ var _ net.Conn = &Client{}
 //
 // TODO(dadrian): Further document
 type Client struct {
-	m  sync.Mutex
-	hs HandshakeState
+	m         sync.Mutex
+	writeLock sync.Mutex
+	readLock  sync.Mutex
+
+	hs *HandshakeState
+
+	handshakeComplete atomicBool
 
 	underlyingConn *net.UDPConn
 
 	buf []byte
-	pos int
-
-	encBuf []byte
-
-	macBuf       [MacLen]byte
-	handshakeKey [KeyLen]byte
-
-	es []byte
-	se []byte
-
-	sessionID            SessionID
-	client_to_server_key [KeyLen]byte
-	server_to_client_key [KeyLen]byte
 
 	readBuf bytes.Buffer
+	rawRead bytes.Buffer
+
+	sessionID         SessionID
+	clientToServerKey [KeyLen]byte
+	serverToClientKey [KeyLen]byte
+}
+
+func (c *Client) lockUser() {
+	c.m.Lock()
+	c.writeLock.Lock()
+	c.readLock.Lock()
+}
+
+func (c *Client) unlockUser() {
+	c.m.Unlock()
+	c.readLock.Unlock()
+	c.writeLock.Unlock()
 }
 
 // Handshake performs the Portal handshake with the remote host. The connection
 // must already be open. It is an error to call Handshake on a connection that
 // has already performed the portal handshake.
 func (c *Client) Handshake() error {
-	c.m.Lock()
-	defer c.m.Unlock()
-	c.buf = make([]byte, 1024*1024)
-	c.encBuf = make([]byte, len(c.buf))
-	c.pos = 0
-	return c.clientHandshake()
+	if c.handshakeComplete.isSet() {
+		return nil
+	}
+
+	c.lockUser()
+	defer c.unlockUser()
+
+	if c.handshakeComplete.isSet() {
+		return nil
+	}
+
+	c.buf = make([]byte, 65535)
+	return c.clientHandshakeLocked()
 }
 
-func (c *Client) initializeKeyMaterial() {
+func (c *Client) clientHandshakeLocked() error {
+	c.hs = new(HandshakeState)
 	c.hs.duplex.InitializeEmpty()
 	c.hs.ephemeral.Generate()
 
@@ -61,12 +78,9 @@ func (c *Client) initializeKeyMaterial() {
 	c.hs.static.Generate()
 
 	c.hs.duplex.Absorb([]byte(ProtocolName))
-}
 
-func (c *Client) clientHandshake() error {
-	c.initializeKeyMaterial()
 	logrus.Debugf("client: public ephemeral: %x", c.hs.ephemeral.public)
-	n, err := writeClientHello(&c.hs, c.buf)
+	n, err := writeClientHello(c.hs, c.buf)
 	if err != nil {
 		return err
 	}
@@ -83,7 +97,7 @@ func (c *Client) clientHandshake() error {
 	if n < 4 {
 		return ErrInvalidMessage
 	}
-	n, err = readServerHello(&c.hs, c.buf)
+	n, err = readServerHello(c.hs, c.buf)
 	if err != nil {
 		return err
 	}
@@ -128,8 +142,11 @@ func (c *Client) clientHandshake() error {
 		return err
 	}
 
-	c.hs.deriveFinalKeys(&c.client_to_server_key, &c.server_to_client_key)
+	c.hs.deriveFinalKeys(&c.clientToServerKey, &c.serverToClientKey)
 	c.sessionID = c.hs.sessionID
+	c.handshakeComplete.setTrue()
+	c.hs = nil
+
 	return nil
 }
 
@@ -195,7 +212,8 @@ func (c *Client) readTransport(msg []byte) ([]byte, error) {
 
 // Write implements net.Conn.
 func (c *Client) Write(b []byte) (n int, err error) {
-	// TODO(dadrian): #concurrency
+	c.writeLock.Lock()
+	defer c.writeLock.Unlock()
 	return c.writeTransport(b)
 }
 
@@ -208,10 +226,17 @@ func (c *Client) Close() error {
 
 // Read implements net.Conn.
 func (c *Client) Read(b []byte) (int, error) {
+	if !c.handshakeComplete.isSet() {
+		err := c.Handshake()
+		// TODO(dadrian): Cache handshake error?
+		if err != nil {
+			return 0, err
+		}
+	}
 	// TODO(dadrian): #concurrency
-	// TODO(dadrian): Enforce handshake has happened
-	// TODO(dadrian): Share code with server-side conn?
 	// TODO(dadrian): Avoid allocation?
+	c.readLock.Lock()
+	defer c.readLock.Unlock()
 	if c.readBuf.Len() > 0 {
 		n, err := c.readBuf.Read(b)
 		if c.readBuf.Len() == 0 {
@@ -224,6 +249,8 @@ func (c *Client) Read(b []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// TODO(dadrian): If this implements io.Reader, we can probably avoid a
+	// copy.
 	plaintext, err := c.readTransport(ciphertext[:msgLen])
 	if err != nil {
 		return 0, err
@@ -239,31 +266,37 @@ func (c *Client) Read(b []byte) (int, error) {
 }
 
 // LocalAddr returns the underlying UDP address.
-//
-// TODO(dadrian): Should this be a subspace address?
 func (c *Client) LocalAddr() net.Addr {
+	c.lockUser()
+	defer c.unlockUser()
 	return c.underlyingConn.LocalAddr()
 }
 
 // RemoteAddr returns the underlying remote UDP address.
-//
-// TODO(dadrian): Should this be a subspace address?
 func (c *Client) RemoteAddr() net.Addr {
+	c.lockUser()
+	defer c.unlockUser()
 	return c.underlyingConn.RemoteAddr()
 }
 
 // SetDeadline implements net.Conn.
 func (c *Client) SetDeadline(t time.Time) error {
+	c.lockUser()
+	defer c.unlockUser()
 	return c.underlyingConn.SetDeadline(t)
 }
 
 // SetReadDeadline implements net.Conn.
 func (c *Client) SetReadDeadline(t time.Time) error {
+	c.lockUser()
+	defer c.unlockUser()
 	return c.underlyingConn.SetReadDeadline(t)
 }
 
 // SetWriteDeadline implements net.Conn.
 func (c *Client) SetWriteDeadline(t time.Time) error {
+	c.lockUser()
+	defer c.unlockUser()
 	return c.underlyingConn.SetWriteDeadline(t)
 }
 

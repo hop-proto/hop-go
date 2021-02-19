@@ -11,9 +11,6 @@ import (
 	"gotest.tools/assert/cmp"
 )
 
-// TODO(dadrian): Actually specify transcripts?
-var clientServerTranscripts = []int{0}
-
 func TestClientServerCompatibilityHandshake(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
@@ -32,10 +29,10 @@ func TestClientServerCompatibilityHandshake(t *testing.T) {
 	assert.Assert(t, ss != nil)
 	assert.DeepEqual(t, c.sessionID, ss.sessionID)
 	var zero [KeyLen]byte
-	assert.Check(t, cmp.Equal(c.client_to_server_key, ss.client_to_server_key))
-	assert.Check(t, cmp.Equal(c.server_to_client_key, ss.server_to_client_key))
-	assert.Check(t, c.client_to_server_key != zero)
-	assert.Check(t, c.server_to_client_key != zero)
+	assert.Check(t, cmp.Equal(c.clientToServerKey, ss.client_to_server_key))
+	assert.Check(t, cmp.Equal(c.serverToClientKey, ss.server_to_client_key))
+	assert.Check(t, c.clientToServerKey != zero)
+	assert.Check(t, c.serverToClientKey != zero)
 }
 
 func TestBufferSizes(t *testing.T) {
