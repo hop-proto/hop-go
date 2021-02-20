@@ -3,6 +3,7 @@ package portal
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -21,11 +22,11 @@ type Client struct {
 	writeLock sync.Mutex
 	readLock  sync.Mutex
 
-	hs *HandshakeState
-
 	handshakeComplete atomicBool
+	closed            atomicBool
 
 	underlyingConn *net.UDPConn
+	hs             *HandshakeState
 
 	buf []byte
 
@@ -145,6 +146,7 @@ func (c *Client) clientHandshakeLocked() error {
 	c.hs.deriveFinalKeys(&c.clientToServerKey, &c.serverToClientKey)
 	c.sessionID = c.hs.sessionID
 	c.handshakeComplete.setTrue()
+	c.closed.setFalse()
 	c.hs = nil
 
 	return nil
@@ -212,14 +214,35 @@ func (c *Client) readTransport(msg []byte) ([]byte, error) {
 
 // Write implements net.Conn.
 func (c *Client) Write(b []byte) (n int, err error) {
+	if !c.handshakeComplete.isSet() {
+		err := c.Handshake()
+		if err != nil {
+			return 0, err
+		}
+	}
 	c.writeLock.Lock()
 	defer c.writeLock.Unlock()
+	if c.closed.isSet() {
+		return 0, io.EOF
+	}
 	return c.writeTransport(b)
 }
 
 // Close gracefully shutds down the connection. Repeated calls to close will error.
 func (c *Client) Close() error {
-	// TODO(dadrian): #concurrency
+	c.lockUser()
+	defer c.unlockUser()
+
+	if c.closed.isSet() {
+		return io.EOF
+	}
+
+	c.closed.setTrue()
+	c.handshakeComplete.setFalse()
+
+	// TODO(dadrian): We should cache this error to return on repeated calls if
+	// it fails.
+	//
 	// TODO(dadrian): Do we send a protocol close message?
 	return c.underlyingConn.Close()
 }
@@ -237,6 +260,9 @@ func (c *Client) Read(b []byte) (int, error) {
 	// TODO(dadrian): Avoid allocation?
 	c.readLock.Lock()
 	defer c.readLock.Unlock()
+	if c.closed.isSet() {
+		return 0, io.EOF
+	}
 	if c.readBuf.Len() > 0 {
 		n, err := c.readBuf.Read(b)
 		if c.readBuf.Len() == 0 {
