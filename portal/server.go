@@ -49,6 +49,8 @@ const (
 )
 
 type Server struct {
+	sessionLock sync.RWMutex
+
 	inBuf   []byte
 	outBuf  []byte
 	encBuf  []byte
@@ -77,15 +79,30 @@ func (s *Server) newSessionState() (*SessionState, error) {
 		// TODO(dadrian): Remove potential infinite loop
 		n, err := rand.Read(ss.sessionID[:])
 		if n != 4 || err != nil {
-			// TODO(dadrian): Should this be a panic or an error?
 			panic("could not read random data")
 		}
-		if _, ok := s.sessions[ss.sessionID]; !ok {
-			s.sessions[ss.sessionID] = ss
+		if s.setSessionState(ss) {
 			break
 		}
 	}
 	return ss, nil
+}
+
+func (s *Server) setSessionState(ss *SessionState) bool {
+	s.sessionLock.Lock()
+	defer s.sessionLock.Unlock()
+	_, exists := s.sessions[ss.sessionID]
+	if exists {
+		return false
+	}
+	s.sessions[ss.sessionID] = ss
+	return true
+}
+
+func (s *Server) fetchSessionState(sessionID SessionID) *SessionState {
+	s.sessionLock.RLock()
+	defer s.sessionLock.RUnlock()
+	return s.sessions[sessionID]
 }
 
 func (s *Server) writePacket(pkt []byte, dst *net.UDPAddr) error {
@@ -154,7 +171,7 @@ func (s *Server) readPacket() error {
 			return err
 		}
 		logrus.Debug("server: finishHandshakeLocked")
-		s.finishHandshakeLocked(hs)
+		s.finishHandshake(hs)
 		// TODO(dadrian): Don't use remote addr as the key
 		delete(s.handshakes, hs.remoteAddr.String())
 		logrus.Debug("server: deleted")
@@ -295,8 +312,8 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		logrus.Debugf("server: mismatched session ID for %s: expected %x, got %x", addr, hs.sessionID, sessionID)
 		return pos, nil, ErrUnexpectedMessage
 	}
-	_, ok = s.sessions[hs.sessionID]
-	if !ok {
+	ss := s.fetchSessionState(hs.sessionID)
+	if ss == nil {
 		logrus.Debugf("server: could not find session ID %x", hs.sessionID)
 		return pos, nil, ErrUnexpectedMessage
 	}
@@ -353,8 +370,8 @@ func (s *Server) handleTransport(addr *net.UDPAddr, msg []byte, plaintext []byte
 	counter := binary.LittleEndian.Uint64(b)
 	logrus.Debugf("server: handling transport from %s with counter %d", addr, counter)
 	b = b[CounterLen:]
-	ss, ok := s.sessions[sessionID]
-	if !ok {
+	ss := s.fetchSessionState(sessionID)
+	if ss == nil {
 		return 0, ErrUnknownSession
 	}
 	// TODO(dadrian): Decryption
@@ -419,9 +436,8 @@ func (s *Server) writeToSession(b []byte, sessionID SessionID) error {
 	x = x[HeaderLen:]
 	copy(x, sessionID[:])
 	x = x[SessionIDLen:]
-	// TODO(dadrian): #concurrency
-	ss, ok := s.sessions[sessionID]
-	if !ok {
+	ss := s.fetchSessionState(sessionID)
+	if ss == nil {
 		return ErrUnknownSession
 	}
 	counter := x
@@ -435,9 +451,8 @@ func (s *Server) writeToSession(b []byte, sessionID SessionID) error {
 	return s.writePacket(buf, &ss.remoteAddr)
 }
 
-func (s *Server) finishHandshakeLocked(hs *HandshakeState) error {
-	sid := hs.sessionID
-	ss := s.sessions[sid]
+func (s *Server) finishHandshake(hs *HandshakeState) error {
+	ss := s.fetchSessionState(hs.sessionID)
 	if ss == nil {
 		return ErrUnknownSession
 	}
@@ -452,7 +467,7 @@ func (s *Server) finishHandshakeLocked(hs *HandshakeState) error {
 // RemoteAddrFor returns the current net.Addr associated with a given session.
 func (s *Server) RemoteAddrFor(sessionID SessionID) net.Addr {
 	// TODO(dadrian): #concurrency
-	ss := s.sessions[sessionID]
+	ss := s.fetchSessionState(sessionID)
 	if ss == nil {
 		return nil
 	}

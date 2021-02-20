@@ -14,9 +14,7 @@ import (
 func TestClientServerCompatibilityHandshake(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
-	if err != nil {
-		t.Fatalf("unable to listen for packets: %s", err)
-	}
+	assert.NilError(t, err)
 	udpC := pc.(*net.UDPConn)
 	s := NewServer(udpC, nil)
 	go s.Serve()
