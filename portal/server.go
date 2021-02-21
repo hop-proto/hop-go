@@ -13,44 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// TODO(dadrian): Update cookies to use Kravatte once it's implemented.
-const cookieLen = 128
-
-// SessionID is an IP-independent identifier of a tunnel.
-type SessionID [4]byte
-
-// SessionState contains the cryptographic state associated with a SessionID
-// after the successful completion of a handshake.
-type SessionState struct {
-	m                    sync.Mutex
-	sessionID            SessionID
-	count                uint64
-	client_to_server_key [KeyLen]byte
-	server_to_client_key [KeyLen]byte
-	remoteAddr           net.UDPAddr
-}
-
-func (ss *SessionState) incrementCounterLocked(b []byte) {
-	_ = b[7]
-	b[0] = byte(ss.count >> 56)
-	b[1] = byte(ss.count >> 48)
-	b[2] = byte(ss.count >> 40)
-	b[3] = byte(ss.count >> 32)
-	b[4] = byte(ss.count >> 24)
-	b[5] = byte(ss.count >> 16)
-	b[6] = byte(ss.count >> 8)
-	b[7] = byte(ss.count)
-	ss.count++
-}
-
-const (
-	flagHaltingServe = 1
-	flagClosed       = 1 << 1
-)
-
 type Server struct {
-	sessionLock sync.RWMutex
-
 	inBuf   []byte
 	outBuf  []byte
 	encBuf  []byte
@@ -58,12 +21,13 @@ type Server struct {
 	udpConn *net.UDPConn
 
 	// TODO(dadrian): #concurrency
-	closed bool
-
-	listenerClosed bool
+	closed atomicBool
 
 	handshakes map[string]*HandshakeState
 	sessions   map[SessionID]*SessionState
+
+	sessionLock   sync.RWMutex
+	handshakeLock sync.RWMutex
 
 	cookieKey    [KeyLen]byte
 	cookieCipher cipher.Block
@@ -72,7 +36,34 @@ type Server struct {
 	staticKey X25519KeyPair
 }
 
-// TODO(dadrian): This is not thread-safe
+func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
+	s.handshakeLock.Lock()
+	defer s.handshakeLock.Unlock()
+	// TODO(dadrian): Use the same format as our cookie AD input
+	key := remoteAddr.String()
+	_, exists := s.handshakes[key]
+	if exists {
+		return false
+	}
+	s.handshakes[key] = hs
+	return true
+}
+
+func (s *Server) fetchHandshakeState(remoteAddr *net.UDPAddr) *HandshakeState {
+	s.handshakeLock.RLock()
+	defer s.handshakeLock.RUnlock()
+	key := remoteAddr.String()
+	return s.handshakes[key]
+}
+
+func (s *Server) clearHandshakeState(remoteAddr *net.UDPAddr) {
+	s.handshakeLock.Lock()
+	defer s.handshakeLock.Unlock()
+	// TODO(dadrian): Use the same format as our cookie AD input
+	key := remoteAddr.String()
+	delete(s.handshakes, key)
+}
+
 func (s *Server) newSessionState() (*SessionState, error) {
 	ss := new(SessionState)
 	for {
@@ -133,6 +124,7 @@ func (s *Server) readPacket() error {
 		if err != nil {
 			return err
 		}
+		logrus.Debugf("server: sh %x", s.outBuf[:n])
 		if err := s.writePacket(s.outBuf[:n], addr); err != nil {
 			return err
 		}
@@ -148,7 +140,10 @@ func (s *Server) readPacket() error {
 			return ErrInvalidMessage
 		}
 		// TODO(dadrian): Don't use .String() for this
-		s.handshakes[addr.String()] = hs
+		if !s.setHandshakeState(addr, hs) {
+			logrus.Debugf("server: already have handshake in progress with %s", addr.String())
+			return ErrUnexpectedMessage
+		}
 		ss, err := s.newSessionState()
 		copy(hs.sessionID[:], ss.sessionID[:])
 		ss.remoteAddr = *addr
@@ -299,8 +294,8 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
 		return 0, nil, ErrInvalidMessage
 	}
-	hs, ok := s.handshakes[addr.String()]
-	if !ok {
+	hs := s.fetchHandshakeState(addr)
+	if hs == nil {
 		logrus.Debugf("server: no handshake state for handshake packet from %s", addr)
 		return pos, nil, ErrUnexpectedMessage
 	}
@@ -395,7 +390,7 @@ func (s *Server) Serve() error {
 	s.outBuf = make([]byte, len(s.inBuf))
 	s.encBuf = make([]byte, len(s.inBuf))
 	s.oob = make([]byte, 1024)
-	for !s.closed {
+	for !s.closed.isSet() {
 		err := s.readPacket()
 		if err != nil {
 			logrus.Errorf("server: %s", err)
@@ -422,33 +417,13 @@ func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
 }
 
 func (s *Server) writeToSession(b []byte, sessionID SessionID) error {
-	pktLen := HeaderLen + SessionIDLen + CounterLen + len(b) + MacLen
-	if pktLen > MaxTotalPacketSize {
-		return bytes.ErrTooLarge
-	}
-	// TODO(dadrian): Avoid memory allocation
-	buf := make([]byte, pktLen)
-	x := buf
-	x[0] = MessageTypeTransport
-	x[1] = 0
-	x[2] = 0
-	x[3] = 0
-	x = x[HeaderLen:]
-	copy(x, sessionID[:])
-	x = x[SessionIDLen:]
 	ss := s.fetchSessionState(sessionID)
 	if ss == nil {
 		return ErrUnknownSession
 	}
-	counter := x
-	x = x[CounterLen:]
-	copy(x, b)
-	// TODO(dadrian): Encrypt this
-	x = x[len(b):]
-	// TODO(dadrian): Mac
-	// TODO(dadrian): #concurrency
-	ss.incrementCounterLocked(counter)
-	return s.writePacket(buf, &ss.remoteAddr)
+	ss.writeLock.Lock()
+	defer ss.writeLock.Unlock()
+	return ss.writePacket(s.udpConn, b, &ss.serverToClientKey)
 }
 
 func (s *Server) finishHandshake(hs *HandshakeState) error {
@@ -457,10 +432,12 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 		return ErrUnknownSession
 	}
 	// TODO(add to some queue)?
-	err := hs.deriveFinalKeys(&ss.client_to_server_key, &ss.server_to_client_key)
+	err := hs.deriveFinalKeys(&ss.clientToServerKey, &ss.serverToClientKey)
 	if err != nil {
 		return err
 	}
+	// TODO(dadrian): Is this a race?
+	s.clearHandshakeState(hs.remoteAddr)
 	return nil
 }
 
@@ -472,6 +449,15 @@ func (s *Server) RemoteAddrFor(sessionID SessionID) net.Addr {
 		return nil
 	}
 	return &ss.remoteAddr
+}
+
+// Close stops the server, causing Serve() to return.
+//
+// TODO(dadrian): What does it do to writes?
+func (s *Server) Close() error {
+	// TODO(dadrian): #concurrency
+	s.closed.setTrue()
+	return nil
 }
 
 // NewServer returns a Server listening on the provided UDP connection. The

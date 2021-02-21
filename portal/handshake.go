@@ -179,6 +179,7 @@ func writeServerHello(hs *HandshakeState, b []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	logrus.Debugf("server: ee: %x", secret)
 	hs.duplex.Absorb(secret)
 
 	// Cookie
@@ -195,6 +196,7 @@ func writeServerHello(hs *HandshakeState, b []byte) (int, error) {
 
 	// Mac
 	hs.duplex.Squeeze(b[:MacLen])
+	logrus.Debugf("server: sh mac %x", b[:MacLen])
 
 	return HeaderLen + DHLen + CookieLen + MacLen, nil
 }
@@ -227,7 +229,7 @@ func readServerHello(hs *HandshakeState, b []byte) (int, error) {
 	// Cookie
 	hs.cookie = make([]byte, CookieLen)
 	copy(hs.cookie, b[:CookieLen])
-	hs.duplex.Absorb(b[:CookieLen])
+	hs.duplex.Absorb(hs.cookie)
 	logrus.Debugf("client: read cookie %x", hs.cookie)
 	b = b[CookieLen:]
 

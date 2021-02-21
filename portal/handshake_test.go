@@ -23,14 +23,14 @@ func TestClientServerCompatibilityHandshake(t *testing.T) {
 	err = c.Handshake()
 	assert.Check(t, err)
 	time.Sleep(time.Second)
-	ss := s.sessions[c.sessionID]
+	ss := s.sessions[c.ss.sessionID]
 	assert.Assert(t, ss != nil)
-	assert.DeepEqual(t, c.sessionID, ss.sessionID)
+	assert.DeepEqual(t, c.ss.sessionID, ss.sessionID)
 	var zero [KeyLen]byte
-	assert.Check(t, cmp.Equal(c.clientToServerKey, ss.client_to_server_key))
-	assert.Check(t, cmp.Equal(c.serverToClientKey, ss.server_to_client_key))
-	assert.Check(t, c.clientToServerKey != zero)
-	assert.Check(t, c.serverToClientKey != zero)
+	assert.Check(t, cmp.Equal(c.ss.clientToServerKey, ss.clientToServerKey))
+	assert.Check(t, cmp.Equal(c.ss.serverToClientKey, ss.serverToClientKey))
+	assert.Check(t, c.ss.clientToServerKey != zero)
+	assert.Check(t, c.ss.serverToClientKey != zero)
 }
 
 func TestBufferSizes(t *testing.T) {

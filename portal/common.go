@@ -54,3 +54,7 @@ var ErrInvalidMessage = errors.New("invalid message")
 
 // ErrUnknownSession is returned when a message contains an unknown SessionID.
 var ErrUnknownSession = errors.New("unknown session")
+
+// ErrUnknownMessage is returned when a mess contains an unknown MessageType in
+// byte 0.
+var ErrUnknownMessage = errors.New("unknown message type")

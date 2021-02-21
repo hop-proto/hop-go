@@ -2,7 +2,6 @@ package portal
 
 import (
 	"bytes"
-	"encoding/binary"
 	"io"
 	"net"
 	"sync"
@@ -26,16 +25,12 @@ type Client struct {
 	closed            atomicBool
 
 	underlyingConn *net.UDPConn
-	hs             *HandshakeState
+	dialAddr       *net.UDPAddr
 
-	buf []byte
+	hs *HandshakeState
+	ss *SessionState
 
 	readBuf bytes.Buffer
-	rawRead bytes.Buffer
-
-	sessionID         SessionID
-	clientToServerKey [KeyLen]byte
-	serverToClientKey [KeyLen]byte
 }
 
 func (c *Client) lockUser() {
@@ -65,12 +60,12 @@ func (c *Client) Handshake() error {
 		return nil
 	}
 
-	c.buf = make([]byte, 65535)
 	return c.clientHandshakeLocked()
 }
 
 func (c *Client) clientHandshakeLocked() error {
 	c.hs = new(HandshakeState)
+	c.hs.remoteAddr = c.dialAddr
 	c.hs.duplex.InitializeEmpty()
 	c.hs.ephemeral.Generate()
 
@@ -80,25 +75,28 @@ func (c *Client) clientHandshakeLocked() error {
 
 	c.hs.duplex.Absorb([]byte(ProtocolName))
 
+	// TODO(dadrian): This should be allocated smaller
+	buf := make([]byte, 65535)
+
 	logrus.Debugf("client: public ephemeral: %x", c.hs.ephemeral.public)
-	n, err := writeClientHello(c.hs, c.buf)
+	n, err := writeClientHello(c.hs, buf)
 	if err != nil {
 		return err
 	}
-	n, err = c.underlyingConn.Write(c.buf[:n])
+	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
 	if err != nil {
 		return err
 	}
 	// TODO(dadrian): Use ReadMsgUDP
-	n, err = c.underlyingConn.Read(c.buf)
+	n, _, _, _, err = c.underlyingConn.ReadMsgUDP(buf, nil)
 	if err != nil {
 		return err
 	}
-	logrus.Debugf("client: recv %x", c.buf[:n])
+	logrus.Debugf("client: recv %x", buf[:n])
 	if n < 4 {
 		return ErrInvalidMessage
 	}
-	n, err = readServerHello(c.hs, c.buf)
+	n, err = readServerHello(c.hs, buf)
 	if err != nil {
 		return err
 	}
@@ -106,24 +104,24 @@ func (c *Client) clientHandshakeLocked() error {
 	c.hs.RekeyFromSqueeze()
 
 	// Client Ack
-	n, err = c.hs.writeClientAck(c.buf, "david.test")
+	n, err = c.hs.writeClientAck(buf, "david.test")
 	if err != nil {
 		return err
 	}
 
-	_, err = c.underlyingConn.Write(c.buf[:n])
+	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
 	if err != nil {
 		return err
 	}
 
 	// Server Auth
-	msgLen, err := c.underlyingConn.Read(c.buf)
+	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(buf, nil)
 	if err != nil {
 		return err
 	}
 	logrus.Debugf("clinet: sa msgLen: %d", msgLen)
 
-	n, err = c.hs.readServerAuth(c.buf[:msgLen])
+	n, err = c.hs.readServerAuth(buf[:msgLen])
 	if err != nil {
 		return err
 	}
@@ -133,87 +131,38 @@ func (c *Client) clientHandshakeLocked() error {
 	}
 
 	// Client Auth
-	n, err = c.hs.writeClientAuth(c.buf)
+	n, err = c.hs.writeClientAuth(buf)
 	if err != nil {
 		return err
 	}
-	_, err = c.underlyingConn.Write(c.buf[:n])
+	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
 	if err != nil {
 		logrus.Errorf("client: unable to send client auth: %s", err)
 		return err
 	}
 
-	c.hs.deriveFinalKeys(&c.clientToServerKey, &c.serverToClientKey)
-	c.sessionID = c.hs.sessionID
+	c.ss = new(SessionState)
+	c.ss.sessionID = c.hs.sessionID
+	c.ss.remoteAddr = *c.hs.remoteAddr
+	c.hs.deriveFinalKeys(&c.ss.clientToServerKey, &c.ss.serverToClientKey)
 	c.handshakeComplete.setTrue()
 	c.closed.setFalse()
 	c.hs = nil
+	c.dialAddr = nil
 
 	return nil
 }
 
-func (c *Client) writeTransport(plaintext []byte) (int, error) {
-	buf := make([]byte, HeaderLen+SessionIDLen+CounterLen+len(plaintext)+MacLen)
-	n := 0
-	x := buf
-	x[0] = MessageTypeTransport
-	x[1] = 0
-	x[2] = 0
-	x[3] = 0
-	x = x[4:]
-	n += 4
-	copy(x, c.sessionID[:])
-	x = x[SessionIDLen:]
-	n += SessionIDLen
-	// TODO(dadrian): Tracks sequence numbers
-	copy(x, []byte{1, 2, 3, 4, 5, 6, 7, 8})
-	x = x[CounterLen:]
-	n += CounterLen
-	// TODO(dadrian): Implement encryption
-	copy(x, plaintext)
-	x = x[len(plaintext):]
-	n += len(plaintext)
-	c.hs.duplex.Absorb(buf[0:n])
-	c.hs.duplex.Squeeze(x[:MacLen])
-	n += MacLen
-	written, err := c.underlyingConn.Write(buf)
-	if written != n {
-		panic("fuck")
+func (c *Client) writeTransport(plaintext []byte) error {
+	err := c.ss.writePacket(c.underlyingConn, plaintext, &c.ss.clientToServerKey)
+	if err != nil {
+		return err
 	}
-	return len(plaintext), err
-}
-
-func (c *Client) readTransport(msg []byte) ([]byte, error) {
-	if len(msg) < HeaderLen+SessionIDLen+CounterLen+MacLen {
-		return nil, ErrInvalidMessage
-	}
-	x := msg
-	if x[0] != MessageTypeTransport {
-		return nil, ErrUnexpectedMessage
-	}
-	if x[1] != 0 || x[2] != 0 || x[3] != 0 {
-		return nil, ErrInvalidMessage
-	}
-	x = x[HeaderLen:]
-	var sessionID SessionID
-	copy(sessionID[:], x[:SessionIDLen])
-	if c.sessionID != sessionID {
-		return nil, ErrUnknownSession
-	}
-	x = x[SessionIDLen:]
-	counter := binary.LittleEndian.Uint64(x)
-	x = x[CounterLen:]
-	logrus.Debugf("client: handling transport message from %s with counter %d", c.RemoteAddr(), counter)
-	dataLen := len(x) - MacLen
-	// TODO(dadrian): Decryption
-	// TODO(dadrian): Mac verification
-	out := make([]byte, dataLen)
-	copy(out, x[:dataLen])
-	return out, nil
+	return nil
 }
 
 // Write implements net.Conn.
-func (c *Client) Write(b []byte) (n int, err error) {
+func (c *Client) Write(b []byte) (int, error) {
 	if !c.handshakeComplete.isSet() {
 		err := c.Handshake()
 		if err != nil {
@@ -225,7 +174,11 @@ func (c *Client) Write(b []byte) (n int, err error) {
 	if c.closed.isSet() {
 		return 0, io.EOF
 	}
-	return c.writeTransport(b)
+	err := c.writeTransport(b)
+	if err != nil {
+		return 0, err
+	}
+	return len(b), nil
 }
 
 // Close gracefully shutds down the connection. Repeated calls to close will error.
@@ -249,6 +202,7 @@ func (c *Client) Close() error {
 
 // Read implements net.Conn.
 func (c *Client) Read(b []byte) (int, error) {
+	// TODO(dadrian): Close the connection on bad reads?
 	if !c.handshakeComplete.isSet() {
 		err := c.Handshake()
 		// TODO(dadrian): Cache handshake error?
@@ -271,13 +225,19 @@ func (c *Client) Read(b []byte) (int, error) {
 		return n, err
 	}
 	ciphertext := make([]byte, 65535)
-	msgLen, err := c.underlyingConn.Read(ciphertext)
+	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(ciphertext, nil)
 	if err != nil {
 		return 0, err
 	}
+	plaintextLen := PlaintextLen(msgLen)
+	if plaintextLen < 0 {
+		return 0, ErrInvalidMessage
+	}
 	// TODO(dadrian): If this implements io.Reader, we can probably avoid a
 	// copy.
-	plaintext, err := c.readTransport(ciphertext[:msgLen])
+	// TODO(dadrian): Avoid an allocation
+	plaintext := make([]byte, plaintextLen)
+	c.ss.readPacket(plaintext, ciphertext[:msgLen], &c.ss.serverToClientKey)
 	if err != nil {
 		return 0, err
 	}
@@ -328,9 +288,10 @@ func (c *Client) SetWriteDeadline(t time.Time) error {
 
 // NewClient returns a Client configured as specified, using the underlying UDP
 // connection. The Client has not yet completed a handshake.
-func NewClient(conn *net.UDPConn, config *Config) *Client {
+func NewClient(conn *net.UDPConn, server *net.UDPAddr, config *Config) *Client {
 	c := &Client{
 		underlyingConn: conn,
+		dialAddr:       server,
 	}
 	return c
 }
