@@ -1,3 +1,3 @@
-package portal
+package transport
 
 type Config struct{}

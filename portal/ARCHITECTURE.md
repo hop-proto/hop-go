@@ -1,7 +1,20 @@
 Architecture
 ============
 
-TODO
+## File Structure
+
+Each top-level folder should have its own README.
+
+The other top-level folders are organized as follows:
+- `cyclist`: Contains an implementation of the Cyclist duplex using specific
+  parameters for Keccak
+- `kravatte`: Contains an implementation of the Kravatte AEAD, with specific
+  Keccak parameters.
+- `snp`: Byte-manipulation code shared between Kravatte and Cyclist
+- `transport`: Implementation of the $PROTOCOL transport-layer
+- `reliable`: Proof-of-concept of $PROTOCOL channels.
+- `channels`: Implementation of the $PROTCOL channels on top of the transport
+  layer. Not yet started.
 
 ### Notes
 

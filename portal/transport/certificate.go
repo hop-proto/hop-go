@@ -1,4 +1,4 @@
-package portal
+package transport
 
 // Certificate currently contains a single static key pair. This is a hack to
 // get static keys into the protocol. The full certificate is defined in the
