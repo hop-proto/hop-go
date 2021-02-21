@@ -1,20 +1,22 @@
-package main
+package reliable
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"sync"
 	"time"
-	"errors"
 )
 
 // Network Send Buffer Size
 // Channel Recv, Read, Write buf size
 var BUF_SIZE = 64
+
 // Window Size in Bytes
 var WINDOW_SIZE = 4096
+
 // Retransmission Time RTO
-var RTO = 250*time.Millisecond
+var RTO = 250 * time.Millisecond
 
 type ChannelApp struct {
 	// Internal Channel Application
@@ -45,6 +47,12 @@ func (ca *ChannelApp) Init(conn net.PacketConn, raddr net.Addr, maxFrSz int) {
 	internal_ca := &chanApp{}
 	internal_ca.init(nrecv, nsend, nclose, maxFrSz)
 	ca.ca = internal_ca
+}
+
+func (ca *ChannelApp) NewChannel() *Channel {
+	return &Channel{
+		ca: ca.ca,
+	}
 }
 
 func (ca *ChannelApp) Start() {
@@ -80,18 +88,18 @@ type ChannelListener struct {
 
 func (cl *ChannelListener) Accept() (*Channel, error) {
 	select {
+	case <-cl.quit:
+		return nil, errors.New("Channel Listener is closed")
+	default:
+		select {
 		case <-cl.quit:
 			return nil, errors.New("Channel Listener is closed")
-		default:
-			select {
-				case <-cl.quit:
-					return nil, errors.New("Channel Listener is closed")
-				case ch, ok := <-cl.listenerCh:
-					if !ok {
-						return ch, errors.New("Channel Application is closed")
-					}
-					return ch, nil
+		case ch, ok := <-cl.listenerCh:
+			if !ok {
+				return ch, errors.New("Channel Application is closed")
 			}
+			return ch, nil
+		}
 	}
 }
 
@@ -108,7 +116,7 @@ func (cl *ChannelListener) Close() error {
 	return nil
 }
 
-type CALAddr struct {}
+type CALAddr struct{}
 
 func (cal *CALAddr) Network() string {
 	return "ChanApp"
@@ -149,7 +157,7 @@ type chanApp struct {
 	channelRecvChs [256](chan []byte)
 	// Channel windows
 	channelWindows [256]*Window
-	// Channel Retransmission Queues 
+	// Channel Retransmission Queues
 	channelRTQueues [256]*RTQueue
 	// Channel Tickers used for clock ticks
 	channelTickers [256](*time.Ticker)
@@ -172,7 +180,7 @@ type chanApp struct {
 	channelMakeChSignal [256](chan struct{})
 	// Mutex and Channel Active Status
 	channelActiveMu [256]sync.Mutex
-	channelActive [256]bool
+	channelActive   [256]bool
 }
 
 func (ca *chanApp) init(nrecv nrecvfn, nsend nsendfn, nclose nclosefn,
@@ -236,12 +244,12 @@ func (ca *chanApp) shutdown() {
 
 func (ca *chanApp) send(frame []byte) {
 	select {
-		case ca.nsendCh <- frame:
-		default:
+	case ca.nsendCh <- frame:
+	default:
 	}
 }
 
-func (ca *chanApp) nRecvThread(){
+func (ca *chanApp) nRecvThread() {
 	defer ca.nwg.Done()
 	for {
 		n, buf, err := ca.nrecv()
@@ -254,8 +262,8 @@ func (ca *chanApp) nRecvThread(){
 		frame := buf[:n]
 		// Routing frame to channels is best effort
 		select {
-			case ca.channelRecvChs[getCID(frame)] <- frame:
-			default:
+		case ca.channelRecvChs[getCID(frame)] <- frame:
+		default:
 		}
 	}
 }
@@ -292,11 +300,11 @@ func (ca *chanApp) channelRecvThread(cid int) {
 		} else if isRep(frame) {
 			fmt.Println("Channel", cid, "received response frame")
 			// handle processing logic
-			/* 
-			select {
-				case ca.channelMakeChSignal[cid] <- struct{}{}:
-				default:
-			}
+			/*
+				select {
+					case ca.channelMakeChSignal[cid] <- struct{}{}:
+					default:
+				}
 			*/
 		} else if isFin(frame) {
 			// handle Fin Logic
@@ -336,8 +344,8 @@ func (ca *chanApp) channelRecvThread(cid int) {
 				// basically send an ACK frame
 				// Done in nonblocking manner
 				select {
-					case ca.channelSendAckChs[cid] <-struct{}{}:
-					default:
+				case ca.channelSendAckChs[cid] <- struct{}{}:
+				default:
 				}
 			}
 		}
@@ -357,16 +365,16 @@ func (ca *chanApp) channelSendThread(cid int) {
 	for {
 		select {
 		case data, ok := <-ca.channelWriteChs[cid]:
-				if !ok {
-					// Write Ch has closed
-					return
-				}
-				latestCtrSeen := readCtr(&ca.channelLatestCtrSeen[cid])
-				frame := buildFrame(cid, 0, latestCtrSeen, ctr, data)
-				ctr++
-				fmt.Println("Channel", cid, "sending Frame", frame)
-				ca.send(frame)
-				ca.channelRTQueues[cid].Push(frame)
+			if !ok {
+				// Write Ch has closed
+				return
+			}
+			latestCtrSeen := readCtr(&ca.channelLatestCtrSeen[cid])
+			frame := buildFrame(cid, 0, latestCtrSeen, ctr, data)
+			ctr++
+			fmt.Println("Channel", cid, "sending Frame", frame)
+			ca.send(frame)
+			ca.channelRTQueues[cid].Push(frame)
 		case _, ok := <-ca.channelTickers[cid].C:
 			if !ok {
 				// ticker stopped
@@ -390,15 +398,15 @@ func (ca *chanApp) channelSendThread(cid int) {
 				ca.send(frame)
 			}
 		case _, ok := <-ca.channelSendAckChs[cid]:
-				if !ok {
-					// SendAckCh closed
-					return
-				}
-				latestCtrSeen := readCtr(&ca.channelLatestCtrSeen[cid])
-				// Empty frame with ignored ctr
-				frame := buildFrame(cid, 0, latestCtrSeen, 0, []byte{})
-				fmt.Println("Channel", cid, "sending ack frame", frame)
-				ca.send(frame)
+			if !ok {
+				// SendAckCh closed
+				return
+			}
+			latestCtrSeen := readCtr(&ca.channelLatestCtrSeen[cid])
+			// Empty frame with ignored ctr
+			frame := buildFrame(cid, 0, latestCtrSeen, 0, []byte{})
+			fmt.Println("Channel", cid, "sending ack frame", frame)
+			ca.send(frame)
 		}
 	}
 }

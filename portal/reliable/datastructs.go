@@ -1,15 +1,15 @@
-package main
+package reliable
 
 import (
 	"container/heap"
 )
 
 type RTQueue struct {
-	frames [](*[]byte)
-	count int
+	frames []([]byte)
+	count  uint32
 }
 
-func (rtq *RTQueue) Push(frame *[]byte) {
+func (rtq *RTQueue) Push(frame []byte) {
 	rtq.frames = append(rtq.frames, frame)
 	rtq.count++
 }
@@ -21,8 +21,8 @@ func (rtq *RTQueue) Pop() {
 	}
 }
 
-func (rtq *RTQueue) Ack(ack int) {
-	for rtq.count > 0 && getCID(*(rtq.frames[0])) <= ack {
+func (rtq *RTQueue) Ack(ack uint32) {
+	for rtq.count > 0 && uint32(getCtr(rtq.frames[0])) <= ack {
 		rtq.Pop()
 	}
 }
@@ -30,7 +30,7 @@ func (rtq *RTQueue) Ack(ack int) {
 type Item struct {
 	value    []byte
 	priority uint32
-	index int
+	index    int
 }
 
 // A PriorityQueue implements heap.Interface and holds Items.
@@ -66,9 +66,9 @@ func (pq *PriorityQueue) Pop() interface{} {
 }
 
 type Window struct {
-	ctrs map[uint32]bool
-	pq PriorityQueue
-	maxsz int
+	ctrs   map[uint32]bool
+	pq     PriorityQueue
+	maxsz  int
 	currsz int
 }
 
@@ -103,8 +103,8 @@ func (w *Window) push(frame []byte) bool {
 	return false
 }
 
-func (w *Window) hasNextframe(lastacked uint32) bool{
-	return w.len() > 0 && w.pq[0].priority == lastacked + 1
+func (w *Window) hasNextFrame(lastacked uint32) bool {
+	return w.len() > 0 && w.pq[0].priority == lastacked+1
 }
 
 func (w *Window) pop() []byte {
