@@ -436,16 +436,6 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	return nil
 }
 
-// RemoteAddrFor returns the current net.Addr associated with a given session.
-func (s *Server) RemoteAddrFor(sessionID SessionID) net.Addr {
-	// TODO(dadrian): #concurrency
-	ss := s.fetchSessionState(sessionID)
-	if ss == nil {
-		return nil
-	}
-	return &ss.remoteAddr
-}
-
 // Close stops the server, causing Serve() to return.
 //
 // TODO(dadrian): What does it do to writes?
