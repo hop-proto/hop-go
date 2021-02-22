@@ -18,7 +18,7 @@ func TestClientServerCompatibilityHandshake(t *testing.T) {
 	udpC := pc.(*net.UDPConn)
 	s := NewServer(udpC, nil)
 	go s.Serve()
-	c, err := Dial("udp", pc.LocalAddr().String(), &Config{})
+	c, err := Dial("udp", pc.LocalAddr().String(), &ClientConfig{})
 	assert.NilError(t, err)
 	err = c.Handshake()
 	assert.Check(t, err)

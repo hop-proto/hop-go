@@ -40,6 +40,15 @@ func PlaintextLen(transportLen int) int {
 	return transportLen - HeaderLen - SessionIDLen - CounterLen - MacLen
 }
 
+func PeekSession(msg []byte) (out SessionID, err error) {
+	if len(msg) < HeaderLen+SessionIDLen {
+		err = ErrBufUnderflow
+		return
+	}
+	copy(out[:], msg[HeaderLen:HeaderLen+SessionIDLen])
+	return
+}
+
 func (ss *SessionState) lockUser() {
 	ss.m.Lock()
 	ss.writeLock.Lock()
@@ -114,25 +123,27 @@ func (ss *SessionState) writePacket(conn *net.UDPConn, in []byte, key *[KeyLen]b
 	return nil
 }
 
-func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) error {
+func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (int, error) {
 	plaintextLen := PlaintextLen(len(pkt))
 	if plaintextLen > len(plaintext) {
-		return ErrBufOverflow
+		return 0, ErrBufOverflow
 	}
 
 	// Header
 	b := pkt
 	if b[0] != MessageTypeTransport {
-		return ErrUnexpectedMessage
+		return 0, ErrUnexpectedMessage
 	}
 	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
-		return ErrInvalidMessage
+		return 0, ErrInvalidMessage
 	}
+	b = b[HeaderLen:]
 
 	// SessionID
 	if !bytes.Equal(ss.sessionID[:], b[:SessionIDLen]) {
-		return ErrUnknownSession
+		return 0, ErrUnknownSession
 	}
+	b = b[SessionIDLen:]
 
 	// Counter
 	count := ss.readCounter(b)
@@ -146,5 +157,5 @@ func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) err
 	// TODO(dadrian): Mac Verify
 	b = b[MacLen:]
 
-	return nil
+	return plaintextLen, nil
 }

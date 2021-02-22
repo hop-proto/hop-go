@@ -20,7 +20,7 @@ func TestMultipleHandshakes(t *testing.T) {
 	go func() {
 		s.Serve()
 	}()
-	clientConfig := Config{}
+	clientConfig := ClientConfig{}
 	wg.Add(3)
 	var zero [KeyLen]byte
 	now := time.Now()
@@ -51,11 +51,19 @@ func TestMultipleHandshakes(t *testing.T) {
 	wg.Wait()
 }
 
+func ExpectData(t *testing.T, expected string, wg *sync.WaitGroup) PacketCallback {
+	return func(_ SessionID, msg []byte) {
+		assert.Check(t, cmp.Equal(expected, string(msg)))
+		wg.Done()
+	}
+}
+
 func TestReadWrite(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
-	s := NewServer(pc.(*net.UDPConn), nil)
+	config := &ServerConfig{}
+	s := NewServer(pc.(*net.UDPConn), config)
 	go func() {
 		s.Serve()
 	}()
@@ -63,18 +71,34 @@ func TestReadWrite(t *testing.T) {
 	t.Run("test client write", func(t *testing.T) {
 		c, err := Dial("udp", pc.LocalAddr().String(), nil)
 		assert.NilError(t, err)
+		wg := sync.WaitGroup{}
+		wg.Add(1)
 		err = c.Handshake()
 		assert.NilError(t, err)
-		n, err := c.Write([]byte("It's time to ignite. I'm making a fire!"))
+		s := "It's time to ignite. I'm making a fire!"
+		config.OnReceive = ExpectData(t, s, &wg)
+		defer func() {
+			config.OnReceive = nil
+		}()
+		n, err := c.Write([]byte(s))
 		assert.NilError(t, err)
-		assert.Check(t, cmp.Equal(39, n))
+		assert.Check(t, cmp.Equal(len(s), n))
+		wg.Wait()
 	})
 
 	t.Run("test client write triggers handshake", func(t *testing.T) {
 		c, err := Dial("udp", pc.LocalAddr().String(), nil)
 		assert.NilError(t, err)
-		n, err := c.Write([]byte("Another splinter under the skin. Another season of loneliness."))
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		s := "Another splinter under the skin. Another season of loneliness."
+		config.OnReceive = ExpectData(t, s, &wg)
+		defer func() {
+			config.OnReceive = nil
+		}()
+		n, err := c.Write([]byte(s))
 		assert.NilError(t, err)
-		assert.Check(t, cmp.Equal(62, n))
+		assert.Check(t, cmp.Equal(len(s), n))
+		wg.Wait()
 	})
 }

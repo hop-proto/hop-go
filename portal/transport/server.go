@@ -5,7 +5,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"encoding/binary"
 	"errors"
 	"net"
 	"sync"
@@ -14,11 +13,13 @@ import (
 )
 
 type Server struct {
-	inBuf   []byte
-	outBuf  []byte
-	encBuf  []byte
-	oob     []byte
+	inBuf  []byte
+	outBuf []byte
+	encBuf []byte
+	oob    []byte
+
 	udpConn *net.UDPConn
+	config  *ServerConfig
 
 	// TODO(dadrian): #concurrency
 	closed atomicBool
@@ -167,9 +168,6 @@ func (s *Server) readPacket() error {
 		}
 		logrus.Debug("server: finishHandshakeLocked")
 		s.finishHandshake(hs)
-		// TODO(dadrian): Don't use remote addr as the key
-		delete(s.handshakes, hs.remoteAddr.String())
-		logrus.Debug("server: deleted")
 	case MessageTypeServerHello, MessageTypeServerAuth:
 		// Server-side should not receive messages only sent by the server
 		return ErrUnexpectedMessage
@@ -347,39 +345,24 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 }
 
 func (s *Server) handleTransport(addr *net.UDPAddr, msg []byte, plaintext []byte) (int, error) {
-	if len(msg) < HeaderLen+SessionIDLen+CounterLen+MacLen {
-		return 0, ErrBufUnderflow
+	sessionID, err := PeekSession(msg)
+	if err != nil {
+		return 0, err
 	}
-	b := msg
-	if MessageType(b[0]) != MessageTypeTransport {
-		return 0, ErrUnexpectedMessage
-	}
-	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
-		logrus.Debugf("server: transport message not zeroed %x", b[:4])
-		return 0, ErrInvalidMessage
-	}
-	b = b[HeaderLen:]
-	var sessionID SessionID
-	copy(sessionID[:], b[:SessionIDLen])
-	b = b[SessionIDLen:]
-	counter := binary.LittleEndian.Uint64(b)
-	logrus.Debugf("server: handling transport from %s with counter %d", addr, counter)
-	b = b[CounterLen:]
+	logrus.Debugf("server: transport message for session %x", sessionID)
 	ss := s.fetchSessionState(sessionID)
 	if ss == nil {
 		return 0, ErrUnknownSession
 	}
-	// TODO(dadrian): Decryption
-	dataLen := len(b) - MacLen
-	if len(plaintext) < dataLen {
-		return 0, ErrBufOverflow
+	n, err := ss.readPacket(plaintext, msg, &ss.clientToServerKey)
+	if err != nil {
+		return 0, err
 	}
-	copy(plaintext, b[:dataLen])
-	// TODO(dadrian): Make this a callback
 	logrus.Debugf("server: session %x: plaintext: %x", ss.sessionID, plaintext)
-	//ss.handle.in <- plaintext[:dataLen]
-	// TODO(dadrian): Mac verification
-	return dataLen, nil
+	if s.config.OnReceive != nil {
+		s.config.OnReceive(sessionID, plaintext[:n])
+	}
+	return n, nil
 }
 
 // Serve blocks until the server is closed.
@@ -431,6 +414,7 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	if ss == nil {
 		return ErrUnknownSession
 	}
+	logrus.Debugf("server: finishing handshake for session %x", ss.sessionID)
 	// TODO(add to some queue)?
 	err := hs.deriveFinalKeys(&ss.clientToServerKey, &ss.serverToClientKey)
 	if err != nil {
@@ -462,12 +446,16 @@ func (s *Server) Close() error {
 
 // NewServer returns a Server listening on the provided UDP connection. The
 // returned Server object is a valid net.Listener.
-func NewServer(conn *net.UDPConn, config *Config) *Server {
+func NewServer(conn *net.UDPConn, config *ServerConfig) *Server {
+	if config == nil {
+		config = new(ServerConfig)
+	}
 	s := Server{
 		udpConn: conn,
 		// TODO(dadrian): Standardize this?
 		handshakes: make(map[string]*HandshakeState),
 		sessions:   make(map[SessionID]*SessionState),
+		config:     config,
 	}
 	// TODO(dadrian): This probably shouldn't happen in this function
 	_, err := rand.Read(s.cookieKey[:])

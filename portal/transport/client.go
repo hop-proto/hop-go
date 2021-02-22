@@ -288,7 +288,7 @@ func (c *Client) SetWriteDeadline(t time.Time) error {
 
 // NewClient returns a Client configured as specified, using the underlying UDP
 // connection. The Client has not yet completed a handshake.
-func NewClient(conn *net.UDPConn, server *net.UDPAddr, config *Config) *Client {
+func NewClient(conn *net.UDPConn, server *net.UDPAddr, config *ClientConfig) *Client {
 	c := &Client{
 		underlyingConn: conn,
 		dialAddr:       server,

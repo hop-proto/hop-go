@@ -1,3 +1,9 @@
 package transport
 
-type Config struct{}
+type ClientConfig struct{}
+
+type PacketCallback func(SessionID, []byte)
+
+type ServerConfig struct {
+	OnReceive PacketCallback
+}
