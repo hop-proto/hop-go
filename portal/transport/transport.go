@@ -49,6 +49,19 @@ func PeekSession(msg []byte) (out SessionID, err error) {
 	return
 }
 
+func EqualUDPAddress(a, b *net.UDPAddr) bool {
+	if a.Port != b.Port {
+		return false
+	}
+	if !a.IP.Equal(b.IP) {
+		return false
+	}
+	if a.Zone != b.Zone {
+		return false
+	}
+	return true
+}
+
 func (ss *SessionState) lockUser() {
 	ss.m.Lock()
 	ss.writeLock.Lock()

@@ -344,6 +344,12 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	return pos, hs, nil
 }
 
+func (s *Server) readPacketFromSession(ss *SessionState, plaintext []byte, pkt []byte, key *[KeyLen]byte) (int, error) {
+	ss.readLock.Lock()
+	defer ss.readLock.Unlock()
+	return ss.readPacket(plaintext, pkt, &ss.clientToServerKey)
+}
+
 func (s *Server) handleTransport(addr *net.UDPAddr, msg []byte, plaintext []byte) (int, error) {
 	sessionID, err := PeekSession(msg)
 	if err != nil {
@@ -354,13 +360,18 @@ func (s *Server) handleTransport(addr *net.UDPAddr, msg []byte, plaintext []byte
 	if ss == nil {
 		return 0, ErrUnknownSession
 	}
-	n, err := ss.readPacket(plaintext, msg, &ss.clientToServerKey)
+	n, err := s.readPacketFromSession(ss, plaintext, msg, &ss.clientToServerKey)
 	if err != nil {
 		return 0, err
 	}
 	logrus.Debugf("server: session %x: plaintext: %x", ss.sessionID, plaintext)
 	if s.config.OnReceive != nil {
 		s.config.OnReceive(sessionID, plaintext[:n])
+	}
+	ss.writeLock.Lock()
+	defer ss.writeLock.Unlock()
+	if !EqualUDPAddress(&ss.remoteAddr, addr) {
+		ss.remoteAddr = *addr
 	}
 	return n, nil
 }
