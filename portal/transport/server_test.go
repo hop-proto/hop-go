@@ -81,7 +81,7 @@ func TestReadWrite(t *testing.T) {
 		assert.NilError(t, err)
 		err = c.Handshake()
 		assert.NilError(t, err)
-		h, err := s.accept()
+		h, err := s.AcceptTimeout(10 * time.Second)
 		assert.NilError(t, err)
 		s := "It's time to ignite. I'm making a fire!"
 		n, err := c.Write([]byte(s))

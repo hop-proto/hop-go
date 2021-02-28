@@ -61,3 +61,6 @@ var ErrUnknownMessage = errors.New("unknown message type")
 
 // ErrWouldBlock is returned when an operation would need to block to finish.
 var ErrWouldBlock = errors.New("operation would block")
+
+// ErrTimeout is returned for operations that timed out
+var ErrTimeout = errors.New("operation timed out")

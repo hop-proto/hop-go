@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -487,12 +488,13 @@ func (s *Server) createHandleLocked(ss *SessionState) *RWHandle {
 	return handle
 }
 
-func (s *Server) accept() (*RWHandle, error) {
+func (s *Server) AcceptTimeout(duration time.Duration) (*RWHandle, error) {
+	timer := time.NewTicker(duration)
 	select {
-	case conn := <-s.pendingConnections:
-		return conn, nil
-	default:
-		return nil, ErrWouldBlock
+	case handle := <-s.pendingConnections:
+		return handle, nil
+	case <-timer.C:
+		return nil, ErrTimeout
 	}
 }
 
