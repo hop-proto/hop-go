@@ -28,6 +28,15 @@ const (
 // IsHandshakeType returns true if the message type is part of the handshake, not the transport.
 func (mt MessageType) IsHandshakeType() bool { return (byte(mt) & byte(0x0F)) != 0 }
 
+// AddressHashKey returns a string suitable for use as a key in Golang map (e.g.
+// of handshakes) that identifies the remote address.
+func AddressHashKey(addr *net.UDPAddr) string {
+	// TODO(dadrian): Figure out if this is stable, and possible replace with
+	// the same format as our cookie AD?
+	key := addr.String()
+	return key
+}
+
 // HandshakeState tracks state across the lifetime of a handshake, starting with
 // the ClientHello. A HandshakeState may be allocated on ClientHello, it does
 // not need to be stored until after the ClientAck since enough state is

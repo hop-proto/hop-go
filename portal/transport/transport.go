@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"sync"
 
 	"github.com/sirupsen/logrus"
 )
@@ -18,14 +17,12 @@ type SessionID [4]byte
 type SessionState struct {
 	sessionID SessionID
 
-	m         sync.Mutex
-	readLock  sync.Mutex
-	writeLock sync.Mutex
-
 	count             uint64
 	clientToServerKey [KeyLen]byte
 	serverToClientKey [KeyLen]byte
 	remoteAddr        net.UDPAddr
+
+	handle *RWHandle
 
 	rawWrite bytes.Buffer
 }
@@ -60,18 +57,6 @@ func EqualUDPAddress(a, b *net.UDPAddr) bool {
 		return false
 	}
 	return true
-}
-
-func (ss *SessionState) lockUser() {
-	ss.m.Lock()
-	ss.writeLock.Lock()
-	ss.readLock.Lock()
-}
-
-func (ss *SessionState) unlockUser() {
-	ss.m.Unlock()
-	ss.readLock.Unlock()
-	ss.writeLock.Unlock()
 }
 
 func (ss *SessionState) writeCounter(w io.ByteWriter) {

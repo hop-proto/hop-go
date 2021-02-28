@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"io"
 	"net"
 	"sync"
 	"testing"
@@ -58,6 +59,13 @@ func ExpectData(t *testing.T, expected string, wg *sync.WaitGroup) PacketCallbac
 	}
 }
 
+func ExpectRead(t *testing.T, expected string, r io.Reader) {
+	buf := make([]byte, len(expected))
+	n, err := r.Read(buf)
+	assert.NilError(t, err)
+	assert.Check(t, cmp.Equal(len(expected), n))
+}
+
 func TestReadWrite(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
@@ -71,34 +79,23 @@ func TestReadWrite(t *testing.T) {
 	t.Run("test client write", func(t *testing.T) {
 		c, err := Dial("udp", pc.LocalAddr().String(), nil)
 		assert.NilError(t, err)
-		wg := sync.WaitGroup{}
-		wg.Add(1)
 		err = c.Handshake()
 		assert.NilError(t, err)
+		h, err := s.accept()
+		assert.NilError(t, err)
 		s := "It's time to ignite. I'm making a fire!"
-		config.OnReceive = ExpectData(t, s, &wg)
-		defer func() {
-			config.OnReceive = nil
-		}()
 		n, err := c.Write([]byte(s))
 		assert.NilError(t, err)
 		assert.Check(t, cmp.Equal(len(s), n))
-		wg.Wait()
+		ExpectRead(t, s, h)
 	})
 
 	t.Run("test client write triggers handshake", func(t *testing.T) {
 		c, err := Dial("udp", pc.LocalAddr().String(), nil)
 		assert.NilError(t, err)
-		wg := sync.WaitGroup{}
-		wg.Add(1)
 		s := "Another splinter under the skin. Another season of loneliness."
-		config.OnReceive = ExpectData(t, s, &wg)
-		defer func() {
-			config.OnReceive = nil
-		}()
 		n, err := c.Write([]byte(s))
 		assert.NilError(t, err)
 		assert.Check(t, cmp.Equal(len(s), n))
-		wg.Wait()
 	})
 }

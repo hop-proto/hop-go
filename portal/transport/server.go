@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"errors"
+	"io"
 	"net"
 	"sync"
 
@@ -13,22 +14,21 @@ import (
 )
 
 type Server struct {
-	inBuf  []byte
-	outBuf []byte
-	encBuf []byte
-	oob    []byte
+	m sync.RWMutex
+
+	rawRead      []byte
+	handshakeBuf []byte
 
 	udpConn *net.UDPConn
 	config  *ServerConfig
 
-	// TODO(dadrian): #concurrency
 	closed atomicBool
 
 	handshakes map[string]*HandshakeState
 	sessions   map[SessionID]*SessionState
+	handles    map[SessionID]*RWHandle
 
-	sessionLock   sync.RWMutex
-	handshakeLock sync.RWMutex
+	pendingConnections chan *RWHandle
 
 	cookieKey    [KeyLen]byte
 	cookieCipher cipher.Block
@@ -37,11 +37,18 @@ type Server struct {
 	staticKey X25519KeyPair
 }
 
+func (s *Server) lockGlobal() {
+	s.m.Lock()
+}
+
+func (s *Server) unlockGlobal() {
+	s.m.Unlock()
+}
+
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
-	s.handshakeLock.Lock()
-	defer s.handshakeLock.Unlock()
-	// TODO(dadrian): Use the same format as our cookie AD input
-	key := remoteAddr.String()
+	s.m.Lock()
+	defer s.m.Unlock()
+	key := AddressHashKey(remoteAddr)
 	_, exists := s.handshakes[key]
 	if exists {
 		return false
@@ -51,17 +58,20 @@ func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) 
 }
 
 func (s *Server) fetchHandshakeState(remoteAddr *net.UDPAddr) *HandshakeState {
-	s.handshakeLock.RLock()
-	defer s.handshakeLock.RUnlock()
-	key := remoteAddr.String()
+	s.m.RLock()
+	defer s.m.RUnlock()
+	key := AddressHashKey(remoteAddr)
 	return s.handshakes[key]
 }
 
 func (s *Server) clearHandshakeState(remoteAddr *net.UDPAddr) {
-	s.handshakeLock.Lock()
-	defer s.handshakeLock.Unlock()
-	// TODO(dadrian): Use the same format as our cookie AD input
-	key := remoteAddr.String()
+	s.m.Lock()
+	defer s.m.Unlock()
+	s.clearHandshakeStateLocked(remoteAddr)
+}
+
+func (s *Server) clearHandshakeStateLocked(remoteAddr *net.UDPAddr) {
+	key := AddressHashKey(remoteAddr)
 	delete(s.handshakes, key)
 }
 
@@ -81,8 +91,8 @@ func (s *Server) newSessionState() (*SessionState, error) {
 }
 
 func (s *Server) setSessionState(ss *SessionState) bool {
-	s.sessionLock.Lock()
-	defer s.sessionLock.Unlock()
+	s.m.Lock()
+	defer s.m.Unlock()
 	_, exists := s.sessions[ss.sessionID]
 	if exists {
 		return false
@@ -92,9 +102,19 @@ func (s *Server) setSessionState(ss *SessionState) bool {
 }
 
 func (s *Server) fetchSessionState(sessionID SessionID) *SessionState {
-	s.sessionLock.RLock()
-	defer s.sessionLock.RUnlock()
+	s.m.RLock()
+	defer s.m.RUnlock()
+	return s.fetchSessionStateLocked(sessionID)
+}
+
+func (s *Server) fetchSessionStateLocked(sessionID SessionID) *SessionState {
 	return s.sessions[sessionID]
+}
+
+func (s *Server) clearSessionState(sessionID SessionID) {
+	s.m.Lock()
+	defer s.m.Unlock()
+	delete(s.sessions, sessionID)
 }
 
 func (s *Server) writePacket(pkt []byte, dst *net.UDPAddr) error {
@@ -103,7 +123,7 @@ func (s *Server) writePacket(pkt []byte, dst *net.UDPAddr) error {
 }
 
 func (s *Server) readPacket() error {
-	msgLen, oobn, flags, addr, err := s.udpConn.ReadMsgUDP(s.inBuf, s.oob)
+	msgLen, oobn, flags, addr, err := s.udpConn.ReadMsgUDP(s.rawRead, nil)
 	if err != nil {
 		return err
 	}
@@ -111,27 +131,27 @@ func (s *Server) readPacket() error {
 	if msgLen < 4 {
 		return ErrInvalidMessage
 	}
-	mt := MessageType(s.inBuf[0])
+	mt := MessageType(s.rawRead[0])
 	switch mt {
 	case MessageTypeClientHello:
-		hs, err := s.handleClientHello(s.inBuf[:msgLen])
+		hs, err := s.handleClientHello(s.rawRead[:msgLen])
 		if err != nil {
 			return err
 		}
 		logrus.Debugf("server: client ephemeral: %x", hs.remoteEphemeral)
 		hs.cookieKey = &s.cookieKey
 		hs.remoteAddr = addr
-		n, err := writeServerHello(hs, s.outBuf)
+		n, err := writeServerHello(hs, s.handshakeBuf)
 		if err != nil {
 			return err
 		}
-		logrus.Debugf("server: sh %x", s.outBuf[:n])
-		if err := s.writePacket(s.outBuf[:n], addr); err != nil {
+		logrus.Debugf("server: sh %x", s.handshakeBuf[:n])
+		if err := s.writePacket(s.handshakeBuf[:n], addr); err != nil {
 			return err
 		}
 	case MessageTypeClientAck:
 		logrus.Debug("server: about to handle client ack")
-		n, hs, err := s.handleClientAck(s.inBuf[:msgLen], addr)
+		n, hs, err := s.handleClientAck(s.rawRead[:msgLen], addr)
 		if err != nil {
 			logrus.Debugf("server: unable to handle client ack: %s", err)
 			return err
@@ -152,17 +172,17 @@ func (s *Server) readPacket() error {
 			logrus.Debug("could not make new session state")
 			return err
 		}
-		n, err = s.writeServerAuth(s.outBuf, hs, ss)
+		n, err = s.writeServerAuth(s.handshakeBuf, hs, ss)
 		if err != nil {
 			return err
 		}
-		err = s.writePacket(s.outBuf[0:n], addr)
+		err = s.writePacket(s.handshakeBuf[0:n], addr)
 		if err != nil {
 			return err
 		}
 	case MessageTypeClientAuth:
 		logrus.Debug("server: received client auth")
-		_, hs, err := s.handleClientAuth(s.inBuf[:msgLen], addr)
+		_, hs, err := s.handleClientAuth(s.rawRead[:msgLen], addr)
 		if err != nil {
 			return err
 		}
@@ -175,7 +195,7 @@ func (s *Server) readPacket() error {
 		logrus.Debugf("server: received transport message from %s", addr)
 		// TODO(dadrian): Avoid allocation
 		plaintext := make([]byte, 65535)
-		n, err := s.handleTransport(addr, s.inBuf[:msgLen], plaintext)
+		n, err := s.handleTransport(addr, s.rawRead[:msgLen], plaintext)
 		if err != nil {
 			return err
 		}
@@ -345,8 +365,6 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 }
 
 func (s *Server) readPacketFromSession(ss *SessionState, plaintext []byte, pkt []byte, key *[KeyLen]byte) (int, error) {
-	ss.readLock.Lock()
-	defer ss.readLock.Unlock()
 	return ss.readPacket(plaintext, pkt, &ss.clientToServerKey)
 }
 
@@ -360,16 +378,19 @@ func (s *Server) handleTransport(addr *net.UDPAddr, msg []byte, plaintext []byte
 	if ss == nil {
 		return 0, ErrUnknownSession
 	}
+	ss.handle.m.Lock()
+	defer ss.handle.m.Unlock()
 	n, err := s.readPacketFromSession(ss, plaintext, msg, &ss.clientToServerKey)
 	if err != nil {
 		return 0, err
 	}
 	logrus.Debugf("server: session %x: plaintext: %x", ss.sessionID, plaintext)
-	if s.config.OnReceive != nil {
-		s.config.OnReceive(sessionID, plaintext[:n])
+	select {
+	case ss.handle.recv <- plaintext:
+		break
+	default:
+		logrus.Warnf("session %x: recv queue full, dropping packet", sessionID)
 	}
-	ss.writeLock.Lock()
-	defer ss.writeLock.Unlock()
 	if !EqualUDPAddress(&ss.remoteAddr, addr) {
 		ss.remoteAddr = *addr
 	}
@@ -378,18 +399,27 @@ func (s *Server) handleTransport(addr *net.UDPAddr, msg []byte, plaintext []byte
 
 // Serve blocks until the server is closed.
 func (s *Server) Serve() error {
-	// TODO(dadrian): Probably shoudln't initialize this here
-	// TODO(dadrian): Do we really need three buffers?
-	s.inBuf = make([]byte, 1024*1024)
-	s.outBuf = make([]byte, len(s.inBuf))
-	s.encBuf = make([]byte, len(s.inBuf))
-	s.oob = make([]byte, 1024)
-	for !s.closed.isSet() {
-		err := s.readPacket()
-		if err != nil {
-			logrus.Errorf("server: %s", err)
+	// TODO(dadrian): These should be smaller buffers
+	s.rawRead = make([]byte, 65535)
+	s.handshakeBuf = make([]byte, 65535)
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for !s.closed.isSet() {
+			// TODO(dadrian): Timeouts
+			err := s.readPacket()
+			if err != nil {
+				logrus.Errorf("server: %s", err)
+			}
 		}
-	}
+	}()
+	go func() {
+		defer wg.Done()
+		// TODO(dadrian): Write packets
+	}()
+	wg.Done()
+	wg.Wait()
 	return nil
 }
 
@@ -415,25 +445,55 @@ func (s *Server) writeToSession(b []byte, sessionID SessionID) error {
 	if ss == nil {
 		return ErrUnknownSession
 	}
-	ss.writeLock.Lock()
-	defer ss.writeLock.Unlock()
+	ss.handle.m.Lock()
+	defer ss.handle.m.Unlock()
 	return ss.writePacket(s.udpConn, b, &ss.serverToClientKey)
 }
 
 func (s *Server) finishHandshake(hs *HandshakeState) error {
-	ss := s.fetchSessionState(hs.sessionID)
+	s.m.Lock()
+	defer s.m.Unlock()
+	defer s.clearHandshakeStateLocked(hs.remoteAddr)
+	ss := s.fetchSessionStateLocked(hs.sessionID)
 	if ss == nil {
 		return ErrUnknownSession
 	}
 	logrus.Debugf("server: finishing handshake for session %x", ss.sessionID)
-	// TODO(add to some queue)?
 	err := hs.deriveFinalKeys(&ss.clientToServerKey, &ss.serverToClientKey)
 	if err != nil {
 		return err
 	}
-	// TODO(dadrian): Is this a race?
-	s.clearHandshakeState(hs.remoteAddr)
+	// TODO(dadrian): Create this earlier on so that the handshake fails earlier
+	// if the queue is full.
+	h := s.createHandleLocked(ss)
+	select {
+	case s.pendingConnections <- h:
+		break
+	default:
+		logrus.Warnf("server: session %x: pending connections queue is full, dropping handshake", ss.sessionID)
+		s.clearSessionState(ss.sessionID)
+		ss.handle.close()
+	}
 	return nil
+}
+
+func (s *Server) createHandleLocked(ss *SessionState) *RWHandle {
+	handle := &RWHandle{
+		sessionID: ss.sessionID,
+		recv:      make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
+		send:      make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
+	}
+	ss.handle = handle
+	return handle
+}
+
+func (s *Server) accept() (*RWHandle, error) {
+	select {
+	case conn := <-s.pendingConnections:
+		return conn, nil
+	default:
+		return nil, ErrWouldBlock
+	}
 }
 
 // Close stops the server, causing Serve() to return.
@@ -453,10 +513,11 @@ func NewServer(conn *net.UDPConn, config *ServerConfig) *Server {
 	}
 	s := Server{
 		udpConn: conn,
-		// TODO(dadrian): Standardize this?
-		handshakes: make(map[string]*HandshakeState),
-		sessions:   make(map[SessionID]*SessionState),
-		config:     config,
+		config:  config,
+
+		handshakes:         make(map[string]*HandshakeState),
+		sessions:           make(map[SessionID]*SessionState),
+		pendingConnections: make(chan *RWHandle, config.maxPendingConnections()),
 	}
 	// TODO(dadrian): This probably shouldn't happen in this function
 	_, err := rand.Read(s.cookieKey[:])
@@ -470,4 +531,88 @@ func NewServer(conn *net.UDPConn, config *ServerConfig) *Server {
 	// TODO(dadrian): This should be on the config object
 	s.staticKey.Generate()
 	return &s
+}
+
+type RWHandle struct {
+	m         sync.Mutex
+	readLock  sync.Mutex
+	writeLock sync.Mutex
+
+	sessionID SessionID
+	recv      chan []byte
+	send      chan []byte
+
+	closed atomicBool
+
+	buf bytes.Buffer
+}
+
+func (c *RWHandle) lockUser() {
+	c.m.Lock()
+	c.readLock.Lock()
+	c.writeLock.Lock()
+}
+
+func (c *RWHandle) unlockUser() {
+	c.m.Unlock()
+	c.writeLock.Unlock()
+	c.readLock.Unlock()
+}
+
+func (c *RWHandle) Read(b []byte) (int, error) {
+	c.readLock.Lock()
+	defer c.readLock.Unlock()
+
+	// If there's buffered data, return all of it.
+	if c.buf.Len() > 0 {
+		n, err := c.buf.Read(b)
+		if c.buf.Len() == 0 {
+			c.buf.Reset()
+		}
+		return n, err
+	}
+
+	// There must not be buffered data, fetch a message off the channel
+	var msg []byte
+	select {
+	case msg = <-c.recv:
+		break
+	default:
+		if c.closed.isSet() {
+			return 0, io.EOF
+		}
+		return 0, ErrWouldBlock
+	}
+
+	// Copy as much data as possible into the output data
+	n := copy(b, msg)
+	if n == len(msg) {
+		return n, nil
+	}
+	// If there was leftover data, buffer it
+	_, err := c.buf.Write(msg[n:])
+	return n, err
+}
+
+func (c *RWHandle) Write(b []byte) (int, error) {
+	select {
+	case c.send <- b:
+		return len(b), nil
+	default:
+		return 0, ErrWouldBlock
+	}
+}
+
+func (c *RWHandle) close() {
+	// TODO(dadrian): Implement
+	// Remove the reference to the session, so it can be cleaned up
+	// Close all the channels
+	// Set the closed state
+}
+
+func (c *RWHandle) Close() error {
+	c.lockUser()
+	defer c.unlockUser()
+
+	return nil
 }
