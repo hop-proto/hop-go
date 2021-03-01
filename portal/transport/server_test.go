@@ -1,6 +1,8 @@
 package transport
 
 import (
+	"bytes"
+	"crypto/rand"
 	"io"
 	"net"
 	"sync"
@@ -52,13 +54,6 @@ func TestMultipleHandshakes(t *testing.T) {
 	wg.Wait()
 }
 
-func ExpectData(t *testing.T, expected string, wg *sync.WaitGroup) PacketCallback {
-	return func(_ SessionID, msg []byte) {
-		assert.Check(t, cmp.Equal(expected, string(msg)))
-		wg.Done()
-	}
-}
-
 func ExpectRead(t *testing.T, expected string, r io.Reader) {
 	buf := make([]byte, len(expected))
 	n, err := r.Read(buf)
@@ -70,10 +65,14 @@ func TestReadWrite(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
-	config := &ServerConfig{}
-	s := NewServer(pc.(*net.UDPConn), config)
+	config := &ServerConfig{
+		StartingReadTimeout:             10 * time.Second,
+		MaxPendingConnections:           1,
+		MaxBufferedPacketsPerConnection: 5,
+	}
+	server := NewServer(pc.(*net.UDPConn), config)
 	go func() {
-		s.Serve()
+		server.Serve()
 	}()
 
 	t.Run("test client write", func(t *testing.T) {
@@ -81,7 +80,7 @@ func TestReadWrite(t *testing.T) {
 		assert.NilError(t, err)
 		err = c.Handshake()
 		assert.NilError(t, err)
-		h, err := s.AcceptTimeout(10 * time.Second)
+		h, err := server.AcceptTimeout(10 * time.Second)
 		assert.NilError(t, err)
 		s := "It's time to ignite. I'm making a fire!"
 		n, err := c.Write([]byte(s))
@@ -96,6 +95,57 @@ func TestReadWrite(t *testing.T) {
 		s := "Another splinter under the skin. Another season of loneliness."
 		n, err := c.Write([]byte(s))
 		assert.NilError(t, err)
+		h, err := server.AcceptTimeout(10 * time.Second)
+		assert.NilError(t, err)
 		assert.Check(t, cmp.Equal(len(s), n))
+		ExpectRead(t, s, h)
 	})
+
+	t.Run("test big client writes", func(t *testing.T) {
+		c, err := Dial("udp", pc.LocalAddr().String(), nil)
+		assert.NilError(t, err)
+		data := make([]byte, MaxPlaintextSize)
+		_, err = rand.Read(data)
+		assert.NilError(t, err)
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			h, err := server.AcceptTimeout(5 * time.Second)
+			assert.NilError(t, err)
+			buf := make([]byte, 1000)
+			for i := 0; i < 5; i++ {
+				soFar := 0
+				for soFar < len(data) {
+					n, err := h.Read(buf)
+					assert.NilError(t, err)
+					soFar += n
+				}
+				assert.Check(t, cmp.Equal(len(data), soFar))
+			}
+		}()
+		for i := 0; i < 5; i++ {
+			n, err := c.Write(data)
+			assert.NilError(t, err)
+			assert.Check(t, cmp.Equal(len(data), n))
+		}
+		wg.Wait()
+	})
+}
+
+func TestBufferBehavior(t *testing.T) {
+	data := []byte("hi this is some data!")
+	buf := bytes.Buffer{}
+	assert.Equal(t, 0, buf.Len())
+	n, err := buf.Write(data)
+	assert.NilError(t, err)
+	assert.Equal(t, len(data), n)
+	readBuf := make([]byte, 100)
+	n, err = buf.Read(readBuf)
+	assert.NilError(t, err)
+	assert.Equal(t, len(data), n)
+	assert.Equal(t, 0, buf.Len())
+	buf.Reset()
+	assert.Equal(t, 0, buf.Len())
+	assert.Assert(t, buf.Cap() != 0)
 }

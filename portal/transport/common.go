@@ -6,11 +6,6 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
-// MaxTotalPacketSize is MaxUDPPacketSize minus bytes used by Ethernet frames and Wifi frames.
-//
-// TODO(dadrian): Verify this size
-const MaxTotalPacketSize = 65535 - 18
-
 // ProtocolName is the string representation of the parameters used in this version
 const ProtocolName = "noise_NN_XX_cyclist_keccak_p1600_12"
 
@@ -28,6 +23,14 @@ const (
 	SessionIDLen = 4
 	CounterLen   = 8
 )
+
+// MaxTotalPacketSize is MaxUDPPacketSize minus bytes used by Ethernet frames and Wifi frames.
+//
+// TODO(dadrian): Verify this size, this is definitely too small
+const MaxTotalPacketSize = 65535 - 64
+
+// MaxPlaintextSize is MaxTotalPacketSize minus bytes used by transport messages
+const MaxPlaintextSize = MaxTotalPacketSize - HeaderLen - SessionIDLen - CounterLen - MacLen
 
 // Derived protocol size constants
 const (

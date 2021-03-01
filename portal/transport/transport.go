@@ -33,10 +33,15 @@ func init() {
 	emptyMac = make([]byte, MacLen)
 }
 
+// PlaintextLen returns the expected length of plaintext given the length of a
+// transport message. It returns a negative number for transport messages of
+// insufficient length to contain any plaintext.
 func PlaintextLen(transportLen int) int {
 	return transportLen - HeaderLen - SessionIDLen - CounterLen - MacLen
 }
 
+// PeekSession returns the SessionID located in the provided raw transport
+// message. It errors if the buffer is too short.
 func PeekSession(msg []byte) (out SessionID, err error) {
 	if len(msg) < HeaderLen+SessionIDLen {
 		err = ErrBufUnderflow

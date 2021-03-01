@@ -6,7 +6,6 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"errors"
-	"io"
 	"net"
 	"sync"
 	"time"
@@ -385,9 +384,9 @@ func (s *Server) handleTransport(addr *net.UDPAddr, msg []byte, plaintext []byte
 	if err != nil {
 		return 0, err
 	}
-	logrus.Debugf("server: session %x: plaintext: %x", ss.sessionID, plaintext)
+	logrus.Debugf("server: session %x: plaintext: %x", ss.sessionID, plaintext[:n])
 	select {
-	case ss.handle.recv <- plaintext:
+	case ss.handle.recv <- plaintext[:n]:
 		break
 	default:
 		logrus.Warnf("session %x: recv queue full, dropping packet", sessionID)
@@ -483,6 +482,7 @@ func (s *Server) createHandleLocked(ss *SessionState) *RWHandle {
 		sessionID: ss.sessionID,
 		recv:      make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
 		send:      make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
+		timeout:   s.config.StartingReadTimeout,
 	}
 	ss.handle = handle
 	return handle
@@ -533,88 +533,4 @@ func NewServer(conn *net.UDPConn, config *ServerConfig) *Server {
 	// TODO(dadrian): This should be on the config object
 	s.staticKey.Generate()
 	return &s
-}
-
-type RWHandle struct {
-	m         sync.Mutex
-	readLock  sync.Mutex
-	writeLock sync.Mutex
-
-	sessionID SessionID
-	recv      chan []byte
-	send      chan []byte
-
-	closed atomicBool
-
-	buf bytes.Buffer
-}
-
-func (c *RWHandle) lockUser() {
-	c.m.Lock()
-	c.readLock.Lock()
-	c.writeLock.Lock()
-}
-
-func (c *RWHandle) unlockUser() {
-	c.m.Unlock()
-	c.writeLock.Unlock()
-	c.readLock.Unlock()
-}
-
-func (c *RWHandle) Read(b []byte) (int, error) {
-	c.readLock.Lock()
-	defer c.readLock.Unlock()
-
-	// If there's buffered data, return all of it.
-	if c.buf.Len() > 0 {
-		n, err := c.buf.Read(b)
-		if c.buf.Len() == 0 {
-			c.buf.Reset()
-		}
-		return n, err
-	}
-
-	// There must not be buffered data, fetch a message off the channel
-	var msg []byte
-	select {
-	case msg = <-c.recv:
-		break
-	default:
-		if c.closed.isSet() {
-			return 0, io.EOF
-		}
-		return 0, ErrWouldBlock
-	}
-
-	// Copy as much data as possible into the output data
-	n := copy(b, msg)
-	if n == len(msg) {
-		return n, nil
-	}
-	// If there was leftover data, buffer it
-	_, err := c.buf.Write(msg[n:])
-	return n, err
-}
-
-func (c *RWHandle) Write(b []byte) (int, error) {
-	select {
-	case c.send <- b:
-		return len(b), nil
-	default:
-		return 0, ErrWouldBlock
-	}
-}
-
-func (c *RWHandle) close() {
-	// TODO(dadrian): Implement
-	// Remove the reference to the session, so it can be cleaned up
-	// Close all the channels
-	// Set the closed state
-}
-
-func (c *RWHandle) Close() error {
-	c.lockUser()
-	defer c.unlockUser()
-
-	return nil
 }

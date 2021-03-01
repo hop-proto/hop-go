@@ -1,8 +1,8 @@
 package transport
 
-type ClientConfig struct{}
+import "time"
 
-type PacketCallback func(SessionID, []byte)
+type ClientConfig struct{}
 
 const (
 	DefaultMaxPendingConnections           = 10
@@ -12,7 +12,8 @@ const (
 type ServerConfig struct {
 	MaxPendingConnections           int
 	MaxBufferedPacketsPerConnection int
-	OnReceive                       PacketCallback
+
+	StartingReadTimeout time.Duration
 }
 
 func (c *ServerConfig) maxPendingConnections() int {
