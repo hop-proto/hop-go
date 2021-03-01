@@ -27,7 +27,7 @@ const (
 // MaxTotalPacketSize is MaxUDPPacketSize minus bytes used by Ethernet frames and Wifi frames.
 //
 // TODO(dadrian): Verify this size, this is definitely too small
-const MaxTotalPacketSize = 65535 - 64
+const MaxTotalPacketSize = 65535 - 1000
 
 // MaxPlaintextSize is MaxTotalPacketSize minus bytes used by transport messages
 const MaxPlaintextSize = MaxTotalPacketSize - HeaderLen - SessionIDLen - CounterLen - MacLen

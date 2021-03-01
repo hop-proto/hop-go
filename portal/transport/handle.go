@@ -8,8 +8,11 @@ import (
 )
 
 type RWHandle struct {
-	m        sync.Mutex
-	readLock sync.Mutex
+	m         sync.Mutex
+	readLock  sync.Mutex
+	writeLock sync.Mutex
+
+	writeWg sync.WaitGroup
 
 	timeout time.Duration
 
@@ -25,9 +28,11 @@ type RWHandle struct {
 func (c *RWHandle) lockUser() {
 	c.m.Lock()
 	c.readLock.Lock()
+	c.writeLock.Lock()
 }
 
 func (c *RWHandle) unlockUser() {
+	c.writeLock.Unlock()
 	c.readLock.Unlock()
 	c.m.Unlock()
 }

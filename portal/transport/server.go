@@ -13,6 +13,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type outgoing struct {
+	pkt []byte
+	dst *net.UDPAddr
+}
+
 type Server struct {
 	m sync.RWMutex
 
@@ -29,20 +34,13 @@ type Server struct {
 	handles    map[SessionID]*RWHandle
 
 	pendingConnections chan *RWHandle
+	outgoing           chan outgoing
 
 	cookieKey    [KeyLen]byte
 	cookieCipher cipher.Block
 
 	// TODO(dadrian): Different keys for different names
 	staticKey X25519KeyPair
-}
-
-func (s *Server) lockGlobal() {
-	s.m.Lock()
-}
-
-func (s *Server) unlockGlobal() {
-	s.m.Unlock()
 }
 
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
@@ -195,11 +193,10 @@ func (s *Server) readPacket() error {
 		logrus.Debugf("server: received transport message from %s", addr)
 		// TODO(dadrian): Avoid allocation
 		plaintext := make([]byte, 65535)
-		n, err := s.handleTransport(addr, s.rawRead[:msgLen], plaintext)
+		_, err := s.handleTransport(addr, s.rawRead[:msgLen], plaintext)
 		if err != nil {
 			return err
 		}
-		logrus.Debugf("server: read plaintext %x from %s", plaintext[:n], addr)
 		return nil
 	default:
 		// TODO(dadrian): Make this an explicit error once all handshake message types are handled
@@ -384,13 +381,15 @@ func (s *Server) handleTransport(addr *net.UDPAddr, msg []byte, plaintext []byte
 	if err != nil {
 		return 0, err
 	}
-	logrus.Debugf("server: session %x: plaintext: %x", ss.sessionID, plaintext[:n])
+	logrus.Debugf("server: session %x: plaintext: %x from: %s", ss.sessionID, plaintext[:n], addr)
 	select {
 	case ss.handle.recv <- plaintext[:n]:
 		break
 	default:
 		logrus.Warnf("session %x: recv queue full, dropping packet", sessionID)
 	}
+	ss.handle.writeLock.Lock()
+	defer ss.handle.writeLock.Unlock()
 	if !EqualUDPAddress(&ss.remoteAddr, addr) {
 		ss.remoteAddr = *addr
 	}
@@ -407,7 +406,6 @@ func (s *Server) Serve() error {
 	go func() {
 		defer wg.Done()
 		for !s.closed.isSet() {
-			// TODO(dadrian): Timeouts
 			err := s.readPacket()
 			if err != nil {
 				logrus.Errorf("server: %s", err)
@@ -416,6 +414,9 @@ func (s *Server) Serve() error {
 	}()
 	go func() {
 		defer wg.Done()
+		for outgoing := range s.outgoing {
+			s.writePacket(outgoing.pkt, outgoing.dst)
+		}
 		// TODO(dadrian): Write packets
 	}()
 	wg.Done()
@@ -438,16 +439,6 @@ func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
 	}
 	hs.ephemeral.Generate()
 	return hs, nil
-}
-
-func (s *Server) writeToSession(b []byte, sessionID SessionID) error {
-	ss := s.fetchSessionState(sessionID)
-	if ss == nil {
-		return ErrUnknownSession
-	}
-	ss.handle.m.Lock()
-	defer ss.handle.m.Unlock()
-	return ss.writePacket(s.udpConn, b, &ss.serverToClientKey)
 }
 
 func (s *Server) finishHandshake(hs *HandshakeState) error {
@@ -488,10 +479,34 @@ func (s *Server) createHandleLocked(ss *SessionState) *RWHandle {
 	return handle
 }
 
+func (s *Server) lockHandleAndWriteToSession(ss *SessionState, plaintext []byte) error {
+	ss.handle.writeLock.Lock()
+	defer ss.handle.writeLock.Unlock()
+	logrus.Debug("FUCK SERVER WRITE")
+	err := ss.writePacket(s.udpConn, plaintext, &ss.serverToClientKey)
+	return err
+}
+
 func (s *Server) AcceptTimeout(duration time.Duration) (*RWHandle, error) {
 	timer := time.NewTicker(duration)
 	select {
 	case handle := <-s.pendingConnections:
+		ss := s.fetchSessionState(handle.sessionID)
+		if ss.handle != handle {
+			// Should never happen
+			return nil, ErrUnknownSession
+		}
+		ss.handle.writeWg.Add(1)
+		go func(ss *SessionState) {
+			defer ss.handle.writeWg.Done()
+			for plaintext := range ss.handle.send {
+				err := s.lockHandleAndWriteToSession(ss, plaintext)
+				if err != nil {
+					logrus.Errorf("server: unable to write packet: %s", err)
+					// TODO(dadrian): Should this affect connection state?
+				}
+			}
+		}(ss)
 		return handle, nil
 	case <-timer.C:
 		return nil, ErrTimeout
@@ -520,6 +535,7 @@ func NewServer(conn *net.UDPConn, config *ServerConfig) *Server {
 		handshakes:         make(map[string]*HandshakeState),
 		sessions:           make(map[SessionID]*SessionState),
 		pendingConnections: make(chan *RWHandle, config.maxPendingConnections()),
+		outgoing:           make(chan outgoing, 0), // TODO(dadrian): Is this the appropriate size?
 	}
 	// TODO(dadrian): This probably shouldn't happen in this function
 	_, err := rand.Read(s.cookieKey[:])

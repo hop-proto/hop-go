@@ -2,7 +2,6 @@ package transport
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"net"
 
@@ -91,7 +90,7 @@ func (ss *SessionState) readCounter(b []byte) (count uint64) {
 func (ss *SessionState) writePacket(conn *net.UDPConn, in []byte, key *[KeyLen]byte) error {
 	length := HeaderLen + SessionIDLen + CounterLen + len(in) + MacLen
 	ss.rawWrite.Reset()
-	if ss.rawWrite.Len() < length {
+	if ss.rawWrite.Cap() < length {
 		ss.rawWrite.Grow(length)
 	}
 
@@ -105,7 +104,7 @@ func (ss *SessionState) writePacket(conn *net.UDPConn, in []byte, key *[KeyLen]b
 
 	// Counter
 	ss.writeCounter(&ss.rawWrite)
-	logrus.Debugf("ss: wrote packet with count %d", ss.count)
+	logrus.Debugf("ss: writing packet with count %d", ss.count)
 
 	// TODO(dadrian): Encryption
 	ss.rawWrite.Write(in)
@@ -113,14 +112,14 @@ func (ss *SessionState) writePacket(conn *net.UDPConn, in []byte, key *[KeyLen]b
 	// TODO(dadrian): Mac Generation
 	ss.rawWrite.Write(emptyMac)
 
-	var written int
-	written, _, err := conn.WriteMsgUDP(ss.rawWrite.Bytes(), nil, &ss.remoteAddr)
+	b := ss.rawWrite.Bytes()
+	written, _, err := conn.WriteMsgUDP(b, nil, &ss.remoteAddr)
 	if err != nil {
 		return err
 	}
 	if written != length {
-		logrus.Debugf("client: somehow wrote less than a message?")
-		return errors.New("wat")
+		// Should never happen
+		panic("writemsgudp somehow wrote less than a message")
 	}
 	ss.count++
 	return nil

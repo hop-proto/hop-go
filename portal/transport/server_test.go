@@ -57,7 +57,8 @@ func TestMultipleHandshakes(t *testing.T) {
 func ExpectRead(t *testing.T, expected string, r io.Reader) {
 	buf := make([]byte, len(expected))
 	n, err := r.Read(buf)
-	assert.NilError(t, err)
+	logrus.Debugf("read %d bytes, err?: %s", n, err)
+	assert.Check(t, err)
 	assert.Check(t, cmp.Equal(len(expected), n))
 }
 
@@ -104,9 +105,10 @@ func TestReadWrite(t *testing.T) {
 	t.Run("test big client writes", func(t *testing.T) {
 		c, err := Dial("udp", pc.LocalAddr().String(), nil)
 		assert.NilError(t, err)
-		data := make([]byte, MaxPlaintextSize)
-		_, err = rand.Read(data)
+		data := make([]byte, 3100)
+		n, err := rand.Read(data)
 		assert.NilError(t, err)
+		assert.Assert(t, cmp.Equal(n, len(data)))
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
@@ -119,6 +121,7 @@ func TestReadWrite(t *testing.T) {
 				for soFar < len(data) {
 					n, err := h.Read(buf)
 					assert.NilError(t, err)
+					assert.DeepEqual(t, data[soFar:soFar+n], buf[:n])
 					soFar += n
 				}
 				assert.Check(t, cmp.Equal(len(data), soFar))
