@@ -62,7 +62,7 @@ func ExpectRead(t *testing.T, expected string, r io.Reader) {
 	assert.Check(t, cmp.Equal(len(expected), n))
 }
 
-func TestReadWrite(t *testing.T) {
+func TestServerRead(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
@@ -133,6 +133,49 @@ func TestReadWrite(t *testing.T) {
 			assert.Check(t, cmp.Equal(len(data), n))
 		}
 		wg.Wait()
+	})
+}
+
+func TestServerWrite(t *testing.T) {
+	logrus.SetLevel(logrus.DebugLevel)
+	pc, err := net.ListenPacket("udp", "localhost:0")
+	assert.NilError(t, err)
+	config := &ServerConfig{
+		StartingReadTimeout:             10 * time.Second,
+		MaxPendingConnections:           1,
+		MaxBufferedPacketsPerConnection: 5,
+	}
+	server := NewServer(pc.(*net.UDPConn), config)
+	go func() {
+		server.Serve()
+	}()
+
+	t.Run("server echo", func(t *testing.T) {
+		c, err := Dial("udp", pc.LocalAddr().String(), nil)
+		assert.NilError(t, err)
+		c.Handshake()
+		h, err := server.AcceptTimeout(5 * time.Second)
+		assert.NilError(t, err)
+
+		data := make([]byte, 10)
+		buf := make([]byte, 30)
+		for i := 0; i < 5; i++ {
+			rand.Read(data)
+			n, err := c.Write(data)
+			assert.Check(t, err)
+			assert.Check(t, cmp.Equal(len(data), n))
+			n, err = h.Read(buf)
+			assert.Check(t, err)
+			assert.Check(t, cmp.Equal(len(data), n))
+			assert.DeepEqual(t, data, buf[:n])
+			n, err = h.Write(buf[:n])
+			assert.Check(t, err)
+			assert.Check(t, cmp.Equal(len(data), n))
+			n, err = c.Read(buf)
+			assert.Check(t, err)
+			assert.Check(t, cmp.Equal(len(data), n))
+			assert.DeepEqual(t, data, buf[:n])
+		}
 	})
 }
 
