@@ -177,6 +177,47 @@ func TestServerWrite(t *testing.T) {
 			assert.DeepEqual(t, data, buf[:n])
 		}
 	})
+
+	t.Run("server call and response", func(t *testing.T) {
+		lines := [...]string{
+			"I've been waiting on a war since I was young",
+			"Since I was a little boy with a toy gun",
+			"Never really wanted to be number one",
+			"Just wanted to love everyone",
+		}
+
+		c, err := Dial("udp", pc.LocalAddr().String(), nil)
+		assert.NilError(t, err)
+
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			h, err := server.AcceptTimeout(5 * time.Second)
+			assert.NilError(t, err)
+			h.Write([]byte(lines[0]))
+			h.Write([]byte(lines[1]))
+			buf := make([]byte, len(lines[2]+lines[3]))
+			pos := 0
+			for pos < len(buf) {
+				n, err := h.Read(buf[pos:])
+				assert.NilError(t, err)
+				pos += n
+			}
+			assert.Check(t, cmp.Equal(lines[2]+lines[3], string(buf)))
+		}()
+		buf := make([]byte, len(lines[0]+lines[1]))
+		pos := 0
+		for pos < len(buf) {
+			n, err := c.Read(buf[pos:])
+			assert.NilError(t, err)
+			pos += n
+		}
+		assert.Check(t, cmp.Equal(lines[0]+lines[1], string(buf)))
+		c.Write([]byte(lines[2]))
+		c.Write([]byte(lines[3]))
+		wg.Wait()
+	})
 }
 
 func TestBufferBehavior(t *testing.T) {
