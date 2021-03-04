@@ -1,9 +1,27 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 func main() {
-	fmt.Println("This is where the SSH replacement CLI will be implemented")
+	/*
+		TODO (drew): parse args to include:
+			- host, user, and port
+			- identity file
+			- tunneling
+	*/
 
-	// TODO(drew): Design the CLI and implement
+	fmt.Println("This is where the SSH replacement CLI will be implemented")
+	if os.Args[1] == "sshd" {
+		fmt.Println("Hosting ssh server")
+		sshd()
+	}
+
+	if os.Args[1] == "ssh" {
+		fmt.Println("Attempting to connect to client")
+		sshClient()
+	}
+
 }

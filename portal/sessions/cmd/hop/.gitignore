@@ -1,0 +1,4 @@
+hop
+*.out
+/.ssh
+.ssh
