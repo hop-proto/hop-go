@@ -56,6 +56,8 @@ func (c *Client) Handshake() error {
 	c.lockUser()
 	defer c.unlockUser()
 
+	// TODO(dadrian): Cache any handshake errors
+
 	if c.handshakeComplete.isSet() {
 		return nil
 	}
@@ -163,22 +165,32 @@ func (c *Client) writeTransport(plaintext []byte) error {
 
 // Write implements net.Conn.
 func (c *Client) Write(b []byte) (int, error) {
+	err := c.WriteMsg(b)
+	if err != nil {
+		return 0, err
+	}
+	return len(b), nil
+}
+
+// WriteMsg implements MsgConn. It send a single packet.
+func (c *Client) WriteMsg(b []byte) error {
 	if !c.handshakeComplete.isSet() {
 		err := c.Handshake()
 		if err != nil {
-			return 0, err
+			return err
 		}
 	}
 	c.writeLock.Lock()
 	defer c.writeLock.Unlock()
 	if c.closed.isSet() {
-		return 0, io.EOF
+		return io.EOF
 	}
 	err := c.writeTransport(b)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	return len(b), nil
+	return nil
+
 }
 
 // Close gracefully shutds down the connection. Repeated calls to close will error.
@@ -198,6 +210,68 @@ func (c *Client) Close() error {
 	//
 	// TODO(dadrian): Do we send a protocol close message?
 	return c.underlyingConn.Close()
+}
+
+// ReadMsg reads a single message. If b is too short to hold the message, it is
+// buffered and ErrBufOverflow is returned.
+func (c *Client) ReadMsg(b []byte) (int, error) {
+	// TODO(dadrian): Close the connection on bad reads / certain unrecoverable
+	// errors.
+	if !c.handshakeComplete.isSet() {
+		err := c.Handshake()
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	c.readLock.Lock()
+	defer c.readLock.Unlock()
+	if c.closed.isSet() {
+		return 0, io.EOF
+	}
+	if c.readBuf.Len() > 0 {
+		if len(b) < c.readBuf.Len() {
+			return 0, ErrBufOverflow
+		}
+		n, err := c.readBuf.Read(b)
+		c.readBuf.Reset()
+		return n, err
+	}
+
+	// TODO(dadrian): Avoid allocation
+	ciphertext := make([]byte, 65535)
+	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(ciphertext, nil)
+	if err != nil {
+		return 0, err
+	}
+	plaintextLen := PlaintextLen(msgLen)
+	if plaintextLen < 0 {
+		return 0, ErrInvalidMessage
+	}
+	// TODO(dadrian): If this implements io.Reader, we can probably avoid a
+	// copy.
+	// TODO(dadrian): Avoid an allocation
+	plaintext := make([]byte, plaintextLen)
+	n, err := c.ss.readPacket(plaintext, ciphertext[:msgLen], &c.ss.serverToClientKey)
+	if err != nil {
+		return 0, err
+	}
+	if n != plaintextLen {
+		return 0, ErrInvalidMessage
+	}
+
+	// If the input is long enough, just copy into it
+	if len(b) >= plaintextLen {
+		copy(b, plaintext[:n])
+		return n, nil
+	}
+
+	// Input was too short, buffer this message and return ErrBufOverflow
+	_, err = c.readBuf.Write(plaintext[n:])
+	if err != nil {
+		return 0, err
+	}
+	return 0, ErrBufOverflow
 }
 
 // Read implements net.Conn.

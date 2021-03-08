@@ -105,6 +105,7 @@ func (c *RWHandle) close() {
 }
 
 func (c *RWHandle) Close() error {
+	// TODO(dadrian): Implement
 	c.m.Lock()
 	defer c.m.Unlock()
 
