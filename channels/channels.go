@@ -2,24 +2,52 @@ package channels
 
 import (
 	"net"
+	"sync"
 	"time"
+
+	"zmap.io/portal/transport"
 )
 
 // TODO(drew): Implement, using the reliable package as a guideline.
 
+// How David would approach this:
+//   0. Assume just one channel ID for now
+//   1. Implement the message framing (seq no, ack no, all that stuff)
+//   2. Implement Read and Write assuming no buffering or out of order or anything like that, using the framing
+//   3. Buffering
+//   4. Concurrency controls (locks)
+
 // Reliable implements a reliable and ordered channel on top
 type Reliable struct {
+	m          sync.Mutex
+	underlying transport.MsgConn // comes from transport.Dial, etc.
 }
 
 // Reliable implements net.Conn
 var _ net.Conn = &Reliable{}
 
+func NewReliableChannel(underlying transport.MsgConn) *Reliable {
+	panic("implement me")
+}
+
+func Dial(protocol, address string) (*Reliable, error) {
+	// ignore protocol or check dif udp or check if hop?
+	underlying, err := transport.Dial("udp", address, nil)
+	if err != nil {
+		return nil, err
+	}
+	return NewReliableChannel(underlying), nil
+}
 
 func (r *Reliable) Read(b []byte) (n int, err error) {
+	// Except with buffering and framing and concurrency control
+	r.underlying.ReadMsg(b)
 	panic("implement me")
 }
 
 func (r *Reliable) Write(b []byte) (n int, err error) {
+	// Except with buffering and framing and concurrency control
+	r.underlying.WriteMsg(b)
 	panic("implement me")
 }
 
@@ -46,4 +74,3 @@ func (r *Reliable) SetReadDeadline(t time.Time) error {
 func (r *Reliable) SetWriteDeadline(t time.Time) error {
 	panic("implement me")
 }
-

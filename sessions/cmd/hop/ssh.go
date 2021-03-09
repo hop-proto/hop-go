@@ -23,6 +23,9 @@ func getClient() (*ssh.Client, error) {
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 	client, err := ssh.Dial("tcp", "localhost:2234", config)
+	//conn := transport.Dial("udp", "localhost:1234")
+	//reliableChannel = reliable.NewChannel(transportConn) // You have to define this function still
+	//client, err := ssh.NewClientConn(reliableChannel, otherargs....)
 	if err != nil {
 		return nil, err
 	}
