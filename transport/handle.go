@@ -3,18 +3,27 @@ package transport
 import (
 	"bytes"
 	"io"
+	"net"
 	"sync"
 	"time"
 )
 
-type RWHandle struct {
+// Handle implements net.Conn and MsgConn for connections accepted by a Server.
+type Handle struct {
+
+	// TODO(dadrian): Not all of these are used, but also not all of the
+	// functions are implemented yet. Remove unused variables when the
+	// implementation settles down.
 	m         sync.Mutex
 	readLock  sync.Mutex
 	writeLock sync.Mutex
 
+	// TODO(dadrian): This might need to be a real condition variable. We don't
+	// currently wait on it, but we Add/Done in the actual send write function.
 	writeWg sync.WaitGroup
 
-	timeout time.Duration
+	readTimeout  atomicTimeout
+	writeTimeout atomicTimeout
 
 	sessionID SessionID
 	recv      chan []byte
@@ -25,19 +34,84 @@ type RWHandle struct {
 	buf bytes.Buffer
 }
 
-func (c *RWHandle) lockUser() {
+var _ MsgReader = &Handle{}
+var _ MsgWriter = &Handle{}
+var _ MsgConn = &Handle{}
+
+var _ net.Conn = &Handle{}
+
+func (c *Handle) lockUser() {
 	c.m.Lock()
 	c.readLock.Lock()
 	c.writeLock.Lock()
 }
 
-func (c *RWHandle) unlockUser() {
+func (c *Handle) unlockUser() {
 	c.writeLock.Unlock()
 	c.readLock.Unlock()
 	c.m.Unlock()
 }
 
-func (c *RWHandle) Read(b []byte) (int, error) {
+// ReadMsg implements the MsgReader interface. If b is too short to hold the
+// message, it returns ErrBufOverflow.
+func (c *Handle) ReadMsg(b []byte) (int, error) {
+	// TODO(dadrian): Should we close the connection on read errors?
+	// TODO(dadrian): This duplicates a lot of code from Read().
+	c.readLock.Lock()
+	defer c.readLock.Unlock()
+
+	// If there's buffered data, return all of it.
+	if c.buf.Len() > 0 {
+		if len(b) < c.buf.Len() {
+			return 0, ErrBufOverflow
+		}
+		n, err := c.buf.Read(b)
+		c.buf.Reset()
+		return n, err
+	}
+
+	// Check and see if there are pending messages. This causes the queue to get
+	// drained even if the connection is closed.
+	var msg []byte
+	select {
+	case msg = <-c.recv:
+		break
+	default:
+		if c.closed.isSet() {
+			return 0, io.EOF
+		}
+	}
+
+	// Wait for a message until timeout
+	if msg == nil {
+		timer := time.NewTimer(c.readTimeout.get())
+		select {
+		case msg = <-c.recv:
+			if !timer.Stop() {
+				<-timer.C
+			}
+			break
+		case <-timer.C:
+			return 0, ErrTimeout
+		}
+	}
+
+	// If the input is long enough, just copy into it
+	if len(b) >= len(msg) {
+		copy(b, msg)
+		return len(msg), nil
+	}
+
+	// Input was too short, buffer this message and return ErrBufOverflow
+	_, err := c.buf.Write(msg)
+	if err != nil {
+		return 0, err
+	}
+	return 0, ErrBufOverflow
+
+}
+
+func (c *Handle) Read(b []byte) (int, error) {
 	c.readLock.Lock()
 	defer c.readLock.Unlock()
 
@@ -66,7 +140,7 @@ func (c *RWHandle) Read(b []byte) (int, error) {
 
 	// Wait for a message until timeout
 	if msg == nil {
-		timer := time.NewTimer(c.timeout)
+		timer := time.NewTimer(c.readTimeout.get())
 		select {
 		case msg = <-c.recv:
 			if !timer.Stop() {
@@ -88,26 +162,147 @@ func (c *RWHandle) Read(b []byte) (int, error) {
 	return n, err
 }
 
-func (c *RWHandle) Write(b []byte) (int, error) {
+// WriteMsg writes b as a single packet. If b is too long, WriteMsg returns
+// ErrBufOverlow.
+func (c *Handle) WriteMsg(b []byte) error {
+	if len(b) > MaxPlaintextSize {
+		return ErrBufOverflow
+	}
+	if c.closed.isSet() {
+		return io.EOF
+	}
 	select {
 	case c.send <- b:
-		return len(b), nil
+		return nil
 	default:
-		return 0, ErrWouldBlock
+		if c.closed.isSet() {
+			return io.EOF
+		}
+	}
+
+	timer := time.NewTimer(c.writeTimeout.get())
+	select {
+	case c.send <- b:
+		if !timer.Stop() {
+			<-timer.C
+		}
+		return nil
+	case <-timer.C:
+		if c.closed.isSet() {
+			return io.EOF
+		}
+		return ErrTimeout
 	}
 }
 
-func (c *RWHandle) close() {
+// Write implements io.Writer. It will split b into segments of length
+// MaxPlaintextLength and send them using WriteMsg. Each call to WriteMsg is
+// subject to the timeout.
+func (c *Handle) Write(b []byte) (int, error) {
+	if c.closed.isSet() {
+		return 0, io.EOF
+	}
+	if len(b) <= MaxPlaintextSize {
+		return len(b), c.WriteMsg(b)
+	}
+	total := 0
+	for i := MaxPlaintextSize; i < len(b); i += MaxPlaintextSize {
+		end := i + MaxPlaintextSize
+		if end > len(b) {
+			end = len(b)
+		}
+		err := c.WriteMsg(b[i:end])
+		if err != nil {
+			return total, err
+		}
+		total += end - i
+	}
+	return total, nil
+}
+
+func (c *Handle) close() {
 	// TODO(dadrian): Implement
 	// Remove the reference to the session, so it can be cleaned up
 	// Close all the channels
 	// Set the closed state
 }
 
-func (c *RWHandle) Close() error {
-	// TODO(dadrian): Implement
+// Close closes the connection. Future operations on non-buffered data will
+// return io.EOF.
+//
+// TODO(dadrian): Implement
+func (c *Handle) Close() error {
 	c.m.Lock()
 	defer c.m.Unlock()
 
+	return nil
+}
+
+// LocalAddr implements net.Conn.
+//
+// TODO(dadrian): Implement
+func (c *Handle) LocalAddr() net.Addr {
+	panic("unimplemented")
+}
+
+// RemoteAddr implements net.Conn.
+//
+// TODO(dadrian): Implement
+func (c *Handle) RemoteAddr() net.Addr {
+	panic("unimplemented")
+}
+
+// SetDeadline sets a deadline at which future operations will stop. It *might*
+// not affect in-progress operations. It is implemented as a timeout, not a
+// deadline.
+//
+// TODO(dadrian): Implement as a deadline.
+func (c *Handle) SetDeadline(t time.Time) error {
+	if c.closed.isSet() {
+		return io.EOF
+	}
+	now := time.Now()
+	var timeout time.Duration
+	if t.After(now) {
+		timeout = t.Sub(now)
+	}
+	c.readTimeout.set(timeout)
+	c.writeTimeout.set(timeout)
+	return nil
+}
+
+// SetReadDeadline sets a deadline at which future read operations will stop. It
+// *might* not affect in-progress operations. It is implemented as a timeout,
+// not a deadline.
+//
+// TODO(dadrian): Implement as a deadline.
+func (c *Handle) SetReadDeadline(t time.Time) error {
+	if c.closed.isSet() {
+		return io.EOF
+	}
+	now := time.Now()
+	var timeout time.Duration
+	if t.After(now) {
+		timeout = t.Sub(now)
+	}
+	c.readTimeout.set(timeout)
+	return nil
+}
+
+// SetWriteDeadline sets a deadline at which future read operations will stop. It
+// *might* not affect in-progress operations. It is implemented as a timeout,
+// not a deadline.
+//
+// TODO(dadrian): Implement as a deadline.
+func (c *Handle) SetWriteDeadline(t time.Time) error {
+	if c.closed.isSet() {
+		return io.EOF
+	}
+	now := time.Now()
+	var timeout time.Duration
+	if t.After(now) {
+		timeout = t.Sub(now)
+	}
+	c.writeTimeout.set(timeout)
 	return nil
 }

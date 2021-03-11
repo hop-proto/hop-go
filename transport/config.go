@@ -22,7 +22,8 @@ type ServerConfig struct {
 	MaxPendingConnections           int
 	MaxBufferedPacketsPerConnection int
 
-	StartingReadTimeout time.Duration
+	StartingReadTimeout  time.Duration
+	StartingWriteTimeout time.Duration
 }
 
 func (c *ServerConfig) maxPendingConnections() int {

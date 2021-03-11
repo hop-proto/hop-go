@@ -226,9 +226,7 @@ func (c *Client) ReadMsg(b []byte) (int, error) {
 
 	c.readLock.Lock()
 	defer c.readLock.Unlock()
-	if c.closed.isSet() {
-		return 0, io.EOF
-	}
+
 	if c.readBuf.Len() > 0 {
 		if len(b) < c.readBuf.Len() {
 			return 0, ErrBufOverflow
@@ -236,6 +234,10 @@ func (c *Client) ReadMsg(b []byte) (int, error) {
 		n, err := c.readBuf.Read(b)
 		c.readBuf.Reset()
 		return n, err
+	}
+
+	if c.closed.isSet() {
+		return 0, io.EOF
 	}
 
 	// TODO(dadrian): Avoid allocation

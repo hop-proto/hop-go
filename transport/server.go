@@ -31,9 +31,9 @@ type Server struct {
 
 	handshakes map[string]*HandshakeState
 	sessions   map[SessionID]*SessionState
-	handles    map[SessionID]*RWHandle
+	handles    map[SessionID]*Handle
 
-	pendingConnections chan *RWHandle
+	pendingConnections chan *Handle
 	outgoing           chan outgoing
 
 	cookieKey    [KeyLen]byte
@@ -468,12 +468,13 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	return nil
 }
 
-func (s *Server) createHandleLocked(ss *SessionState) *RWHandle {
-	handle := &RWHandle{
-		sessionID: ss.sessionID,
-		recv:      make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
-		send:      make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
-		timeout:   s.config.StartingReadTimeout,
+func (s *Server) createHandleLocked(ss *SessionState) *Handle {
+	handle := &Handle{
+		sessionID:    ss.sessionID,
+		recv:         make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
+		send:         make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
+		readTimeout:  atomicTimeout(s.config.StartingReadTimeout),
+		writeTimeout: atomicTimeout(s.config.StartingWriteTimeout),
 	}
 	ss.handle = handle
 	return handle
@@ -487,7 +488,7 @@ func (s *Server) lockHandleAndWriteToSession(ss *SessionState, plaintext []byte)
 	return err
 }
 
-func (s *Server) AcceptTimeout(duration time.Duration) (*RWHandle, error) {
+func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 	timer := time.NewTicker(duration)
 	select {
 	case handle := <-s.pendingConnections:
@@ -534,7 +535,7 @@ func NewServer(conn *net.UDPConn, config *ServerConfig) *Server {
 
 		handshakes:         make(map[string]*HandshakeState),
 		sessions:           make(map[SessionID]*SessionState),
-		pendingConnections: make(chan *RWHandle, config.maxPendingConnections()),
+		pendingConnections: make(chan *Handle, config.maxPendingConnections()),
 		outgoing:           make(chan outgoing, 0), // TODO(dadrian): Is this the appropriate size?
 	}
 	// TODO(dadrian): This probably shouldn't happen in this function

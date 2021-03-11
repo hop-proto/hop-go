@@ -21,7 +21,7 @@ type SessionState struct {
 	serverToClientKey [KeyLen]byte
 	remoteAddr        net.UDPAddr
 
-	handle *RWHandle
+	handle *Handle
 
 	rawWrite bytes.Buffer
 }
