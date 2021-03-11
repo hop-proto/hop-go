@@ -1,6 +1,9 @@
 Architecture
 ============
 
+Documentation of the code and types themselves should be primarily done in
+comments following Golang conventions. This document explains where to go looking for specific things.
+
 ## File Structure
 
 Each top-level folder should have its own README.
@@ -11,8 +14,9 @@ The other top-level folders are organized as follows:
 - `kravatte`: Contains an implementation of the Kravatte AEAD, with specific
   Keccak parameters.
 - `snp`: Byte-manipulation code shared between Kravatte and Cyclist
-- `transport`: Implementation of the $PROTOCOL transport-layer
-- `reliable`: Proof-of-concept of $PROTOCOL channels.
+- `certs`: Tooling and parsing for the certificate format used by Hop
+- `transport`: Implementation of the Hop transport-layer
+- `reliable`: Proof-of-concept of Hop channels.
 - `channels`: Implementation of the $PROTCOL channels on top of the transport
   layer. Not yet started.
 
@@ -20,7 +24,9 @@ The other top-level folders are organized as follows:
 
 - The server-side implementation needs to multiplex multiple connections
 - Each connection should be able to read and write independently
-
+- Packet processing is not the same thing as stream processing! This is why
+  most interactions with the `transport` layer should be through the `MsgConn`
+  interface.
 
 #### Concurrency
 
@@ -28,4 +34,4 @@ The other top-level folders are organized as follows:
 - Close should block until it is safely closed
 - Buffered data can be returned after a `Close`.
 - All calls to `Write` should fail after a close.
-- Calls to `SetDeadline`, `SetTimeout`, et. all should be allowed to be called from multiple threads, and should not affect pending calls (\todo is this right?)
+- Calls to `SetDeadline` et. all should be allowed to be called from multiple threads, and should not affect pending calls.
