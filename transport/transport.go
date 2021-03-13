@@ -126,7 +126,7 @@ func (ss *SessionState) writePacket(conn *net.UDPConn, in []byte, key *[KeyLen]b
 	if n, err := rand.Read(buf[0:12]); err != nil || n != 12 {
 		panic("could not read random nonce for transport")
 	}
-	enc := aead.Seal(buf[12:12], buf[:12], in, []byte("oops all static"))
+	enc := aead.Seal(buf[12:12], buf[:12], in, ss.rawWrite.Bytes()[:AssociatedDataLen])
 	logrus.Debugf("write: %x %x", buf[:12], enc)
 	logrus.Debugf("write(buf): %x", buf)
 	if len(enc)+12 != len(buf) {
@@ -191,7 +191,7 @@ func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (in
 	b = b[12:]
 	enc := b[:ciphertextLen]
 	logrus.Debugf("read: %x %x", nonce, enc)
-	out, err := aead.Open(plaintext[:0], nonce, enc, []byte("oops all static"))
+	out, err := aead.Open(plaintext[:0], nonce, enc, pkt[:AssociatedDataLen])
 	if err != nil {
 		return 0, err
 	}

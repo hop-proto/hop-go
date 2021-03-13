@@ -34,7 +34,8 @@ const MaxPlaintextSize = MaxTotalPacketSize - HeaderLen - SessionIDLen - Counter
 
 // Derived protocol size constants
 const (
-	HelloLen = HeaderLen + DHLen + MacLen
+	HelloLen          = HeaderLen + DHLen + MacLen
+	AssociatedDataLen = HeaderLen + SessionIDLen + CounterLen
 )
 
 // ErrBufOverflow is returned when write would go off the end off a buffer.
