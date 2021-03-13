@@ -2,6 +2,9 @@ package transport
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"io"
 	"net"
 
@@ -36,7 +39,8 @@ func init() {
 // transport message. It returns a negative number for transport messages of
 // insufficient length to contain any plaintext.
 func PlaintextLen(transportLen int) int {
-	return transportLen - HeaderLen - SessionIDLen - CounterLen - MacLen
+	// TODO(dadrian): remove the 12-byte nonce when we get rid of AES
+	return transportLen - HeaderLen - SessionIDLen - CounterLen - MacLen - 12
 }
 
 // PeekSession returns the SessionID located in the provided raw transport
@@ -50,6 +54,8 @@ func PeekSession(msg []byte) (out SessionID, err error) {
 	return
 }
 
+// EqualUDPAddress returns true if the two net.UDPAddrs have the same IP, Port,
+// and Zone.
 func EqualUDPAddress(a, b *net.UDPAddr) bool {
 	if a.Port != b.Port {
 		return false
@@ -88,7 +94,7 @@ func (ss *SessionState) readCounter(b []byte) (count uint64) {
 }
 
 func (ss *SessionState) writePacket(conn *net.UDPConn, in []byte, key *[KeyLen]byte) error {
-	length := HeaderLen + SessionIDLen + CounterLen + len(in) + MacLen
+	length := HeaderLen + SessionIDLen + CounterLen + len(in) + MacLen + 12
 	ss.rawWrite.Reset()
 	if ss.rawWrite.Cap() < length {
 		ss.rawWrite.Grow(length)
@@ -106,11 +112,29 @@ func (ss *SessionState) writePacket(conn *net.UDPConn, in []byte, key *[KeyLen]b
 	ss.writeCounter(&ss.rawWrite)
 	logrus.Debugf("ss: writing packet with count %d", ss.count)
 
-	// TODO(dadrian): Encryption
-	ss.rawWrite.Write(in)
+	// Temporary Encryption via AES until Kravatte is working
+	// TODO(dadrian): Finish Kravatte and get rid of AES.
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return err
+	}
+	aead, err := cipher.NewGCMWithTagSize(block, MacLen)
+	if err != nil {
+		return err
+	}
+	buf := make([]byte, 12+MacLen+len(in))
+	if n, err := rand.Read(buf[0:12]); err != nil || n != 12 {
+		panic("could not read random nonce for transport")
+	}
+	enc := aead.Seal(buf[12:12], buf[:12], in, []byte("oops all static"))
+	logrus.Debugf("write: %x %x", buf[:12], enc)
+	logrus.Debugf("write(buf): %x", buf)
+	if len(enc)+12 != len(buf) {
+		logrus.Panicf("expected len(buf) = len(enc) + 12, got: %d = %d + 12", len(buf), len(enc))
+	}
 
-	// TODO(dadrian): Mac Generation
-	ss.rawWrite.Write(emptyMac)
+	// TODO(dadrian): Encryption
+	ss.rawWrite.Write(buf)
 
 	b := ss.rawWrite.Bytes()
 	written, _, err := conn.WriteMsgUDP(b, nil, &ss.remoteAddr)
@@ -119,7 +143,7 @@ func (ss *SessionState) writePacket(conn *net.UDPConn, in []byte, key *[KeyLen]b
 	}
 	if written != length {
 		// Should never happen
-		panic("writemsgudp somehow wrote less than a message")
+		logrus.Panicf("WriteMsgUDP wrote %d, expected length %d", written, length)
 	}
 	ss.count++
 	return nil
@@ -127,6 +151,7 @@ func (ss *SessionState) writePacket(conn *net.UDPConn, in []byte, key *[KeyLen]b
 
 func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (int, error) {
 	plaintextLen := PlaintextLen(len(pkt))
+	ciphertextLen := plaintextLen + MacLen
 	if plaintextLen > len(plaintext) {
 		return 0, ErrBufOverflow
 	}
@@ -152,12 +177,29 @@ func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (in
 	logrus.Debugf("ss: read packet with count %d", count)
 	b = b[CounterLen:]
 
-	// TODO(dadrian): Decryption
-	copy(plaintext, b[:plaintextLen])
+	// Temporary Encryption via AES until Kravatte is working
+	// TODO(dadrian): Finish Kravatte and get rid of AES.
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return 0, err
+	}
+	aead, err := cipher.NewGCMWithTagSize(block, MacLen)
+	if err != nil {
+		return 0, err
+	}
+	nonce := b[:12]
+	b = b[12:]
+	enc := b[:ciphertextLen]
+	logrus.Debugf("read: %x %x", nonce, enc)
+	out, err := aead.Open(plaintext[:0], nonce, enc, []byte("oops all static"))
+	if err != nil {
+		return 0, err
+	}
+	if len(out) != plaintextLen {
+		panic("wtf mate")
+	}
 	b = b[plaintextLen:]
-
-	// TODO(dadrian): Mac Verify
-	b = b[MacLen:]
+	b = b[MacLen:] // Mac checked as part of Open
 
 	return plaintextLen, nil
 }
