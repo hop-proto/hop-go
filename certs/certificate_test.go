@@ -25,10 +25,10 @@ func TestWriteTo(t *testing.T) {
 	rand.Read(testKeyPair.public[:])
 	rand.Read(testKeyPair.private[:])
 	c := Certificate{
-		CertificateProtocolVersion: 1,
-		CertificateType:            129,
-		IssuedAt:                   time.Date(2020, 03, 11, 23, 35, 0, 0, time.UTC),
-		ExpiresAt:                  time.Date(2021, 07, 04, 12, 1, 1, 0, time.UTC),
+		Version:   1,
+		Type:      Leaf,
+		IssuedAt:  time.Date(2020, 03, 11, 23, 35, 0, 0, time.UTC),
+		ExpiresAt: time.Date(2021, 07, 04, 12, 1, 1, 0, time.UTC),
 		IDChunk: IDChunk{
 			Blocks: nil,
 		},
@@ -40,4 +40,12 @@ func TestWriteTo(t *testing.T) {
 	n, err := c.WriteTo(b)
 	assert.NilError(t, err)
 	assert.Check(t, cmp.Equal(867, n))
+}
+
+func TestReadFrom(t *testing.T) {
+	// TODO(dadrian): Test
+}
+
+func TestReadAndWriteAreInverse(t *testing.T) {
+
 }

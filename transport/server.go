@@ -9,6 +9,7 @@ import (
 	"net"
 	"sync"
 	"time"
+	"zmap.io/portal/keys"
 
 	"github.com/sirupsen/logrus"
 )
@@ -40,7 +41,7 @@ type Server struct {
 	cookieCipher cipher.Block
 
 	// TODO(dadrian): Different keys for different names
-	staticKey X25519KeyPair
+	staticKey keys.X25519KeyPair
 }
 
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
@@ -247,7 +248,7 @@ func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 }
 
 func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState) (int, error) {
-	leaf := s.staticKey.public[:]
+	leaf := s.staticKey.Public[:]
 	var intermediate []byte
 	logrus.Debugf("server: leaf, inter: %x, %x", leaf, intermediate)
 	encCertLen := EncryptedCertificatesLength(leaf, intermediate)

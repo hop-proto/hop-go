@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 	"time"
+	"zmap.io/portal/keys"
 
 	"github.com/sirupsen/logrus"
 )
@@ -72,7 +73,7 @@ func (c *Client) clientHandshakeLocked() error {
 	c.hs.ephemeral.Generate()
 
 	// TODO(dadrian): This should actually be, well, static
-	c.hs.static = new(X25519KeyPair)
+	c.hs.static = new(keys.X25519KeyPair)
 	c.hs.static.Generate()
 
 	c.hs.duplex.Absorb([]byte(ProtocolName))
@@ -80,7 +81,7 @@ func (c *Client) clientHandshakeLocked() error {
 	// TODO(dadrian): This should be allocated smaller
 	buf := make([]byte, 65535)
 
-	logrus.Debugf("client: public ephemeral: %x", c.hs.ephemeral.public)
+	logrus.Debugf("client: public ephemeral: %x", c.hs.ephemeral.Public)
 	n, err := writeClientHello(c.hs, buf)
 	if err != nil {
 		return err

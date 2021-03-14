@@ -54,7 +54,7 @@ func TestCookie(t *testing.T) {
 	_, err = rand.Read(hs.remoteEphemeral[:])
 	assert.NilError(t, err)
 
-	oldPrivate := hs.ephemeral.private
+	oldPrivate := hs.ephemeral.Private
 
 	hs.remoteAddr = &net.UDPAddr{
 		IP:   net.ParseIP("192.168.1.1"),
@@ -69,5 +69,5 @@ func TestCookie(t *testing.T) {
 	bytesRead, err := hs.decryptCookie(cookie)
 	assert.Check(t, cmp.Equal(CookieLen, bytesRead))
 	assert.NilError(t, err)
-	assert.Check(t, cmp.Equal(oldPrivate, hs.ephemeral.private))
+	assert.Check(t, cmp.Equal(oldPrivate, hs.ephemeral.Private))
 }

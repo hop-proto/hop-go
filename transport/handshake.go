@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"net"
+	"zmap.io/portal/keys"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/cyclist"
@@ -43,8 +44,8 @@ func AddressHashKey(addr *net.UDPAddr) string {
 // contained within the cookie to reconstruct the HandshakeState.
 type HandshakeState struct {
 	duplex    cyclist.Cyclist
-	ephemeral X25519KeyPair
-	static    *X25519KeyPair
+	ephemeral keys.X25519KeyPair
+	static    *keys.X25519KeyPair
 
 	macBuf          [MacLen]byte
 	remoteEphemeral [DHLen]byte
@@ -83,7 +84,7 @@ func (hs *HandshakeState) writeCookie(b []byte) (int, error) {
 		panic("could not read random for cookie")
 	}
 	nonce := b[0:12]
-	plaintextCookie := hs.ephemeral.private[:]
+	plaintextCookie := hs.ephemeral.Private[:]
 	ad := CookieAD(&hs.remoteEphemeral, hs.remoteAddr)
 	logrus.Debugf("encrypt: cookie ad: %x", ad)
 	enc := aead.Seal(b[12:12], nonce, plaintextCookie, ad)
@@ -107,7 +108,7 @@ func (hs *HandshakeState) decryptCookie(b []byte) (int, error) {
 	ad := CookieAD(&hs.remoteEphemeral, hs.remoteAddr)
 	logrus.Debugf("decrypt: cookie ad: %x", ad)
 	// TODO(dadrian): Avoid allocation?
-	out, err := aead.Open(hs.ephemeral.private[:0], nonce, encryptedCookie, ad)
+	out, err := aead.Open(hs.ephemeral.Private[:0], nonce, encryptedCookie, ad)
 	if len(out) != DHLen {
 		return 0, ErrInvalidMessage
 	}
@@ -129,8 +130,8 @@ func writeClientHello(hs *HandshakeState, b []byte) (int, error) {
 	x = x[HeaderLen:]
 
 	// Ephemeral
-	copy(x, hs.ephemeral.public[:])
-	hs.duplex.Absorb(hs.ephemeral.public[:])
+	copy(x, hs.ephemeral.Public[:])
+	hs.duplex.Absorb(hs.ephemeral.Public[:])
 	x = x[DHLen:]
 
 	// Mac
@@ -180,7 +181,7 @@ func writeServerHello(hs *HandshakeState, b []byte) (int, error) {
 	b = b[HeaderLen:]
 
 	// Ephemeral
-	copy(b, hs.ephemeral.public[:])
+	copy(b, hs.ephemeral.Public[:])
 	hs.duplex.Absorb(b[:DHLen])
 	b = b[DHLen:]
 
@@ -290,7 +291,7 @@ func (hs *HandshakeState) writeClientAck(b []byte, name string) (int, error) {
 	b = b[HeaderLen:]
 
 	// DH
-	copy(b, hs.ephemeral.public[:DHLen])
+	copy(b, hs.ephemeral.Public[:DHLen])
 	hs.duplex.Absorb(b[:DHLen])
 	b = b[DHLen:]
 
@@ -409,7 +410,7 @@ func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
 	b = b[SessionIDLen:]
 
 	// Encrypted Static
-	hs.duplex.Encrypt(b[:DHLen], hs.static.public[:])
+	hs.duplex.Encrypt(b[:DHLen], hs.static.Public[:])
 	b = b[DHLen:]
 
 	// Tag
