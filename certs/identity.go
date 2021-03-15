@@ -22,7 +22,7 @@ const (
 	CanSign     byte = 1
 )
 
-// NamesToBlocks convers the provided Names to IDBlocks, with the
+// NamesToBlocks converts the provided Names to IDBlocks, with the
 // AuthorizationIndicator flag set to 0 (Identify)
 func NamesToBlocks(names []Name) []IDBlock {
 	out := make([]IDBlock, 0, len(names))

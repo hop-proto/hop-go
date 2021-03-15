@@ -20,7 +20,7 @@ const (
 // will have the AuthorizationIndicator set to 0x0 (identify only).
 //
 // The parent private key is assumed to be an Ed25519 key, not an X25519 key.
-// Similarly, the child PublicKey is assumed to be an X25519, not an Ed25519
+// Similarly, the child Public is assumed to be an X25519, not an Ed25519
 // key.
 //
 // TODO(dadrian): Do we need Authorization Indicator?

@@ -2,6 +2,9 @@ package keys
 
 import (
 	"crypto/rand"
+	"encoding/base64"
+	"encoding/pem"
+	"fmt"
 
 	"golang.org/x/crypto/curve25519"
 )
@@ -41,4 +44,17 @@ func GenerateNewX25519KeyPair() *X25519KeyPair {
 func (x *X25519KeyPair) DH(other []byte) ([]byte, error) {
 	// TODO(dadrian): Do a variant that's operable with a preallocated array
 	return curve25519.X25519(x.Private[:], other)
+}
+
+func (p *PublicKey) String() string {
+	b64 := base64.StdEncoding.EncodeToString(p[:])
+	return fmt.Sprintf("hop-dh-v1-%s", b64)
+}
+
+func (k *PrivateKey) String() string {
+	block := pem.Block{
+		Type:  "HOP PROTOCOL DH PRIVATE KEY V1",
+		Bytes: k[:],
+	}
+	return string(pem.EncodeToMemory(&block))
 }
