@@ -24,6 +24,7 @@ type SigningKeyPair struct {
 	Private SigningPrivateKey
 }
 
+// GenerateNewSigningKeyPair allocates a new SigningKeyPair and calls Generate.
 func GenerateNewSigningKeyPair() *SigningKeyPair {
 	out := new(SigningKeyPair)
 	out.Generate()
@@ -46,6 +47,7 @@ func (e *SigningKeyPair) Generate() {
 	}
 }
 
+// PublicFromPrivate populates e.Public based on e.Private.
 func (e *SigningKeyPair) PublicFromPrivate() {
 	k := ed25519.NewKeyFromSeed(e.Private[:])
 	pk := k.Public().(ed25519.PublicKey)
@@ -55,11 +57,13 @@ func (e *SigningKeyPair) PublicFromPrivate() {
 	}
 }
 
+// String encodes a SigningPublicKey to a custom format.
 func (p *SigningPublicKey) String() string {
 	b64 := base64.StdEncoding.EncodeToString(p[:])
 	return fmt.Sprintf("hop-sign-%s", b64)
 }
 
+// String encodes a SigningPrivateKey to PEM.
 func (k *SigningPrivateKey) String() string {
 	block := pem.Block{
 		Type: "HOP PROTOCOL SIGNING PRIVATE KEY V1",
