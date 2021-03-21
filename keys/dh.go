@@ -54,10 +54,12 @@ func (p *PublicKey) String() string {
 	return fmt.Sprintf("hop-dh-v1-%s", b64)
 }
 
+const PEMTypeDHPrivate = "HOP PROTOCOL DH PRIVATE KEY V1"
+
 // String encodes a PrivateKey to PEM.
 func (k *PrivateKey) String() string {
 	block := pem.Block{
-		Type:  "HOP PROTOCOL DH PRIVATE KEY V1",
+		Type:  PEMTypeDHPrivate,
 		Bytes: k[:],
 	}
 	return string(pem.EncodeToMemory(&block))

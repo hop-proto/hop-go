@@ -63,11 +63,26 @@ func (p *SigningPublicKey) String() string {
 	return fmt.Sprintf("hop-sign-%s", b64)
 }
 
+const PEMTypeSigningPrivate = "HOP PROTOCOL SIGNING PRIVATE KEY V1"
+
 // String encodes a SigningPrivateKey to PEM.
 func (k *SigningPrivateKey) String() string {
 	block := pem.Block{
-		Type: "HOP PROTOCOL SIGNING PRIVATE KEY V1",
+		Type:  PEMTypeSigningPrivate,
 		Bytes: k[:],
 	}
 	return string(pem.EncodeToMemory(&block))
+}
+
+func SigningKeyFromPEM(p *pem.Block) (*SigningKeyPair, error) {
+	if p.Type != PEMTypeSigningPrivate {
+		return nil, fmt.Errorf("wront PEM type %q, want %q", p.Type, PEMTypeSigningPrivate)
+	}
+	out := new(SigningKeyPair)
+	n := copy(out.Private[:], p.Bytes)
+	if n != 32 {
+		return nil, fmt.Errorf("unexpected key length (got %d, expected 32)", n)
+	}
+	out.PublicFromPrivate()
+	return out, nil
 }

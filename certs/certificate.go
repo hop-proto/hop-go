@@ -1,8 +1,10 @@
 package certs
 
 import (
+	"bytes"
 	"crypto/subtle"
 	"encoding/binary"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -29,6 +31,20 @@ const (
 	Intermediate CertificateType = 2
 	Root         CertificateType = 3
 )
+
+func CertificateTypeFromString(typeStr string) (CertificateType, error) {
+	s := strings.ToLower(typeStr)
+	switch s {
+	case "leaf":
+		return Leaf, nil
+	case "intermediate":
+		return Intermediate, nil
+	case "root":
+		return Root, nil
+	default:
+		return 0, fmt.Errorf("unknown certificate type: %s", typeStr)
+	}
+}
 
 const (
 	// SHA256Len is the length of a SHA256Fingerprint array
@@ -364,7 +380,11 @@ func (chunk *IDChunk) ReadFrom(r io.Reader) (int64, error) {
 // WriteTo writes an IDChunk to w.
 func (chunk *IDChunk) WriteTo(w io.Writer) (int64, error) {
 	var written int64
-	err := binary.Write(w, binary.BigEndian, chunk.SerializedLen())
+	serializedLen := chunk.SerializedLen()
+	if serializedLen > 512 {
+		return 0, fmt.Errorf("invalid chunk len %d (max is 512)", serializedLen)
+	}
+	err := binary.Write(w, binary.BigEndian, uint16(serializedLen))
 	if err != nil {
 		return written, err
 	}
@@ -385,4 +405,20 @@ func (chunk *IDChunk) WriteTo(w io.Writer) (int64, error) {
 		}
 	}
 	return written, nil
+}
+
+const PEMTypeHopCertificate = "HOP CERTIFICATE"
+
+// EncodeCertificateToPEM returns the PEM-encoded bytes of the certificate.
+func EncodeCertificateToPEM(c *Certificate) ([]byte, error) {
+	buf := bytes.Buffer{}
+	_, err := c.WriteTo(&buf)
+	if err != nil {
+		return nil, err
+	}
+	p := pem.Block{
+		Type:  PEMTypeHopCertificate,
+		Bytes: buf.Bytes(),
+	}
+	return pem.EncodeToMemory(&p), nil
 }

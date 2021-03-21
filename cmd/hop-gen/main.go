@@ -19,10 +19,10 @@ func main() {
 	flag.Parse()
 	if signing {
 		keyPair := keys.GenerateNewSigningKeyPair()
-		output.Write([]byte(keyPair.Public.String()))
+		output.Write([]byte(keyPair.Private.String()))
 	} else {
 		keyPair := keys.GenerateNewX25519KeyPair()
-		output.Write([]byte(keyPair.Public.String()))
+		output.Write([]byte(keyPair.Private.String()))
 	}
 	output.Write([]byte("\n"))
 	output.Close()
