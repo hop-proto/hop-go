@@ -2,6 +2,7 @@ package certs
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/binary"
 	"encoding/pem"
@@ -11,6 +12,9 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/sirupsen/logrus"
+	"zmap.io/portal/keys"
 )
 
 // Byte-length constants for cryptographic material
@@ -144,6 +148,10 @@ func (c *Certificate) WriteTo(w io.Writer) (int64, error) {
 func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 	var bytesRead int64
 	var err error
+
+	h := sha256.New()
+	r = io.TeeReader(r, h)
+
 	err = binary.Read(r, binary.BigEndian, &c.Version)
 	if err != nil {
 		return bytesRead, err
@@ -216,6 +224,9 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 		return bytesRead, io.EOF
 	}
 
+	// The hash has been written via the TeeReader, read it out.
+	h.Sum(c.Fingerprint[:0])
+
 	return bytesRead, nil
 }
 
@@ -231,7 +242,7 @@ func RoundUpToWord(i int) int {
 // SerializedLen returns the length of this IDChunk if it were to be serialized.
 // It does not serialize the IDChunk.
 func (chunk *IDChunk) SerializedLen() int {
-	outputLen := 0
+	outputLen := 4
 	for i := range chunk.Blocks {
 		blockSize, _ := chunk.Blocks[i].BlockSize()
 		outputLen += blockSize
@@ -244,7 +255,8 @@ func (chunk *IDChunk) SerializedLen() int {
 // size.
 func (b *IDBlock) BlockSize() (blockSize int, padding int) {
 	base := len(b.ServerID) + 3
-	return RoundUpToWord(base), base
+	total := RoundUpToWord(base)
+	return total, total - base
 }
 
 // WriteTo serializes the IDBlock to w.
@@ -253,9 +265,12 @@ func (b *IDBlock) WriteTo(w io.Writer) (int64, error) {
 	if blockSize > 256 {
 		return 0, ErrNameTooLong
 	}
-	// TODO(dadrian): Flags
+	idLen := len(b.ServerID)
+	if idLen > 256 {
+		return 0, ErrNameTooLong
+	}
 	written := int64(0)
-	n, err := w.Write([]byte{byte(blockSize), 0})
+	n, err := w.Write([]byte{byte(blockSize), b.Flags, byte(idLen)})
 	written += int64(n)
 	if err != nil {
 		return written, err
@@ -286,8 +301,7 @@ func (b *IDBlock) ReadFrom(r io.Reader) (int64, error) {
 		return bytesRead, fmt.Errorf("minium block size is 3, got %d", blockSize)
 	}
 
-	var flags byte
-	err = binary.Read(r, binary.BigEndian, &flags)
+	err = binary.Read(r, binary.BigEndian, &b.Flags)
 	if err != nil {
 		return bytesRead, err
 	}
@@ -312,6 +326,7 @@ func (b *IDBlock) ReadFrom(r io.Reader) (int64, error) {
 	if err != nil {
 		return bytesRead, err
 	}
+	b.ServerID = builder.String()
 
 	paddingLen := int(blockSize - 3 - serverIDLen)
 	expectedPadding := make([]byte, paddingLen)
@@ -347,21 +362,24 @@ func (chunk *IDChunk) ReadFrom(r io.Reader) (int64, error) {
 	}
 	bytesRead += 2
 
-	if chunkLen > 512 {
+	if chunkLen > 512 || chunkLen < 4 {
 		return bytesRead, fmt.Errorf("invalid IDChunk length %d", chunkLen)
 	}
-	if paddingLen > chunkLen {
+	if paddingLen > chunkLen-4 {
 		return bytesRead, fmt.Errorf("invalid IDChunk padding length %d (IDChunk only %d)", paddingLen, chunkLen)
 	}
 
-	blockLen := chunkLen - paddingLen
-	for bytesRead < int64(blockLen) {
+	blockLen := chunkLen - paddingLen - 4
+	var blockBytesRead int64
+	for blockBytesRead < int64(blockLen) {
 		block := IDBlock{}
 		n, err := block.ReadFrom(r)
+		blockBytesRead += n
 		bytesRead += n
 		if err != nil {
 			return bytesRead, err
 		}
+		chunk.Blocks = append(chunk.Blocks, block)
 	}
 
 	padding := make([]byte, paddingLen)
@@ -421,4 +439,43 @@ func EncodeCertificateToPEM(c *Certificate) ([]byte, error) {
 		Bytes: buf.Bytes(),
 	}
 	return pem.EncodeToMemory(&p), nil
+}
+
+func ReadCertificatePEM(b []byte) (*Certificate, error) {
+	p, _ := pem.Decode(b)
+	if p == nil {
+		return nil, errors.New("could not decode PEM block")
+	}
+	buf := bytes.NewBuffer(p.Bytes)
+	c := new(Certificate)
+	_, err := c.ReadFrom(buf)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func (c *Certificate) ProvideKey(private *[KeyLen]byte) error {
+	switch c.Type {
+	case Leaf:
+		keyPair := keys.X25519KeyPair{
+			Private: *private,
+		}
+		keyPair.PublicFromPrivate()
+		if !bytes.Equal(c.PublicKey[:], keyPair.Public[:]) {
+			return errors.New("mismatched public and private key")
+		}
+	case Intermediate, Root:
+		keyPair := keys.SigningKeyPair{
+			Private: *private,
+		}
+		keyPair.PublicFromPrivate()
+		if !bytes.Equal(c.PublicKey[:], keyPair.Public[:]) {
+			return errors.New("mismatched public and private key")
+		}
+	default:
+		logrus.Panicf("unknown cert type: %d", c.Type)
+	}
+	c.privateKey = private
+	return nil
 }

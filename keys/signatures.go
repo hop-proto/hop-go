@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 )
@@ -57,10 +58,12 @@ func (e *SigningKeyPair) PublicFromPrivate() {
 	}
 }
 
+const SigningPublicKeyPrefix = "hop-sign-v1-"
+
 // String encodes a SigningPublicKey to a custom format.
 func (p *SigningPublicKey) String() string {
 	b64 := base64.StdEncoding.EncodeToString(p[:])
-	return fmt.Sprintf("hop-sign-%s", b64)
+	return fmt.Sprintf("%s%s", SigningPublicKeyPrefix, b64)
 }
 
 const PEMTypeSigningPrivate = "HOP PROTOCOL SIGNING PRIVATE KEY V1"
@@ -78,11 +81,31 @@ func SigningKeyFromPEM(p *pem.Block) (*SigningKeyPair, error) {
 	if p.Type != PEMTypeSigningPrivate {
 		return nil, fmt.Errorf("wront PEM type %q, want %q", p.Type, PEMTypeSigningPrivate)
 	}
+	if len(p.Bytes) != 32 {
+		panic("fuck you")
+	}
 	out := new(SigningKeyPair)
 	n := copy(out.Private[:], p.Bytes)
 	if n != 32 {
 		return nil, fmt.Errorf("unexpected key length (got %d, expected 32)", n)
 	}
 	out.PublicFromPrivate()
+	return out, nil
+}
+
+func ParseSigningPublicKey(encoded string) (*SigningPublicKey, error) {
+	if !strings.HasPrefix(encoded, SigningPublicKeyPrefix) {
+		return nil, fmt.Errorf("bad prefix, expected %s", SigningPublicKeyPrefix)
+	}
+	rest := encoded[len(SigningPublicKeyPrefix):]
+	b, err := base64.StdEncoding.DecodeString(rest)
+	if err != nil {
+		return nil, err
+	}
+	if len(b) != 32 {
+		return nil, fmt.Errorf("invalid public key length, got %d, expected 32", len(b))
+	}
+	out := new(SigningPublicKey)
+	copy(out[:], b)
 	return out, nil
 }
