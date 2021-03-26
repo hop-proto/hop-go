@@ -50,6 +50,45 @@ func main() {
 	}
 
 	switch certType {
+	case certs.Leaf:
+		data, err = ioutil.ReadFile(parentFilePath)
+		if err != nil {
+			logrus.Fatalf("could not open parent cert file: %s", err)
+		}
+		parent, err := certs.ReadCertificatePEM(data)
+		if err != nil {
+			logrus.Fatalf("could not deserialize parent cert: %s", err)
+		}
+		err = parent.ProvideKey((*[32]byte)(&signingKeyPair.Private))
+		if err != nil {
+			logrus.Fatalf("bad private key: %s", err)
+		}
+		pubKeyBytes, err := ioutil.ReadFile(publicKeyFilePath)
+		if err != nil {
+			logrus.Fatalf("could not read public key file: %s", err)
+		}
+		pubKey, err := keys.ParseDHPublicKey(string(pubKeyBytes))
+		if err != nil {
+			logrus.Fatalf("unable to parse DH public key: %s")
+		}
+		identity := certs.Identity{
+			PublicKey: *pubKey,
+			Names: []certs.Name{
+				{
+					Type:  certs.DNSName,
+					Label: dnsName,
+				},
+			},
+		}
+		leaf, err := certs.IssueLeaf(parent, &identity)
+		if err != nil {
+			logrus.Fatalf("unable to issue intermediate: %s", err)
+		}
+		pemBytes, err := certs.EncodeCertificateToPEM(leaf)
+		if err != nil {
+			logrus.Fatalf("unable to encode certificate to PEM: %s", err)
+		}
+		output.Write(pemBytes)
 	case certs.Intermediate:
 		data, err = ioutil.ReadFile(parentFilePath)
 		if err != nil {

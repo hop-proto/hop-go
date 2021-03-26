@@ -58,6 +58,12 @@ func (e *SigningKeyPair) PublicFromPrivate() {
 	}
 }
 
+// VerifySignature verifies the signature corresponds to the data, using the provided public key.
+func VerifySignature(publicKey *SigningPublicKey, data []byte, signature *[64]byte) bool {
+	internal := ed25519.PublicKey(publicKey[:])
+	return ed25519.Verify(internal, data, signature[:])
+}
+
 const SigningPublicKeyPrefix = "hop-sign-v1-"
 
 // String encodes a SigningPublicKey to a custom format.

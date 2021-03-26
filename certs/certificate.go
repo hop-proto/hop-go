@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"math"
+	"os"
 	"strings"
 	"time"
 
@@ -81,6 +83,8 @@ type Certificate struct {
 	Fingerprint SHA256Fingerprint
 
 	privateKey *[KeyLen]byte
+
+	raw bytes.Buffer
 }
 
 // IDChunk contains the IDBlocks in a certificate
@@ -102,9 +106,6 @@ func (c *Certificate) WriteTo(w io.Writer) (int64, error) {
 	if err != nil {
 		return written, err
 	}
-
-	//idChunkLen := c.IDChunk.SerializedLen()
-	//binary.Write(w, binary.BigEndian, uint16(idChunkLen))
 
 	err = binary.Write(w, binary.BigEndian, c.IssuedAt.Unix())
 	if err != nil {
@@ -149,8 +150,13 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 	var bytesRead int64
 	var err error
 
+	// Save the bytes
+	c.raw.Reset()
+	tee := io.TeeReader(r, &c.raw)
+
+	// Calculate hash as we read
 	h := sha256.New()
-	r = io.TeeReader(r, h)
+	r = io.TeeReader(tee, h)
 
 	err = binary.Read(r, binary.BigEndian, &c.Version)
 	if err != nil {
@@ -453,6 +459,19 @@ func ReadCertificatePEM(b []byte) (*Certificate, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+func ReadCertificatePEMFile(path string) (*Certificate, error) {
+	fd, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer fd.Close()
+	b, err := ioutil.ReadAll(fd)
+	if err != nil {
+		return nil, err
+	}
+	return ReadCertificatePEM(b)
 }
 
 func (c *Certificate) ProvideKey(private *[KeyLen]byte) error {

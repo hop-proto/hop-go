@@ -3,12 +3,14 @@ package certs
 import (
 	"bytes"
 	"crypto/rand"
-	"encoding/base64"
+	"io/ioutil"
+	"os"
 	"testing"
 	"time"
 
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
+	"zmap.io/portal/keys"
 )
 
 type keypair struct {
@@ -78,43 +80,101 @@ func TestWriteTo(t *testing.T) {
 	assert.DeepEqual(t, back[:32], c.PublicKey[:])
 	assert.DeepEqual(t, back[32:64], c.Parent[:])
 	assert.DeepEqual(t, back[64:], c.Signature[:])
-}
 
-func TestReadFrom(t *testing.T) {
-	// TODO(dadrian): Test
-}
+	raw := make([]byte, b.Len())
+	copy(raw, b.Bytes())
 
-func TestReadAndWriteAreInverse(t *testing.T) {
-	rawBase64 := "AQMAAAAAAABgWmMCAAAAAGnBtgIACAAABAEAAJ/Uvy+Aw+SPm6MTWdSOziXbDwkW7kQMBwvhBCWUervrAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC8j60pq235F+PjfsFl42f29olJ3qae/nihqTg2ibPJHF/Xa7aPiQ85WX4AGNoU0dAVhmVazIsXPCqiLf0gtuUN"
-	raw, err := base64.StdEncoding.DecodeString(rawBase64)
-	assert.NilError(t, err)
-	c := Certificate{}
-	n, err := c.ReadFrom(bytes.NewBuffer(raw))
-	assert.NilError(t, err)
+	d := Certificate{}
+	n, err = d.ReadFrom(b)
 	assert.Check(t, cmp.Equal(len(raw), int(n)))
-	assert.Check(t, cmp.Equal(c.IDChunk.SerializedLen(), 8))
-	buf := bytes.Buffer{}
-	written, err := c.WriteTo(&buf)
 	assert.NilError(t, err)
-	assert.Check(t, cmp.Equal(n, written))
-	assert.Check(t, cmp.DeepEqual(raw, buf.Bytes()))
+
+	assert.Equal(t, c.Version, d.Version)
+	assert.Equal(t, c.Type, d.Type)
+	assert.Equal(t, c.IssuedAt, d.IssuedAt)
+	assert.Equal(t, c.ExpiresAt, d.ExpiresAt)
+	assert.DeepEqual(t, c.IDChunk, d.IDChunk)
+	assert.Equal(t, c.PublicKey, d.PublicKey)
+	assert.Equal(t, c.PublicKey, testKeyPair.public)
+	assert.Equal(t, c.Parent, d.Parent)
+	assert.Equal(t, c.Signature, d.Signature)
+	//assert.Equal(t, c.Fingerprint, d.Fingerprint)
 }
 
-func TestPublicKeyManual(t *testing.T) {
-	pemString := `-----BEGIN HOP CERTIFICATE-----
-AQMAAAAAAABgWmMCAAAAAGnBtgIACAAABAEAAJ/Uvy+Aw+SPm6MTWdSOziXbDwkW
-7kQMBwvhBCWUervrAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC8j60p
-q235F+PjfsFl42f29olJ3qae/nihqTg2ibPJHF/Xa7aPiQ85WX4AGNoU0dAVhmVa
-zIsXPCqiLf0gtuUN
------END HOP CERTIFICATE-----
-`
-
-	c, err := ReadCertificatePEM([]byte(pemString))
+func TestReadFiles(t *testing.T) {
+	c, err := ReadCertificatePEMFile("testdata/leaf.pem")
 	assert.NilError(t, err)
-	assert.Check(t, c != nil)
 
-	expectedPublic, _ := base64.StdEncoding.DecodeString("n9S/L4DD5I+boxNZ1I7OJdsPCRbuRAwHC+EEJZR6u+s=")
-	assert.Check(t, cmp.Len(expectedPublic, 32))
-	assert.Check(t, cmp.Len(c.PublicKey[:], 32))
-	assert.Check(t, cmp.DeepEqual(expectedPublic[:], c.PublicKey[:]))
+	pubKey, err := keys.ParseDHPublicKey(string(readFile(t, "testdata/leaf.pub")))
+	assert.DeepEqual(t, c.PublicKey[:], pubKey[:])
+
+	p, err := ReadCertificatePEMFile("testdata/intermediate.pem")
+	assert.NilError(t, err)
+	assert.DeepEqual(t, c.Parent[:], p.Fingerprint[:])
+
+	parentPubKey, err := keys.ParseSigningPublicKey(string(readFile(t, "testdata/intermediate.pub")))
+	assert.DeepEqual(t, p.PublicKey[:], parentPubKey[:])
+
+	r, err := ReadCertificatePEMFile("testdata/root.pem")
+	assert.NilError(t, err)
+	assert.DeepEqual(t, p.Parent[:], r.Fingerprint[:])
+
+	rootPubKey, err := keys.ParseSigningPublicKey(string(readFile(t, "testdata/root.pub")))
+	assert.DeepEqual(t, r.PublicKey[:], rootPubKey[:])
+
+}
+
+func open(t *testing.T, f string) *os.File {
+	fd, err := os.Open(f)
+	assert.NilError(t, err)
+	return fd
+}
+
+func readFile(t *testing.T, f string) []byte {
+	fd := open(t, f)
+	b, err := ioutil.ReadAll(fd)
+	assert.NilError(t, err)
+	return b
+}
+
+func TestVerify(t *testing.T) {
+	root, err := ReadCertificatePEMFile("testdata/root.pem")
+	assert.NilError(t, err)
+	intermediate, err := ReadCertificatePEMFile("testdata/intermediate.pem")
+	assert.NilError(t, err)
+	leaf, err := ReadCertificatePEMFile("testdata/leaf.pem")
+	assert.NilError(t, err)
+
+	err = VerifyParent(leaf, leaf)
+	assert.Check(t, err != nil)
+	err = VerifyParent(leaf, intermediate)
+	assert.Check(t, err)
+	err = VerifyParent(leaf, root)
+	assert.Check(t, err != nil)
+
+	err = VerifyParent(intermediate, leaf)
+	assert.Check(t, err != nil)
+	err = VerifyParent(intermediate, intermediate)
+	assert.Check(t, err != nil)
+	err = VerifyParent(intermediate, root)
+	assert.Check(t, err)
+
+	err = VerifyParent(root, leaf)
+	assert.Check(t, err != nil)
+	err = VerifyParent(root, intermediate)
+	assert.Check(t, err != nil)
+	err = VerifyParent(root, root)
+	assert.Check(t, err)
+
+	leaf.Signature[0]++
+	err = VerifyParent(leaf, intermediate)
+	assert.Check(t, err != nil)
+
+	intermediate.Signature[1]++
+	err = VerifyParent(intermediate, root)
+	assert.Check(t, err != nil)
+
+	root.Signature[63]++
+	err = VerifyParent(root, root)
+	assert.Check(t, err != nil)
 }
