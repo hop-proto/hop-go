@@ -38,6 +38,8 @@ const (
 	Root         CertificateType = 3
 )
 
+// CertificateTypeFromString returns a CertificateType based on its name. It is
+// case-insensitive.
 func CertificateTypeFromString(typeStr string) (CertificateType, error) {
 	s := strings.ToLower(typeStr)
 	switch s {
