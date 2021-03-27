@@ -1,0 +1,24 @@
+help: ## List tasks with documentation
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' "$(firstword $(MAKEFILE_LIST))" | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
+	@for file in $(DARKLY_EXE); do printf "\033[36m%-30s\033[0m %s\n" $${file} "Single Darkly executable"; done
+
+GOLANGCI_LINT := golangci-lint
+ifeq (, $(shell command -v "$(GOLANGCI_LINT)"))
+	GOLANGCI_LINT_ERR = $(error install golangci-lint with e.g. brew install golangci/tap/golangci-lint)
+endif
+
+.PHONY: lint
+lint: ## lint go code
+lint: ; $(GOLANGCI_LINT_ERR)
+	@echo "lint-go"
+	@$(GOLANGCI_LINT) run --deadline 1m
+
+.PHONY: build
+build: ## compile
+build:
+	go build ./...
+
+.PHONY: test
+test: ## test
+test:
+	go test ./... -timeout 30s

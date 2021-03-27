@@ -33,7 +33,7 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	out.duplex.Squeeze(out.macBuf[:])
 	logrus.Debugf("server: regen ch mac: %x", out.macBuf[:])
 	out.duplex.Absorb([]byte{byte(MessageTypeServerHello), 0, 0, 0})
-	out.duplex.Absorb(out.ephemeral.public[:])
+	out.duplex.Absorb(out.ephemeral.Public[:])
 	out.ee, err = out.ephemeral.DH(out.remoteEphemeral[:])
 	logrus.Debugf("replay server ee: %x", out.ee)
 	if err != nil {
