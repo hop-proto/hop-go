@@ -87,15 +87,24 @@ type Certificate struct {
 	raw bytes.Buffer
 }
 
-// IDChunk contains the IDBlocks in a certificate
-type IDChunk struct {
-	Blocks []IDBlock
+// IDType indicates the type of an identifier label, e.g. DNSName, IPAddress, etc.
+type IDType byte
+
+// Known IDType values
+const (
+	DNSName   IDType = 0x01
+	IPAddress IDType = 0x02
+)
+
+// Name is a UTF-8 label and an IDType. It can be encoded to an IDBlock.
+type Name struct {
+	Label string
+	Type  IDType
 }
 
-// IDBlock is the serialization structure for a Name.
-type IDBlock struct {
-	Flags    byte
-	ServerID string
+// IDChunk contains the IDBlocks in a certificate
+type IDChunk struct {
+	Blocks []Name
 }
 
 // WriteTo serializes a certificate and implements the io.WriterTo interface.
@@ -259,30 +268,33 @@ func (chunk *IDChunk) SerializedLen() int {
 // BlockSize returns the length of this block when serialized, and how many
 // bytes of the serialization are padding. The padding is included in the block
 // size.
-func (b *IDBlock) BlockSize() (blockSize int, padding int) {
-	base := len(b.ServerID) + 3
+func (name *Name) BlockSize() (blockSize int, padding int) {
+	base := len(name.Label) + 3
 	total := RoundUpToWord(base)
 	return total, total - base
 }
 
 // WriteTo serializes the IDBlock to w.
-func (b *IDBlock) WriteTo(w io.Writer) (int64, error) {
-	blockSize, paddingLen := b.BlockSize()
+func (name *Name) WriteTo(w io.Writer) (int64, error) {
+	blockSize, paddingLen := name.BlockSize()
 	if blockSize > 256 {
 		return 0, ErrNameTooLong
 	}
-	idLen := len(b.ServerID)
+	idLen := len(name.Label)
 	if idLen > 256 {
 		return 0, ErrNameTooLong
 	}
 	written := int64(0)
-	n, err := w.Write([]byte{byte(blockSize), b.Flags, byte(idLen)})
+	n, err := w.Write([]byte{byte(blockSize), byte(name.Type), byte(idLen)})
 	written += int64(n)
 	if err != nil {
 		return written, err
 	}
-	n, err = w.Write([]byte(b.ServerID))
+	n, err = w.Write([]byte(name.Label))
 	written += int64(n)
+	if err != nil {
+		return written, err
+	}
 	for i := 0; i < paddingLen; i++ {
 		n, err = w.Write([]byte{0})
 		written += int64(n)
@@ -294,7 +306,7 @@ func (b *IDBlock) WriteTo(w io.Writer) (int64, error) {
 }
 
 // ReadFrom reads a serialized IDBlock from r.
-func (b *IDBlock) ReadFrom(r io.Reader) (int64, error) {
+func (name *Name) ReadFrom(r io.Reader) (int64, error) {
 	var bytesRead int64
 
 	var blockSize byte
@@ -307,7 +319,7 @@ func (b *IDBlock) ReadFrom(r io.Reader) (int64, error) {
 		return bytesRead, fmt.Errorf("minium block size is 3, got %d", blockSize)
 	}
 
-	err = binary.Read(r, binary.BigEndian, &b.Flags)
+	err = binary.Read(r, binary.BigEndian, &name.Type)
 	if err != nil {
 		return bytesRead, err
 	}
@@ -332,7 +344,7 @@ func (b *IDBlock) ReadFrom(r io.Reader) (int64, error) {
 	if err != nil {
 		return bytesRead, err
 	}
-	b.ServerID = builder.String()
+	name.Label = builder.String()
 
 	paddingLen := int(blockSize - 3 - serverIDLen)
 	expectedPadding := make([]byte, paddingLen)
@@ -378,14 +390,14 @@ func (chunk *IDChunk) ReadFrom(r io.Reader) (int64, error) {
 	blockLen := chunkLen - paddingLen - 4
 	var blockBytesRead int64
 	for blockBytesRead < int64(blockLen) {
-		block := IDBlock{}
-		n, err := block.ReadFrom(r)
+		name := Name{}
+		n, err := name.ReadFrom(r)
 		blockBytesRead += n
 		bytesRead += n
 		if err != nil {
 			return bytesRead, err
 		}
-		chunk.Blocks = append(chunk.Blocks, block)
+		chunk.Blocks = append(chunk.Blocks, name)
 	}
 
 	padding := make([]byte, paddingLen)

@@ -6,6 +6,15 @@ import (
 	"zmap.io/portal/keys"
 )
 
+// Identity is a set of names associated with a public key.
+type Identity struct {
+	PublicKey [KeyLen]byte
+	Names     []Name
+}
+
+// VerifyParent returns nil if parent issued child. An error is returned on any
+// processing error (mismatched cert types, etc.), as well as for signature
+// failures.
 func VerifyParent(child *Certificate, parent *Certificate) error {
 	switch child.Type {
 	case Leaf:

@@ -35,10 +35,10 @@ func TestWriteTo(t *testing.T) {
 		IssuedAt:  time.Unix(issued, 0),
 		ExpiresAt: time.Unix(expires, 0),
 		IDChunk: IDChunk{
-			Blocks: []IDBlock{
+			Blocks: []Name{
 				{
-					Flags:    byte(DNSName),
-					ServerID: "example.domain",
+					Type:  DNSName,
+					Label: "example.domain",
 				},
 			},
 		},
@@ -106,6 +106,7 @@ func TestReadFiles(t *testing.T) {
 	assert.NilError(t, err)
 
 	pubKey, err := keys.ParseDHPublicKey(string(readFile(t, "testdata/leaf.pub")))
+	assert.NilError(t, err)
 	assert.DeepEqual(t, c.PublicKey[:], pubKey[:])
 
 	p, err := ReadCertificatePEMFile("testdata/intermediate.pem")
@@ -113,6 +114,7 @@ func TestReadFiles(t *testing.T) {
 	assert.DeepEqual(t, c.Parent[:], p.Fingerprint[:])
 
 	parentPubKey, err := keys.ParseSigningPublicKey(string(readFile(t, "testdata/intermediate.pub")))
+	assert.NilError(t, err)
 	assert.DeepEqual(t, p.PublicKey[:], parentPubKey[:])
 
 	r, err := ReadCertificatePEMFile("testdata/root.pem")
@@ -120,6 +122,7 @@ func TestReadFiles(t *testing.T) {
 	assert.DeepEqual(t, p.Parent[:], r.Fingerprint[:])
 
 	rootPubKey, err := keys.ParseSigningPublicKey(string(readFile(t, "testdata/root.pub")))
+	assert.NilError(t, err)
 	assert.DeepEqual(t, r.PublicKey[:], rootPubKey[:])
 
 }

@@ -31,7 +31,7 @@ func issue(parent *Certificate, child *Identity, certType CertificateType, durat
 		IssuedAt:  time.Now(),
 		ExpiresAt: now.Add(week),
 		IDChunk: IDChunk{
-			Blocks: NamesToBlocks(child.Names),
+			Blocks: child.Names,
 		},
 		PublicKey: child.PublicKey,
 		Parent:    parent.Fingerprint,
@@ -96,7 +96,7 @@ func SelfSignRoot(root *Identity, keyPair *keys.SigningKeyPair) (*Certificate, e
 		IssuedAt:  now,
 		ExpiresAt: exipration,
 		IDChunk: IDChunk{
-			Blocks: NamesToBlocks(root.Names),
+			Blocks: root.Names,
 		},
 		PublicKey:   root.PublicKey,
 		Fingerprint: zero,
