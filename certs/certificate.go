@@ -1,3 +1,4 @@
+// Package certs defines the Hop certificates structure, including serialization and verification functions.
 package certs
 
 import (
@@ -58,7 +59,7 @@ const (
 	// SHA256Len is the length of a SHA256Fingerprint array
 	SHA256Len = 32
 
-	// Protocol version
+	// Version is the protocol version
 	Version byte = 1
 )
 
@@ -437,7 +438,7 @@ func (chunk *IDChunk) WriteTo(w io.Writer) (int64, error) {
 
 	for i := range chunk.Blocks {
 		n, err := chunk.Blocks[i].WriteTo(w)
-		written += int64(n)
+		written += n
 		if err != nil {
 			return written, err
 		}
@@ -445,6 +446,7 @@ func (chunk *IDChunk) WriteTo(w io.Writer) (int64, error) {
 	return written, nil
 }
 
+// PEMTypeHopCertificate is the header string used for PEM files for Hop certificates.
 const PEMTypeHopCertificate = "HOP CERTIFICATE"
 
 // EncodeCertificateToPEM returns the PEM-encoded bytes of the certificate.
@@ -461,6 +463,9 @@ func EncodeCertificateToPEM(c *Certificate) ([]byte, error) {
 	return pem.EncodeToMemory(&p), nil
 }
 
+// ReadCertificatePEM reads the first PEM-encoded bytes in b as a Certificate.
+// It will only read a single PEM. To read many PEMs, use ReadFrom and the
+// encoding/pem module directly.
 func ReadCertificatePEM(b []byte) (*Certificate, error) {
 	p, _ := pem.Decode(b)
 	if p == nil {
@@ -475,6 +480,7 @@ func ReadCertificatePEM(b []byte) (*Certificate, error) {
 	return c, nil
 }
 
+// ReadCertificatePEMFile reads the first PEM-encoded certificate from a PEM file.
 func ReadCertificatePEMFile(path string) (*Certificate, error) {
 	fd, err := os.Open(path)
 	if err != nil {
@@ -488,6 +494,9 @@ func ReadCertificatePEMFile(path string) (*Certificate, error) {
 	return ReadCertificatePEM(b)
 }
 
+// ProvideKey sets the private key associated with the public key in the
+// certificate. You must call ProvideKey before calling any issue functions with
+// this certificate.
 func (c *Certificate) ProvideKey(private *[KeyLen]byte) error {
 	switch c.Type {
 	case Leaf:

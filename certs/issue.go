@@ -89,12 +89,12 @@ func SelfSignRoot(root *Identity, keyPair *keys.SigningKeyPair) (*Certificate, e
 		return nil, errors.New("key pair does not match identity")
 	}
 	now := time.Now()
-	exipration := time.Date(now.Year()+5, now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second(), now.Nanosecond(), time.Local)
+	expiration := time.Date(now.Year()+5, now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second(), now.Nanosecond(), time.Local)
 	out := &Certificate{
 		Version:   Version,
 		Type:      Root,
 		IssuedAt:  now,
-		ExpiresAt: exipration,
+		ExpiresAt: expiration,
 		IDChunk: IDChunk{
 			Blocks: root.Names,
 		},
