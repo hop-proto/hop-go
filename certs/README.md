@@ -1,6 +1,9 @@
 Certificates
 ============
 
-TODO(dadrian): Copy in documentation from the paper / spec
+Certificate format is currently documented [here][cert-doc]. See Go Doc
+comments for more details on the implementation.
 
-https://docs.google.com/document/d/1pizyochHqcojollCGMqBTPiSPTpZ2kTmYxcOJlZlhDY/edit#
+[cert-doc] :https://docs.google.com/document/d/1pizyochHqcojollCGMqBTPiSPTpZ2kTmYxcOJlZlhDY/edit#
+
+
