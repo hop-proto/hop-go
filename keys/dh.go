@@ -4,7 +4,10 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
+	"io/ioutil"
+	"os"
 	"strings"
 
 	"golang.org/x/crypto/curve25519"
@@ -79,6 +82,24 @@ func DHKeyFromPEM(p *pem.Block) (*X25519KeyPair, error) {
 	}
 	out.PublicFromPrivate()
 	return out, nil
+}
+
+// ReadDHKeyFromPEMFile reads the first PEM-encoded Hop DH key at the provided
+// path.
+func ReadDHKeyFromPEMFile(path string) (*X25519KeyPair, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	b, err := ioutil.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+	p, _ := pem.Decode(b)
+	if p == nil {
+		return nil, errors.New("not a PEM file")
+	}
+	return DHKeyFromPEM(p)
 }
 
 func ParseDHPublicKey(encoded string) (*PublicKey, error) {

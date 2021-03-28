@@ -9,6 +9,7 @@ import (
 	"net"
 	"sync"
 	"time"
+
 	"zmap.io/portal/keys"
 
 	"github.com/sirupsen/logrus"
@@ -41,7 +42,9 @@ type Server struct {
 	cookieCipher cipher.Block
 
 	// TODO(dadrian): Different keys for different names
-	staticKey keys.X25519KeyPair
+	staticKey    *keys.X25519KeyPair
+	certificate  []byte
+	intermediate []byte
 }
 
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
@@ -248,10 +251,8 @@ func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 }
 
 func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState) (int, error) {
-	leaf := s.staticKey.Public[:]
-	var intermediate []byte
-	logrus.Debugf("server: leaf, inter: %x, %x", leaf, intermediate)
-	encCertLen := EncryptedCertificatesLength(leaf, intermediate)
+	logrus.Debugf("server: leaf, inter: %x, %x", s.certificate, s.intermediate)
+	encCertLen := EncryptedCertificatesLength(s.certificate, s.intermediate)
 	logrus.Debugf("server: encrypted cert len: %d", encCertLen)
 	if len(b) < HeaderLen+SessionIDLen+encCertLen {
 		return 0, ErrBufUnderflow
@@ -270,7 +271,7 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState)
 	hs.duplex.Absorb(x[:SessionIDLen])
 	x = x[SessionIDLen:]
 	pos += SessionIDLen
-	encCerts, err := EncryptCertificates(&hs.duplex, leaf, intermediate)
+	encCerts, err := EncryptCertificates(&hs.duplex, s.certificate, s.intermediate)
 	if err != nil {
 		return pos, err
 	}
@@ -526,10 +527,27 @@ func (s *Server) Close() error {
 
 // NewServer returns a Server listening on the provided UDP connection. The
 // returned Server object is a valid net.Listener.
-func NewServer(conn *net.UDPConn, config *ServerConfig) *Server {
-	if config == nil {
-		config = new(ServerConfig)
+func NewServer(conn *net.UDPConn, config *ServerConfig) (*Server, error) {
+	if config.KeyPair == nil {
+		return nil, errors.New("config.KeyPair must be set")
 	}
+	if config.Certificate == nil {
+		return nil, errors.New("config.Certificate must be set")
+	}
+
+	// Pre-serialize the certificates.
+	//
+	// TODO(dadrian): This should happen on-demand.
+	var cert, intermediate bytes.Buffer
+	if _, err := config.Certificate.WriteTo(&cert); err != nil {
+		return nil, err
+	}
+	if config.Intermediate != nil {
+		if _, err := config.Intermediate.WriteTo(&intermediate); err != nil {
+			return nil, err
+		}
+	}
+
 	s := Server{
 		udpConn: conn,
 		config:  config,
@@ -538,6 +556,10 @@ func NewServer(conn *net.UDPConn, config *ServerConfig) *Server {
 		sessions:           make(map[SessionID]*SessionState),
 		pendingConnections: make(chan *Handle, config.maxPendingConnections()),
 		outgoing:           make(chan outgoing, 0), // TODO(dadrian): Is this the appropriate size?
+
+		staticKey:    config.KeyPair,
+		certificate:  cert.Bytes(),
+		intermediate: intermediate.Bytes(),
 	}
 	// TODO(dadrian): This probably shouldn't happen in this function
 	_, err := rand.Read(s.cookieKey[:])
@@ -548,7 +570,5 @@ func NewServer(conn *net.UDPConn, config *ServerConfig) *Server {
 	if err != nil {
 		panic(err.Error())
 	}
-	// TODO(dadrian): This should be on the config object
-	s.staticKey.Generate()
-	return &s
+	return &s, nil
 }

@@ -1,6 +1,11 @@
 package transport
 
-import "time"
+import (
+	"time"
+
+	"zmap.io/portal/certs"
+	"zmap.io/portal/keys"
+)
 
 // ClientConfig contains client-specific configuration settings.
 type ClientConfig struct{}
@@ -24,6 +29,10 @@ type ServerConfig struct {
 
 	StartingReadTimeout  time.Duration
 	StartingWriteTimeout time.Duration
+
+	KeyPair      *keys.X25519KeyPair
+	Certificate  *certs.Certificate
+	Intermediate *certs.Certificate
 }
 
 func (c *ServerConfig) maxPendingConnections() int {

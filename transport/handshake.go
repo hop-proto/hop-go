@@ -7,6 +7,8 @@ import (
 	"crypto/rand"
 	"errors"
 	"net"
+
+	"zmap.io/portal/certs"
 	"zmap.io/portal/keys"
 
 	"github.com/sirupsen/logrus"
@@ -353,12 +355,12 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	b = b[encryptedCertLen:]
 
 	// Decrypt the certificates, but don't read them yet
-	leaf, intermediate, err := DecryptCertificates(&hs.duplex, encryptedCertificates)
+	rawLeaf, rawIntermediate, err := DecryptCertificates(&hs.duplex, encryptedCertificates)
 	if err != nil {
 		logrus.Debugf("client: error decrypting certificates: %s", err)
 		return 0, err
 	}
-	logrus.Debugf("client: leaf, intermediate: %x, %x", leaf, intermediate)
+	logrus.Debugf("client: leaf, intermediate: %x, %x", rawLeaf, rawIntermediate)
 
 	// Tag (Encrypted Certs)
 	hs.duplex.Squeeze(hs.macBuf[:])
@@ -369,9 +371,21 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	}
 	b = b[MacLen:]
 
+	// Parse the certificate
+	leaf := certs.Certificate{}
+	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
+	if err != nil {
+		return 0, err
+	}
+	if int(leafLen) != len(rawLeaf) {
+		return 0, errors.New("extra bytes after leaf certificate")
+	}
+
+	// TODO(dadrian): Handle the intermediate and do verification and
+	// name-checking.
+
 	// DH
-	// TODO(dadrian): Avoid this allocation?
-	hs.es, err = hs.ephemeral.DH(leaf)
+	hs.es, err = hs.ephemeral.DH(leaf.PublicKey[:])
 	if err != nil {
 		logrus.Debugf("client: could not calculate es: %s", err)
 		return 0, err

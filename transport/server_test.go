@@ -12,13 +12,30 @@ import (
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
+	"zmap.io/portal/certs"
+	"zmap.io/portal/keys"
 )
+
+func newTestServerConfig(t *testing.T) *ServerConfig {
+	keyPair, err := keys.ReadDHKeyFromPEMFile("testdata/leaf-key.pem")
+	assert.NilError(t, err)
+	certificate, err := certs.ReadCertificatePEMFile("testdata/leaf.pem")
+	assert.NilError(t, err)
+	intermediate, err := certs.ReadCertificatePEMFile("testdata/intermediate.pem")
+	assert.NilError(t, err)
+	return &ServerConfig{
+		KeyPair:      keyPair,
+		Certificate:  certificate,
+		Intermediate: intermediate,
+	}
+}
 
 func TestMultipleHandshakes(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
-	s := NewServer(pc.(*net.UDPConn), nil)
+	s, err := NewServer(pc.(*net.UDPConn), newTestServerConfig(t))
+	assert.NilError(t, err)
 	wg := sync.WaitGroup{}
 	go func() {
 		s.Serve()
@@ -66,12 +83,12 @@ func TestServerRead(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
-	config := &ServerConfig{
-		StartingReadTimeout:             10 * time.Second,
-		MaxPendingConnections:           1,
-		MaxBufferedPacketsPerConnection: 5,
-	}
-	server := NewServer(pc.(*net.UDPConn), config)
+	config := newTestServerConfig(t)
+	config.StartingReadTimeout = 10 * time.Second
+	config.MaxPendingConnections = 1
+	config.MaxBufferedPacketsPerConnection = 5
+	server, err := NewServer(pc.(*net.UDPConn), config)
+	assert.NilError(t, err)
 	go func() {
 		server.Serve()
 	}()
@@ -140,12 +157,12 @@ func TestServerWrite(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
-	config := &ServerConfig{
-		StartingReadTimeout:             10 * time.Second,
-		MaxPendingConnections:           1,
-		MaxBufferedPacketsPerConnection: 5,
-	}
-	server := NewServer(pc.(*net.UDPConn), config)
+	config := newTestServerConfig(t)
+	config.StartingReadTimeout = 10 * time.Second
+	config.MaxPendingConnections = 1
+	config.MaxBufferedPacketsPerConnection = 5
+	server, err := NewServer(pc.(*net.UDPConn), config)
+	assert.NilError(t, err)
 	go func() {
 		server.Serve()
 	}()
