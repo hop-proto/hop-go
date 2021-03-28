@@ -7,7 +7,7 @@ import (
 )
 
 // ProtocolName is the string representation of the parameters used in this version
-const ProtocolName = "noise_NN_XX_cyclist_keccak_p1600_12"
+const ProtocolName = "hop_NN_XX_cyclist_keccak_p1600_12"
 
 // Version is the protocol version being used. Only one version is supported.
 const Version byte = 0x01
