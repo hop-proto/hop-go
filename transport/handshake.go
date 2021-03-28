@@ -260,25 +260,25 @@ func (hs *HandshakeState) RekeyFromSqueeze() {
 	hs.duplex.Initialize(hs.handshakeKey[:], []byte(ProtocolName), nil)
 }
 
-func (hs *HandshakeState) EncryptSNI(dst []byte, name string) error {
-	var buf [SNILen]byte
-	if len(dst) < SNILen {
-		return ErrBufUnderflow
+// EncryptSNI encrypts the name to a buffer. The encrypted length is always
+// SNILen.
+func (hs *HandshakeState) EncryptSNI(dst []byte, name certs.Name) error {
+	// TODO(dadrian): Avoid this memory allocation
+	buf := &bytes.Buffer{}
+	_, err := name.WriteTo(buf)
+	logrus.Debugf("client: pre-encrypted SNI buf: %x", buf.Bytes())
+	if err != nil {
+		return err
 	}
-	nameLen := len(name)
-	if nameLen > 255 {
-		return errors.New("invalid SNI name")
-	}
-	buf[0] = byte(nameLen)
-	n := copy(buf[1:], name)
-	if n != nameLen {
-		return errors.New("invalid SNI name")
-	}
-	hs.duplex.Encrypt(dst, buf[:])
+	// SNI is padded to SNILen
+	var b [SNILen]byte
+	copy(b[:], buf.Bytes())
+	logrus.Debugf("client: pre-encrypted SNI: %x", b)
+	hs.duplex.Encrypt(dst, b[:])
 	return nil
 }
 
-func (hs *HandshakeState) writeClientAck(b []byte, name string) (int, error) {
+func (hs *HandshakeState) writeClientAck(b []byte, name certs.Name) (int, error) {
 	length := HeaderLen + DHLen + CookieLen + SNILen + MacLen
 	if len(b) < length {
 		return 0, ErrBufOverflow
@@ -307,7 +307,6 @@ func (hs *HandshakeState) writeClientAck(b []byte, name string) (int, error) {
 	b = b[CookieLen:]
 
 	// Encrypted SNI
-	copy(b, "lol no SNI yet")
 	err := hs.EncryptSNI(b, name)
 	if err != nil {
 		return HeaderLen + DHLen + CookieLen, ErrInvalidMessage

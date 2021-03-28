@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 	"time"
+
 	"zmap.io/portal/keys"
 
 	"github.com/sirupsen/logrus"
@@ -32,6 +33,8 @@ type Client struct {
 	ss *SessionState
 
 	readBuf bytes.Buffer
+
+	config ClientConfig
 }
 
 func (c *Client) lockUser() {
@@ -107,7 +110,7 @@ func (c *Client) clientHandshakeLocked() error {
 	c.hs.RekeyFromSqueeze()
 
 	// Client Ack
-	n, err = c.hs.writeClientAck(buf, "david.test")
+	n, err = c.hs.writeClientAck(buf, c.config.Name)
 	if err != nil {
 		return err
 	}

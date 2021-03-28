@@ -105,6 +105,10 @@ type Name struct {
 	Type  IDType
 }
 
+func (n Name) IsZero() bool {
+	return n.Label == "" && n.Type == 0
+}
+
 // IDChunk contains the IDBlocks in a certificate
 type IDChunk struct {
 	Blocks []Name

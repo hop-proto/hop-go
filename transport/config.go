@@ -8,7 +8,9 @@ import (
 )
 
 // ClientConfig contains client-specific configuration settings.
-type ClientConfig struct{}
+type ClientConfig struct {
+	Name certs.Name
+}
 
 const (
 

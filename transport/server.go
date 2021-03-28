@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"zmap.io/portal/certs"
 	"zmap.io/portal/keys"
 
 	"github.com/sirupsen/logrus"
@@ -238,8 +239,13 @@ func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 	hs.duplex.Absorb(ephemeral)
 	hs.duplex.Absorb(cookie)
 	hs.duplex.Decrypt(buf[:], b[:SNILen])
-	logrus.Debugf("server: got raw decrypted SNI %x: ", buf)
-
+	logrus.Debugf("server: got raw decrypted SNI %x: ", buf[:])
+	name := certs.Name{}
+	_, err = name.ReadFrom(bytes.NewBuffer(buf[:]))
+	if err != nil {
+		return 0, nil, err
+	}
+	logrus.Debugf("server: got name %v", name)
 	b = b[SNILen:]
 
 	hs.duplex.Squeeze(hs.macBuf[:])

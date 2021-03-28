@@ -253,7 +253,8 @@ mac = duplex.squeeze()
 duplex.absorb([type, reserved])
 duplex.absorb(e_c)
 duplex.absorb(cookie)
-SNI = duplex.enc(serverID)
+sni = padTo(serverID, 255) # pad serverID to 255 bytes
+duplex.enc(sni)
 mac = duplex.squeeze()
 ```
 
@@ -269,6 +270,7 @@ duplex.absorb([type, reserved])
 duplex.absorb(e_c)
 duplex.absorb(cooke)
 sni = duplex.decrypt(encrypted_sni)
+name = unPad(sni)
 duplex.squeeze()
 ```
 
@@ -342,7 +344,7 @@ mac = duplex.squeeze()
 # Continuing from duplex prior
 duplex.absorb([type, reserved])
 duplex.absorb(SessionID)
-encStatic = duplex.encrypt(static) # TODO(dadrian): Implement
+encStatic = duplex.encrypt(static)
 tag = duplex.squeeze()
 duplex.absorb(DH(se))
 mac = duplex.squeeze()
