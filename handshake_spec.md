@@ -159,6 +159,7 @@ Note that `absorb([a, b])`operates on the concatenation of `a` and `b`, and shou
 protocolName = “hop_NN_XX_cyclist_keccak_p1600_12” # 1-1 protocol version
 duplex = Cyclist()
 duplex.absorb(protocolName)
+
 duplex.absorb([type, version, reserved])
 duplex.absorb(ephemeral)
 mac = duplex.squeeze()
@@ -239,7 +240,7 @@ mac = duplex.squeeze()
 | type $:=$ 0x3 (1 byte) | reserved $:= 0^3$ (3 bytes) |
 | :--------------------: | :-------------------------: |
 |    $e_c$ (32 bytes)    |      cookie (60 bytes)      |
-|   SNI (4..255 bytes)   |       mac (16 bytes)        |
+|    SNI (256 bytes)     |       mac (16 bytes)        |
 
 ##### Client Construction
 
@@ -253,7 +254,7 @@ mac = duplex.squeeze()
 duplex.absorb([type, reserved])
 duplex.absorb(e_c)
 duplex.absorb(cookie)
-sni = padTo(serverID, 255) # pad serverID to 255 bytes
+sni = padTo(serverID, 256) # pad serverID to 256 bytes
 duplex.enc(sni)
 mac = duplex.squeeze()
 ```
@@ -276,6 +277,7 @@ duplex.squeeze()
 
 - Use SNI to located certificate to serve, verify all macs
 - Limit max number of handshakes with a given IP
+- Only read the SNI if the Mac matches
 
 #### Server Auth
 
