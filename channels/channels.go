@@ -1,6 +1,7 @@
 package channels
 
 import (
+	"bytes"
 	"net"
 	"sync"
 	"time"
@@ -19,8 +20,9 @@ import (
 
 // Reliable implements a reliable and ordered channel on top
 type Reliable struct {
-	m          sync.Mutex
-	underlying transport.MsgConn // comes from transport.Dial, etc.
+	m sync.Mutex
+
+	ordered bytes.Buffer
 }
 
 // Reliable implements net.Conn
@@ -40,14 +42,14 @@ func Dial(protocol, address string) (*Reliable, error) {
 }
 
 func (r *Reliable) Read(b []byte) (n int, err error) {
-	// Except with buffering and framing and concurrency control
-	r.underlying.ReadMsg(b)
-	panic("implement me")
+	// This part gets hard if you want this call to block until data is available.
+	//
+	// David recommends not making that work until everything else works.
+	return r.ordered.Read(b)
 }
 
 func (r *Reliable) Write(b []byte) (n int, err error) {
 	// Except with buffering and framing and concurrency control
-	r.underlying.WriteMsg(b)
 	panic("implement me")
 }
 
