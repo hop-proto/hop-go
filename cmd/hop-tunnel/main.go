@@ -53,6 +53,7 @@ func main() {
 		if err != nil {
 			logrus.Fatalf("unable to listen on %q: %s", address, err)
 		}
+		logrus.Infof("listening on %s", pktConn.LocalAddr().String())
 		udpConn := pktConn.(*net.UDPConn)
 		s, err := transport.NewServer(udpConn, &config)
 		if err != nil {
