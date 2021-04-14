@@ -79,26 +79,21 @@ func IssueLeaf(parent *Certificate, child *Identity) (*Certificate, error) {
 	return issue(parent, child, Leaf, week)
 }
 
-// SelfSignRoot issues a self-signed root certificate using the key in the key
-// pair and the name in the Identity. The public keys for the Identity and the
-// KeyPair must match.
-//
-// TODO(dadrian): This API is not great.
-func SelfSignRoot(root *Identity, keyPair *keys.SigningKeyPair) (*Certificate, error) {
-	if !bytes.Equal(root.PublicKey[:], keyPair.Public[:]) {
+func selfSign(self *Identity, certificateType CertificateType, keyPair *keys.SigningKeyPair) (*Certificate, error) {
+	if keyPair != nil && !bytes.Equal(self.PublicKey[:], keyPair.Public[:]) {
 		return nil, errors.New("key pair does not match identity")
 	}
 	now := time.Now()
 	expiration := time.Date(now.Year()+5, now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second(), now.Nanosecond(), time.Local)
 	out := &Certificate{
 		Version:   Version,
-		Type:      Root,
+		Type:      certificateType,
 		IssuedAt:  now,
 		ExpiresAt: expiration,
 		IDChunk: IDChunk{
-			Blocks: root.Names,
+			Blocks: self.Names,
 		},
-		PublicKey:   root.PublicKey,
+		PublicKey:   self.PublicKey,
 		Fingerprint: zero,
 	}
 	buf := bytes.Buffer{}
@@ -112,16 +107,29 @@ func SelfSignRoot(root *Identity, keyPair *keys.SigningKeyPair) (*Certificate, e
 	b := buf.Bytes()
 	tbsLen := len(b) - SignatureLen
 
-	private := ed25519.NewKeyFromSeed(keyPair.Private[:])
-	signature, err := private.Sign(rand.Reader, b[:tbsLen], crypto.Hash(0))
-	if err != nil {
-		return nil, err
+	// Only add the signature if a key pair is provided.
+	if keyPair != nil {
+		private := ed25519.NewKeyFromSeed(keyPair.Private[:])
+		signature, err := private.Sign(rand.Reader, b[:tbsLen], crypto.Hash(0))
+		if err != nil {
+			return nil, err
+		}
+
+		if len(signature) != SignatureLen {
+			logrus.Panicf("unexpected signature len %d (expected %d)", len(signature), SignatureLen)
+		}
+		copy(out.Signature[:], signature)
 	}
-	if len(signature) != SignatureLen {
-		logrus.Panicf("unexpected signature len %d (expected %d)", len(signature), SignatureLen)
-	}
-	copy(out.Signature[:], signature)
 	return out, nil
+}
+
+// SelfSignRoot issues a self-signed root certificate using the key in the key
+// pair and the name in the Identity. The public keys for the Identity and the
+// KeyPair must match.
+//
+// TODO(dadrian): This API is not great.
+func SelfSignRoot(root *Identity, keyPair *keys.SigningKeyPair) (*Certificate, error) {
+	return selfSign(root, Root, keyPair)
 }
 
 // IssueIntermediate issues an intermediate certificate, give a root. The root
@@ -131,4 +139,12 @@ func IssueIntermediate(root *Certificate, intermediate *Identity) (*Certificate,
 		return nil, errors.New("IssueIntermediate requires the parent to be a root")
 	}
 	return issue(root, intermediate, Intermediate, time.Hour*24*366)
+}
+
+// SelfSignLeaf returns a leaf self-signed by the provided key pair.
+//
+// TODO(dadrian): Actually make it self-signed, instead of zero signature. This
+// requires implementing XEdDSA.
+func SelfSignLeaf(leaf *Identity, keyPair *keys.X25519KeyPair) (*Certificate, error) {
+	return selfSign(leaf, Leaf, nil)
 }
