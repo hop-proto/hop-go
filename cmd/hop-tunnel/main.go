@@ -25,7 +25,7 @@ func main() {
 	if err != nil {
 		logrus.Fatalf("unable to parse address %q: %s", address, err)
 	}
-	logrus.Infof("using host: %q:, port: %d", host, port)
+	logrus.Infof("using host: %q:, port: %s", host, port)
 
 	switch action {
 	case "connect":
@@ -56,6 +56,7 @@ func main() {
 		logrus.Infof("listening on %s", pktConn.LocalAddr().String())
 		udpConn := pktConn.(*net.UDPConn)
 		s, err := transport.NewServer(udpConn, &config)
+		go s.Serve()
 		if err != nil {
 			logrus.Fatalf("unable to launch server: %s", err)
 		}
