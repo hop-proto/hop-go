@@ -42,10 +42,12 @@ func getClient(userHost string) (*ssh.Client, error) {
 	// TODO: support custom ports
 	port := 2234
 
+	// TODO: When the channel layer is completed, this code will look somewhat like:
+	// conn := transport.Dial("udp", "localhost:1234")
+	// reliableChannel = reliable.NewChannel(transportConn)
+	// client, err := ssh.NewClientConn(reliableChannel, otherargs....)
 	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, port), config)
-	//conn := transport.Dial("udp", "localhost:1234")
-	//reliableChannel = reliable.NewChannel(transportConn) // You have to define this function still
-	//client, err := ssh.NewClientConn(reliableChannel, otherargs....)
+
 	if err != nil {
 		return nil, err
 	}

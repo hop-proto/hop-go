@@ -9,9 +9,7 @@ import (
 	"strings"
 )
 
-/**
- * The SCP copy mode, from the perspective of the remote.
- */
+// The SCP copy mode, from the perspective of the remote.
 const (
 	SOURCE uint = iota
 	SINK   uint = iota
@@ -90,9 +88,15 @@ func scp(sourcePath string, destPath string) error {
 	}
 	session.SendRequest("scp", false, payload)
 	if mode == SOURCE {
-		sendFile(writer, sourcePath)
+		err := sendFile(writer, sourcePath)
+		if err != nil {
+			return err
+		}
 	} else if mode == SINK {
-		receiveFile(reader, destPath)
+		err := receiveFile(reader, destPath)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -147,11 +151,11 @@ func sendFile(w io.Writer, srcPath string) error {
 	return nil
 }
 
-type ScpRequestPayload struct {
+type SCPRequestPayload struct {
 	Mode uint   `json:"mode"`
 	Path string `json:"path"`
 }
 
 func serializePayload(mode uint, path string) ([]byte, error) {
-	return json.Marshal(ScpRequestPayload{mode, path})
+	return json.Marshal(SCPRequestPayload{mode, path})
 }

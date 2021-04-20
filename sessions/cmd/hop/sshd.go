@@ -156,11 +156,11 @@ func handleChannel(newChannel ssh.NewChannel) {
 				w, h := parseDims(req.Payload[termLen+4:])
 				log.Printf("PTY req: w: %d, h: %d", w, h)
 				SetWinsize(bashf.Fd(), w, h)
-				// Responding true (OK) here will let the client
+				// Responding true (OK) here will let cthe client
 				// know we have a pty ready for input
 				req.Reply(true, nil)
 			case "scp":
-				var payload ScpRequestPayload
+				var payload SCPRequestPayload
 
 				err := json.Unmarshal(req.Payload, &payload)
 				if err != nil {
