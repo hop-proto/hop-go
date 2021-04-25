@@ -134,12 +134,6 @@ func (c *Certificate) WriteTo(w io.Writer) (int64, error) {
 	}
 	written += 8
 
-	chunkLen, err := c.IDChunk.WriteTo(w)
-	written += chunkLen
-	if err != nil {
-		return written, err
-	}
-
 	n, err = w.Write(c.PublicKey[:])
 	written += int64(n)
 	if err != nil {
@@ -154,6 +148,12 @@ func (c *Certificate) WriteTo(w io.Writer) (int64, error) {
 
 	n, err = w.Write(c.Signature[:])
 	written += int64(n)
+	if err != nil {
+		return written, err
+	}
+
+	chunkLen, err := c.IDChunk.WriteTo(w)
+	written += chunkLen
 	if err != nil {
 		return written, err
 	}

@@ -93,7 +93,7 @@ func (c *Client) clientHandshakeLocked() error {
 	if err != nil {
 		return err
 	}
-	// TODO(dadrian): Use ReadMsgUDP
+
 	n, _, _, _, err = c.underlyingConn.ReadMsgUDP(buf, nil)
 	if err != nil {
 		return err
