@@ -83,6 +83,8 @@ func TestWriteTo(t *testing.T) {
 	assert.DeepEqual(t, middle[:32], c.PublicKey[:])
 	assert.DeepEqual(t, middle[32:64], c.Parent[:])
 
+	assert.Check(t, cmp.Equal(84, len(front)+len(middle)))
+
 	back := serialized[len(expected)+32+32:]
 	assert.Assert(t, cmp.Len(back, len(expectedIDChunk)+64))
 	assert.DeepEqual(t, back[:len(expectedIDChunk)], expectedIDChunk)
