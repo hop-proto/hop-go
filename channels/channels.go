@@ -20,25 +20,16 @@ import (
 
 // Reliable implements a reliable and ordered channel on top
 type Reliable struct {
-	m sync.Mutex
-
-	ordered bytes.Buffer
+	m             sync.Mutex
+	transportConn transport.MsgConn
+	ordered       bytes.Buffer
 }
 
 // Reliable implements net.Conn
 var _ net.Conn = &Reliable{}
 
 func NewReliableChannel(underlying transport.MsgConn) *Reliable {
-	panic("implement me")
-}
-
-func Dial(protocol, address string) (*Reliable, error) {
-	// ignore protocol or check dif udp or check if hop?
-	underlying, err := transport.Dial("udp", address, nil)
-	if err != nil {
-		return nil, err
-	}
-	return NewReliableChannel(underlying), nil
+	return &Reliable{sync.Mutex{}, underlying, bytes.Buffer{}}
 }
 
 func (r *Reliable) Read(b []byte) (n int, err error) {
@@ -50,7 +41,7 @@ func (r *Reliable) Read(b []byte) (n int, err error) {
 
 func (r *Reliable) Write(b []byte) (n int, err error) {
 	// Except with buffering and framing and concurrency control
-	panic("implement me")
+	return r.ordered.Write(b)
 }
 
 func (r *Reliable) Close() error {
