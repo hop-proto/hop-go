@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
 	"zmap.io/portal/certs"
@@ -27,6 +28,7 @@ func newTestServerConfig(t *testing.T) *transport.ServerConfig {
 }
 
 func TestMuxer(t *testing.T) {
+	logrus.SetLevel(logrus.DebugLevel)
 	pktConn, err := net.ListenPacket("udp", "localhost:8888")
 	assert.NilError(t, err)
 	// It's actually a UDP conn
@@ -38,15 +40,18 @@ func TestMuxer(t *testing.T) {
 	transportConn, err := transport.Dial("udp", udpConn.LocalAddr().String(), nil)
 	assert.NilError(t, err)
 
+	assert.NilError(t, transportConn.Handshake())
+
 	serverConn, err := server.AcceptTimeout(time.Minute)
 	assert.NilError(t, err)
 
-	m := Muxer{
+	mc := Muxer{
 		underlying: transportConn,
+		stopped:    false,
 	}
-	go m.Start()
+	go mc.Start()
 
-	channel, err := m.Accept()
+	channel, err := mc.CreateChannel()
 	assert.NilError(t, err)
 
 	ms := Muxer{

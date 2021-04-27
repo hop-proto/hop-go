@@ -2,6 +2,8 @@ package channels
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/binary"
 	"net"
 	"sync"
 	"time"
@@ -23,13 +25,23 @@ type Reliable struct {
 	m             sync.Mutex
 	transportConn transport.MsgConn
 	ordered       bytes.Buffer
+	cid           uint64
 }
 
 // Reliable implements net.Conn
 var _ net.Conn = &Reliable{}
 
-func NewReliableChannel(underlying transport.MsgConn) *Reliable {
-	return &Reliable{sync.Mutex{}, underlying, bytes.Buffer{}}
+func NewReliableChannelWithChannelId(underlying transport.MsgConn, channelId uint64) *Reliable {
+	return &Reliable{sync.Mutex{}, underlying, bytes.Buffer{}, channelId}
+}
+
+func NewReliableChannel(underlying transport.MsgConn) (*Reliable, error) {
+	cidB := make([]byte, 8)
+	n, err := rand.Read(cidB)
+	if err != nil || n != 8 {
+		return nil, err
+	}
+	return &Reliable{sync.Mutex{}, underlying, bytes.Buffer{}, binary.BigEndian.Uint64(cidB)}, nil
 }
 
 func (r *Reliable) Read(b []byte) (n int, err error) {

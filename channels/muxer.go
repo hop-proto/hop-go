@@ -6,10 +6,10 @@ import (
 )
 
 type Muxer struct {
-	channels map[uint64]*Reliable
-	stopped  bool
-
-	underlying transport.MsgConn
+	channels     map[uint64]*Reliable
+	stopped      bool
+	channelQueue chan *Reliable
+	underlying   transport.MsgConn
 }
 
 type msg struct {
@@ -18,8 +18,12 @@ type msg struct {
 	Data       []byte
 }
 
+func (m *Muxer) CreateChannel() (*Reliable, error) {
+	return NewReliableChannel(m.underlying)
+}
+
 func (m *Muxer) Accept() (*Reliable, error) {
-	panic("implement me")
+	return <-m.channelQueue, nil
 }
 
 func (m *Muxer) readMsg() (*msg, error) {
@@ -43,13 +47,15 @@ func (m *Muxer) Start() {
 	for !m.stopped {
 		rawMsg, err := m.readMsg()
 		if err != nil {
+			logrus.Fatal(err.Error())
 			continue
 		}
 		logrus.Debugf("got msg for channel %x", rawMsg.ChannelID)
 		channel, ok := m.channels[rawMsg.ChannelID]
 		if !ok {
-			// wat
-			panic("oops, no channel")
+			ch := NewReliableChannelWithChannelId(m.underlying, rawMsg.ChannelID)
+			m.channels[rawMsg.ChannelID] = ch
+			m.channelQueue <- ch
 		}
 		logrus.Debugf("got channel %v", channel)
 		// Inspect
