@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"gotest.tools/assert"
 	"zmap.io/portal/snp"
 )
 
@@ -128,11 +129,6 @@ type cyclistTranscriptEntry struct {
 	explicitDecrypt bool
 }
 
-type cyclistTranscriptTest struct {
-	name       string
-	transcript []snp.TranscriptEntry
-}
-
 func assertEquivalentState(t *testing.T, a, b *Cyclist) {
 	var ab [200]byte
 	var bb [200]byte
@@ -143,10 +139,10 @@ func assertEquivalentState(t *testing.T, a, b *Cyclist) {
 	}
 }
 
-func runTranscript(t *testing.T, test *cyclistTranscriptTest, initiator, responder *Cyclist) {
+func runTranscript(t *testing.T, transcript []snp.TranscriptEntry, initiator, responder *Cyclist) {
 	var previousPlaintext []byte
-	for i, entry := range test.transcript {
-		t.Logf("test %s, entry %d", test.name, i)
+	for i, entry := range transcript {
+		t.Logf("test %s, entry %d", t.Name(), i)
 		switch entry.Action {
 		case "absorb":
 			initiator.Absorb(entry.B)
@@ -215,32 +211,29 @@ func TestCyclistEncryptDecrypt(t *testing.T) {
 	client.Initialize(newDefaultKey(), nil, nil)
 	server := Cyclist{}
 	server.Initialize(newDefaultKey(), nil, nil)
-	test := cyclistTranscriptTest{
-		name: "encrypt-decrypt",
-		transcript: []snp.TranscriptEntry{
-			{
-				Action: "absorb",
-				B:      []byte("the creature has requested gentle handpats."),
-			},
-			{
-				Action: "encrypt-ir",
-				B:      []byte("for how long?"),
-			},
-			{
-				Action: "encrypt-ri",
-				B:      []byte("until one of us perishes."),
-			},
-			{
-				Action: "absorb",
-				B:      []byte("a life well spent!"),
-			},
-			{
-				Action: "squeeze",
-				Length: 100,
-			},
+	transcript := []snp.TranscriptEntry{
+		{
+			Action: "absorb",
+			B:      []byte("the creature has requested gentle handpats."),
+		},
+		{
+			Action: "encrypt-ir",
+			B:      []byte("for how long?"),
+		},
+		{
+			Action: "encrypt-ri",
+			B:      []byte("until one of us perishes."),
+		},
+		{
+			Action: "absorb",
+			B:      []byte("a life well spent!"),
+		},
+		{
+			Action: "squeeze",
+			Length: 100,
 		},
 	}
-	runTranscript(t, &test, &client, &server)
+	runTranscript(t, transcript, &client, &server)
 }
 
 func TestCyclistAgainstReference(t *testing.T) {
@@ -248,20 +241,16 @@ func TestCyclistAgainstReference(t *testing.T) {
 		"xkcp",
 	}
 	for _, implementation := range implementations {
-		path := fmt.Sprintf("testdata/%s.txt", implementation)
-		r, err := os.Open(path)
-		if err != nil {
-			t.Fatalf("unable to open %s: %s", path, err)
-		}
-		transcript := snp.ParseTestTranscript(t, r)
-		test := cyclistTranscriptTest{
-			name:       implementation,
-			transcript: transcript,
-		}
-		initiator := Cyclist{}
-		initiator.Initialize(newDefaultKey(), nil, nil)
-		responder := Cyclist{}
-		responder.Initialize(newDefaultKey(), nil, nil)
-		runTranscript(t, &test, &initiator, &responder)
+		t.Run(implementation, func(t *testing.T) {
+			path := fmt.Sprintf("testdata/%s.txt", implementation)
+			r, err := os.Open(path)
+			assert.NilError(t, err)
+			transcript := snp.ParseTestTranscript(t, r)
+			initiator := Cyclist{}
+			initiator.Initialize(newDefaultKey(), nil, nil)
+			responder := Cyclist{}
+			responder.Initialize(newDefaultKey(), nil, nil)
+			runTranscript(t, transcript, &initiator, &responder)
+		})
 	}
 }
