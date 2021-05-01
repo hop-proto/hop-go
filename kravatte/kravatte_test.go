@@ -4,6 +4,8 @@ import (
 	"encoding/hex"
 	"testing"
 
+	"gotest.tools/assert"
+	"gotest.tools/assert/cmp"
 	"zmap.io/portal/snp"
 )
 
@@ -24,15 +26,9 @@ func TestRefMask(t *testing.T) {
 	kv.x[1] = 1
 	kv.RefMaskInitialize(key)
 	t.Logf("% x", kv.k)
-	if kv.k != expectedKLanes {
-		t.Errorf("got k %x, expected %x", kv.k, expectedKLanes)
-	}
-	if kv.r != kv.k {
-		t.Errorf("got r %x, expected %x", kv.r, expectedKLanes)
-	}
-	if kv.x != zero {
-		t.Errorf("expected x to be set to 0, got %x", kv.x)
-	}
+	assert.Check(t, cmp.DeepEqual(expectedKLanes, kv.k))
+	assert.Check(t, cmp.DeepEqual(kv.r, kv.k))
+	assert.Check(t, cmp.DeepEqual(kv.x, zero))
 }
 
 func TestKra(t *testing.T) {
