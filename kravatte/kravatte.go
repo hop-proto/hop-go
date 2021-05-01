@@ -21,6 +21,7 @@ const (
 const (
 	widthBytes = 200
 	widthBits  = 1600
+
 	// TODO(dadrian): Confirm these values
 	rollWidthBytes = 200
 	rollWidthBites = 1600
@@ -188,10 +189,8 @@ func min(a, b int) int {
 
 var zero [25]uint64
 
-type keccakTest [25]uint64
-
-// RefMaskInitialize closely follows the refernce implementation and
-// specification of Kravatte, rather than th XKCP optimized implementation. It
+// RefMaskInitialize closely follows the reference implementation and
+// specification of Kravatte, rather than the XKCP optimized implementation. It
 // implements the first phase of Farfelle as defined in
 // https://eprint.iacr.org/2016/1188.pdf.
 //
@@ -249,8 +248,7 @@ func (kv *Kravatte) compress(message []byte, lastFlag int) int {
 		}
 	}
 	if lastFlag != 0 {
-		var state [25]uint64
-		state = kv.k
+		state := kv.k
 		rollC(&kv.r)
 		snp.StateAddBytes(&state, message)
 		snp.StateAddByte(&state, 1, remainingLen)
@@ -318,8 +316,7 @@ func (kv *Kravatte) Vatte(out []byte, flags int) int {
 		if (flags & FlagShort) != 0 {
 			kv.y = kv.x
 		} else {
-			var state [25]uint64
-			state = kv.x
+			state := kv.x
 			keccakF1600(&state)
 			kv.y = state
 		}

@@ -46,15 +46,15 @@ func runTranscript(t *testing.T, kv *Kravatte, transcript []snp.TranscriptEntry)
 		case "out":
 			out := make([]byte, entry.Length)
 			kv.Vatte(out, FlagNone)
-			assert.Check(t, cmp.DeepEqual(entry.B, out))
+			assert.Check(t, cmp.DeepEqual(entry.B, out), "out")
 		case "dumpK":
 			actual := make([]byte, entry.Length)
 			snp.StateExtractBytes(&kv.k, actual)
-			assert.Check(t, cmp.DeepEqual(entry.B, actual))
+			assert.Check(t, cmp.DeepEqual(entry.B, actual), "dumpK")
 		case "dumpX":
 			actual := make([]byte, entry.Length)
 			snp.StateExtractBytes(&kv.x, actual)
-			assert.Check(t, cmp.DeepEqual(entry.B, actual))
+			assert.Check(t, cmp.DeepEqual(entry.B, actual), "dumpX")
 		default:
 			t.Fatalf("unknown action %q", entry.Action)
 		}

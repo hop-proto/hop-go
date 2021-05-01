@@ -32,6 +32,7 @@ func StateAddBytes(state *[25]uint64, b []byte) {
 	}
 }
 
+// StateAddState adds b to the input state, in place.
 func StateAddState(state *[25]uint64, b *[25]uint64) {
 	for i := 0; i < 25; i++ {
 		state[i] ^= b[i]
@@ -76,35 +77,39 @@ func stateExtractAndAddStateLanes(state *[25]uint64, in *[25]uint64, out []byte,
 	for i := 0; i < lanes; i++ {
 		lane := startLane + i
 		sum = state[lane] ^ in[lane]
-		out[0] = byte(sum >> 56)
-		out[1] = byte(sum >> 48)
-		out[2] = byte(sum >> 40)
-		out[3] = byte(sum >> 32)
-		out[4] = byte(sum >> 24)
-		out[5] = byte(sum >> 16)
-		out[6] = byte(sum >> 8)
-		out[7] = byte(sum)
+		out[0] = byte(sum)
+		out[1] = byte(sum >> 8)
+		out[2] = byte(sum >> 16)
+		out[3] = byte(sum >> 24)
+		out[4] = byte(sum >> 32)
+		out[5] = byte(sum >> 40)
+		out[6] = byte(sum >> 48)
+		out[7] = byte(sum >> 56)
 		out = out[8:]
 	}
 }
 
 func stateExtractAndAddStateInLane(state *[25]uint64, in *[25]uint64, lane int, offsetInLane int, out []byte, length int) {
-	shift := 64
-	shift -= 8 * offsetInLane
+	shift := 0
+	shift += 8 * offsetInLane
+	// This will crash if length is greater than 8, which is what we want
 	for i := 0; i < length; i++ {
-		shift -= 8
-		out[i] = byte(in[lane]>>shift) ^ byte(state[lane]>>shift)
+		out[i] = byte(state[lane]>>shift) ^ byte(in[lane]>>shift)
+		shift += 8
 	}
 }
 
-// StateExtractAndAddStateToBytes extracts state, adds in b, and writes to out,
-// starting at offset in both state and b.
+// StateExtractAndAddStateToBytes extracts state, adds in, and writes to out,
+// starting at offset in both state and in.
 func StateExtractAndAddStateToBytes(state *[25]uint64, in *[25]uint64, offset int, out []byte) {
+	// If offset is bigger than 200, we end up crashing later on, which is what
+	// we want.
 	length := MinInt(len(out), 200-offset)
-	// TODO(implement)
 	if offset == 0 {
-		stateExtractAndAddStateLanes(state, in, out, 0, length/8)
-		stateExtractAndAddStateInLane(state, in, length/8, 0, out[8*(length/8):], length%8)
+		fullLanes := length / 8
+		leftover := length % 8
+		stateExtractAndAddStateLanes(state, in, out, 0, fullLanes)
+		stateExtractAndAddStateInLane(state, in, fullLanes, 0, out[length-leftover:], leftover)
 	} else {
 		sizeLeft := length
 		lane := offset / 8
