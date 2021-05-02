@@ -29,13 +29,13 @@ func TestRefMask(t *testing.T) {
 	kv.RefMaskInitialize(key)
 	t.Logf("% x", kv.k)
 	assert.Check(t, cmp.DeepEqual(expectedKLanes, kv.k))
-	assert.Check(t, cmp.DeepEqual(kv.r, kv.k))
+	assert.Check(t, cmp.DeepEqual(kv.kr, kv.k))
 	assert.Check(t, cmp.DeepEqual(kv.x, zero))
 }
 
 func runTranscript(t *testing.T, kv *Kravatte, transcript []snp.TranscriptEntry) {
 	for i, entry := range transcript {
-		t.Logf("test %s, entry %d", t.Name(), i)
+		t.Logf("test %s, entry %d (%s)", t.Name(), i, entry.Action)
 		switch entry.Action {
 		case "key":
 			kv.RefMaskInitialize(entry.B)
