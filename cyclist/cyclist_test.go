@@ -113,22 +113,6 @@ func TestCyclistFromC(t *testing.T) {
 	}
 }
 
-type cyclistTranscriptEntry struct {
-	action string
-
-	// Input for absorb, encrypt, and decrypt
-	// Optional expected value for squeeze
-	b []byte
-
-	// Output size for squeeze
-	length int
-
-	// true if decrypt is a separate stage in the transcript from encrypt. When
-	// false, the tests will automatically have the opposite side decrypt any
-	// input to encrypt.
-	explicitDecrypt bool
-}
-
 func assertEquivalentState(t *testing.T, a, b *Cyclist) {
 	var ab [200]byte
 	var bb [200]byte
@@ -241,6 +225,7 @@ func TestCyclistAgainstReference(t *testing.T) {
 		"xkcp",
 	}
 	for _, implementation := range implementations {
+		implementation := implementation
 		t.Run(implementation, func(t *testing.T) {
 			path := fmt.Sprintf("testdata/%s.txt", implementation)
 			r, err := os.Open(path)

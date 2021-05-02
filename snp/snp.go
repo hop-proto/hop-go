@@ -13,7 +13,10 @@ func MinInt(a, b int) int {
 
 // StateAddByte adds b to state at the given offset.
 func StateAddByte(state *[25]uint64, b byte, offset int) {
-	// TODO(dadrian): Implement
+	lane := offset / 8
+	offsetInLane := offset % 8
+	shift := 8 * offsetInLane
+	state[lane] ^= uint64(b) << shift
 }
 
 // StateAddBytes adds the first up to 200 bytes of b to state.

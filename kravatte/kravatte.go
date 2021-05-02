@@ -20,11 +20,6 @@ const (
 
 const (
 	widthBytes = 200
-	widthBits  = 1600
-
-	// TODO(dadrian): Confirm these values
-	rollWidthBytes = 200
-	rollWidthBites = 1600
 )
 
 func rol64(a uint64, offset int) uint64 {
@@ -274,16 +269,15 @@ func (kv *Kravatte) Kra(in []byte, flags int) int {
 		// Data is already queued
 		toQueueLen := min(inputLen, widthBytes-kv.queueOffset)
 		copy(kv.q[kv.queueOffset:], in[:toQueueLen])
-		in = in[:toQueueLen]
+		in = in[toQueueLen:]
 		inputLen -= toQueueLen
-		kv.queueOffset += inputLen
+		kv.queueOffset += toQueueLen
 		if kv.queueOffset == widthBytes {
 			// Queue is full
 			kv.compress(kv.q[:kv.queueOffset], 0)
 			kv.queueOffset = 0
 		} else if finalFlag != 0 {
 			kv.compress(kv.q[:kv.queueOffset], 1)
-			kv.queueOffset = 0
 			return 0
 		}
 	}
@@ -355,7 +349,7 @@ func (kv *Kravatte) Vatte(out []byte, flags int) int {
 				break
 			}
 		}
-		if finalFlag != 0 && (byteLen != widthBytes) {
+		if (finalFlag != 0) && (byteLen != widthBytes) {
 			// Put the rest of the expanded data in the queue
 			offset := byteLen
 			byteLen = widthBytes - byteLen

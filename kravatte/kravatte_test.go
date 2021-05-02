@@ -55,6 +55,14 @@ func runTranscript(t *testing.T, kv *Kravatte, transcript []snp.TranscriptEntry)
 			actual := make([]byte, entry.Length)
 			snp.StateExtractBytes(&kv.x, actual)
 			assert.Check(t, cmp.DeepEqual(entry.B, actual), "dumpX")
+		case "dumpY":
+			actual := make([]byte, entry.Length)
+			snp.StateExtractBytes(&kv.y, actual)
+			assert.Check(t, cmp.DeepEqual(entry.B, actual), "dumpY")
+		case "dumpR":
+			actual := make([]byte, entry.Length)
+			snp.StateExtractBytes(&kv.kr, actual)
+			assert.Check(t, cmp.DeepEqual(entry.B, actual), "dumpR")
 		default:
 			t.Fatalf("unknown action %q", entry.Action)
 		}
@@ -66,6 +74,7 @@ func TestKravatteAgainstReference(t *testing.T) {
 		"xkcp",
 	}
 	for _, implementation := range implementations {
+		implementation := implementation
 		t.Run(implementation, func(t *testing.T) {
 			path := fmt.Sprintf("testdata/%s.txt", implementation)
 			r, err := os.Open(path)

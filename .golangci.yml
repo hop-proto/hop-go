@@ -8,9 +8,9 @@
 run:
   skip-dirs:
     - reliable
-    - kravatte
     - sessions
   skip-files:
+    - fuck
 linters:
   enable:
     - gofmt # Gofmt checks whether code was gofmt-ed. By default this tool runs with -s option to check for code simplification [fast: true, auto-fix: true]
