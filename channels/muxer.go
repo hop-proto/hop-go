@@ -1,7 +1,6 @@
 package channels
 
 import (
-	"github.com/sirupsen/logrus"
 	"zmap.io/portal/transport"
 )
 
@@ -29,16 +28,11 @@ func (m *Muxer) Accept() (*Reliable, error) {
 }
 
 func (m *Muxer) readMsg() (*Packet, error) {
-	// Otherwise
 	pkt := make([]byte, 65535)
 	_, err := m.underlying.ReadMsg(pkt) // wait until read packet
 	if err != nil {
 		return nil, err
 	}
-	logrus.Debugf("PACKET DATA %s", string(pkt))
-	// TODO(drew): Parse the packet structure
-	// Read the header
-	// Extract the actual data
 	return FromBytes(pkt)
 
 }
@@ -48,13 +42,9 @@ func (m *Muxer) Start() {
 	for !m.stopped {
 		pkt, err := m.readMsg()
 		if err != nil {
-			if pkt != nil && pkt.dataLength > 0 {
-				logrus.Fatalln(err)
-			}
-
 			continue
 		}
-		logrus.Debugf("got msg for channel %x", pkt.channelID)
+
 		channel, ok := m.channels[pkt.channelID]
 		if !ok {
 			ch := NewReliableChannelWithChannelId(m.underlying, m, pkt.channelID)
@@ -64,7 +54,7 @@ func (m *Muxer) Start() {
 		} else {
 			channel.ordered.Write(pkt.data)
 		}
-		logrus.Debugf("got channel %v", channel)
+
 		// Inspect
 
 		// Reorder here rawMsg.SequenceNumber

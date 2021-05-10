@@ -13,7 +13,6 @@ import (
 // TODO(drew): Implement, using the reliable package as a guideline.
 
 // How David would approach this:
-//   0. Assume just one channel ID for now
 //   1. Implement the message framing (seq no, ack no, all that stuff)
 //   2. Implement Read and Write assuming no buffering or out of order or anything like that, using the framing
 //   3. Buffering
