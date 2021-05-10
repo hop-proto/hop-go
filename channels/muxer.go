@@ -6,59 +6,67 @@ import (
 )
 
 type Muxer struct {
-	channels     map[uint64]*Reliable
+	channels     map[byte]*Reliable
 	stopped      bool
 	channelQueue chan *Reliable
 	underlying   transport.MsgConn
 }
 
-type msg struct {
-	ChannelID  uint64
-	SequenceNo int
-	Data       []byte
+func NewMuxer(stopped bool, underlying transport.MsgConn) *Muxer {
+	return &Muxer{make(map[byte]*Reliable), stopped, make(chan *Reliable), underlying}
 }
 
 func (m *Muxer) CreateChannel() (*Reliable, error) {
-	return NewReliableChannel(m.underlying)
+	r, err := NewReliableChannel(m.underlying, m)
+	if err == nil {
+		r.Initiate()
+	}
+	return r, err
 }
 
 func (m *Muxer) Accept() (*Reliable, error) {
 	return <-m.channelQueue, nil
 }
 
-func (m *Muxer) readMsg() (*msg, error) {
+func (m *Muxer) readMsg() (*Packet, error) {
 	// Otherwise
 	pkt := make([]byte, 65535)
 	_, err := m.underlying.ReadMsg(pkt) // wait until read packet
 	if err != nil {
 		return nil, err
 	}
+	logrus.Debugf("PACKET DATA %s", string(pkt))
 	// TODO(drew): Parse the packet structure
 	// Read the header
 	// Extract the actual data
-	return &msg{
-		SequenceNo: 8,
-		Data:       pkt,
-	}, nil
+	return FromBytes(pkt)
+
 }
 
 func (m *Muxer) Start() {
 	m.stopped = false
 	for !m.stopped {
-		rawMsg, err := m.readMsg()
+		pkt, err := m.readMsg()
 		if err != nil {
-			logrus.Fatal(err.Error())
+			if pkt != nil && pkt.dataLength > 0 {
+				logrus.Fatalln(err)
+			}
+
 			continue
 		}
-		logrus.Debugf("got msg for channel %x", rawMsg.ChannelID)
-		channel, ok := m.channels[rawMsg.ChannelID]
+		logrus.Debugf("got msg for channel %x", pkt.channelID)
+		channel, ok := m.channels[pkt.channelID]
 		if !ok {
-			ch := NewReliableChannelWithChannelId(m.underlying, rawMsg.ChannelID)
-			m.channels[rawMsg.ChannelID] = ch
+			ch := NewReliableChannelWithChannelId(m.underlying, m, pkt.channelID)
+			m.channels[pkt.channelID] = ch
 			m.channelQueue <- ch
+			channel = ch
+		} else {
+			channel.ordered.Write(pkt.data)
 		}
 		logrus.Debugf("got channel %v", channel)
 		// Inspect
+
 		// Reorder here rawMsg.SequenceNumber
 		// Add to some buffer???
 		// if rawMsg.SequenceNo == nextNumber {

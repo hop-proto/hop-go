@@ -45,18 +45,13 @@ func TestMuxer(t *testing.T) {
 	serverConn, err := server.AcceptTimeout(time.Minute)
 	assert.NilError(t, err)
 
-	mc := Muxer{
-		underlying: transportConn,
-		stopped:    false,
-	}
+	mc := NewMuxer(false, transportConn)
 	go mc.Start()
 
 	channel, err := mc.CreateChannel()
 	assert.NilError(t, err)
 
-	ms := Muxer{
-		underlying: serverConn,
-	}
+	ms := NewMuxer(false, serverConn)
 	go ms.Start()
 
 	testData := "hi I am some written data"
@@ -68,8 +63,14 @@ func TestMuxer(t *testing.T) {
 	assert.NilError(t, err)
 
 	buf := make([]byte, len(testData))
-	n, err := serverChan.Read(buf)
-	assert.NilError(t, err)
+	var n int
+	for {
+		n, err = serverChan.Read(buf)
+		if err == nil {
+			break
+		}
+	}
+
 	assert.Check(t, cmp.Len(testData, n))
 	assert.Check(t, cmp.Equal(testData, string(buf)))
 }
