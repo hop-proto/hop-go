@@ -22,6 +22,7 @@ func main() {
 	action := flag.Arg(0)
 	address := flag.Arg(1)
 	host, port, err := net.SplitHostPort(address)
+	logrus.SetLevel(logrus.DebugLevel)
 	if err != nil {
 		logrus.Fatalf("unable to parse address %q: %s", address, err)
 	}

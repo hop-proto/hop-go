@@ -20,10 +20,6 @@ const (
 
 const (
 	widthBytes = 200
-	widthBits  = 1600
-	// TODO(dadrian): Confirm these values
-	rollWidthBytes = 200
-	rollWidthBites = 1600
 )
 
 func rol64(a uint64, offset int) uint64 {
@@ -159,11 +155,11 @@ type Kravatte struct {
 	// TODO(dadrian): Some of these probably need to be uint64 arrays, since
 	// Keccak operates on [25]uint64.
 	// TODO(dadrian): Are these all the same size?
-	k [25]uint64
-	r [25]uint64
-	x [25]uint64
-	y [25]uint64
-	q [widthBytes]byte
+	k  [25]uint64
+	kr [25]uint64
+	x  [25]uint64
+	y  [25]uint64
+	q  [widthBytes]byte
 
 	queueOffset int
 	phase       Phase
@@ -188,14 +184,8 @@ func min(a, b int) int {
 
 var zero [25]uint64
 
-type keccakTest [25]uint64
-
-// RefMaskInitialize closely follows the refernce implementation and
-// specification of Kravatte, rather than th XKCP optimized implementation. It
-// implements the first phase of Farfelle as defined in
-// https://eprint.iacr.org/2016/1188.pdf.
-//
-// "First, the key derivation computes a b-bit mask k from the key K".
+// RefMaskInitialize roughtly follows MaskDerivation from XKCP. It is used to
+// initialize a Kravatte instance.
 func (kv *Kravatte) RefMaskInitialize(key []byte) int {
 	if len(key) >= widthBytes {
 		return 1
@@ -203,7 +193,7 @@ func (kv *Kravatte) RefMaskInitialize(key []byte) int {
 	key = Pad10NewSlice(key, widthBytes)
 	snp.StateSetBytes(&kv.k, key)
 	keccakF1600(&kv.k)
-	kv.r = kv.k
+	kv.kr = kv.k
 	kv.x = zero
 	kv.phase = PhaseCompressing
 	kv.queueOffset = 0
@@ -231,13 +221,14 @@ func Pad10NewSlice(in []byte, blockByteLen int) []byte {
 }
 
 func (kv *Kravatte) compress(message []byte, lastFlag int) int {
+	// NB(dadrian): This seems correct based on the reference
 	messageLen := len(message)
 	remainingLen := len(message)
 	if remainingLen >= widthBytes {
 		var state [25]uint64
 		for {
-			state = kv.k
-			rollC(&kv.r)
+			state = kv.kr
+			rollC(&kv.kr)
 			snp.StateAddBytes(&state, message[:widthBytes])
 			keccakF1600(&state)
 			snp.StateAddState(&kv.x, &state) // Add state to x, not vice-versa
@@ -249,14 +240,13 @@ func (kv *Kravatte) compress(message []byte, lastFlag int) int {
 		}
 	}
 	if lastFlag != 0 {
-		var state [25]uint64
-		state = kv.k
-		rollC(&kv.r)
+		state := kv.kr
+		rollC(&kv.kr)
 		snp.StateAddBytes(&state, message)
 		snp.StateAddByte(&state, 1, remainingLen)
 		keccakF1600(&state)
 		snp.StateAddState(&kv.x, &state) // Add state to x, not vice-versa
-		rollC(&kv.r)
+		rollC(&kv.kr)
 		return messageLen
 	}
 	return messageLen - remainingLen
@@ -268,7 +258,7 @@ func (kv *Kravatte) Kra(in []byte, flags int) int {
 	finalFlag := flags & FlagLastPart
 	if (flags & FlagInit) != 0 {
 		// Do init
-		kv.r = kv.k
+		kv.kr = kv.k
 		kv.x = zero
 		kv.queueOffset = 0
 	}
@@ -279,16 +269,15 @@ func (kv *Kravatte) Kra(in []byte, flags int) int {
 		// Data is already queued
 		toQueueLen := min(inputLen, widthBytes-kv.queueOffset)
 		copy(kv.q[kv.queueOffset:], in[:toQueueLen])
-		in = in[:toQueueLen]
+		in = in[toQueueLen:]
 		inputLen -= toQueueLen
-		kv.queueOffset += inputLen
+		kv.queueOffset += toQueueLen
 		if kv.queueOffset == widthBytes {
 			// Queue is full
 			kv.compress(kv.q[:kv.queueOffset], 0)
 			kv.queueOffset = 0
 		} else if finalFlag != 0 {
 			kv.compress(kv.q[:kv.queueOffset], 1)
-			kv.queueOffset = 0
 			return 0
 		}
 	}
@@ -318,8 +307,7 @@ func (kv *Kravatte) Vatte(out []byte, flags int) int {
 		if (flags & FlagShort) != 0 {
 			kv.y = kv.x
 		} else {
-			var state [25]uint64
-			state = kv.x
+			state := kv.x
 			keccakF1600(&state)
 			kv.y = state
 		}
@@ -354,19 +342,19 @@ func (kv *Kravatte) Vatte(out []byte, flags int) int {
 			state = kv.y
 			rollE(&kv.y)
 			keccakF1600(&state)
-			snp.StateExtractAndAddStateToBytes(&state, &kv.y, 0, out[:byteLen])
+			snp.StateExtractAndAddStateToBytes(&state, &kv.kr, 0, out[:byteLen])
 			out = out[byteLen:]
 			remainingOutputLen -= byteLen
 			if remainingOutputLen == 0 {
 				break
 			}
 		}
-		if finalFlag != 0 && (byteLen != widthBytes) {
+		if (finalFlag != 0) && (byteLen != widthBytes) {
 			// Put the rest of the expanded data in the queue
 			offset := byteLen
 			byteLen = widthBytes - byteLen
 			q := kv.q[kv.queueOffset:]
-			snp.StateExtractAndAddStateToBytes(&state, &kv.r, offset, q[:byteLen])
+			snp.StateExtractAndAddStateToBytes(&state, &kv.kr, offset, q[:byteLen])
 			kv.queueOffset = offset
 		}
 	}

@@ -2,8 +2,12 @@ package kravatte
 
 import (
 	"encoding/hex"
+	"fmt"
+	"os"
 	"testing"
 
+	"gotest.tools/assert"
+	"gotest.tools/assert/cmp"
 	"zmap.io/portal/snp"
 )
 
@@ -24,24 +28,60 @@ func TestRefMask(t *testing.T) {
 	kv.x[1] = 1
 	kv.RefMaskInitialize(key)
 	t.Logf("% x", kv.k)
-	if kv.k != expectedKLanes {
-		t.Errorf("got k %x, expected %x", kv.k, expectedKLanes)
-	}
-	if kv.r != kv.k {
-		t.Errorf("got r %x, expected %x", kv.r, expectedKLanes)
-	}
-	if kv.x != zero {
-		t.Errorf("expected x to be set to 0, got %x", kv.x)
+	assert.Check(t, cmp.DeepEqual(expectedKLanes, kv.k))
+	assert.Check(t, cmp.DeepEqual(kv.kr, kv.k))
+	assert.Check(t, cmp.DeepEqual(kv.x, zero))
+}
+
+func runTranscript(t *testing.T, kv *Kravatte, transcript []snp.TranscriptEntry) {
+	for i, entry := range transcript {
+		t.Logf("test %s, entry %d (%s)", t.Name(), i, entry.Action)
+		switch entry.Action {
+		case "key":
+			kv.RefMaskInitialize(entry.B)
+		case "in":
+			kv.Kra(entry.B, FlagNone)
+		case "last":
+			kv.Kra(entry.B, FlagLastPart)
+		case "out":
+			out := make([]byte, entry.Length)
+			kv.Vatte(out, FlagNone)
+			assert.Check(t, cmp.DeepEqual(entry.B, out), "out")
+		case "dumpK":
+			actual := make([]byte, entry.Length)
+			snp.StateExtractBytes(&kv.k, actual)
+			assert.Check(t, cmp.DeepEqual(entry.B, actual), "dumpK")
+		case "dumpX":
+			actual := make([]byte, entry.Length)
+			snp.StateExtractBytes(&kv.x, actual)
+			assert.Check(t, cmp.DeepEqual(entry.B, actual), "dumpX")
+		case "dumpY":
+			actual := make([]byte, entry.Length)
+			snp.StateExtractBytes(&kv.y, actual)
+			assert.Check(t, cmp.DeepEqual(entry.B, actual), "dumpY")
+		case "dumpR":
+			actual := make([]byte, entry.Length)
+			snp.StateExtractBytes(&kv.kr, actual)
+			assert.Check(t, cmp.DeepEqual(entry.B, actual), "dumpR")
+		default:
+			t.Fatalf("unknown action %q", entry.Action)
+		}
 	}
 }
 
-func TestKra(t *testing.T) {
-	key := newTestKey(16)
-	kv := Kravatte{}
-	kv.RefMaskInitialize(key)
-	kv.Kra([]byte("Kravatte! Kravatte! Kra! Kra! Kra!"), FlagNone)
-	t.Logf("x: %x", kv.x)
-	t.Logf("r: %x", kv.r)
-	t.Logf("k: %x", kv.k)
-	t.Fail()
+func TestKravatteAgainstReference(t *testing.T) {
+	implementations := []string{
+		"xkcp",
+	}
+	for _, implementation := range implementations {
+		implementation := implementation
+		t.Run(implementation, func(t *testing.T) {
+			path := fmt.Sprintf("testdata/%s.txt", implementation)
+			r, err := os.Open(path)
+			assert.NilError(t, err, "unable to open %s", path)
+			transcript := snp.ParseTestTranscript(t, r)
+			k := Kravatte{}
+			runTranscript(t, &k, transcript)
+		})
+	}
 }

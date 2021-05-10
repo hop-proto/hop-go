@@ -134,12 +134,6 @@ func (c *Certificate) WriteTo(w io.Writer) (int64, error) {
 	}
 	written += 8
 
-	chunkLen, err := c.IDChunk.WriteTo(w)
-	written += chunkLen
-	if err != nil {
-		return written, err
-	}
-
 	n, err = w.Write(c.PublicKey[:])
 	written += int64(n)
 	if err != nil {
@@ -148,6 +142,12 @@ func (c *Certificate) WriteTo(w io.Writer) (int64, error) {
 
 	n, err = w.Write(c.Parent[:])
 	written += int64(n)
+	if err != nil {
+		return written, err
+	}
+
+	chunkLen, err := c.IDChunk.WriteTo(w)
+	written += chunkLen
 	if err != nil {
 		return written, err
 	}
@@ -214,11 +214,6 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 	bytesRead += 8
 	c.ExpiresAt = time.Unix(int64(t), 0)
 
-	chunkLen, err := c.IDChunk.ReadFrom(r)
-	bytesRead += chunkLen
-	if err != nil {
-		return bytesRead, err
-	}
 	n, err := r.Read(c.PublicKey[:])
 	bytesRead += int64(n)
 	if err != nil {
@@ -235,6 +230,12 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 	}
 	if n != SHA256Len {
 		return bytesRead, io.EOF
+	}
+
+	chunkLen, err := c.IDChunk.ReadFrom(r)
+	bytesRead += chunkLen
+	if err != nil {
+		return bytesRead, err
 	}
 
 	n, err = r.Read(c.Signature[:])

@@ -239,25 +239,30 @@ func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 	hs.duplex.Absorb(ephemeral)
 	hs.duplex.Absorb(cookie)
 	hs.duplex.Decrypt(buf[:], b[:SNILen])
-	logrus.Debugf("server: got raw decrypted SNI %x: ", buf[:])
+	decryptedSNI := buf[:SNILen]
+	b = b[SNILen:]
+
+	hs.duplex.Squeeze(hs.macBuf[:])
+	logrus.Debugf("server got client ack mac: %x, expected %x", b[:MacLen], hs.macBuf)
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
+		return length, nil, ErrInvalidMessage
+	}
+
+	// Only check SNI if MACs match
+	logrus.Debugf("server: got raw decrypted SNI %x: ", decryptedSNI[:])
 	name := certs.Name{}
-	_, err = name.ReadFrom(bytes.NewBuffer(buf[:]))
+	_, err = name.ReadFrom(bytes.NewBuffer(decryptedSNI[:]))
 	if err != nil {
 		return 0, nil, err
 	}
 	logrus.Debugf("server: got name %v", name)
-	b = b[SNILen:]
 
-	hs.duplex.Squeeze(hs.macBuf[:])
-
-	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
-		return length, nil, ErrInvalidMessage
-	}
 	return length, hs, err
 }
 
 func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState) (int, error) {
 	logrus.Debugf("server: leaf, inter: %x, %x", s.certificate, s.intermediate)
+	logrus.Debugf("server: leaf public: %x", s.staticKey.Public)
 	encCertLen := EncryptedCertificatesLength(s.certificate, s.intermediate)
 	logrus.Debugf("server: encrypted cert len: %d", encCertLen)
 	if len(b) < HeaderLen+SessionIDLen+encCertLen {
@@ -299,6 +304,7 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState)
 	logrus.Debugf("server es: %x", hs.es)
 	hs.duplex.Absorb(hs.es)
 	hs.duplex.Squeeze(x[:MacLen])
+	logrus.Debugf("server serverauth mac: %x", x[:MacLen])
 	x = x[MacLen:]
 	pos += MacLen
 	return pos, nil

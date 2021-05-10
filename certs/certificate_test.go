@@ -61,6 +61,8 @@ func TestWriteTo(t *testing.T) {
 		0x01, 0x01, 0x00, 0x00, // Version, Type, Reserved
 		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, // Issued
 		0x0F, 0xED, 0xCB, 0xA0, 0x98, 0x76, 0x54, 0x32, // Expires
+	}
+	expectedIDChunk := []byte{
 		0x0, 0x18, // ID Chunk Len
 		0x00, 0x00, // ID Chunk Padding Len
 		0x14, // IDBlock Len
@@ -70,16 +72,23 @@ func TestWriteTo(t *testing.T) {
 		0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x64, 0x6f, 0x6d, 0x61, 0x69, 0x6e,
 		0x00, 0x00, 0x00, // IDBlock padding
 		// No IDChunk padding
+
 	}
 	assert.Assert(t, len(expected) < b.Len())
-	var front []byte = serialized[:len(expected)]
+	front := serialized[:len(expected)]
 	assert.Check(t, cmp.DeepEqual(expected, front))
 
-	back := serialized[len(expected):]
-	assert.Check(t, cmp.Len(back, 32+32+64))
-	assert.DeepEqual(t, back[:32], c.PublicKey[:])
-	assert.DeepEqual(t, back[32:64], c.Parent[:])
-	assert.DeepEqual(t, back[64:], c.Signature[:])
+	middle := serialized[len(expected) : len(expected)+32+32]
+	assert.Assert(t, cmp.Len(middle, 32+32))
+	assert.DeepEqual(t, middle[:32], c.PublicKey[:])
+	assert.DeepEqual(t, middle[32:64], c.Parent[:])
+
+	assert.Check(t, cmp.Equal(84, len(front)+len(middle)))
+
+	back := serialized[len(expected)+32+32:]
+	assert.Assert(t, cmp.Len(back, len(expectedIDChunk)+64))
+	assert.DeepEqual(t, back[:len(expectedIDChunk)], expectedIDChunk)
+	assert.DeepEqual(t, back[len(expectedIDChunk):], c.Signature[:])
 
 	raw := make([]byte, b.Len())
 	copy(raw, b.Bytes())
