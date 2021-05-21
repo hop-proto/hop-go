@@ -75,3 +75,56 @@ func TestMuxer(t *testing.T) {
 	assert.Check(t, cmp.Len(testData, n))
 	assert.Equal(t, testData, string(buf))
 }
+
+// func TestSmallWindow(t *testing.T) {
+// 	logrus.SetLevel(logrus.DebugLevel)
+// 	pktConn, err := net.ListenPacket("udp", "localhost:8889")
+// 	assert.NilError(t, err)
+// 	// It's actually a UDP conn
+// 	udpConn := pktConn.(*net.UDPConn)
+// 	server, err := transport.NewServer(udpConn, newTestServerConfig(t))
+// 	assert.NilError(t, err)
+// 	go server.Serve()
+
+// 	transportConn, err := transport.Dial("udp", udpConn.LocalAddr().String(), nil)
+// 	assert.NilError(t, err)
+
+// 	assert.NilError(t, transportConn.Handshake())
+
+// 	serverConn, err := server.AcceptTimeout(time.Minute)
+// 	assert.NilError(t, err)
+
+// 	mc := NewMuxer(false, transportConn)
+// 	go mc.Start()
+
+// 	channel, err := mc.CreateChannel(1 << 6)
+// 	assert.NilError(t, err)
+
+// 	ms := NewMuxer(false, serverConn)
+// 	go ms.Start()
+
+// 	testData := make([]byte, 200)
+// 	for i := range testData {
+// 		testData[i] = []byte{'a', 'b', 'c', 'd', 'e', 'f'}[rand.Intn(6)]
+// 	}
+
+// 	fmt.Println(testData)
+// 	_, err = channel.Write([]byte(testData))
+// 	assert.NilError(t, err)
+
+// 	serverChan, err := ms.Accept()
+// 	assert.NilError(t, err)
+
+// 	buf := make([]byte, len(testData))
+// 	time.Sleep(1 * time.Millisecond)
+// 	var n int
+// 	for {
+// 		n, err = serverChan.Read(buf)
+// 		if err == nil {
+// 			break
+// 		}
+// 	}
+
+// 	assert.Check(t, cmp.Len(testData, n))
+// 	assert.Equal(t, string(testData), string(buf))
+// }

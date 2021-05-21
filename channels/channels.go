@@ -96,22 +96,32 @@ func (r *Reliable) Initiate() {
 func (r *Reliable) Receive(pkt *Packet) error {
 	r.sendBuffer = r.sendBuffer[pkt.ackNo-r.sendSeqNo:]
 	r.sendSeqNo = pkt.ackNo
-	// TODO: Handle wraparounds.
+	// TODO: Handle uint32 wraparounds, only overwriting new data.
 	readNo := r.recvReadNo
 	windowEnd := r.recvReadNo + uint32(r.recvWindowSize)
 	frameNo := pkt.frameNo
 	logrus.Info("READ NO ", readNo, " FRAME ", frameNo, "window end ", windowEnd, "ACK NO", r.recvAckNo)
 	if (frameNo < readNo || frameNo > windowEnd) ||
-		(frameNo+uint32(pkt.dataLength) > windowEnd) ||
 		(frameNo+uint32(pkt.dataLength) < readNo) {
 		return errors.New("received data has exceeded window length")
 	}
 	startIdx := frameNo % uint32(r.recvWindowSize)
-	endIdx := (frameNo + uint32(pkt.dataLength)) % uint32(r.recvWindowSize)
+	endIdx := (frameNo + uint32(pkt.dataLength))
+	if windowEnd < endIdx {
+		endIdx = windowEnd
+	}
+	endIdx = endIdx % uint32(r.recvWindowSize)
 	logrus.Info("READ NO ", readNo, " FRAME ", frameNo, " start idx ", startIdx, " end idx NO ", endIdx)
-	copy(r.recvWindow[startIdx:endIdx], pkt.data)
-	if pkt.frameNo+uint32(pkt.dataLength) >= r.recvAckNo {
-		r.recvAckNo = pkt.frameNo + uint32(pkt.dataLength)
+	var numCopied = 0
+	if endIdx > startIdx {
+		numCopied += copy(r.recvWindow[startIdx:endIdx], pkt.data)
+	} else {
+		numCopied += copy(r.recvWindow[startIdx:], pkt.data[:r.recvWindowSize-uint16(startIdx)])
+		numCopied += copy(r.recvWindow[:endIdx], pkt.data[r.recvWindowSize-uint16(startIdx):])
+	}
+	logrus.Info("NUM COPIED", numCopied)
+	if pkt.frameNo+uint32(numCopied) >= r.recvAckNo {
+		r.recvAckNo = pkt.frameNo + uint32(numCopied)
 	}
 	return nil
 }
@@ -126,7 +136,13 @@ func (r *Reliable) Read(b []byte) (n int, err error) {
 
 	logrus.Info("RECV NO ", r.recvReadNo, r.recvAckNo, r.recvWindowSize)
 	endIdx := r.recvAckNo % uint32(r.recvWindowSize)
-	numCopied += copy(b, r.recvWindow[startIdx:endIdx])
+	if endIdx > startIdx {
+		numCopied += copy(b, r.recvWindow[startIdx:endIdx])
+	} else {
+		numCopied += copy(b, r.recvWindow[startIdx:])
+		numCopied += copy(b[uint32(len(r.recvWindow))-startIdx:], r.recvWindow[:endIdx])
+	}
+
 	r.recvReadNo = (r.recvReadNo + uint32(numCopied)) % uint32(r.recvWindowSize)
 	return numCopied, nil
 }

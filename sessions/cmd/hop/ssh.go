@@ -44,7 +44,9 @@ func getClient(userHost string) (*ssh.Client, error) {
 
 	// TODO: When the channel layer is completed, this code will look somewhat like:
 	// conn := transport.Dial("udp", "localhost:1234")
-	// reliableChannel = reliable.NewChannel(transportConn)
+	// mc := NewMuxer(false, transportConn)
+	// go mc.Start()
+	// channel, err := mc.CreateChannel(1 << 8)
 	// client, err := ssh.NewClientConn(reliableChannel, otherargs....)
 	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, port), config)
 
@@ -118,7 +120,7 @@ func sshClient(userHost string) error {
 		return err
 	}
 	defer func() { term.Restore(int(os.Stdin.Fd()), oldState) }()
-
+	session.SendRequest("authoriziation", true, authPacket.toBytes())
 	if err = session.Shell(); err != nil {
 		return err
 	}
