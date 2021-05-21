@@ -1,8 +1,8 @@
 package channels
 
 import (
-	"bytes"
 	"crypto/rand"
+	"errors"
 	"net"
 	"sync"
 	"time"
@@ -18,11 +18,17 @@ import (
 //   3. Buffering
 //   4. Concurrency controls (locks)
 
-// Reliable implements a reliable and ordered channel on top
+// Reliable implements a reliable and receiveWindow channel on top
+
+const WINDOW_SIZE = 65535
+
 type Reliable struct {
 	m             sync.Mutex
 	transportConn transport.MsgConn
-	ordered       bytes.Buffer
+	receiveWindow []byte
+	windowSize    uint16
+	ackNo         uint32
+	readNo        uint32
 	cid           byte
 	muxer         *Muxer
 }
@@ -30,24 +36,39 @@ type Reliable struct {
 // Reliable implements net.Conn
 var _ net.Conn = &Reliable{}
 
-func NewReliableChannelWithChannelId(underlying transport.MsgConn, muxer *Muxer, channelId byte) *Reliable {
-	return &Reliable{sync.Mutex{}, underlying, bytes.Buffer{}, channelId, muxer}
+func NewReliableChannelWithChannelId(underlying transport.MsgConn, muxer *Muxer, windowSize uint16, channelId byte) *Reliable {
+	return &Reliable{
+		m:             sync.Mutex{},
+		transportConn: underlying,
+		receiveWindow: make([]byte, WINDOW_SIZE),
+		windowSize:    windowSize,
+		cid:           channelId,
+		readNo:        1,
+		muxer:         muxer,
+	}
 }
 
-func NewReliableChannel(underlying transport.MsgConn, muxer *Muxer) (*Reliable, error) {
+func NewReliableChannel(underlying transport.MsgConn, muxer *Muxer, windowSize uint16) (*Reliable, error) {
 	cid := []byte{0}
 	n, err := rand.Read(cid)
 	if err != nil || n != 1 {
 		return nil, err
 	}
-	return &Reliable{sync.Mutex{}, underlying, bytes.Buffer{}, cid[0], muxer}, nil
+	return &Reliable{
+		m:             sync.Mutex{},
+		transportConn: underlying,
+		receiveWindow: make([]byte, windowSize),
+		windowSize:    windowSize,
+		cid:           cid[0],
+		readNo:        1,
+		muxer:         muxer,
+	}, nil
 }
 
 func (r *Reliable) Initiate() {
 	// Set REQ bit to 1.
 	meta := byte(1 << 7)
 
-	windowSize := uint16(0)
 	// TODO: support various channel types
 	channelType := byte(0)
 	// Frame Number begins with 0.
@@ -58,19 +79,47 @@ func (r *Reliable) Initiate() {
 		r.cid,
 		meta,
 		length,
-		windowSize,
+		r.windowSize,
 		channelType,
 		frameNumber,
 		data,
 	}
 	r.muxer.underlying.WriteMsg(p.toBytes())
+	// TODO: Wait for Channel initiation response.
+}
+
+func (r *Reliable) Receive(pkt *Packet) error {
+	// TODO: Handle wraparounds.
+	readNo := r.readNo
+	windowEnd := r.readNo + uint32(r.windowSize)
+	frameNo := pkt.frameNumber
+
+	if (frameNo < readNo || frameNo > windowEnd) ||
+		(frameNo+uint32(pkt.dataLength) > windowEnd) ||
+		(frameNo+uint32(pkt.dataLength) < readNo) {
+		return errors.New("received data has exceeded window length")
+	}
+
+	startIdx := frameNo % uint32(r.windowSize)
+	endIdx := (frameNo + uint32(pkt.dataLength)) % uint32(r.windowSize)
+	copy(r.receiveWindow[startIdx:endIdx], pkt.data)
+	if pkt.frameNumber+uint32(pkt.dataLength) >= r.ackNo {
+		r.ackNo = pkt.frameNumber + uint32(pkt.dataLength)
+	}
+	return nil
 }
 
 func (r *Reliable) Read(b []byte) (n int, err error) {
 	// This part gets hard if you want this call to block until data is available.
 	//
 	// David recommends not making that work until everything else works.
-	return r.ordered.Read(b)
+
+	var numCopied = 0
+	startIdx := r.readNo % uint32(r.windowSize)
+	endIdx := r.ackNo % uint32(r.windowSize)
+	numCopied += copy(b, r.receiveWindow[startIdx:endIdx])
+	r.readNo = (r.readNo + uint32(numCopied)) % uint32(r.windowSize)
+	return numCopied, nil
 }
 
 func (r *Reliable) Write(b []byte) (n int, err error) {
@@ -79,9 +128,9 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 		channelID:   r.cid,
 		meta:        0,              // TODO
 		dataLength:  uint16(len(b)), // TODO: break up b into packet sizes
-		windowSize:  1000,           // TODO
-		channelType: 1,              // TODO
-		frameNumber: 1,              // TODO
+		windowSize:  r.windowSize,
+		channelType: 1, // TODO
+		frameNumber: 1, // TODO
 		data:        b,
 	}
 	return len(pkt.toBytes()), r.transportConn.WriteMsg(pkt.toBytes())

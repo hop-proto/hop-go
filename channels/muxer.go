@@ -1,6 +1,8 @@
 package channels
 
 import (
+	"fmt"
+
 	"zmap.io/portal/transport"
 )
 
@@ -15,8 +17,8 @@ func NewMuxer(stopped bool, underlying transport.MsgConn) *Muxer {
 	return &Muxer{make(map[byte]*Reliable), stopped, make(chan *Reliable), underlying}
 }
 
-func (m *Muxer) CreateChannel() (*Reliable, error) {
-	r, err := NewReliableChannel(m.underlying, m)
+func (m *Muxer) CreateChannel(windowSize uint16) (*Reliable, error) {
+	r, err := NewReliableChannel(m.underlying, m, windowSize)
 	if err == nil {
 		r.Initiate()
 	}
@@ -29,7 +31,7 @@ func (m *Muxer) Accept() (*Reliable, error) {
 
 func (m *Muxer) readMsg() (*Packet, error) {
 	pkt := make([]byte, 65535)
-	_, err := m.underlying.ReadMsg(pkt) // wait until read packet
+	_, err := m.underlying.ReadMsg(pkt) // TODO: wait until read packet
 	if err != nil {
 		return nil, err
 	}
@@ -47,12 +49,14 @@ func (m *Muxer) Start() {
 
 		channel, ok := m.channels[pkt.channelID]
 		if !ok {
-			ch := NewReliableChannelWithChannelId(m.underlying, m, pkt.channelID)
+			fmt.Println("NEW CHANNEL ID", pkt.channelID, pkt.windowSize)
+			ch := NewReliableChannelWithChannelId(m.underlying, m, pkt.windowSize, pkt.channelID)
 			m.channels[pkt.channelID] = ch
 			m.channelQueue <- ch
 			channel = ch
 		} else {
-			channel.ordered.Write(pkt.data)
+			fmt.Println("PKT RECIEVE")
+			channel.Receive(pkt)
 		}
 
 		// Inspect
