@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"zmap.io/portal/transport"
 )
 
@@ -19,18 +20,19 @@ import (
 //   4. Concurrency controls (locks)
 
 // Reliable implements a reliable and receiveWindow channel on top
-
-const WINDOW_SIZE = 65535
+const SEND_BUFFER_SIZE = 8092
 
 type Reliable struct {
-	m             sync.Mutex
-	transportConn transport.MsgConn
-	receiveWindow []byte
-	windowSize    uint16
-	ackNo         uint32
-	readNo        uint32
-	cid           byte
-	muxer         *Muxer
+	m              sync.Mutex
+	transportConn  transport.MsgConn
+	sendBuffer     []byte
+	sendSeqNo      uint32
+	recvWindow     []byte
+	recvWindowSize uint16
+	recvAckNo      uint32
+	recvReadNo     uint32
+	cid            byte
+	muxer          *Muxer
 }
 
 // Reliable implements net.Conn
@@ -38,13 +40,15 @@ var _ net.Conn = &Reliable{}
 
 func NewReliableChannelWithChannelId(underlying transport.MsgConn, muxer *Muxer, windowSize uint16, channelId byte) *Reliable {
 	return &Reliable{
-		m:             sync.Mutex{},
-		transportConn: underlying,
-		receiveWindow: make([]byte, WINDOW_SIZE),
-		windowSize:    windowSize,
-		cid:           channelId,
-		readNo:        1,
-		muxer:         muxer,
+		m:              sync.Mutex{},
+		transportConn:  underlying,
+		recvWindow:     make([]byte, windowSize),
+		recvWindowSize: windowSize,
+		cid:            channelId,
+		recvReadNo:     1,
+		recvAckNo:      1,
+		sendBuffer:     make([]byte, 0),
+		muxer:          muxer,
 	}
 }
 
@@ -55,13 +59,14 @@ func NewReliableChannel(underlying transport.MsgConn, muxer *Muxer, windowSize u
 		return nil, err
 	}
 	return &Reliable{
-		m:             sync.Mutex{},
-		transportConn: underlying,
-		receiveWindow: make([]byte, windowSize),
-		windowSize:    windowSize,
-		cid:           cid[0],
-		readNo:        1,
-		muxer:         muxer,
+		m:              sync.Mutex{},
+		transportConn:  underlying,
+		recvWindow:     make([]byte, windowSize),
+		recvWindowSize: windowSize,
+		cid:            cid[0],
+		recvReadNo:     1,
+		sendSeqNo:      1,
+		muxer:          muxer,
 	}, nil
 }
 
@@ -75,11 +80,11 @@ func (r *Reliable) Initiate() {
 	frameNumber := uint32(0)
 	data := []byte("Channel initiation request.")
 	length := uint16(len(data))
-	p := Packet{
+	p := InitiatePacket{
 		r.cid,
 		meta,
 		length,
-		r.windowSize,
+		r.recvWindowSize,
 		channelType,
 		frameNumber,
 		data,
@@ -89,22 +94,24 @@ func (r *Reliable) Initiate() {
 }
 
 func (r *Reliable) Receive(pkt *Packet) error {
+	r.sendBuffer = r.sendBuffer[pkt.ackNo-r.sendSeqNo:]
+	r.sendSeqNo = pkt.ackNo
 	// TODO: Handle wraparounds.
-	readNo := r.readNo
-	windowEnd := r.readNo + uint32(r.windowSize)
-	frameNo := pkt.frameNumber
-
+	readNo := r.recvReadNo
+	windowEnd := r.recvReadNo + uint32(r.recvWindowSize)
+	frameNo := pkt.frameNo
+	logrus.Info("READ NO ", readNo, " FRAME ", frameNo, "window end ", windowEnd, "ACK NO", r.recvAckNo)
 	if (frameNo < readNo || frameNo > windowEnd) ||
 		(frameNo+uint32(pkt.dataLength) > windowEnd) ||
 		(frameNo+uint32(pkt.dataLength) < readNo) {
 		return errors.New("received data has exceeded window length")
 	}
-
-	startIdx := frameNo % uint32(r.windowSize)
-	endIdx := (frameNo + uint32(pkt.dataLength)) % uint32(r.windowSize)
-	copy(r.receiveWindow[startIdx:endIdx], pkt.data)
-	if pkt.frameNumber+uint32(pkt.dataLength) >= r.ackNo {
-		r.ackNo = pkt.frameNumber + uint32(pkt.dataLength)
+	startIdx := frameNo % uint32(r.recvWindowSize)
+	endIdx := (frameNo + uint32(pkt.dataLength)) % uint32(r.recvWindowSize)
+	logrus.Info("READ NO ", readNo, " FRAME ", frameNo, " start idx ", startIdx, " end idx NO ", endIdx)
+	copy(r.recvWindow[startIdx:endIdx], pkt.data)
+	if pkt.frameNo+uint32(pkt.dataLength) >= r.recvAckNo {
+		r.recvAckNo = pkt.frameNo + uint32(pkt.dataLength)
 	}
 	return nil
 }
@@ -115,23 +122,25 @@ func (r *Reliable) Read(b []byte) (n int, err error) {
 	// David recommends not making that work until everything else works.
 
 	var numCopied = 0
-	startIdx := r.readNo % uint32(r.windowSize)
-	endIdx := r.ackNo % uint32(r.windowSize)
-	numCopied += copy(b, r.receiveWindow[startIdx:endIdx])
-	r.readNo = (r.readNo + uint32(numCopied)) % uint32(r.windowSize)
+	startIdx := r.recvReadNo % uint32(r.recvWindowSize)
+
+	logrus.Info("RECV NO ", r.recvReadNo, r.recvAckNo, r.recvWindowSize)
+	endIdx := r.recvAckNo % uint32(r.recvWindowSize)
+	numCopied += copy(b, r.recvWindow[startIdx:endIdx])
+	r.recvReadNo = (r.recvReadNo + uint32(numCopied)) % uint32(r.recvWindowSize)
 	return numCopied, nil
 }
 
 func (r *Reliable) Write(b []byte) (n int, err error) {
+	r.sendBuffer = append(r.sendBuffer, b...)
 	// Except with buffering and framing and concurrency control
 	pkt := Packet{
-		channelID:   r.cid,
-		meta:        0,              // TODO
-		dataLength:  uint16(len(b)), // TODO: break up b into packet sizes
-		windowSize:  r.windowSize,
-		channelType: 1, // TODO
-		frameNumber: 1, // TODO
-		data:        b,
+		channelID:  r.cid,
+		meta:       0,                         // TODO
+		dataLength: uint16(len(r.sendBuffer)), // TODO: break up b into packet sizes
+		ackNo:      r.recvAckNo,
+		frameNo:    r.sendSeqNo, // TODO
+		data:       r.sendBuffer,
 	}
 	return len(pkt.toBytes()), r.transportConn.WriteMsg(pkt.toBytes())
 }

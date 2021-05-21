@@ -1,8 +1,6 @@
 package channels
 
 import (
-	"fmt"
-
 	"zmap.io/portal/transport"
 )
 
@@ -49,13 +47,15 @@ func (m *Muxer) Start() {
 
 		channel, ok := m.channels[pkt.channelID]
 		if !ok {
-			fmt.Println("NEW CHANNEL ID", pkt.channelID, pkt.windowSize)
-			ch := NewReliableChannelWithChannelId(m.underlying, m, pkt.windowSize, pkt.channelID)
+			initPkt, err := FromInitiateBytes(pkt.toBytes())
+			if err != nil {
+				panic(err)
+			}
+			ch := NewReliableChannelWithChannelId(m.underlying, m, initPkt.windowSize, initPkt.channelID)
 			m.channels[pkt.channelID] = ch
 			m.channelQueue <- ch
 			channel = ch
 		} else {
-			fmt.Println("PKT RECIEVE")
 			channel.Receive(pkt)
 		}
 

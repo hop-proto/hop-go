@@ -63,7 +63,7 @@ func TestMuxer(t *testing.T) {
 	assert.NilError(t, err)
 
 	buf := make([]byte, len(testData))
-	time.Sleep(1 * time.Second)
+	time.Sleep(1 * time.Millisecond)
 	var n int
 	for {
 		n, err = serverChan.Read(buf)
