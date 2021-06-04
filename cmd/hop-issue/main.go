@@ -69,7 +69,7 @@ func main() {
 		}
 		pubKey, err := keys.ParseDHPublicKey(string(pubKeyBytes))
 		if err != nil {
-			logrus.Fatalf("unable to parse DH public key: %s")
+			logrus.Fatalf("unable to parse DH public key: %s", err)
 		}
 		identity := certs.Identity{
 			PublicKey: *pubKey,
@@ -108,7 +108,7 @@ func main() {
 		}
 		pubKey, err := keys.ParseSigningPublicKey(string(pubKeyBytes))
 		if err != nil {
-			logrus.Fatalf("unable to parse signing public key: %s")
+			logrus.Fatalf("unable to parse signing public key: %s", err)
 		}
 		identity := certs.Identity{
 			PublicKey: *pubKey,
