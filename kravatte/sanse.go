@@ -33,27 +33,38 @@ func (s *sanse) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, err
 	panic("implement me")
 }
 
-func (k *Kravatte) NewSANSE() cipher.AEAD {
+func NewSANSE(key []byte) cipher.AEAD {
+	k := Kravatte{}
+	if k.RefMaskInitialize(key) != 0 {
+		panic("unable to initialize kravatte")
+	}
 	return &sanse{
-		kravatte: k,
+		kravatte: &k,
 		e:        0,
 	}
 }
 
-func memxoris(target, source []byte, bitLength int) {
-	// TODO(dadrian): Implement
-	panic("unimplemented")
+func memxoris(target, source []byte, bitLen int) {
+	byteLen := bitLen / 8
+	for i := 0; i < byteLen; i++ {
+		target[i] ^= source[i]
+	}
+	bitLen &= 7
+	if bitLen != 0 {
+		target[byteLen] ^= source[byteLen]
+		target[byteLen] &= (1 << bitLen) - 1
+	}
 }
 
 func (s *sanse) addToHistory(data []byte, dataBitLen int, appendix byte, appendixLen int) int {
 	var lastByte [1]byte
-	if s.kravatte.Kra(data, dataBitLen&(1^7), FlagNone) != 0 {
+	if s.kravatte.Kra(data, dataBitLen&0xF8, FlagNone) != 0 {
 		return 1
 	}
 	data = data[dataBitLen>>3:]
 	dataBitLen &= 7
 	if dataBitLen == 0 {
-		lastByte[0] = appendix | byte(s.e<<uint32(appendixLen))
+		lastByte[0] = appendix | byte(s.e<<appendixLen)
 		dataBitLen = appendixLen + 1
 	} else if dataBitLen <= (8 - (appendixLen + 1)) {
 		lastByte[0] = (data[0] & byte((1<<dataBitLen)-1)) | (appendix << dataBitLen) | byte(s.e<<(dataBitLen+appendixLen))
