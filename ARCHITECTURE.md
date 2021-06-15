@@ -11,18 +11,19 @@ Each top-level folder should have its own README.
 The other top-level folders are organized as follows:
 - `cyclist`: Contains an implementation of the Cyclist duplex using specific
   parameters for Keccak
-- `kravatte`: Contains an implementation of the Kravatte AEAD, with specific
-  Keccak parameters.
+- `kravatte`: Contains an implementation of the Kravatte function and 
+  DECK-SANSE AEAD, with specific Keccak parameters.
 - `snp`: Byte-manipulation code shared between Kravatte and Cyclist
 - `certs`: Tooling and parsing for the certificate format used by Hop
 - `transport`: Implementation of the Hop transport-layer
 - `reliable`: Proof-of-concept of Hop channels.
-- `channels`: Implementation of the $PROTCOL channels on top of the transport
-  layer. Not yet started.
+- `channels`: Production implementation of the Hop channels on top of the Hop
+  transport layer.
 
 ### Notes
 
-- The server-side implementation needs to multiplex multiple connections
+- The server-side implementation needs to multiplex multiple Hop connections on
+  a single UDP socket.
 - Each connection should be able to read and write independently
 - Packet processing is not the same thing as stream processing! This is why
   most interactions with the `transport` layer should be through the `MsgConn`
