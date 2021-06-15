@@ -40,12 +40,15 @@ func runTranscript(t *testing.T, kv *Kravatte, transcript []snp.TranscriptEntry)
 		case "key":
 			kv.RefMaskInitialize(entry.B)
 		case "in":
-			kv.Kra(entry.B, FlagNone)
+			ret := kv.Kra(entry.B, 8*len(entry.B), FlagNone)
+			assert.Check(t, cmp.Equal(0, ret), "Kra/None")
 		case "last":
-			kv.Kra(entry.B, FlagLastPart)
+			ret := kv.Kra(entry.B, 8*len(entry.B), FlagLastPart)
+			assert.Check(t, cmp.Equal(0, ret), "Kra/Last")
 		case "out":
 			out := make([]byte, entry.Length)
-			kv.Vatte(out, FlagNone)
+			ret := kv.Vatte(out, 8*len(out), FlagNone)
+			assert.Check(t, cmp.Equal(0, ret), "Vatte")
 			assert.Check(t, cmp.DeepEqual(entry.B, out), "out")
 		case "dumpK":
 			actual := make([]byte, entry.Length)
@@ -63,6 +66,15 @@ func runTranscript(t *testing.T, kv *Kravatte, transcript []snp.TranscriptEntry)
 			actual := make([]byte, entry.Length)
 			snp.StateExtractBytes(&kv.kr, actual)
 			assert.Check(t, cmp.DeepEqual(entry.B, actual), "dumpR")
+		case "dumpQ":
+			assert.Check(t, cmp.DeepEqual(entry.B, kv.q[:]), "dumpQ")
+		case "dumpO":
+			actual := make([]byte, 8)
+			actual[0] = byte(kv.queueOffsetBits)
+			actual[1] = byte(kv.queueOffsetBits >> 8)
+			actual[2] = byte(kv.queueOffsetBits >> 16)
+			actual[3] = byte(kv.queueOffsetBits >> 24)
+			assert.Check(t, cmp.DeepEqual(entry.B, actual), "dumpO")
 		default:
 			t.Fatalf("unknown action %q", entry.Action)
 		}

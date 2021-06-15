@@ -20,6 +20,7 @@ const (
 
 const (
 	widthBytes = 200
+	widthBits  = 8 * widthBytes
 )
 
 func rol64(a uint64, offset int) uint64 {
@@ -161,8 +162,8 @@ type Kravatte struct {
 	y  [25]uint64
 	q  [widthBytes]byte
 
-	queueOffset int
-	phase       Phase
+	queueOffsetBits int
+	phase           Phase
 }
 
 // Phase represents a Kravatte phase.
@@ -190,118 +191,110 @@ func (kv *Kravatte) RefMaskInitialize(key []byte) int {
 	if len(key) >= widthBytes {
 		return 1
 	}
-	key = Pad10NewSlice(key, widthBytes)
+	kv.k = zero
 	snp.StateSetBytes(&kv.k, key)
+	snp.StateSetByte(&kv.k, 1, len(key))
 	keccakF1600(&kv.k)
 	kv.kr = kv.k
 	kv.x = zero
 	kv.phase = PhaseCompressing
-	kv.queueOffset = 0
+	kv.queueOffsetBits = 0
 	return 0
 }
 
-// KraRef implements the input compression phase
-func (kv *Kravatte) KraRef(in []byte) int {
-	return 1
-}
-
-// Pad10NewSlice implements the Pad10 function for a byte slice and given block
-// size length (in bytes). It returns a newly allocated slice.
-func Pad10NewSlice(in []byte, blockByteLen int) []byte {
-	blocks := len(in) / blockByteLen
-	paddingBytes := len(in) % blockByteLen
-	if paddingBytes > 0 {
-		blocks++
-	}
-	byteLen := blocks * blockByteLen
-	out := make([]byte, byteLen)
-	n := copy(out, in)
-	out[n] = 1
-	return out
-}
-
-func (kv *Kravatte) compress(message []byte, lastFlag int) int {
-	// NB(dadrian): This seems correct based on the reference
-	messageLen := len(message)
-	remainingLen := len(message)
-	if remainingLen >= widthBytes {
-		var state [25]uint64
+func (kv *Kravatte) compress(message []byte, messageBitLen *int, lastFlag int) int {
+	messageByteLen := *messageBitLen / 8 // do not include partial last byte
+	bytesCompressed := 0
+	if messageByteLen >= widthBytes {
 		for {
-			state = kv.kr
+			state := kv.kr
 			rollC(&kv.kr)
 			snp.StateAddBytes(&state, message[:widthBytes])
 			keccakF1600(&state)
 			snp.StateAddState(&kv.x, &state) // Add state to x, not vice-versa
 			message = message[widthBytes:]
-			remainingLen -= widthBytes
-			if remainingLen < widthBytes {
+			bytesCompressed += widthBytes
+			messageByteLen -= widthBytes
+			if messageByteLen < widthBytes {
 				break
 			}
 		}
 	}
+	*messageBitLen %= widthBits
 	if lastFlag != 0 {
 		state := kv.kr
 		rollC(&kv.kr)
-		snp.StateAddBytes(&state, message)
-		snp.StateAddByte(&state, 1, remainingLen)
+		snp.StateAddBytes(&state, message[:messageByteLen])
+		message = message[messageByteLen:]
+		bytesCompressed += messageByteLen
+		*messageBitLen %= 8
+		if *messageBitLen != 0 {
+			snp.StateAddByte(&state, message[0]|(1<<*messageBitLen), messageByteLen)
+			bytesCompressed += 1
+		} else {
+			snp.StateAddByte(&state, 1, messageByteLen)
+		}
 		keccakF1600(&state)
 		snp.StateAddState(&kv.x, &state) // Add state to x, not vice-versa
 		rollC(&kv.kr)
-		return messageLen
+		*messageBitLen = 0
 	}
-	return messageLen - remainingLen
+	return bytesCompressed
 }
 
 // Kra compresses input into the sponge.
-func (kv *Kravatte) Kra(in []byte, flags int) int {
-	inputLen := len(in)
+func (kv *Kravatte) Kra(in []byte, inputBitLen int, flags int) int {
 	finalFlag := flags & FlagLastPart
+	if finalFlag == 0 && (inputBitLen&7) != 0 {
+		return 1
+	}
 	if (flags & FlagInit) != 0 {
 		// Do init
 		kv.kr = kv.k
 		kv.x = zero
-		kv.queueOffset = 0
+		kv.queueOffsetBits = 0
 	}
 	if kv.phase != PhaseCompressing {
 		kv.phase = PhaseCompressing
-		kv.queueOffset = 0
-	} else if kv.queueOffset != 0 {
+		kv.queueOffsetBits = 0
+	} else if kv.queueOffsetBits != 0 {
 		// Data is already queued
-		toQueueLen := min(inputLen, widthBytes-kv.queueOffset)
-		copy(kv.q[kv.queueOffset:], in[:toQueueLen])
-		in = in[toQueueLen:]
-		inputLen -= toQueueLen
-		kv.queueOffset += toQueueLen
-		if kv.queueOffset == widthBytes {
+		bitLen := min(inputBitLen, widthBits-kv.queueOffsetBits)
+		byteLen := (bitLen + 7) / 8
+		copy(kv.q[kv.queueOffsetBits/8:], in[:byteLen])
+		in = in[byteLen:]
+		inputBitLen -= bitLen
+		kv.queueOffsetBits += bitLen
+		if kv.queueOffsetBits == widthBits {
 			// Queue is full
-			kv.compress(kv.q[:kv.queueOffset], 0)
-			kv.queueOffset = 0
+			kv.compress(kv.q[:], &kv.queueOffsetBits, 0)
+			kv.queueOffsetBits = 0
 		} else if finalFlag != 0 {
-			kv.compress(kv.q[:kv.queueOffset], 1)
+			kv.compress(kv.q[:], &kv.queueOffsetBits, 1)
 			return 0
 		}
 	}
-	if (inputLen >= widthBytes) || (finalFlag != 0) {
+	if (inputBitLen >= widthBytes) || (finalFlag != 0) {
 		// Compress blocks
-		n := kv.compress(in, finalFlag)
+		n := kv.compress(in, &inputBitLen, finalFlag)
 		in = in[n:]
-		inputLen -= n
 	}
-	if inputLen != 0 {
+	if inputBitLen != 0 {
 		// Queue eventual residual message bytes
-		copy(kv.q[:], in[:inputLen])
-		kv.queueOffset = inputLen
+		copy(kv.q[:], in[:inputBitLen/8])
+		kv.queueOffsetBits = inputBitLen
 	}
 	return 0
 }
 
 // Vatte squeezes the sponge into the output.
-func (kv *Kravatte) Vatte(out []byte, flags int) int {
-	totalOutputLen := len(out)
-	remainingOutputLen := totalOutputLen
+func (kv *Kravatte) Vatte(out []byte, outBits int, flags int) int {
 	finalFlag := flags & FlagLastPart
+	if finalFlag == 0 && (outBits&7) != 0 {
+		return 1
+	}
 	if kv.phase == PhaseCompressing {
-		if kv.queueOffset != 0 {
+		if kv.queueOffsetBits != 0 {
 			return 1
 		}
 		if (flags & FlagShort) != 0 {
@@ -313,52 +306,66 @@ func (kv *Kravatte) Vatte(out []byte, flags int) int {
 		}
 		kv.phase = PhaseExpanding
 	} else if kv.phase != PhaseExpanding {
-		// TODO(dadrian): Should this be a switch?
 		return 1
 	}
-	if kv.queueOffset != 0 {
+	if kv.queueOffsetBits != 0 {
 		// Data is already queued
-		toOutputLen := min(remainingOutputLen, widthBytes-kv.queueOffset)
-		q := kv.q[kv.queueOffset:]
-		copy(out, q[:toOutputLen])
-		kv.queueOffset += toOutputLen
-		if kv.queueOffset == widthBytes {
-			kv.queueOffset = 0
+		toOutputBitLen := min(outBits, widthBits-kv.queueOffsetBits)
+		toOutputByteLen := (toOutputBitLen + 7) / 8
+		q := kv.q[kv.queueOffsetBits/8:]
+		copy(out, q[:toOutputByteLen])
+		kv.queueOffsetBits += toOutputBitLen
+		if kv.queueOffsetBits == widthBits {
+			kv.queueOffsetBits = 0
 		}
-		out = out[toOutputLen:]
-		remainingOutputLen -= toOutputLen
-		if (finalFlag != 0) && (remainingOutputLen == 0) {
+		outBits -= toOutputBitLen
+		if (finalFlag != 0) && (outBits == 0) {
+			toOutputBitLen &= 7
+			if toOutputBitLen != 0 {
+				// cleanup last incomplete byte
+				out[toOutputByteLen-1] &= (1 << toOutputBitLen) - 1
+			}
 			kv.phase = PhaseExpanded
 			return 0
 		}
+		out = out[toOutputByteLen:]
 	}
 
-	if remainingOutputLen != 0 {
+	remainingByteLen := (outBits + 7) / 8
+	var previousBlock []byte
+	var previousBlockLen int
+	if remainingByteLen != 0 {
 		var state [25]uint64
 		var byteLen int
-		// mInit(state)?
 		for {
-			byteLen = min(remainingOutputLen, widthBytes)
+			byteLen = min(remainingByteLen, widthBytes)
 			state = kv.y
 			rollE(&kv.y)
 			keccakF1600(&state)
 			snp.StateExtractAndAddStateToBytes(&state, &kv.kr, 0, out[:byteLen])
+			previousBlock = out
+			previousBlockLen = byteLen
 			out = out[byteLen:]
-			remainingOutputLen -= byteLen
-			if remainingOutputLen == 0 {
+			remainingByteLen -= byteLen
+			if remainingByteLen == 0 {
 				break
 			}
 		}
-		if (finalFlag != 0) && (byteLen != widthBytes) {
+		if (finalFlag == 0) && (byteLen != widthBytes) {
 			// Put the rest of the expanded data in the queue
 			offset := byteLen
 			byteLen = widthBytes - byteLen
-			q := kv.q[kv.queueOffset:]
+			q := kv.q[offset:]
 			snp.StateExtractAndAddStateToBytes(&state, &kv.kr, offset, q[:byteLen])
-			kv.queueOffset = offset
+			kv.queueOffsetBits = offset * 8
 		}
 	}
 	if finalFlag != 0 {
+		outBits &= 7
+		if outBits != 0 {
+			// Cleanup last incomplete byte
+			previousBlock[previousBlockLen-1] &= (1 << outBits) - 1
+		}
 		kv.phase = PhaseExpanded
 	}
 	return 0
@@ -370,8 +377,8 @@ func (kv *Kravatte) Vatte(out []byte, flags int) int {
 // internally forced to true for input and output.
 func (kv *Kravatte) Kravatte(in []byte, out []byte, flags int) int {
 	flags |= FlagLastPart
-	if kv.Kra(in, flags) != 0 {
+	if kv.Kra(in, len(in)*8, flags) != 0 {
 		return 1
 	}
-	return kv.Vatte(out, flags)
+	return kv.Vatte(out, len(out)*8, flags)
 }

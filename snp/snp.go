@@ -19,9 +19,20 @@ func StateAddByte(state *[25]uint64, b byte, offset int) {
 	state[lane] ^= uint64(b) << shift
 }
 
+// StateSetByte overwrites the byte at the given offset.
+func StateSetByte(state *[25]uint64, b byte, offset int) {
+	lane := offset / 8
+	offsetInLane := offset % 8
+	shift := 8 * offsetInLane
+	state[lane] = uint64(b) << shift
+}
+
 // StateAddBytes adds the first up to 200 bytes of b to state.
 func StateAddBytes(state *[25]uint64, b []byte) {
 	length := len(b)
+	if length == 0 {
+		return
+	}
 	i := 0
 	for stateIdx := 0; stateIdx < 25; stateIdx++ {
 		// Little Endian
