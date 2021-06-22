@@ -23,16 +23,13 @@ import (
 const SEND_BUFFER_SIZE = 8092
 
 type Reliable struct {
-	m              sync.Mutex
-	transportConn  transport.MsgConn
-	sendBuffer     []byte
-	sendSeqNo      uint32
-	recvWindow     []byte
-	recvWindowSize uint16
-	recvAckNo      uint32
-	recvReadNo     uint32
-	cid            byte
-	muxer          *Muxer
+	m             sync.Mutex
+	transportConn transport.MsgConn
+	sendBuffer    []byte
+	sendSeqNo     uint32
+	recvWindow    ReceiveWindow
+	cid           byte
+	muxer         *Muxer
 }
 
 // Reliable implements net.Conn
@@ -40,15 +37,16 @@ var _ net.Conn = &Reliable{}
 
 func NewReliableChannelWithChannelId(underlying transport.MsgConn, muxer *Muxer, windowSize uint16, channelId byte) *Reliable {
 	return &Reliable{
-		m:              sync.Mutex{},
-		transportConn:  underlying,
-		recvWindow:     make([]byte, windowSize),
-		recvWindowSize: windowSize,
-		cid:            channelId,
-		recvReadNo:     1,
-		recvAckNo:      1,
-		sendBuffer:     make([]byte, 0),
-		muxer:          muxer,
+		m:             sync.Mutex{},
+		transportConn: underlying,
+		recvWindow: ReceiveWindow{
+			fragments: make(PriorityQueue, 0),
+			stream:    make(chan byte),
+			maxSize:   windowSize,
+		},
+		cid:        channelId,
+		sendBuffer: make([]byte, 0),
+		muxer:      muxer,
 	}
 }
 
@@ -59,14 +57,16 @@ func NewReliableChannel(underlying transport.MsgConn, muxer *Muxer, windowSize u
 		return nil, err
 	}
 	return &Reliable{
-		m:              sync.Mutex{},
-		transportConn:  underlying,
-		recvWindow:     make([]byte, windowSize),
-		recvWindowSize: windowSize,
-		cid:            cid[0],
-		recvReadNo:     1,
-		sendSeqNo:      1,
-		muxer:          muxer,
+		m:             sync.Mutex{},
+		transportConn: underlying,
+		recvWindow: ReceiveWindow{
+			make([]byte, windowSize),
+			windowSize,
+			0,
+		},
+		cid:       cid[0],
+		sendSeqNo: 1,
+		muxer:     muxer,
 	}, nil
 }
 
@@ -105,6 +105,7 @@ func (r *Reliable) Receive(pkt *Packet) error {
 		(frameNo+uint32(pkt.dataLength) < readNo) {
 		return errors.New("received data has exceeded window length")
 	}
+
 	startIdx := frameNo % uint32(r.recvWindowSize)
 	endIdx := (frameNo + uint32(pkt.dataLength))
 	if windowEnd < endIdx {
