@@ -36,18 +36,19 @@ type Reliable struct {
 var _ net.Conn = &Reliable{}
 
 func NewReliableChannelWithChannelId(underlying transport.MsgConn, muxer *Muxer, windowSize uint16, channelId byte) *Reliable {
-	return &Reliable{
+	r := &Reliable{
 		m:             sync.Mutex{},
 		transportConn: underlying,
 		recvWindow: ReceiveWindow{
 			fragments: make(PriorityQueue, 0),
-			stream:    make(chan byte),
 			maxSize:   windowSize,
 		},
 		cid:        channelId,
 		sendBuffer: make([]byte, 0),
 		muxer:      muxer,
 	}
+	r.recvWindow.Init()
+	return r
 }
 
 func NewReliableChannel(underlying transport.MsgConn, muxer *Muxer, windowSize uint16) (*Reliable, error) {
@@ -56,18 +57,19 @@ func NewReliableChannel(underlying transport.MsgConn, muxer *Muxer, windowSize u
 	if err != nil || n != 1 {
 		return nil, err
 	}
-	return &Reliable{
+	r := &Reliable{
 		m:             sync.Mutex{},
 		transportConn: underlying,
 		recvWindow: ReceiveWindow{
-			make([]byte, windowSize),
-			windowSize,
-			0,
+			fragments: make(PriorityQueue, 0),
+			maxSize:   windowSize,
 		},
 		cid:       cid[0],
 		sendSeqNo: 1,
 		muxer:     muxer,
-	}, nil
+	}
+	r.recvWindow.Init()
+	return r, nil
 }
 
 func (r *Reliable) Initiate() {
@@ -84,7 +86,7 @@ func (r *Reliable) Initiate() {
 		r.cid,
 		meta,
 		length,
-		r.recvWindowSize,
+		r.recvWindow.maxSize,
 		channelType,
 		frameNumber,
 		data,
@@ -94,6 +96,8 @@ func (r *Reliable) Initiate() {
 }
 
 func (r *Reliable) Receive(pkt *Packet) error {
+	return r.recvWindow.Receive(pkt)
+
 	r.sendBuffer = r.sendBuffer[pkt.ackNo-r.sendSeqNo:]
 	r.sendSeqNo = pkt.ackNo
 	// TODO: Handle uint32 wraparounds, only overwriting new data.

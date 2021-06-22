@@ -2,7 +2,7 @@ package channels
 
 type Item struct {
 	value    []byte
-	priority uint32
+	priority uint64
 	index    int
 }
 
