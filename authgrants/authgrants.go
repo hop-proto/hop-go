@@ -1,4 +1,4 @@
-package authgrants
+package main
 
 //MSG Types
 const INTENT_REQUEST = 0
@@ -12,7 +12,7 @@ func principalHandleMsg(msg []byte) {
 	msgType := msg[0]
 	switch msgType {
 	case INTENT_REQUEST:
-		clientID := msg[1:33] //first 32 bytes of data
+		//clientID := msg[1:33] //first 32 bytes of data
 		// SNI := //next 256 bytes;
 		// aport := //next 2 bytes
 		// channelType := //next byte
