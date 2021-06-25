@@ -6,17 +6,26 @@ import (
 
 type Muxer struct {
 	channels     map[byte]*Reliable
-	stopped      bool
 	channelQueue chan *Reliable
-	underlying   transport.MsgConn
+	// All channels write raw bytes for a channel packet to this golang chan.
+	sendQueue  chan []byte
+	stopped    bool
+	underlying transport.MsgConn
 }
 
-func NewMuxer(stopped bool, underlying transport.MsgConn) *Muxer {
-	return &Muxer{make(map[byte]*Reliable), stopped, make(chan *Reliable), underlying}
+func NewMuxer(underlying transport.MsgConn) *Muxer {
+	return &Muxer{
+		channels:     make(map[byte]*Reliable),
+		channelQueue: make(chan *Reliable),
+		sendQueue:    make(chan []byte),
+		stopped:      false,
+		underlying:   underlying,
+	}
 }
 
 func (m *Muxer) CreateChannel(windowSize uint16) (*Reliable, error) {
 	r, err := NewReliableChannel(m.underlying, m, windowSize)
+	m.channels[r.cid] = r
 	if err == nil {
 		r.Initiate()
 	}
@@ -29,7 +38,7 @@ func (m *Muxer) Accept() (*Reliable, error) {
 
 func (m *Muxer) readMsg() (*Packet, error) {
 	pkt := make([]byte, 65535)
-	_, err := m.underlying.ReadMsg(pkt) // TODO: wait until read packet
+	_, err := m.underlying.ReadMsg(pkt)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +46,15 @@ func (m *Muxer) readMsg() (*Packet, error) {
 
 }
 
+func (m *Muxer) sender() {
+	for !m.stopped {
+		rawBytes := <-m.sendQueue
+		m.underlying.WriteMsg(rawBytes)
+	}
+}
+
 func (m *Muxer) Start() {
+	go m.sender()
 	m.stopped = false
 	for !m.stopped {
 		pkt, err := m.readMsg()

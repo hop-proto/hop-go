@@ -4,6 +4,8 @@ import (
 	"container/heap"
 	"errors"
 	"sync"
+
+	"github.com/sirupsen/logrus"
 )
 
 type ReceiveWindow struct {
@@ -20,26 +22,25 @@ type ReceiveWindow struct {
 	ackNo       uint64
 }
 
-func (r *ReceiveWindow) Init() {
+func (r *ReceiveWindow) init() {
 	heap.Init(&r.fragments)
 	r.curSize = 0
 }
 
-func (r *ReceiveWindow) Read(buf []byte) int {
+func (r *ReceiveWindow) read(buf []byte) (int, error) {
+
 	r.m.Lock()
 	defer r.m.Unlock()
 	bytesRead := 0
 	bufLen := len(buf)
 
 	for bytesRead <= bufLen && r.fragments.Len() > 0 {
-		frag := r.fragments.Pop().(*Item)
+		frag := heap.Pop(&(r.fragments)).(*Item)
 		fragStart := frag.priority
 		fragEnd := fragStart + uint64(len(frag.value))
-
-		if fragStart <= r.windowStart && fragEnd > r.windowStart {
+		if fragStart <= r.windowStart && fragEnd >= r.windowStart {
 			startIdx := r.windowStart - fragStart
 			numCopied := copy(buf[bytesRead:], frag.value[startIdx:])
-
 			r.windowStart += uint64(numCopied)
 			bytesRead += numCopied
 			if fragStart+uint64(numCopied) < fragEnd {
@@ -50,7 +51,8 @@ func (r *ReceiveWindow) Read(buf []byte) int {
 			}
 		}
 	}
-	return bytesRead
+	// logrus.Info("In read: bytesread: ", bytesRead, " bufLen: ", bufLen, " fraglen: ", r.fragments.Len())
+	return bytesRead, nil
 }
 
 /* Checks if frame is in bounds of receive window. */
@@ -81,32 +83,33 @@ func (r *ReceiveWindow) unwrapSequenceNumber(seqNo uint32) uint64 {
 	return newNo
 }
 
-func (r *ReceiveWindow) Receive(p *Packet) error {
+func (r *ReceiveWindow) receive(p *Packet) error {
 	r.m.Lock()
 	defer r.m.Unlock()
 	windowStart := r.windowStart
 	windowEnd := r.windowStart + uint64(uint32(r.maxSize))
 
 	frameStart := r.unwrapSequenceNumber(p.frameNo)
-	frameEnd := uint64(int32(len(p.data)))
-
+	frameEnd := frameStart + uint64(uint32(len(p.data)))
 	if !frameInBounds(windowStart, windowEnd, frameStart, frameEnd) {
-		return errors.New("received dataframe out of receive window bounds.")
+		// logrus.Info("received dataframe out of receive window bounds", "Receive: ackNo: ", r.ackNo, " fraglen: ", r.fragments.Len(), " window: ", windowStart, " ", windowEnd, " data:", p.data)
+		return errors.New("received dataframe out of receive window bounds")
 	}
-
-	r.fragments.Push(&Item{
-		value:    p.data,
-		priority: frameStart,
-	})
+	if len(p.data) > 0 {
+		r.fragments.Push(&Item{
+			value:    p.data,
+			priority: frameStart,
+		})
+	}
 
 	// Update ack number, if necessary.
 	if frameStart <= r.ackNo && frameEnd >= r.ackNo {
-		r.ackNo = frameStart
+		r.ackNo = frameEnd
 	}
-
+	logrus.Debug("Receive: ackNo: ", r.ackNo, " fraglen: ", r.fragments.Len(), " window: ", windowStart, " ", windowEnd, " data:", p.data, "framestart: ", frameStart)
 	return nil
 }
 
-func (r *ReceiveWindow) GetAck() uint32 {
+func (r *ReceiveWindow) getAck() uint32 {
 	return uint32(r.ackNo)
 }

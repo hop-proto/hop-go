@@ -1,7 +1,6 @@
 package channels
 
 import (
-	"fmt"
 	"math/rand"
 	"net"
 	"testing"
@@ -30,7 +29,7 @@ func newTestServerConfig(t *testing.T) *transport.ServerConfig {
 }
 
 func TestMuxer(t *testing.T) {
-	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetLevel(logrus.InfoLevel)
 	pktConn, err := net.ListenPacket("udp", "localhost:8888")
 	assert.NilError(t, err)
 	// It's actually a UDP conn
@@ -47,16 +46,16 @@ func TestMuxer(t *testing.T) {
 	serverConn, err := server.AcceptTimeout(time.Minute)
 	assert.NilError(t, err)
 
-	mc := NewMuxer(false, transportConn)
+	mc := NewMuxer(transportConn)
 	go mc.Start()
 
 	channel, err := mc.CreateChannel(1 << 8)
 	assert.NilError(t, err)
 
-	ms := NewMuxer(false, serverConn)
+	ms := NewMuxer(serverConn)
 	go ms.Start()
 
-	testData := "hi I am some written data"
+	testData := "hi i am some data"
 
 	_, err = channel.Write([]byte(testData))
 	assert.NilError(t, err)
@@ -65,21 +64,25 @@ func TestMuxer(t *testing.T) {
 	assert.NilError(t, err)
 
 	buf := make([]byte, len(testData))
-	time.Sleep(1 * time.Millisecond)
-	var n int
+	time.Sleep(time.Millisecond)
+	bytesRead := 0
+	i := 0
 	for {
-		n, err = serverChan.Read(buf)
-		if err == nil {
+		n, err := serverChan.Read(buf[bytesRead:])
+		bytesRead += n
+		if err != nil || i > 20 {
 			break
 		}
+		i += 1
+		time.Sleep(20 * time.Millisecond)
 	}
 
-	assert.Check(t, cmp.Len(testData, n))
+	assert.Check(t, cmp.Len(testData, bytesRead))
 	assert.Equal(t, testData, string(buf))
 }
 
 func TestSmallWindow(t *testing.T) {
-	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetLevel(logrus.InfoLevel)
 	pktConn, err := net.ListenPacket("udp", "localhost:8889")
 	assert.NilError(t, err)
 	// It's actually a UDP conn
@@ -96,21 +99,20 @@ func TestSmallWindow(t *testing.T) {
 	serverConn, err := server.AcceptTimeout(time.Minute)
 	assert.NilError(t, err)
 
-	mc := NewMuxer(false, transportConn)
+	mc := NewMuxer(transportConn)
 	go mc.Start()
 
 	channel, err := mc.CreateChannel(1 << 7)
 	assert.NilError(t, err)
 
-	ms := NewMuxer(false, serverConn)
+	ms := NewMuxer(serverConn)
 	go ms.Start()
 
 	testData := make([]byte, 200)
 	for i := range testData {
-		testData[i] = []byte{'a', 'b', 'c', 'd', 'e', 'f'}[rand.Intn(6)]
+		testData[i] = []byte{'g', 'h', 'i', 'j', 'k', 'l'}[rand.Intn(6)]
 	}
 
-	fmt.Println(testData)
 	_, err = channel.Write([]byte(testData))
 	assert.NilError(t, err)
 
@@ -119,16 +121,19 @@ func TestSmallWindow(t *testing.T) {
 
 	buf := make([]byte, len(testData))
 	time.Sleep(1 * time.Millisecond)
-	var n int
+	bytesRead := 0
 	i := 0
 	for {
-		n, err = serverChan.Read(buf)
-		if err != nil || n == 0 || i == 20 {
+		n, err := serverChan.Read(buf[bytesRead:])
+		time.Sleep(10 * time.Millisecond)
+		bytesRead += n
+		if err != nil || i == 1000 {
+			logrus.Info(err)
 			break
 		}
 		i += 1
 	}
-
-	assert.Check(t, cmp.Len(testData, n))
+	logrus.Info("I", i)
+	assert.Check(t, cmp.Len(testData, bytesRead))
 	assert.Equal(t, string(testData), string(buf))
 }
