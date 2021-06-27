@@ -4,6 +4,12 @@ import (
 	"testing"
 )
 
+func TestRead(t *testing.T) {
+	// c1, err := NewReliableChannel()
+
+	// c2, err := NewReliableChannel()
+}
+
 func TestReadBuffering(t *testing.T) {
 	// server := NewReliableChannel(transport.MsgConn{})
 	// client := Reliable{}

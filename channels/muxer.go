@@ -7,7 +7,7 @@ import (
 type Muxer struct {
 	channels     map[byte]*Reliable
 	channelQueue chan *Reliable
-	// All channels write raw bytes for a channel packet to this golang chan.
+	// All hop channels write raw bytes for a channel packet to this golang chan.
 	sendQueue  chan []byte
 	stopped    bool
 	underlying transport.MsgConn
@@ -24,7 +24,7 @@ func NewMuxer(underlying transport.MsgConn) *Muxer {
 }
 
 func (m *Muxer) CreateChannel(windowSize uint16) (*Reliable, error) {
-	r, err := NewReliableChannel(m.underlying, m, windowSize)
+	r, err := NewReliableChannel(m.underlying, m.sendQueue, windowSize)
 	m.channels[r.cid] = r
 	if err == nil {
 		r.Initiate()
@@ -68,7 +68,7 @@ func (m *Muxer) Start() {
 			if err != nil {
 				panic(err)
 			}
-			ch := NewReliableChannelWithChannelId(m.underlying, m, initPkt.windowSize, initPkt.channelID)
+			ch := NewReliableChannelWithChannelId(m.underlying, m.sendQueue, initPkt.windowSize, initPkt.channelID)
 			m.channels[pkt.channelID] = ch
 			m.channelQueue <- ch
 			channel = ch

@@ -22,8 +22,9 @@ const SEND_BUFFER_SIZE = 8092
 
 type Reliable struct {
 	cid        byte
+	closed     bool
 	m          sync.Mutex
-	muxer      *Muxer
+	sendQueue  chan []byte
 	recvWindow ReceiveWindow
 	sender     Sender
 }
@@ -37,15 +38,14 @@ func (r *Reliable) send() {
 		pkt.channelID = r.cid
 		pkt.ackNo = uint32(r.recvWindow.ackNo)
 		// logrus.Info("sending ", pkt.data, " ackno: ", pkt.ackNo, " seq no: ", pkt.frameNo)
-		r.muxer.sendQueue <- pkt.toBytes()
+		r.sendQueue <- pkt.toBytes()
 	}
 }
 
-func NewReliableChannelWithChannelId(underlying transport.MsgConn, muxer *Muxer, windowSize uint16, channelId byte) *Reliable {
+func NewReliableChannelWithChannelId(underlying transport.MsgConn, sendQueue chan []byte, windowSize uint16, channelId byte) *Reliable {
 	r := &Reliable{
-		cid:   channelId,
-		m:     sync.Mutex{},
-		muxer: muxer,
+		cid: channelId,
+		m:   sync.Mutex{},
 		recvWindow: ReceiveWindow{
 			fragments:   make(PriorityQueue, 0),
 			maxSize:     windowSize,
@@ -54,10 +54,11 @@ func NewReliableChannelWithChannelId(underlying transport.MsgConn, muxer *Muxer,
 		sender: Sender{
 			ackNo:      0,
 			buffer:     make([]byte, 0),
-			RTO:        time.Millisecond * 5,
+			RTO:        time.Millisecond * 50,
 			sendQueue:  make(chan *Packet),
 			windowSize: 1,
 		},
+		sendQueue: sendQueue,
 	}
 	r.recvWindow.init()
 	go r.sender.retransmit()
@@ -65,16 +66,15 @@ func NewReliableChannelWithChannelId(underlying transport.MsgConn, muxer *Muxer,
 	return r
 }
 
-func NewReliableChannel(underlying transport.MsgConn, muxer *Muxer, windowSize uint16) (*Reliable, error) {
+func NewReliableChannel(underlying transport.MsgConn, sendQueue chan []byte, windowSize uint16) (*Reliable, error) {
 	cid := []byte{0}
 	n, err := rand.Read(cid)
 	if err != nil || n != 1 {
 		return nil, err
 	}
 	r := &Reliable{
-		cid:   cid[0],
-		m:     sync.Mutex{},
-		muxer: muxer,
+		cid: cid[0],
+		m:   sync.Mutex{},
 		recvWindow: ReceiveWindow{
 			fragments:   make(PriorityQueue, 0),
 			maxSize:     windowSize,
@@ -84,9 +84,10 @@ func NewReliableChannel(underlying transport.MsgConn, muxer *Muxer, windowSize u
 			ackNo:      0,
 			buffer:     make([]byte, 0),
 			windowSize: 1,
-			RTO:        time.Millisecond * 5,
+			RTO:        time.Millisecond * 50,
 			sendQueue:  make(chan *Packet),
 		},
+		sendQueue: sendQueue,
 	}
 	r.recvWindow.init()
 	go r.sender.retransmit()
@@ -95,25 +96,24 @@ func NewReliableChannel(underlying transport.MsgConn, muxer *Muxer, windowSize u
 }
 
 func (r *Reliable) Initiate() {
-	// Set REQ bit to 1.
-	meta := byte(1 << 7)
 
-	// TODO: support various channel types
 	channelType := byte(0)
-	// Frame Number begins with 0.
-	frameNumber := uint32(0)
-	data := []byte("Channel initiation request.")
-	length := uint16(len(data))
+
 	p := InitiatePacket{
-		r.cid,
-		meta,
-		length,
-		r.recvWindow.maxSize,
-		channelType,
-		frameNumber,
-		data,
+		channelID:   r.cid,
+		channelType: channelType,
+		data:        []byte{},
+		dataLength:  0,
+		frameNo:     0,
+		windowSize:  r.recvWindow.maxSize,
+		flags: PacketFlags{
+			ACK:  false,
+			FIN:  false,
+			REQ:  true,
+			RESP: false,
+		},
 	}
-	r.muxer.sendQueue <- p.toBytes()
+	r.sendQueue <- p.toBytes()
 }
 
 func (r *Reliable) Receive(pkt *Packet) error {

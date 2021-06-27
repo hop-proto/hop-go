@@ -69,6 +69,7 @@ func (s *Sender) retransmit() {
 		if bufferLen > 0 {
 			s.send()
 		}
+
 		// logrus.Info("RETRANSIMT buffer len", bufferLen)
 	}
 
