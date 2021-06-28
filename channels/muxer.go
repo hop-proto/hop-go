@@ -1,12 +1,17 @@
 package channels
 
 import (
+	"sync"
+
+	"github.com/sirupsen/logrus"
 	"zmap.io/portal/transport"
 )
 
 type Muxer struct {
-	channels     map[byte]*Reliable
+	channels map[byte]*Reliable
+	// Channels waiting for an Accept() call.
 	channelQueue chan *Reliable
+	m            sync.Mutex
 	// All hop channels write raw bytes for a channel packet to this golang chan.
 	sendQueue  chan []byte
 	stopped    bool
@@ -16,19 +21,30 @@ type Muxer struct {
 func NewMuxer(underlying transport.MsgConn) *Muxer {
 	return &Muxer{
 		channels:     make(map[byte]*Reliable),
-		channelQueue: make(chan *Reliable),
+		channelQueue: make(chan *Reliable, 128),
+		m:            sync.Mutex{},
 		sendQueue:    make(chan []byte),
 		stopped:      false,
 		underlying:   underlying,
 	}
 }
 
+func (m *Muxer) AddChannel(c *Reliable) {
+	m.m.Lock()
+	m.channels[c.id] = c
+	m.m.Unlock()
+}
+
+func (m *Muxer) GetChannel(channelId byte) (*Reliable, bool) {
+	m.m.Lock()
+	defer m.m.Unlock()
+	c, ok := m.channels[channelId]
+	return c, ok
+}
+
 func (m *Muxer) CreateChannel(windowSize uint16) (*Reliable, error) {
 	r, err := NewReliableChannel(m.underlying, m.sendQueue, windowSize)
-	m.channels[r.cid] = r
-	if err == nil {
-		r.Initiate()
-	}
+	m.AddChannel(r)
 	return r, err
 }
 
@@ -57,35 +73,45 @@ func (m *Muxer) Start() {
 	go m.sender()
 	m.stopped = false
 	for !m.stopped {
-		pkt, err := m.readMsg()
+		frame, err := m.readMsg()
 		if err != nil {
 			continue
 		}
-
-		channel, ok := m.channels[pkt.channelID]
+		logrus.Info("muxer start iteration")
+		channel, ok := m.GetChannel(frame.channelID)
 		if !ok {
-			initPkt, err := FromInitiateBytes(pkt.toBytes())
-			if err != nil {
-				panic(err)
+			logrus.Info("Channel id ", frame.channelID, "not found")
+			initFrame, err := FromInitiateBytes(frame.toBytes())
+
+			if initFrame.flags.REQ {
+
+				if err != nil {
+					logrus.Panic(err)
+					panic(err)
+				}
+				channel = NewReliableChannelWithChannelId(m.underlying, m.sendQueue, initFrame.windowSize, initFrame.channelID)
+				m.AddChannel(channel)
+				logrus.Info("sending to chan")
+				m.channelQueue <- channel
+				logrus.Info("sent to chan")
 			}
-			ch := NewReliableChannelWithChannelId(m.underlying, m.sendQueue, initPkt.windowSize, initPkt.channelID)
-			m.channels[pkt.channelID] = ch
-			m.channelQueue <- ch
-			channel = ch
-		} else {
-			channel.Receive(pkt)
+
+			logrus.Info("Channel id ", frame.channelID, "not found")
 		}
 
-		// Inspect
+		if channel != nil {
+			if frame.flags.REQ || frame.flags.RESP {
+				initFrame, err := FromInitiateBytes(frame.toBytes())
+				logrus.Info("RECEIVING INITIATE FRAME ", initFrame.channelID, " ", initFrame.frameNo, " ", frame.flags.REQ, " ", frame.flags.RESP)
+				if err != nil {
+					panic(err)
+				}
+				channel.ReceiveInitiatePkt(initFrame)
+			} else {
+				logrus.Info("RECEIVING NORMAL FRAME")
+				channel.Receive(frame)
+			}
+		}
 
-		// Reorder here rawMsg.SequenceNumber
-		// Add to some buffer???
-		// if rawMsg.SequenceNo == nextNumber {
-		// channel.pending.Write(rawMsg)
-		// } else {
-		// Packet is out of order
-		// Buffer somewhere until we read the next packet
-		// Then write everything to the pending queue once it's in order
-		// }
 	}
 }

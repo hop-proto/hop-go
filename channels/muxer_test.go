@@ -74,7 +74,7 @@ func TestMuxer(t *testing.T) {
 			break
 		}
 		i += 1
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	assert.Check(t, cmp.Len(testData, bytesRead))
@@ -108,7 +108,7 @@ func TestSmallWindow(t *testing.T) {
 	ms := NewMuxer(serverConn)
 	go ms.Start()
 
-	testData := make([]byte, 200)
+	testData := make([]byte, 50)
 	for i := range testData {
 		testData[i] = []byte{'g', 'h', 'i', 'j', 'k', 'l'}[rand.Intn(6)]
 	}
@@ -122,14 +122,13 @@ func TestSmallWindow(t *testing.T) {
 	assert.NilError(t, err)
 
 	buf := make([]byte, len(testData))
-	time.Sleep(time.Second)
+	time.Sleep(4 * time.Second)
 	bytesRead := 0
 	i := 0
 	for {
 		n, err := serverChan.Read(buf[bytesRead:])
-		time.Sleep(20 * time.Millisecond)
 		bytesRead += n
-		if err != nil || i == 600 {
+		if err != nil || i > 100 {
 			logrus.Info(err)
 			break
 		}
