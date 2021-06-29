@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+//prints out information of a pstree
 func display(pid int, tree *pstree.Tree, indent int) {
 	str := strings.Repeat("  ", indent)
 	for _, cid := range tree.Procs[pid].Children {
@@ -27,6 +28,7 @@ func display(pid int, tree *pstree.Tree, indent int) {
 	}
 }
 
+//checks tree (starting at proc) to see if cPID is a descendent
 func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
 	for _, child := range proc.Children {
 		log.Printf("Checking [%v]", child)
@@ -46,14 +48,21 @@ func authGrantServer(c net.Conn, principals *map[int32]string) {
 		return
 	}
 
+	//PID of client process that connected to socket
 	cPID := creds.Pid
+
+	//ancestor represents the PID of the ancestor of the client and child of server daemon
 	var ancestor int32 = -1
+
+	//get a picture of the entire system process tree
 	tree, err := pstree.New()
-	display(os.Getppid(), tree, 1)
+	//display(os.Getppid(), tree, 1) //displays all pstree for ipcserver
 	if err != nil {
 		log.Printf("Error making pstree: %s", err)
 		return
 	}
+
+	//check all of the PIDs of processes that the server started
 	for k := range *principals {
 		log.Printf("Checking [%v]", k)
 		if k == cPID || checkDescendents(tree, tree.Procs[int(k)], int(cPID)) {
@@ -77,9 +86,10 @@ func authGrantServer(c net.Conn, principals *map[int32]string) {
 	if err != nil {
 		return
 	}
-	println("Server got:", string(buf[0:n]))
+	log.Printf("Server got: %v", string(buf[0:n]))
 
 	//initiate NPC w/ principal and get user response
+	//TODO: make this actually work
 	log.Printf("Initiating AGC w/ %v", principal)
 	approved := true
 	if !approved {
@@ -104,6 +114,7 @@ func setListenerOptions(proto, addr string, c syscall.RawConn) error {
 }
 
 //Src: https://blog.jbowen.dev/2019/09/using-so_peercred-in-go/src/peercred/cred.go
+//Parses the credentials sent by the client when it connects to the socket
 func readCreds(c net.Conn) (*unix.Ucred, error) {
 	var cred *unix.Ucred
 
@@ -162,7 +173,7 @@ func main() {
 	if err != nil {
 		log.Printf("Started w/ err: %v", err)
 	} else {
-		principals[int32(cmd.Process.Pid)] = "principal1"
+		principals[int32(cmd.Process.Pid)] = "principal1" //temporary placeholder for real principal identifier
 		log.Printf("Started process at PID: %v", cmd.Process.Pid)
 	}
 
@@ -178,14 +189,4 @@ func main() {
 
 		go authGrantServer(conn, &principals)
 	}
-	//first way to wait
-	// state, es := cmd.Process.Wait()
-	// if es != nil {
-	// 	log.Printf("Waited w/ err: %v", err)
-	// }
-	// log.Printf("Pid: %v", state.Pid())
-
-	//other way to wait
-	// err = cmd.Wait()
-	// log.Printf("Command finished with error: %v", err)
 }
