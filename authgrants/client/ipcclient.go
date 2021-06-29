@@ -29,14 +29,15 @@ func reader(r net.Conn, finished chan bool, intent string) {
 }
 
 func main() {
-
-	c, err := net.Dial("unix", "../echo.sock")
+	//time.Sleep(10000 * time.Millisecond)
+	c, err := net.Dial("unix", "echo.sock")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer c.Close()
 	ppid := os.Getppid()
 	println(ppid)
+
 	finished := make(chan bool)
 	go reader(c, finished, "user@server1, action, server2")
 
