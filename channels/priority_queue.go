@@ -4,6 +4,7 @@ type Item struct {
 	value    []byte
 	priority uint64
 	index    int
+	FIN      bool
 }
 
 // A PriorityQueue implements heap.Interface and holds Items.

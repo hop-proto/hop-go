@@ -5,14 +5,21 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 // The largest channel frame data length field.
-const MAX_FRAME_DATA_LENGTH = 1
+const MAX_FRAME_DATA_LENGTH = 10
+
+// The highest number of frames we will transmit per timeout period,
+// even if the window size is large enough.
+const MAX_FRAG_TRANS_PER_RTO = 10
 
 type Sender struct {
 	// The acknowledgement number sent from the other end of the connection.
-	ackNo   uint32
+	ackNo   uint64
+	closed  bool
 	frameNo uint32
 	// The buffer of unacknowledged channel frames that will be retransmitted if necessary.
 	frames []*Packet
@@ -36,18 +43,27 @@ type Sender struct {
 
 func (s *Sender) write(b []byte) (n int, err error) {
 	s.l.Lock()
-
+	defer s.l.Unlock()
+	if s.closed {
+		return 0, errors.New("trying to write to closed channel")
+	}
 	s.buffer = append(s.buffer, b...)
-	bufferLen := len(s.buffer)
-	s.l.Unlock()
-	// we need to unlock here so that send()
-	// can claim the buffer lock.
 
-	for bufferLen > 0 {
-		s.send()
-		s.l.Lock()
-		bufferLen = len(s.buffer)
-		s.l.Unlock()
+	for len(s.buffer) > 0 {
+		dataLength := uint16(MAX_FRAME_DATA_LENGTH)
+		if uint16(len(s.buffer)) < dataLength {
+			dataLength = uint16(len(s.buffer))
+		}
+		pkt := Packet{
+			dataLength: dataLength,
+			frameNo:    s.frameNo,
+			data:       s.buffer[:dataLength],
+		}
+
+		s.frameDataLengths[pkt.frameNo] = dataLength
+		s.frameNo += 1
+		s.buffer = s.buffer[dataLength:]
+		s.frames = append(s.frames, &pkt)
 	}
 	return len(b), nil
 }
@@ -55,75 +71,73 @@ func (s *Sender) write(b []byte) (n int, err error) {
 func (s *Sender) recvAck(ackNo uint32) error {
 	s.l.Lock()
 	defer s.l.Unlock()
-	origAckNo := uint64(s.ackNo)
 	newAckNo := uint64(ackNo)
-
-	if newAckNo < origAckNo && (newAckNo+(1<<32)-origAckNo <= uint64(s.windowSize)) { // wrap around
+	logrus.Info("RECV ACK origAckNo ", s.ackNo, " new ackno ", newAckNo)
+	if newAckNo < s.ackNo && (newAckNo+(1<<32)-s.ackNo <= uint64(s.windowSize)) { // wrap around
 		newAckNo = newAckNo + (1 << 32)
 	}
 
 	bytesAcked := uint64(0)
-	frame := origAckNo
-	// logrus.Info("recvAck ", origAckNo, newAckNo, bytesAcked, frame)
-	for frame < newAckNo {
-		bytesForFrame, ok := s.frameDataLengths[uint32(frame)]
+	for s.ackNo < newAckNo {
+		bytesForFrame, ok := s.frameDataLengths[uint32(s.ackNo)]
 		if !ok {
-			return fmt.Errorf("data length missing for frame %d", frame)
+			logrus.Infof("data length missing for frame %d", s.ackNo)
+			return fmt.Errorf("data length missing for frame %d", s.ackNo)
 		}
 		bytesAcked += uint64(bytesForFrame)
-		delete(s.frameDataLengths, uint32(frame))
-		frame += 1
+		delete(s.frameDataLengths, uint32(s.ackNo))
+		s.ackNo += 1
 		s.frames = s.frames[1:]
 	}
 
-	s.ackNo = uint32(newAckNo)
-
-	if bytesAcked > uint64(len(s.buffer)) {
-		return errors.New("acknowledged too many bytes")
-	}
-
-	s.buffer = s.buffer[bytesAcked:]
 	return nil
 }
 
 func (s *Sender) retransmit() {
-	s.l.Lock()
-	numFrames := len(s.frames)
-	s.l.Unlock()
-	for true || numFrames > 0 {
+	for {
 		timer := time.NewTimer(s.RTO)
 		<-timer.C
 		s.l.Lock()
-		if len(s.frames) > 0 {
-			s.sendQueue <- s.frames[0]
+		if len(s.frames) == 0 {
+			pkt := Packet{
+				dataLength: 0,
+				frameNo:    s.frameNo,
+				data:       []byte{},
+			}
+			s.sendQueue <- &pkt
 		}
-
-		numFrames = len(s.frames)
+		i := 0
+		for i < len(s.frames) && i < int(s.windowSize) && i < MAX_FRAG_TRANS_PER_RTO {
+			s.sendQueue <- s.frames[i]
+			i += 1
+		}
 		s.l.Unlock()
 	}
 }
 
-/*
-	send() is internally called by:
-	1) a write() call.
-	2) The sender timeout thread.
-	It sends the earliest unacknowledged segment.
-*/
-func (s *Sender) send() {
+/* */
+func (s *Sender) close() error {
 	s.l.Lock()
 	defer s.l.Unlock()
-	dataLength := uint16(MAX_FRAME_DATA_LENGTH)
-	if uint16(len(s.buffer)) < dataLength {
-		dataLength = uint16(len(s.buffer))
+	if s.closed {
+		return errors.New("channel is already closed")
 	}
-	pkt := Packet{
-		dataLength: dataLength,
-		frameNo:    s.frameNo,
-		data:       s.buffer[:dataLength],
-	}
-	s.frameDataLengths[pkt.frameNo] = dataLength
-	s.frameNo += 1
-	s.buffer = s.buffer[dataLength:]
-	s.frames = append(s.frames, &pkt)
+	s.closed = true
 
+	pkt := Packet{
+		dataLength: 0,
+		frameNo:    s.frameNo,
+		data:       []byte{},
+		flags: PacketFlags{
+			ACK:  true,
+			FIN:  true,
+			REQ:  false,
+			RESP: false,
+		},
+	}
+
+	s.frameDataLengths[pkt.frameNo] = 0
+	s.frameNo += 1
+	s.frames = append(s.frames, &pkt)
+	return nil
 }

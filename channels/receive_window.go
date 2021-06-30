@@ -10,36 +10,39 @@ import (
 )
 
 type ReceiveWindow struct {
-	m         sync.Mutex
-	fragments PriorityQueue
-	buffer    *bytes.Buffer
-	maxSize   uint16
-	curSize   uint16
+	buffer     *bytes.Buffer
+	bufferCond sync.Cond
+	closed     bool
+	fragments  PriorityQueue
+	m          sync.Mutex
+	maxSize    uint16
 	/*
 		We treat the sequence numbers as uint64 so we can avoid wraparounds
 		and not have to update our priority queue orderings in the case of a
 		wraparound.
 	*/
-	windowStart uint64
 	ackNo       uint64
+	windowStart uint64
 }
 
 func (r *ReceiveWindow) init() {
 	heap.Init(&r.fragments)
-	r.curSize = 0
 }
 
 /* Processes window into buffer stream if the ordered fragments are ready (in order).
 Precondition: receive window mutex is held. */
 func (r *ReceiveWindow) processIntoBuffer() {
-
 	for r.fragments.Len() > 0 {
 		frag := heap.Pop(&(r.fragments)).(*Item)
+		if frag.FIN {
+			logrus.Info("RECV WINDDOW FRAG CLOSED")
+			r.windowStart += 1
+			r.ackNo += 1
+			r.closed = true
+			break
+		}
 		if r.windowStart != frag.priority {
-			heap.Push(&r.fragments, &Item{
-				value:    frag.value,
-				priority: frag.priority,
-			})
+			heap.Push(&r.fragments, frag)
 			break
 		} else {
 			r.buffer.Write(frag.value)
@@ -47,9 +50,24 @@ func (r *ReceiveWindow) processIntoBuffer() {
 			r.ackNo += 1
 		}
 	}
+	r.bufferCond.Signal()
 }
 
 func (r *ReceiveWindow) read(buf []byte) (int, error) {
+	r.bufferCond.L.Lock()
+	for {
+		r.m.Lock()
+		logrus.Info("BUFFER LEN", r.buffer.Len(), " buflen", len(buf))
+		if r.buffer.Len() >= len(buf) || r.closed {
+			break
+		}
+		r.m.Unlock()
+		r.bufferCond.Wait()
+
+	}
+	defer r.m.Unlock()
+	defer r.bufferCond.L.Unlock()
+
 	return r.buffer.Read(buf)
 }
 
@@ -83,21 +101,25 @@ func (r *ReceiveWindow) unwrapFrameNo(frameNo uint32) uint64 {
 
 /* Precondition: receive window lock is held. */
 func (r *ReceiveWindow) receive(p *Packet) error {
-
+	r.m.Lock()
+	defer r.m.Unlock()
 	windowStart := r.windowStart
 	windowEnd := r.windowStart + uint64(uint32(r.maxSize))
 
 	frameNo := r.unwrapFrameNo(p.frameNo)
-	logrus.Info("receive frame ", windowStart, windowEnd, frameNo, p.ackNo, p.data, r.ackNo)
+	logrus.Info("receive frame ", windowStart, windowEnd, frameNo, p.ackNo, p.data, r.ackNo, p.flags.FIN)
 	if !frameInBounds(windowStart, windowEnd, frameNo) {
 		logrus.Info("received dataframe out of receive window bounds")
 		return errors.New("received dataframe out of receive window bounds")
 	}
 
-	heap.Push(&r.fragments, &Item{
-		value:    p.data,
-		priority: frameNo,
-	})
+	if p.dataLength > 0 || p.flags.FIN {
+		heap.Push(&r.fragments, &Item{
+			value:    p.data,
+			priority: frameNo,
+			FIN:      p.flags.FIN,
+		})
+	}
 
 	r.processIntoBuffer()
 

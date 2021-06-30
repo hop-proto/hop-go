@@ -1,6 +1,7 @@
 package channels
 
 import (
+	"net"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -16,16 +17,18 @@ type Muxer struct {
 	sendQueue  chan []byte
 	stopped    bool
 	underlying transport.MsgConn
+	netConn    net.Conn
 }
 
-func NewMuxer(underlying transport.MsgConn) *Muxer {
+func NewMuxer(msgConn transport.MsgConn, netConn net.Conn) *Muxer {
 	return &Muxer{
 		channels:     make(map[byte]*Reliable),
 		channelQueue: make(chan *Reliable, 128),
 		m:            sync.Mutex{},
 		sendQueue:    make(chan []byte),
 		stopped:      false,
-		underlying:   underlying,
+		underlying:   msgConn,
+		netConn:      netConn,
 	}
 }
 
@@ -43,7 +46,7 @@ func (m *Muxer) GetChannel(channelId byte) (*Reliable, bool) {
 }
 
 func (m *Muxer) CreateChannel(windowSize uint16) (*Reliable, error) {
-	r, err := NewReliableChannel(m.underlying, m.sendQueue, windowSize)
+	r, err := NewReliableChannel(m.underlying, m.netConn, m.sendQueue, windowSize)
 	m.AddChannel(r)
 	return r, err
 }
@@ -77,10 +80,9 @@ func (m *Muxer) Start() {
 		if err != nil {
 			continue
 		}
-		logrus.Info("muxer start iteration")
 		channel, ok := m.GetChannel(frame.channelID)
 		if !ok {
-			logrus.Info("Channel id ", frame.channelID, "not found")
+			logrus.Info("NO CHANNEL")
 			initFrame, err := FromInitiateBytes(frame.toBytes())
 
 			if initFrame.flags.REQ {
@@ -89,14 +91,11 @@ func (m *Muxer) Start() {
 					logrus.Panic(err)
 					panic(err)
 				}
-				channel = NewReliableChannelWithChannelId(m.underlying, m.sendQueue, initFrame.windowSize, initFrame.channelID)
+				channel = NewReliableChannelWithChannelId(m.underlying, m.netConn, m.sendQueue, initFrame.windowSize, initFrame.channelID)
 				m.AddChannel(channel)
-				logrus.Info("sending to chan")
 				m.channelQueue <- channel
-				logrus.Info("sent to chan")
 			}
 
-			logrus.Info("Channel id ", frame.channelID, "not found")
 		}
 
 		if channel != nil {
@@ -114,4 +113,15 @@ func (m *Muxer) Start() {
 		}
 
 	}
+}
+
+func (m *Muxer) Stop() {
+	// TODO
+	m.m.Lock()
+	m.stopped = true
+	for _, v := range m.channels {
+		v.Close()
+	}
+	m.m.Unlock()
+
 }
