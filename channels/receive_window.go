@@ -35,7 +35,6 @@ func (r *ReceiveWindow) processIntoBuffer() {
 	for r.fragments.Len() > 0 {
 		frag := heap.Pop(&(r.fragments)).(*Item)
 		if frag.FIN {
-			logrus.Info("RECV WINDDOW FRAG CLOSED")
 			r.windowStart += 1
 			r.ackNo += 1
 			r.closed = true
@@ -57,7 +56,6 @@ func (r *ReceiveWindow) read(buf []byte) (int, error) {
 	r.bufferCond.L.Lock()
 	for {
 		r.m.Lock()
-		logrus.Info("BUFFER LEN", r.buffer.Len(), " buflen", len(buf))
 		if r.buffer.Len() >= len(buf) || r.closed {
 			break
 		}

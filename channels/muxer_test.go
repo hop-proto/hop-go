@@ -59,23 +59,17 @@ func TestMuxer(t *testing.T) {
 
 	_, err = channel.Write([]byte(testData))
 	assert.NilError(t, err)
-
+	channel.Close()
 	serverChan, err := ms.Accept()
 	assert.NilError(t, err)
 
 	buf := make([]byte, len(testData))
 	time.Sleep(time.Second)
 	bytesRead := 0
-	i := 0
-	for {
-		n, err := serverChan.Read(buf[bytesRead:])
-		bytesRead += n
-		if err != nil || i > 20 {
-			break
-		}
-		i += 1
-		time.Sleep(200 * time.Millisecond)
-	}
+	n, err := serverChan.Read(buf[bytesRead:])
+	serverChan.Close()
+	assert.NilError(t, err)
+	bytesRead += n
 	mc.Stop()
 	ms.Stop()
 	assert.Check(t, cmp.Len(testData, bytesRead))
@@ -124,11 +118,10 @@ func TestSmallWindow(t *testing.T) {
 	assert.NilError(t, err)
 
 	buf := make([]byte, len(testData)+2)
-	time.Sleep(4 * time.Second)
 
 	n, err := serverChan.Read(buf)
+	serverChan.Close()
 	assert.NilError(t, err)
-	logrus.Info("BYTES READ ", n)
 	ms.Stop()
 	mc.Stop()
 	assert.Check(t, cmp.Len(testData, n))
