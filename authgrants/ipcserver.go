@@ -5,12 +5,11 @@ and pretends to do auth grant with principal*/
 package main
 
 import (
-	"context"
+	"bufio"
 	"fmt"
 	"log"
 	"net"
 	"os"
-	"os/exec"
 	"strings"
 	"syscall"
 
@@ -150,43 +149,80 @@ func readCreds(c net.Conn) (*unix.Ucred, error) {
 	return cred, nil
 }
 
-func main() {
+func handleConn(c net.Conn) {
+	b := bufio.NewReader(c)
+	for {
+		line, err := b.ReadBytes('\n')
+		if err != nil {
+			break
+		}
+		c.Write([]byte("> "))
+		c.Write(line)
+	}
 
-	//make sure the socket does not already exist.
-	if err := os.RemoveAll(SockAddr); err != nil {
+	c.Close()
+}
+
+func serve() {
+	//set up UDS for principal (temp soln) would actually be over a network conn
+	// Make sure no stale sockets present
+	const server1 = "/tmp/server1.sock"
+	os.Remove(server1)
+
+	// Create new Unix domain socket
+	server, err := net.Listen("unix", server1)
+	if err != nil {
 		log.Fatal(err)
 	}
+	defer server.Close()
 
-	//set socket options and start listening to socket
-	config := &net.ListenConfig{Control: setListenerOptions}
-	l, err := config.Listen(context.Background(), "unix", SockAddr)
-	if err != nil {
-		log.Fatal("listen error:", err)
-	}
-	defer l.Close()
-
-	principals := make(map[int32]string) //PID -> "principal" (what should actually rep principal?)
-
-	//Spawn some children processes that will act as clients
-	cmd := exec.Command("go", "run", "client/ipcclient.go") //need to pass a secret when it is spawned?
-	err = cmd.Start()
-	if err != nil {
-		log.Printf("Started w/ err: %v", err)
-	} else {
-		principals[int32(cmd.Process.Pid)] = "principal1" //temporary placeholder for real principal identifier
-		log.Printf("Started process at PID: %v", cmd.Process.Pid)
-	}
-
-	log.Printf("Listening at [%v]", SockAddr)
+	// Loop to process client connections
 	for {
-		// Accept new connections, dispatching them to echoServer
-		// in a goroutine.
-		conn, err := l.Accept()
+		client, err := server.Accept()
 		if err != nil {
-			log.Fatal("accept error:", err)
+			log.Printf("Accept() failed: %s", err)
 			continue
 		}
 
-		go authGrantServer(conn, &principals)
+		go handleConn(client)
+		//break
 	}
+
+	// //make sure the socket does not already exist.
+	// if err := os.RemoveAll(SockAddr); err != nil {
+	// 	log.Fatal(err)
+	// }
+
+	// //set socket options and start listening to socket
+	// config := &net.ListenConfig{Control: setListenerOptions}
+	// l, err := config.Listen(context.Background(), "unix", SockAddr)
+	// if err != nil {
+	// 	log.Fatal("listen error:", err)
+	// }
+	// defer l.Close()
+
+	// principals := make(map[int32]string) //PID -> "principal" (what should actually rep principal?)
+
+	// // //Spawn some children processes that will act as clients
+	// // cmd := exec.Command("go", "run", "client/ipcclient.go") //need to pass a secret when it is spawned?
+	// // err = cmd.Start()
+	// // if err != nil {
+	// // 	log.Printf("Started w/ err: %v", err)
+	// // } else {
+	// // 	principals[int32(cmd.Process.Pid)] = "principal1" //temporary placeholder for real principal identifier
+	// // 	log.Printf("Started process at PID: %v", cmd.Process.Pid)
+	// // }
+
+	// log.Printf("Listening at [%v]", SockAddr)
+	// for {
+	// 	// Accept new connections, dispatching them to echoServer
+	// 	// in a goroutine.
+	// 	conn, err := l.Accept()
+	// 	if err != nil {
+	// 		log.Fatal("accept error:", err)
+	// 		continue
+	// 	}
+
+	// 	go authGrantServer(conn, &principals)
+	// }
 }
