@@ -130,7 +130,7 @@ func (s *Server) readPacket() error {
 	if err != nil {
 		return err
 	}
-	logrus.Info(msgLen, oobn, flags, addr)
+	logrus.Debug(msgLen, oobn, flags, addr)
 	if msgLen < 4 {
 		return ErrInvalidMessage
 	}
@@ -497,7 +497,6 @@ func (s *Server) createHandleLocked(ss *SessionState) *Handle {
 func (s *Server) lockHandleAndWriteToSession(ss *SessionState, plaintext []byte) error {
 	ss.handle.writeLock.Lock()
 	defer ss.handle.writeLock.Unlock()
-	logrus.Debug("FUCK SERVER WRITE")
 	err := ss.writePacket(s.udpConn, plaintext, &ss.serverToClientKey)
 	return err
 }
