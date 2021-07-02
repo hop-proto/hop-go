@@ -10,7 +10,7 @@ import (
 )
 
 // The largest channel frame data length field.
-const MAX_FRAME_DATA_LENGTH = 10
+const MAX_FRAME_DATA_LENGTH = 500
 
 // The highest number of frames we will transmit per timeout period,
 // even if the window size is large enough.
@@ -69,10 +69,11 @@ func (s *Sender) write(b []byte) (n int, err error) {
 }
 
 func (s *Sender) recvAck(ackNo uint32) error {
+	logrus.Debug("GRABBING LOCK")
 	s.l.Lock()
 	defer s.l.Unlock()
 	newAckNo := uint64(ackNo)
-	logrus.Info("RECV ACK origAckNo ", s.ackNo, " new ackno ", newAckNo)
+	logrus.Debug("RECV ACK origAckNo ", s.ackNo, " new ackno ", newAckNo)
 	if newAckNo < s.ackNo && (newAckNo+(1<<32)-s.ackNo <= uint64(s.windowSize)) { // wrap around
 		newAckNo = newAckNo + (1 << 32)
 	}
@@ -81,7 +82,7 @@ func (s *Sender) recvAck(ackNo uint32) error {
 	for s.ackNo < newAckNo {
 		bytesForFrame, ok := s.frameDataLengths[uint32(s.ackNo)]
 		if !ok {
-			logrus.Infof("data length missing for frame %d", s.ackNo)
+			logrus.Debugf("data length missing for frame %d", s.ackNo)
 			return fmt.Errorf("data length missing for frame %d", s.ackNo)
 		}
 		bytesAcked += uint64(bytesForFrame)

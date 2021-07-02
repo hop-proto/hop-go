@@ -15,7 +15,7 @@ type ReceiveWindow struct {
 	closed     bool
 	fragments  PriorityQueue
 	m          sync.Mutex
-	maxSize    uint16
+	windowSize uint16
 	/*
 		We treat the sequence numbers as uint64 so we can avoid wraparounds
 		and not have to update our priority queue orderings in the case of a
@@ -29,8 +29,14 @@ func (r *ReceiveWindow) init() {
 	heap.Init(&r.fragments)
 }
 
+func (r *ReceiveWindow) getAck() uint32 {
+	r.m.Lock()
+	defer r.m.Unlock()
+	return uint32(r.ackNo)
+}
+
 /* Processes window into buffer stream if the ordered fragments are ready (in order).
-Precondition: receive window mutex is held. */
+Precondition: r.m mutex is held. */
 func (r *ReceiveWindow) processIntoBuffer() {
 	for r.fragments.Len() > 0 {
 		frag := heap.Pop(&(r.fragments)).(*Item)
@@ -41,6 +47,7 @@ func (r *ReceiveWindow) processIntoBuffer() {
 			break
 		}
 		if r.windowStart != frag.priority {
+			logrus.Debug("WINDOW START: ", r.windowStart, " FRAG PRIORITY: ", frag.priority)
 			heap.Push(&r.fragments, frag)
 			break
 		} else {
@@ -56,6 +63,7 @@ func (r *ReceiveWindow) read(buf []byte) (int, error) {
 	r.bufferCond.L.Lock()
 	for {
 		r.m.Lock()
+		logrus.Debug("BUFFER LEN: ", r.buffer.Len(), " buf len: ", len(buf), "closed? ", r.closed)
 		if r.buffer.Len() >= len(buf) || r.closed {
 			break
 		}
@@ -102,12 +110,12 @@ func (r *ReceiveWindow) receive(p *Packet) error {
 	r.m.Lock()
 	defer r.m.Unlock()
 	windowStart := r.windowStart
-	windowEnd := r.windowStart + uint64(uint32(r.maxSize))
+	windowEnd := r.windowStart + uint64(uint32(r.windowSize))
 
 	frameNo := r.unwrapFrameNo(p.frameNo)
-	logrus.Info("receive frame ", windowStart, windowEnd, frameNo, p.ackNo, p.data, r.ackNo, p.flags.FIN)
+	logrus.Debug("receive frame ", windowStart, windowEnd, frameNo, p.ackNo, p.data, r.ackNo, p.flags.FIN)
 	if !frameInBounds(windowStart, windowEnd, frameNo) {
-		logrus.Info("received dataframe out of receive window bounds")
+		logrus.Debug("received dataframe out of receive window bounds")
 		return errors.New("received dataframe out of receive window bounds")
 	}
 

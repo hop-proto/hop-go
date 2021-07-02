@@ -104,7 +104,7 @@ func TestSmallWindow(t *testing.T) {
 	ms := NewMuxer(serverConn, serverConn)
 	go ms.Start()
 
-	testData := make([]byte, 200)
+	testData := make([]byte, 5000)
 	for i := range testData {
 		testData[i] = []byte{'g', 'h', 'i', 'j', 'k', 'l'}[rand.Intn(6)]
 	}

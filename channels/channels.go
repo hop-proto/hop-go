@@ -43,21 +43,13 @@ func (r *Reliable) isInitiated() bool {
 	return r.initiated
 }
 
-func (r *Reliable) isClosed() bool {
-	r.m.Lock()
-	defer r.m.Unlock()
-	return r.closed
-}
-
 func (r *Reliable) send() {
 	for r.isInitiated() {
 		pkt := <-r.sender.sendQueue
 		pkt.channelID = r.id
-		r.recvWindow.m.Lock()
-		pkt.ackNo = uint32(r.recvWindow.ackNo)
+		pkt.ackNo = r.recvWindow.getAck()
 		pkt.flags.ACK = true
-		r.recvWindow.m.Unlock()
-		logrus.Info("sending pkt ", pkt.frameNo, pkt.ackNo, pkt.flags.FIN)
+		logrus.Debug("sending pkt ", pkt.frameNo, pkt.ackNo, pkt.flags.FIN, pkt.flags.ACK)
 		r.sendQueue <- pkt.toBytes()
 	}
 }
@@ -77,7 +69,7 @@ func NewReliableChannelWithChannelId(underlying transport.MsgConn, netConn net.C
 				L: &sync.Mutex{},
 			},
 			fragments:   make(PriorityQueue, 0),
-			maxSize:     windowSize,
+			windowSize:  windowSize,
 			windowStart: 1,
 		},
 		sender: Sender{
@@ -117,7 +109,7 @@ func NewReliableChannel(underlying transport.MsgConn, netConn net.Conn, sendQueu
 				L: &sync.Mutex{},
 			},
 			fragments:   make(PriorityQueue, 0),
-			maxSize:     windowSize,
+			windowSize:  windowSize,
 			windowStart: 1,
 		},
 		sender: Sender{
@@ -149,7 +141,7 @@ func (r *Reliable) initiate(req bool) {
 			data:        []byte{},
 			dataLength:  0,
 			frameNo:     0,
-			windowSize:  r.recvWindow.maxSize,
+			windowSize:  r.recvWindow.windowSize,
 			flags: PacketFlags{
 				ACK:  true,
 				FIN:  false,
@@ -190,6 +182,7 @@ func (r *Reliable) ReceiveInitiatePkt(pkt *InitiatePacket) error {
 		r.recvWindow.m.Lock()
 		r.recvWindow.ackNo = 1
 		r.recvWindow.m.Unlock()
+		logrus.Debug("INITIATED! ", pkt.flags.REQ, " ", pkt.flags.RESP)
 		r.initiated = true
 		r.sender.recvAck(1)
 	}
