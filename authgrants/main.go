@@ -5,6 +5,9 @@ import (
 	"os"
 )
 
+//go run *.go => run hopclient.go
+//go run *.go -hopd => start hop server
+
 func main() {
 
 	if len(os.Args) < 2 {
