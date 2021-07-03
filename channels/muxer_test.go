@@ -87,22 +87,22 @@ func TestSmallWindow(t *testing.T) {
 	assert.NilError(t, err)
 	go server.Serve()
 
-	transportConn, err := transport.Dial("udp", udpConn.LocalAddr().String(), nil)
+	transportClient, err := transport.Dial("udp", udpConn.LocalAddr().String(), nil)
 	assert.NilError(t, err)
 
-	assert.NilError(t, transportConn.Handshake())
+	assert.NilError(t, transportClient.Handshake())
 
 	serverConn, err := server.AcceptTimeout(time.Minute)
 	assert.NilError(t, err)
 
-	mc := NewMuxer(transportConn, transportConn)
+	mc := NewMuxer(transportClient, transportClient)
 	go mc.Start()
-
-	channel, err := mc.CreateChannel(1 << 7)
-	assert.NilError(t, err)
 
 	ms := NewMuxer(serverConn, serverConn)
 	go ms.Start()
+
+	channel, err := mc.CreateChannel(1 << 7)
+	assert.NilError(t, err)
 
 	testData := make([]byte, 5000)
 	for i := range testData {
