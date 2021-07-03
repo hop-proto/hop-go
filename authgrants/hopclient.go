@@ -2,9 +2,8 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"time"
 
+	"github.com/sirupsen/logrus"
 	"zmap.io/portal/channels"
 	"zmap.io/portal/transport"
 )
@@ -12,34 +11,41 @@ import (
 func startClient() {
 	transportConn, err := transport.Dial("udp", "127.0.0.1:8888", nil)
 	if err != nil {
-		log.Fatalf("error dialing server %v", err)
+		logrus.Fatalf("error dialing server: %v", err)
 	}
 	err = transportConn.Handshake()
 	if err != nil {
-		log.Fatalf("issue with handshake: %v", err)
+		logrus.Fatalf("issue with handshake: %v", err)
 	}
 
 	mc := channels.NewMuxer(transportConn, transportConn)
 	go mc.Start()
+	defer mc.Stop()
 
 	channel, err := mc.CreateChannel(1 << 8)
 	if err != nil {
-		fmt.Printf("error making channel: %v", err)
+		logrus.Fatalf("error making channel: %v", err)
 	}
 
 	testData := "hi i am some data"
-	time.Sleep(5 * time.Second)
+
 	_, err = channel.Write([]byte(testData))
 	if err != nil {
-		log.Fatalf("error writing to channel: %v", err)
+		logrus.Fatalf("error writing to channel: %v", err)
 	}
 	println("Successfully wrote my data")
-	time.Sleep(time.Second)
+
 	err = channel.Close()
 	if err != nil {
 		fmt.Printf("error closing channel: %v", err)
 	}
-	mc.Stop()
+
+	//infinite loop so the client program doesn't quit
+	//otherwise client quits before server can read data
+	//TODO: Figure out how to check if the other side closed channel
+
+	for {
+	}
 
 }
 
