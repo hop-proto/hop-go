@@ -149,7 +149,7 @@ func readCreds(c net.Conn) (*unix.Ucred, error) {
 	return cred, nil
 }
 
-func serve() {
+func Serve() {
 
 	//make sure the socket does not already exist.
 	if err := os.RemoveAll(SockAddr); err != nil {

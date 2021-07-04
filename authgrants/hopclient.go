@@ -2,14 +2,60 @@ package main
 
 import (
 	"fmt"
+	"net"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/channels"
 	"zmap.io/portal/transport"
 )
 
-func startClient() {
-	transportConn, err := transport.Dial("udp", "127.0.0.1:8888", nil)
+func reader(r net.Conn, finished chan bool, intent string) {
+	defer func() {
+		finished <- true
+	}()
+	logrus.Infof("C2: Connected to server [%s]", r.RemoteAddr().Network())
+
+	//send intent
+	r.Write([]byte(intent))
+
+	buf := make([]byte, 19)
+	n, err := r.Read(buf)
+	if err != nil {
+		logrus.Fatal(err)
+		return
+	}
+	logrus.Infof("C2: Client got: %v", string(buf[0:n]))
+	if string(buf[0:n]) == "INTENT_CONFIRMATION" {
+		logrus.Info("STARTING HOP SESSION WITH S2...")
+	}
+}
+
+func startClientTwo() {
+	c, err := net.Dial("unix", "echo1.sock")
+	if err != nil {
+		logrus.Fatal(err)
+	}
+	defer c.Close()
+	logrus.Info("C2: CONNECTED TO UDS")
+
+	finished := make(chan bool)
+	go reader(c, finished, "INTENT_REQUEST") //TODO: Actually pass the intent request through to here
+
+	<-finished
+}
+
+func startClient(p string) {
+	logrus.SetLevel(logrus.InfoLevel)
+	if p == "2" {
+		startClientTwo()
+	}
+	//TODO: accept args to dial custom address + user?
+	addr := "127.0.0.1:8888"
+	if p == "2" {
+		addr = "127.0.0.1:9999"
+	}
+	transportConn, err := transport.Dial("udp", addr, nil)
+
 	if err != nil {
 		logrus.Fatalf("error dialing server: %v", err)
 	}
@@ -17,27 +63,75 @@ func startClient() {
 	if err != nil {
 		logrus.Fatalf("issue with handshake: %v", err)
 	}
-
 	mc := channels.NewMuxer(transportConn, transportConn)
 	go mc.Start()
 	defer mc.Stop()
+	logrus.Info("STARTED MUXER")
 
-	channel, err := mc.CreateChannel(1 << 8)
-	if err != nil {
-		logrus.Fatalf("error making channel: %v", err)
-	}
+	if p == "1" {
+		channel, err := mc.CreateChannel(1 << 8)
+		if err != nil {
+			logrus.Fatalf("error making channel: %v", err)
+		}
+		logrus.Infof("CREATED CHANNEL")
+		s := []byte("INTENT_REQUEST")
+		//TODO: make actual byte message type
 
-	testData := "hi i am some data"
+		_, err = channel.Write(s)
+		if err != nil {
+			logrus.Fatalf("error writing to channel: %v", err)
+		}
+		logrus.Infof("WROTE INTENT")
 
-	_, err = channel.Write([]byte(testData))
-	if err != nil {
-		logrus.Fatalf("error writing to channel: %v", err)
-	}
-	println("Successfully wrote my data")
+		agc, err := mc.Accept()
+		if err != nil {
+			logrus.Fatalf("issue accepting channel: %v", err)
+		}
+		logrus.Info("ACCEPTED NEW CHANNEL (AGC)")
+		agc_buf := make([]byte, 14)
+		n, err := agc.Read(agc_buf)
+		if err != nil {
+			logrus.Fatalf("issue reading from channel: %v", err)
+		}
+		if string(agc_buf[0:n]) == "INTENT_REQUEST" {
+			logrus.Info("PRINCIPAL REC: INTENT_REQUEST")
+			logrus.Info("PROMPTING USER")
+			fmt.Printf("Allow user to do %v? Enter yes or no\n", "INTENT_REQUEST")
+			var resp string
+			fmt.Scanln(&resp) //TODO: make sure this is safe/sanitize input/make this a popup instead.
+			if resp == "yes" {
+				logrus.Info("USER CONFIRMED INTENT_REQUEST. CONTACTING S2...") //TODO: ACTUALLY DO THE NPC THING
+				logrus.Info("PRETENDING S2 SAID YES")
+				s := []byte("INTENT_CONFIRMATION")
+				//TODO: make actual byte message type
 
-	err = channel.Close()
-	if err != nil {
-		fmt.Printf("error closing channel: %v", err)
+				_, err = agc.Write(s)
+				if err != nil {
+					logrus.Fatalf("error writing to agc: %v", err)
+				}
+				logrus.Infof("WROTE INTENT_CONFIRMATION")
+			}
+		} else {
+			logrus.Info("INTENT DENIED")
+		}
+
+		buf := make([]byte, 50) //fix buffer size
+		n, err = channel.Read(buf)
+		if err != nil {
+			logrus.Fatalf("issue reading from channel: %v", err)
+		}
+		if string(buf[0:n]) == "yes" {
+			logrus.Info("INTENT APPROVED")
+		} else {
+			logrus.Info("INTENT DENIED")
+		}
+
+		err = channel.Close()
+		if err != nil {
+			fmt.Printf("error closing channel: %v", err)
+		}
+	} else if p == "2" {
+		logrus.Infof("c2 connected to %v", addr)
 	}
 
 	//infinite loop so the client program doesn't quit
@@ -48,74 +142,3 @@ func startClient() {
 	}
 
 }
-
-//First try below: messy and doesn't really work
-//const server1 = "/tmp/server1.sock"
-
-// func read(r net.Conn, finished chan bool, intent string) {
-// 	defer func() {
-// 		finished <- true
-// 	}()
-// 	log.Printf("Connected to server [%s]", r.RemoteAddr().Network())
-
-// 	reader := bufio.NewReader(os.Stdin)
-// 	b := bufio.NewWriter(r)
-// 	recv := bufio.NewReader(r)
-// 	out := bufio.NewWriter(os.Stdout)
-// 	//send intent
-// 	b.Write([]byte(intent))
-
-// 	for {
-// 		resp, err := recv.ReadBytes('\n')
-// 		if err != nil {
-// 			break
-// 		}
-// 		out.Write(resp)
-// 		line, err := reader.ReadBytes('\n')
-// 		if err != nil {
-// 			break
-// 		}
-// 		b.Write(line)
-// 		fmt.Printf("sent: %v", line)
-
-// 	}
-// 	// buf := make([]byte, 1024)
-// 	// n, err := r.Read(buf[:])
-// 	// if err != nil {
-// 	// 	return
-// 	// }
-// 	// println("Client got:", string(buf[0:n]))
-// }
-
-// func startClient() {
-// 	//wait for user input
-// 	//parse user cmd to connect to hop server
-// 	//rewire server output so the shell becomes the server.
-
-// 	reader := bufio.NewReader(os.Stdin)
-// 	for {
-// 		fmt.Print("user@localhost: ")
-// 		text, _ := reader.ReadString('\n')
-// 		args := strings.Split(strings.TrimSpace(text), " ")
-// 		if len(args) == 2 {
-// 			if args[0] == "hop" && args[1] == "server1" {
-// 				fmt.Println("Connecting to server1...")
-// 				break
-// 			}
-// 		}
-// 		fmt.Println("unrecognized command")
-// 	}
-
-// 	//connect to server1 (in reality this would be over a network connection using hop protocol)
-// 	//implemented using UDS for demo purposes
-// 	c, err := net.Dial("unix", server1)
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-// 	defer c.Close()
-
-// 	finished := make(chan bool)
-// 	go read(c, finished, "user@server1, action, server2\n")
-
-// 	<-finished
-// }
