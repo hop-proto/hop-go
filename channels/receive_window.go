@@ -13,6 +13,7 @@ type ReceiveWindow struct {
 	buffer     *bytes.Buffer
 	bufferCond sync.Cond
 	closed     bool
+	closedCond *sync.Cond
 	fragments  PriorityQueue
 	m          sync.Mutex
 	windowSize uint16
@@ -43,7 +44,10 @@ func (r *ReceiveWindow) processIntoBuffer() {
 		if frag.FIN {
 			r.windowStart += 1
 			r.ackNo += 1
+			r.closedCond.L.Lock()
 			r.closed = true
+			r.closedCond.Signal()
+			r.closedCond.L.Unlock()
 			break
 		}
 		if r.windowStart != frag.priority {

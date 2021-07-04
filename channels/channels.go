@@ -28,6 +28,7 @@ type Reliable struct {
 	initiated  bool
 	localAddr  net.Addr
 	m          sync.Mutex
+	closedCond sync.Cond
 	recvWindow ReceiveWindow
 	remoteAddr net.Addr
 	sender     Sender
@@ -44,7 +45,7 @@ func (r *Reliable) isInitiated() bool {
 }
 
 func (r *Reliable) send() {
-	for r.isInitiated() {
+	for r.isInitiated() && !r.closed {
 		pkt := <-r.sender.sendQueue
 		pkt.channelID = r.id
 		pkt.ackNo = r.recvWindow.getAck()
@@ -59,6 +60,9 @@ func NewReliableChannelWithChannelId(underlying transport.MsgConn, netConn net.C
 		id:        channelId,
 		initiated: false,
 		closed:    false,
+		closedCond: sync.Cond{
+			L: &sync.Mutex{},
+		},
 		// TODO (dadrian): uncomment this when transport.Handle and transport.Client implement Local,RemoteAddr()
 		// localAddr:  netConn.LocalAddr(),
 		// remoteAddr: netConn.RemoteAddr(),
@@ -84,6 +88,7 @@ func NewReliableChannelWithChannelId(underlying transport.MsgConn, netConn net.C
 		},
 		sendQueue: sendQueue,
 	}
+	r.recvWindow.closedCond = &r.closedCond
 	r.recvWindow.init()
 	go r.initiate(false)
 	return r
@@ -103,6 +108,9 @@ func NewReliableChannel(underlying transport.MsgConn, netConn net.Conn, sendQueu
 		// localAddr:  netConn.LocalAddr(),
 		// remoteAddr: netConn.RemoteAddr(),
 		m: sync.Mutex{},
+		closedCond: sync.Cond{
+			L: &sync.Mutex{},
+		},
 		recvWindow: ReceiveWindow{
 			buffer: new(bytes.Buffer),
 			bufferCond: sync.Cond{
@@ -124,6 +132,7 @@ func NewReliableChannel(underlying transport.MsgConn, netConn net.Conn, sendQueu
 		},
 		sendQueue: sendQueue,
 	}
+	r.recvWindow.closedCond = &r.closedCond
 	r.recvWindow.init()
 	go r.initiate(true)
 	return r, nil
@@ -165,10 +174,12 @@ func (r *Reliable) Receive(pkt *Packet) error {
 		logrus.Error("receiving non-initiate channel frames when not initiated")
 		return errors.New("receiving non-initiate channel frames when not initiated")
 	}
-
+	r.closedCond.L.Lock()
 	if pkt.flags.ACK {
 		r.sender.recvAck(pkt.ackNo)
 	}
+	r.closedCond.Signal()
+	r.closedCond.L.Unlock()
 	err := r.recvWindow.receive(pkt)
 
 	return err
@@ -207,6 +218,19 @@ func (r *Reliable) Close() error {
 	if err != nil {
 		return err
 	}
+
+	time.Sleep(time.Second)
+	// Wait until the other end of the connection has received the FIN packet from the other side.
+	r.closedCond.L.Lock()
+	for r.sender.unsentFramesRemaining() || !r.recvWindow.closed {
+		logrus.Info("waiting: ", r.sender.unsentFramesRemaining(), r.recvWindow.closed)
+		if r.sender.unsentFramesRemaining() {
+			logrus.Info("LENGTH", len(r.sender.frames), string(r.sender.frames[0].data))
+		}
+		r.closedCond.Wait()
+	}
+	r.closedCond.L.Unlock()
+
 	r.m.Lock()
 	r.closed = true
 	r.m.Unlock()

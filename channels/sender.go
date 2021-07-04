@@ -41,6 +41,12 @@ type Sender struct {
 	windowSize uint16
 }
 
+func (s *Sender) unsentFramesRemaining() bool {
+	s.l.Lock()
+	defer s.l.Unlock()
+	return len(s.frames) > 0
+}
+
 func (s *Sender) write(b []byte) (n int, err error) {
 	s.l.Lock()
 	defer s.l.Unlock()
