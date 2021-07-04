@@ -29,7 +29,7 @@ type Reliable struct {
 	localAddr  net.Addr
 	m          sync.Mutex
 	closedCond sync.Cond
-	recvWindow ReceiveWindow
+	recvWindow Receiver
 	remoteAddr net.Addr
 	sender     Sender
 	sendQueue  chan []byte
@@ -67,7 +67,7 @@ func NewReliableChannelWithChannelId(underlying transport.MsgConn, netConn net.C
 		// localAddr:  netConn.LocalAddr(),
 		// remoteAddr: netConn.RemoteAddr(),
 		m: sync.Mutex{},
-		recvWindow: ReceiveWindow{
+		recvWindow: Receiver{
 			buffer: new(bytes.Buffer),
 			bufferCond: sync.Cond{
 				L: &sync.Mutex{},
@@ -111,7 +111,7 @@ func NewReliableChannel(underlying transport.MsgConn, netConn net.Conn, sendQueu
 		closedCond: sync.Cond{
 			L: &sync.Mutex{},
 		},
-		recvWindow: ReceiveWindow{
+		recvWindow: Receiver{
 			buffer: new(bytes.Buffer),
 			bufferCond: sync.Cond{
 				L: &sync.Mutex{},
@@ -214,6 +214,12 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 }
 
 func (r *Reliable) Close() error {
+	r.m.Lock()
+	if r.closed {
+		r.m.Unlock()
+		return errors.New("channel already closed")
+	}
+	r.m.Unlock()
 	err := r.sender.close()
 	if err != nil {
 		return err
@@ -231,6 +237,7 @@ func (r *Reliable) Close() error {
 	}
 	r.closedCond.L.Unlock()
 
+	logrus.Info("CLOSED! WOOHOO")
 	r.m.Lock()
 	r.closed = true
 	r.m.Unlock()

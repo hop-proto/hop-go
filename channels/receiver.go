@@ -9,7 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type ReceiveWindow struct {
+type Receiver struct {
 	buffer     *bytes.Buffer
 	bufferCond sync.Cond
 	closed     bool
@@ -26,11 +26,11 @@ type ReceiveWindow struct {
 	windowStart uint64
 }
 
-func (r *ReceiveWindow) init() {
+func (r *Receiver) init() {
 	heap.Init(&r.fragments)
 }
 
-func (r *ReceiveWindow) getAck() uint32 {
+func (r *Receiver) getAck() uint32 {
 	r.m.Lock()
 	defer r.m.Unlock()
 	return uint32(r.ackNo)
@@ -38,13 +38,14 @@ func (r *ReceiveWindow) getAck() uint32 {
 
 /* Processes window into buffer stream if the ordered fragments are ready (in order).
 Precondition: r.m mutex is held. */
-func (r *ReceiveWindow) processIntoBuffer() {
+func (r *Receiver) processIntoBuffer() {
 	for r.fragments.Len() > 0 {
 		frag := heap.Pop(&(r.fragments)).(*Item)
 		if frag.FIN {
 			r.windowStart += 1
 			r.ackNo += 1
 			r.closedCond.L.Lock()
+			logrus.Info("RECIEVING FIN PACKET")
 			r.closed = true
 			r.closedCond.Signal()
 			r.closedCond.L.Unlock()
@@ -63,7 +64,7 @@ func (r *ReceiveWindow) processIntoBuffer() {
 	r.bufferCond.Signal()
 }
 
-func (r *ReceiveWindow) read(buf []byte) (int, error) {
+func (r *Receiver) read(buf []byte) (int, error) {
 	r.bufferCond.L.Lock()
 	for {
 		r.m.Lock()
@@ -97,7 +98,7 @@ func frameInBounds(wS uint64, wE uint64, f uint64) bool {
 
 /* Utiltiy function to add offsets so that we eliminate wraparounds.
    Precondition: must be holding frame number */
-func (r *ReceiveWindow) unwrapFrameNo(frameNo uint32) uint64 {
+func (r *Receiver) unwrapFrameNo(frameNo uint32) uint64 {
 	// The previous, offsets are represented by the 32 least significant bytes of the window start.
 	windowStart := r.windowStart
 	newNo := uint64(frameNo) + windowStart - uint64(uint32(windowStart))
@@ -110,14 +111,14 @@ func (r *ReceiveWindow) unwrapFrameNo(frameNo uint32) uint64 {
 }
 
 /* Precondition: receive window lock is held. */
-func (r *ReceiveWindow) receive(p *Packet) error {
+func (r *Receiver) receive(p *Packet) error {
 	r.m.Lock()
 	defer r.m.Unlock()
 	windowStart := r.windowStart
 	windowEnd := r.windowStart + uint64(uint32(r.windowSize))
 
 	frameNo := r.unwrapFrameNo(p.frameNo)
-	logrus.Debug("receive frame ", windowStart, windowEnd, frameNo, p.ackNo, p.data, r.ackNo, p.flags.FIN)
+	logrus.Info("receive frame frameNo: ", frameNo, " ackNo: ", p.ackNo, " data: ", string(p.data), " FIN? ", p.flags.FIN, " recv ack no? ", r.ackNo)
 	if !frameInBounds(windowStart, windowEnd, frameNo) {
 		logrus.Debug("received dataframe out of receive window bounds")
 		return errors.New("received dataframe out of receive window bounds")

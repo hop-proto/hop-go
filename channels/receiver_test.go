@@ -26,7 +26,7 @@ func makePacket(frameNo uint32, b []byte) *Packet {
 
 /* Tests that the receive window can handle highly concurrent and out of order packet receipts */
 func TestReceiveWindow(t *testing.T) {
-	recvWindow := ReceiveWindow{
+	recvWindow := Receiver{
 		buffer: new(bytes.Buffer),
 		bufferCond: sync.Cond{
 			L: &sync.Mutex{},
