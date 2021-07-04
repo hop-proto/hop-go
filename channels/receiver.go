@@ -41,7 +41,11 @@ Precondition: r.m mutex is held. */
 func (r *Receiver) processIntoBuffer() {
 	for r.fragments.Len() > 0 {
 		frag := heap.Pop(&(r.fragments)).(*Item)
-		if frag.FIN {
+		if r.windowStart != frag.priority {
+			logrus.Debug("WINDOW START: ", r.windowStart, " FRAG PRIORITY: ", frag.priority)
+			heap.Push(&r.fragments, frag)
+			break
+		} else if frag.FIN {
 			r.windowStart += 1
 			r.ackNo += 1
 			r.closedCond.L.Lock()
@@ -49,11 +53,6 @@ func (r *Receiver) processIntoBuffer() {
 			r.closed = true
 			r.closedCond.Signal()
 			r.closedCond.L.Unlock()
-			break
-		}
-		if r.windowStart != frag.priority {
-			logrus.Debug("WINDOW START: ", r.windowStart, " FRAG PRIORITY: ", frag.priority)
-			heap.Push(&r.fragments, frag)
 			break
 		} else {
 			r.buffer.Write(frag.value)

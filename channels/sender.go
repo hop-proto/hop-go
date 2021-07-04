@@ -99,7 +99,7 @@ func (s *Sender) recvAck(ackNo uint32) error {
 }
 
 func (s *Sender) retransmit() {
-	for {
+	for { // TODO - decide how to shutdown this endless loop with an enum state
 		timer := time.NewTimer(s.RTO)
 		<-timer.C
 		s.l.Lock()
