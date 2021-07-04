@@ -266,13 +266,16 @@ func (r *Reliable) RemoteAddr() net.Addr {
 }
 
 func (r *Reliable) SetDeadline(t time.Time) error {
+	// TODO
 	panic("implement me")
 }
 
 func (r *Reliable) SetReadDeadline(t time.Time) error {
+	// TODO
 	panic("implement me")
 }
 
 func (r *Reliable) SetWriteDeadline(t time.Time) error {
+	// TODO
 	panic("implement me")
 }
