@@ -83,7 +83,7 @@ func NewReliableChannelWithChannelId(underlying transport.MsgConn, netConn net.C
 			frameDataLengths: make(map[uint32]uint16),
 			frameNo:          1,
 			RTO:              RTO,
-			sendQueue:        make(chan *Packet),
+			sendQueue:        make(chan *Frame),
 			windowSize:       windowSize,
 		},
 		sendQueue: sendQueue,
@@ -127,7 +127,7 @@ func NewReliableChannel(underlying transport.MsgConn, netConn net.Conn, sendQueu
 			frameDataLengths: make(map[uint32]uint16),
 			frameNo:          1,
 			RTO:              RTO,
-			sendQueue:        make(chan *Packet),
+			sendQueue:        make(chan *Frame),
 			windowSize:       windowSize,
 		},
 		sendQueue: sendQueue,
@@ -169,7 +169,7 @@ func (r *Reliable) initiate(req bool) {
 	go r.send()
 }
 
-func (r *Reliable) Receive(pkt *Packet) error {
+func (r *Reliable) Receive(pkt *Frame) error {
 	if !r.initiated {
 		logrus.Error("receiving non-initiate channel frames when not initiated")
 		return errors.New("receiving non-initiate channel frames when not initiated")

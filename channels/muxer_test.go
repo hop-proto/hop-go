@@ -117,10 +117,12 @@ func TestSmallWindow(t *testing.T) {
 		testData[i] = []byte{'g', 'h', 'i', 'j', 'k', 'l'}[rand.Intn(6)]
 	}
 
-	_, err = channel.Write([]byte(testData))
-	assert.NilError(t, err)
-	err = channel.Close()
-	assert.NilError(t, err)
+	go func() {
+		_, err = channel.Write([]byte(testData))
+		assert.NilError(t, err)
+		err = channel.Close()
+		assert.NilError(t, err)
+	}()
 
 	serverChan, err := ms.Accept()
 	assert.NilError(t, err)

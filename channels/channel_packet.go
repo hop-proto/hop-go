@@ -2,7 +2,7 @@ package channels
 
 import "encoding/binary"
 
-type Packet struct {
+type Frame struct {
 	ackNo      uint32
 	channelID  byte
 	data       []byte
@@ -86,7 +86,7 @@ func (p *InitiatePacket) toBytes() []byte {
 	)
 }
 
-func (p *Packet) toBytes() []byte {
+func (p *Frame) toBytes() []byte {
 	frameNoBytes := []byte{0, 0, 0, 0}
 	binary.BigEndian.PutUint32(frameNoBytes, p.frameNo)
 	dataLength := []byte{0, 0}
@@ -103,9 +103,9 @@ func (p *Packet) toBytes() []byte {
 	)
 }
 
-func FromBytes(b []byte) (*Packet, error) {
+func FromBytes(b []byte) (*Frame, error) {
 	dataLength := binary.BigEndian.Uint16(b[2:4])
-	return &Packet{
+	return &Frame{
 		channelID:  b[0],
 		flags:      metaToFlags(b[1]),
 		dataLength: dataLength,

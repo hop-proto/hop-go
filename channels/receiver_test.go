@@ -9,8 +9,8 @@ import (
 	"gotest.tools/assert"
 )
 
-func makePacket(frameNo uint32, b []byte) *Packet {
-	pkt := Packet{
+func makePacket(frameNo uint32, b []byte) *Frame {
+	pkt := Frame{
 		dataLength: uint16(len(b)),
 		frameNo:    frameNo,
 		data:       b,
@@ -44,7 +44,7 @@ func TestReceiveWindow(t *testing.T) {
 		testData[i] = []byte{'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r'}[rand.Intn(6)]
 	}
 
-	packets := make([]*Packet, DATA_LENGTH/PACKET_LENGTH)
+	packets := make([]*Frame, DATA_LENGTH/PACKET_LENGTH)
 	i := 0
 	frameNo := 1
 	for i < DATA_LENGTH/PACKET_LENGTH {

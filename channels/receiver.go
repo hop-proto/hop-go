@@ -111,7 +111,7 @@ func (r *Receiver) unwrapFrameNo(frameNo uint32) uint64 {
 }
 
 /* Precondition: receive window lock is held. */
-func (r *Receiver) receive(p *Packet) error {
+func (r *Receiver) receive(p *Frame) error {
 	r.m.Lock()
 	defer r.m.Unlock()
 	windowStart := r.windowStart

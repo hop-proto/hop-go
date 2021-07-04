@@ -22,7 +22,7 @@ type Sender struct {
 	closed  bool
 	frameNo uint32
 	// The buffer of unacknowledged channel frames that will be retransmitted if necessary.
-	frames []*Packet
+	frames []*Frame
 	// Different frames can have different data lengths -- we need to know how
 	// to update the buffer when frames are acknowledged.
 	frameDataLengths map[uint32]uint16
@@ -37,7 +37,7 @@ type Sender struct {
 	l sync.Mutex
 	// Retransmission TimeOut.
 	RTO        time.Duration
-	sendQueue  chan *Packet
+	sendQueue  chan *Frame
 	windowSize uint16
 }
 
@@ -60,7 +60,7 @@ func (s *Sender) write(b []byte) (n int, err error) {
 		if uint16(len(s.buffer)) < dataLength {
 			dataLength = uint16(len(s.buffer))
 		}
-		pkt := Packet{
+		pkt := Frame{
 			dataLength: dataLength,
 			frameNo:    s.frameNo,
 			data:       s.buffer[:dataLength],
@@ -104,7 +104,7 @@ func (s *Sender) retransmit() {
 		<-timer.C
 		s.l.Lock()
 		if len(s.frames) == 0 {
-			pkt := Packet{
+			pkt := Frame{
 				dataLength: 0,
 				frameNo:    s.frameNo,
 				data:       []byte{},
@@ -131,7 +131,7 @@ func (s *Sender) close() error {
 	}
 	s.closed = true
 
-	pkt := Packet{
+	pkt := Frame{
 		dataLength: 0,
 		frameNo:    s.frameNo,
 		data:       []byte{},

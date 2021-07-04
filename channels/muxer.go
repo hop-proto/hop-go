@@ -55,7 +55,7 @@ func (m *Muxer) Accept() (*Reliable, error) {
 	return <-m.channelQueue, nil
 }
 
-func (m *Muxer) readMsg() (*Packet, error) {
+func (m *Muxer) readMsg() (*Frame, error) {
 	pkt := make([]byte, 65535)
 	_, err := m.underlying.ReadMsg(pkt)
 	if err != nil {
