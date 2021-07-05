@@ -1,10 +1,10 @@
 package main
 
 //MSG Types
-const INTENT_REQUEST = 0
-const INTENT_COMMUNICATION = 1
-const INTENT_CONFIRMATION = 2
-const INTENT_DENIED = 3
+const INTENT_REQUEST = byte(0)
+const INTENT_COMMUNICATION = byte(1)
+const INTENT_CONFIRMATION = byte(2)
+const INTENT_DENIED = byte(3)
 
 /*How the principal should respond to different authorization
 grant message types*/

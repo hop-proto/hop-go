@@ -1,60 +1,131 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net"
+	"strconv"
+	"strings"
 
 	"github.com/sirupsen/logrus"
+	"golang.org/x/crypto/sha3"
 	"zmap.io/portal/channels"
 	"zmap.io/portal/transport"
 )
 
-func reader(r net.Conn, finished chan bool, intent string) {
-	defer func() {
-		finished <- true
-	}()
-	logrus.Infof("C2: Connected to server [%s]", r.RemoteAddr().Network())
+//DEATH BY PARSING....AAAAAHHH
+func buildIntentRequest(sha3id [32]byte, action string, user string, addr string) []byte {
 
-	//send intent
-	r.Write([]byte(intent))
+	/*These aren't currently part of the protocol
+	but I feel like they are important?*/
+	// client := os.Current().Username
+	// clienthostname, err := os.Hostname()
 
-	buf := make([]byte, 19)
-	n, err := r.Read(buf)
+	//Set the Msg type field
+	request := []byte{INTENT_REQUEST}
+
+	//Add the SHA3 Client Identifier
+	request = append(request, sha3id[:]...)
+
+	//TODO: Why is there a separate port field?
+	//parse addr into host:port and port
+	portstr := ""
+	if strings.Contains(addr, ":") {
+		i := strings.Index(addr, ":")
+		portstr = addr[i+1:]
+	}
+	//TODO: make a correct sni? Should this also include desired user on remote server?
+	// Figure out what what address to use (copied/modified from Davids gonet.go file)
+	throwaway, err := net.Dial("udp", addr) //addr needs to be of form host:port
 	if err != nil {
-		logrus.Fatal(err)
-		return
+		logrus.Fatal("Failed to figure out address. Check addr is in <host>:<port> format.")
 	}
-	logrus.Infof("C2: Client got: %v", string(buf[0:n]))
-	if string(buf[0:n]) == "INTENT_CONFIRMATION" {
-		logrus.Info("STARTING HOP SESSION WITH S2...")
+	remoteAddr := throwaway.RemoteAddr()
+	throwaway.Close()
+
+	sniinfo := []byte(remoteAddr.String())
+	if len(sniinfo) > 256 {
+		logrus.Fatalf("Invalid SNI. Length exceeded 256 bytes")
 	}
+	sni := [256]byte{}
+	for i, b := range sniinfo {
+		sni[i] = b
+	}
+	//Add the SNI
+	request = append(request, sni[:]...)
+
+	//TODO: Is this necessary? Isn't this included in SNI? Can definitely be done cleaner if necessary
+	//Add the PORT number
+	if portstr != "" {
+		MAXPORTNUMBER := 65535
+		port, _ := strconv.Atoi(portstr)
+		if port > MAXPORTNUMBER {
+			logrus.Fatal("port number out of range")
+		}
+		b := make([]byte, 2)
+		binary.LittleEndian.PutUint16(b, uint16(port))
+		request = append(request, b...)
+	} else {
+		request = append(request, make([]byte, 2)...)
+	}
+
+	//Add the Channel Type (how is this determined...?/Why necessary...?)
+	request = append(request, byte(0))
+
+	//Reserved byte
+	request = append(request, byte(0))
+
+	//Associated data (action)
+	request = append(request, []byte(action)...)
+
+	return request
+
 }
 
-func startClientTwo() {
+func getAuthGrant(intent []byte) bool {
 	c, err := net.Dial("unix", "echo1.sock")
 	if err != nil {
 		logrus.Fatal(err)
 	}
 	defer c.Close()
-	logrus.Info("C2: CONNECTED TO UDS")
+	logrus.Info("C2: CONNECTED TO UDS: [%v]", c.RemoteAddr().String())
+	c.Write(intent)
 
-	finished := make(chan bool)
-	go reader(c, finished, "INTENT_REQUEST") //TODO: Actually pass the intent request through to here
-
-	<-finished
+	buf := make([]byte, 19)
+	n, err := c.Read(buf)
+	if err != nil {
+		logrus.Fatal(err)
+	}
+	logrus.Infof("C2: Client got: %v", string(buf[0:n]))
+	return string(buf[0:n]) == "INTENT_CONFIRMATION"
 }
 
-func startClient(p string) {
+func startClient(args []string) {
 	logrus.SetLevel(logrus.InfoLevel)
-	if p == "2" {
-		startClientTwo()
+	if len(args) != 5 {
+		logrus.Fatal("Invalid arguments. Useage: hop user@host:port -k <pathtokey> or hop user@host:port -a <action>")
 	}
-	//TODO: accept args to dial custom address + user?
-	addr := "127.0.0.1:8888"
-	if p == "2" {
-		addr = "127.0.0.1:9999"
+	//parse args
+	s := strings.SplitAfter(args[2], "@")
+	user := s[0][0 : len(s[0])-1]
+	addr := s[1]
+	//Check if this is a principal client process or one that needs to get an AG
+	if args[3] == "-k" {
+		logrus.Infof("Principal: will use key-file at %v for auth.", args[4])
+		//TODO: actually do this somehow???
+	} else if args[3] == "-a" {
+		logrus.Infof("Not Principal: will initiate AGC Protocol.")
+		//generate keypair
+		pubkey := "public key"              //need to actually generate a key (probably using David's stuff...?)
+		hash := sha3.Sum256([]byte(pubkey)) //don't know if this is correct
+		intent := buildIntentRequest(hash, args[4], user, addr)
+		logrus.Infof("INTENT_REQUEST: %v", string(intent))
+		if !getAuthGrant(intent) {
+			logrus.Fatal("Principal denied request.")
+		}
 	}
-	transportConn, err := transport.Dial("udp", addr, nil)
+
+	transportConn, err := transport.Dial("udp", addr, nil) //There seem to be limits on Dial() and addr format
 
 	if err != nil {
 		logrus.Fatalf("error dialing server: %v", err)
