@@ -20,6 +20,8 @@ import (
 
 const RTO = time.Millisecond * 500
 
+const WINDOW_SIZE = 128
+
 // Reliable implements a reliable and receiveWindow channel on top
 
 type Reliable struct {
@@ -33,6 +35,7 @@ type Reliable struct {
 	remoteAddr net.Addr
 	sender     Sender
 	sendQueue  chan []byte
+	cType      byte
 }
 
 // Reliable implements net.Conn
@@ -55,7 +58,7 @@ func (r *Reliable) send() {
 	}
 }
 
-func NewReliableChannelWithChannelId(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, windowSize uint16, channelId byte) *Reliable {
+func NewReliableChannelWithChannelId(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, channelType byte, channelId byte) *Reliable {
 	r := &Reliable{
 		id:        channelId,
 		initiated: false,
@@ -73,7 +76,7 @@ func NewReliableChannelWithChannelId(underlying transport.MsgConn, netConn net.C
 				L: &sync.Mutex{},
 			},
 			fragments:   make(PriorityQueue, 0),
-			windowSize:  windowSize,
+			windowSize:  WINDOW_SIZE,
 			windowStart: 1,
 		},
 		sender: Sender{
@@ -84,9 +87,10 @@ func NewReliableChannelWithChannelId(underlying transport.MsgConn, netConn net.C
 			frameNo:          1,
 			RTO:              RTO,
 			sendQueue:        make(chan *Frame),
-			windowSize:       windowSize,
+			windowSize:       WINDOW_SIZE,
 		},
 		sendQueue: sendQueue,
+		cType:     channelType,
 	}
 	r.recvWindow.closedCond = &r.closedCond
 	r.recvWindow.init()
@@ -94,7 +98,7 @@ func NewReliableChannelWithChannelId(underlying transport.MsgConn, netConn net.C
 	return r
 }
 
-func NewReliableChannel(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, windowSize uint16) (*Reliable, error) {
+func NewReliableChannel(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, cType byte) (*Reliable, error) {
 	cid := []byte{0}
 	n, err := rand.Read(cid)
 	if err != nil || n != 1 {
@@ -117,7 +121,7 @@ func NewReliableChannel(underlying transport.MsgConn, netConn net.Conn, sendQueu
 				L: &sync.Mutex{},
 			},
 			fragments:   make(PriorityQueue, 0),
-			windowSize:  windowSize,
+			windowSize:  WINDOW_SIZE,
 			windowStart: 1,
 		},
 		sender: Sender{
@@ -128,9 +132,10 @@ func NewReliableChannel(underlying transport.MsgConn, netConn net.Conn, sendQueu
 			frameNo:          1,
 			RTO:              RTO,
 			sendQueue:        make(chan *Frame),
-			windowSize:       windowSize,
+			windowSize:       WINDOW_SIZE,
 		},
 		sendQueue: sendQueue,
+		cType:     cType,
 	}
 	r.recvWindow.closedCond = &r.closedCond
 	r.recvWindow.init()
@@ -144,14 +149,14 @@ func (r *Reliable) initiate(req bool) {
 	not_init := true
 
 	for not_init {
-		p := InitiatePacket{
+		p := InitiateFrame{
 			channelID:   r.id,
 			channelType: channelType,
 			data:        []byte{},
 			dataLength:  0,
 			frameNo:     0,
 			windowSize:  r.recvWindow.windowSize,
-			flags: PacketFlags{
+			flags: FrameFlags{
 				ACK:  true,
 				FIN:  false,
 				REQ:  req,
@@ -169,7 +174,7 @@ func (r *Reliable) initiate(req bool) {
 	go r.send()
 }
 
-func (r *Reliable) Receive(pkt *Frame) error {
+func (r *Reliable) receive(pkt *Frame) error {
 	if !r.initiated {
 		logrus.Error("receiving non-initiate channel frames when not initiated")
 		return errors.New("receiving non-initiate channel frames when not initiated")
@@ -185,7 +190,7 @@ func (r *Reliable) Receive(pkt *Frame) error {
 	return err
 }
 
-func (r *Reliable) ReceiveInitiatePkt(pkt *InitiatePacket) error {
+func (r *Reliable) receiveInitiatePkt(pkt *InitiateFrame) error {
 	r.m.Lock()
 	defer r.m.Unlock()
 
@@ -255,6 +260,10 @@ func (r *Reliable) Close() error {
 	r.closed = true
 	r.m.Unlock()
 	return nil
+}
+
+func (r *Reliable) Type() byte {
+	return r.cType
 }
 
 func (r *Reliable) LocalAddr() net.Addr {

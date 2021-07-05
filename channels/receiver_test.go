@@ -14,7 +14,7 @@ func makePacket(frameNo uint32, b []byte) *Frame {
 		dataLength: uint16(len(b)),
 		frameNo:    frameNo,
 		data:       b,
-		flags: PacketFlags{
+		flags: FrameFlags{
 			ACK:  false,
 			FIN:  false,
 			REQ:  false,

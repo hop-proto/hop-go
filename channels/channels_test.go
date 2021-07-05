@@ -9,7 +9,6 @@ func TestRead(t *testing.T) {
 
 	// c2, err := NewReliableChannel()
 }
-
 func TestReadBuffering(t *testing.T) {
 	// server := NewReliableChannel(transport.MsgConn{})
 	// client := Reliable{}

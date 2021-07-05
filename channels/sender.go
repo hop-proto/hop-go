@@ -135,7 +135,7 @@ func (s *Sender) close() error {
 		dataLength: 0,
 		frameNo:    s.frameNo,
 		data:       []byte{},
-		flags: PacketFlags{
+		flags: FrameFlags{
 			ACK:  true,
 			FIN:  true,
 			REQ:  false,

@@ -32,7 +32,7 @@ func NewMuxer(msgConn transport.MsgConn, netConn net.Conn) *Muxer {
 	}
 }
 
-func (m *Muxer) AddChannel(c *Reliable) {
+func (m *Muxer) addChannel(c *Reliable) {
 	m.m.Lock()
 	m.channels[c.id] = c
 	m.m.Unlock()
@@ -45,9 +45,9 @@ func (m *Muxer) GetChannel(channelId byte) (*Reliable, bool) {
 	return c, ok
 }
 
-func (m *Muxer) CreateChannel(windowSize uint16) (*Reliable, error) {
-	r, err := NewReliableChannel(m.underlying, m.netConn, m.sendQueue, windowSize)
-	m.AddChannel(r)
+func (m *Muxer) CreateChannel(cType byte) (*Reliable, error) {
+	r, err := NewReliableChannel(m.underlying, m.netConn, m.sendQueue, cType)
+	m.addChannel(r)
 	return r, err
 }
 
@@ -91,8 +91,8 @@ func (m *Muxer) Start() {
 					logrus.Panic(err)
 					panic(err)
 				}
-				channel = NewReliableChannelWithChannelId(m.underlying, m.netConn, m.sendQueue, initFrame.windowSize, initFrame.channelID)
-				m.AddChannel(channel)
+				channel = NewReliableChannelWithChannelId(m.underlying, m.netConn, m.sendQueue, initFrame.channelType, initFrame.channelID)
+				m.addChannel(channel)
 				m.channelQueue <- channel
 			}
 

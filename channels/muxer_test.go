@@ -49,7 +49,7 @@ func TestMuxer(t *testing.T) {
 	mc := NewMuxer(transportConn, transportConn)
 	go mc.Start()
 
-	channel, err := mc.CreateChannel(1 << 8)
+	channel, err := mc.CreateChannel(1 << 6)
 	assert.NilError(t, err)
 
 	ms := NewMuxer(serverConn, serverConn)
