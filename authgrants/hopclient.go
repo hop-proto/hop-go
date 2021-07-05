@@ -1,10 +1,8 @@
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -12,75 +10,6 @@ import (
 	"zmap.io/portal/channels"
 	"zmap.io/portal/transport"
 )
-
-//DEATH BY PARSING....AAAAAHHH
-func buildIntentRequest(sha3id [32]byte, action string, user string, addr string) []byte {
-
-	/*These aren't currently part of the protocol
-	but I feel like they are important?*/
-	// client := os.Current().Username
-	// clienthostname, err := os.Hostname()
-
-	//Set the Msg type field
-	request := []byte{INTENT_REQUEST}
-
-	//Add the SHA3 Client Identifier
-	request = append(request, sha3id[:]...)
-
-	//TODO: Why is there a separate port field?
-	//parse addr into host:port and port
-	portstr := ""
-	if strings.Contains(addr, ":") {
-		i := strings.Index(addr, ":")
-		portstr = addr[i+1:]
-	}
-	//TODO: make a correct sni? Should this also include desired user on remote server?
-	// Figure out what what address to use (copied/modified from Davids gonet.go file)
-	throwaway, err := net.Dial("udp", addr) //addr needs to be of form host:port
-	if err != nil {
-		logrus.Fatal("Failed to figure out address. Check addr is in <host>:<port> format.")
-	}
-	remoteAddr := throwaway.RemoteAddr()
-	throwaway.Close()
-
-	sniinfo := []byte(remoteAddr.String())
-	if len(sniinfo) > 256 {
-		logrus.Fatalf("Invalid SNI. Length exceeded 256 bytes")
-	}
-	sni := [256]byte{}
-	for i, b := range sniinfo {
-		sni[i] = b
-	}
-	//Add the SNI
-	request = append(request, sni[:]...)
-
-	//TODO: Is this necessary? Isn't this included in SNI? Can definitely be done cleaner if necessary
-	//Add the PORT number
-	if portstr != "" {
-		MAXPORTNUMBER := 65535
-		port, _ := strconv.Atoi(portstr)
-		if port > MAXPORTNUMBER {
-			logrus.Fatal("port number out of range")
-		}
-		b := make([]byte, 2)
-		binary.LittleEndian.PutUint16(b, uint16(port))
-		request = append(request, b...)
-	} else {
-		request = append(request, make([]byte, 2)...)
-	}
-
-	//Add the Channel Type (how is this determined...?/Why necessary...?)
-	request = append(request, byte(0))
-
-	//Reserved byte
-	request = append(request, byte(0))
-
-	//Associated data (action)
-	request = append(request, []byte(action)...)
-
-	return request
-
-}
 
 func getAuthGrant(intent []byte) bool {
 	c, err := net.Dial("unix", "echo1.sock")
@@ -108,7 +37,9 @@ func startClient(args []string) {
 	//parse args
 	s := strings.SplitAfter(args[2], "@")
 	user := s[0][0 : len(s[0])-1]
+	logrus.Info("user: ", user)
 	addr := s[1]
+	logrus.Info("addr: ", addr)
 	//Check if this is a principal client process or one that needs to get an AG
 	if args[3] == "-k" {
 		logrus.Infof("Principal: will use key-file at %v for auth.", args[4])
@@ -118,8 +49,9 @@ func startClient(args []string) {
 		//generate keypair
 		pubkey := "public key"              //need to actually generate a key (probably using David's stuff...?)
 		hash := sha3.Sum256([]byte(pubkey)) //don't know if this is correct
-		intent := buildIntentRequest(hash, args[4], user, addr)
-		logrus.Infof("INTENT_REQUEST: %v", string(intent))
+		logrus.Infof("Created pubkey (not really) with digest: %v", string(hash[:]))
+		intent := BuildIntentRequest(hash, args[4], user, addr)
+		logrus.Infof("INTENT_REQUEST: %v", string(intent[:]))
 		if !getAuthGrant(intent) {
 			logrus.Fatal("Principal denied request.")
 		}
@@ -139,7 +71,9 @@ func startClient(args []string) {
 	defer mc.Stop()
 	logrus.Info("STARTED MUXER")
 
-	if p == "1" {
+	//TODO: Either start interactive shell with server 2 or execute Auth grant command
+
+	if args[3] == "-k" { //temporary way to allow Principal to get server to start intent request process
 		channel, err := mc.CreateChannel(1 << 8)
 		if err != nil {
 			logrus.Fatalf("error making channel: %v", err)
@@ -201,7 +135,7 @@ func startClient(args []string) {
 		if err != nil {
 			fmt.Printf("error closing channel: %v", err)
 		}
-	} else if p == "2" {
+	} else if args[3] == "-a" {
 		logrus.Infof("c2 connected to %v", addr)
 	}
 

@@ -144,8 +144,8 @@ func authGrantServer(l net.Listener, principals *map[int32]string, ms *channels.
 	if err != nil {
 		return
 	}
-	if string(buf[0:n]) == "INTENT_REQUEST" {
-		logrus.Info("REC: INTENT_REQUEST")
+	logrus.Infof("REC: %v", buf[0:n])
+	if buf[0] == INTENT_REQUEST && n > MIN_INTENT_REQUEST_HEADER_LENGTH {
 		//initiate NPC w/ principal and get user response
 		//TODO: make this actually work
 		logrus.Infof("Initiating AGC w/ %v", principal)
@@ -154,10 +154,10 @@ func authGrantServer(l net.Listener, principals *map[int32]string, ms *channels.
 			logrus.Fatalf("error making channel: %v", err)
 		}
 		logrus.Infof("CREATED CHANNEL (AGC)")
-		s := []byte("INTENT_REQUEST")
+		//s := []byte("INTENT_REQUEST")
 		//TODO: make actual byte message type
 
-		_, err = channel.Write(s)
+		_, err = channel.Write(buf[0:n])
 		if err != nil {
 			logrus.Fatalf("error writing to channel: %v", err)
 		}
@@ -255,7 +255,7 @@ func serve(args []string) {
 	if string(buf[0:n]) == "INTENT_REQUEST" {
 		logrus.Info("REC: INTENT_REQUEST")
 		//Spawn some children processes that will act as clients
-		cmd := exec.Command("go", "run", "main.go", "hopclient.go", "hopd.go", "hop", "2", "INTENT_REQUEST") //need to pass a secret when it is spawned?
+		cmd := exec.Command("go", "run", "main.go", "hopclient.go", "hopd.go", "hop", "user@127.0.0.1:9999", "-a", "shell") //need to pass a secret when it is spawned?
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err = cmd.Start()
