@@ -22,15 +22,15 @@ import (
 func newTestServerConfig() *transport.ServerConfig {
 	keyPair, err := keys.ReadDHKeyFromPEMFile("./testdata/leaf-key.pem")
 	if err != nil {
-		logrus.Fatalf("error with keypair: %v", err)
+		logrus.Fatalf("S: error with keypair: %v", err)
 	}
 	certificate, err := certs.ReadCertificatePEMFile("testdata/leaf.pem")
 	if err != nil {
-		logrus.Fatalf("error with certs: %v", err)
+		logrus.Fatalf("S: error with certs: %v", err)
 	}
 	intermediate, err := certs.ReadCertificatePEMFile("testdata/intermediate.pem")
 	if err != nil {
-		logrus.Fatalf("error with intermediate certs: %v", err)
+		logrus.Fatalf("S: error with intermediate certs: %v", err)
 	}
 	return &transport.ServerConfig{
 		KeyPair:      keyPair,
@@ -42,7 +42,7 @@ func newTestServerConfig() *transport.ServerConfig {
 //checks tree (starting at proc) to see if cPID is a descendent
 func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
 	for _, child := range proc.Children {
-		logrus.Printf("Checking [%v]", child)
+		logrus.Printf("S: Checking [%v]", child)
 		if child == cPID || checkDescendents(tree, tree.Procs[child], cPID) {
 			return true
 		}
@@ -58,12 +58,12 @@ func readCreds(c net.Conn) (*unix.Ucred, error) {
 	//should only have *net.UnixConn types
 	uc, ok := c.(*net.UnixConn)
 	if !ok {
-		return nil, fmt.Errorf("unexpected socket type")
+		return nil, fmt.Errorf("S: unexpected socket type")
 	}
 
 	raw, err := uc.SyscallConn()
 	if err != nil {
-		return nil, fmt.Errorf("error opening raw connection: %s", err)
+		return nil, fmt.Errorf("S: error opening raw connection: %s", err)
 	}
 
 	// The raw.Control() callback does not return an error directly.
@@ -77,11 +77,11 @@ func readCreds(c net.Conn) (*unix.Ucred, error) {
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("GetsockoptUcred() error: %s", err)
+		return nil, fmt.Errorf("S: GetsockoptUcred() error: %s", err)
 	}
 
 	if err2 != nil {
-		return nil, fmt.Errorf("Control() error: %s", err2)
+		return nil, fmt.Errorf("S: Control() error: %s", err2)
 	}
 
 	return cred, nil
@@ -89,19 +89,19 @@ func readCreds(c net.Conn) (*unix.Ucred, error) {
 
 func authGrantServer(l net.Listener, principals *map[int32]string, ms *channels.Muxer) {
 	defer l.Close()
-	logrus.Info("STARTED LISTENING AT UDS: ", l.Addr().String())
+	logrus.Info("S: STARTED LISTENING AT UDS: ", l.Addr().String())
 	// Accept new connections, dispatching them to echoServer
 	// in a goroutine.
 	c, err := l.Accept()
 	if err != nil {
 		logrus.Fatal("accept error:", err)
 	}
-	logrus.Info("ACCEPTED NEW UDS CONNECTION")
+	logrus.Info("S: ACCEPTED NEW UDS CONNECTION")
 	defer c.Close()
 	//Verify that the client is a legit descendent
 	creds, err := readCreds(c)
 	if err != nil {
-		logrus.Errorf("Error reading credentials: %s", err)
+		logrus.Errorf("S: Error reading credentials: %s", err)
 		return
 	}
 
@@ -115,64 +115,63 @@ func authGrantServer(l net.Listener, principals *map[int32]string, ms *channels.
 	tree, err := pstree.New()
 	//display(os.Getppid(), tree, 1) //displays all pstree for ipcserver
 	if err != nil {
-		logrus.Errorf("Error making pstree: %s", err)
+		logrus.Errorf("S: Error making pstree: %s", err)
 		return
 	}
 
 	//check all of the PIDs of processes that the server started
 	for k := range *principals {
-		logrus.Printf("Checking [%v]", k)
+		logrus.Printf("S: Checking [%v]", k)
 		if k == cPID || checkDescendents(tree, tree.Procs[int(k)], int(cPID)) {
-			logrus.Infof("Legit descendent!")
+			logrus.Infof("S: Legit descendent!")
 			ancestor = k
 			break
 		}
 	}
 	if ancestor == -1 {
-		logrus.Infof("Not a legitimate descendent. [%v]", ancestor)
+		logrus.Infof("S: Not a legitimate descendent. [%v]", ancestor)
 		return
 	}
-	logrus.Info("CREDENTIALS VERIFIED")
+	logrus.Info("S: CREDENTIALS VERIFIED")
 
 	// + find corresponding principal
 	principal, _ := (*principals)[ancestor]
 
-	logrus.Infof("Client connected [%s]", c.RemoteAddr().Network())
+	logrus.Infof("S: Client connected [%s]", c.RemoteAddr().Network())
 
 	buf := make([]byte, 1024)
 	n, err := c.Read(buf[:])
 	if err != nil {
 		return
 	}
-	logrus.Infof("REC: %v", buf[0:n])
 	if buf[0] == INTENT_REQUEST && n > MIN_INTENT_REQUEST_HEADER_LENGTH {
 		//initiate NPC w/ principal and get user response
 		//TODO: make this actually work
-		logrus.Infof("Initiating AGC w/ %v", principal)
+		logrus.Infof("S: Initiating AGC w/ %v", principal)
 		channel, err := ms.CreateChannel(1 << 8)
 		if err != nil {
-			logrus.Fatalf("error making channel: %v", err)
+			logrus.Fatalf("S: error making channel: %v", err)
 		}
-		logrus.Infof("CREATED CHANNEL (AGC)")
+		logrus.Infof("S: CREATED CHANNEL (AGC)")
 		//s := []byte("INTENT_REQUEST")
 		//TODO: make actual byte message type
 
 		_, err = channel.Write(buf[0:n])
 		if err != nil {
-			logrus.Fatalf("error writing to channel: %v", err)
+			logrus.Fatalf("S: error writing to channel: %v", err)
 		}
-		logrus.Infof("WROTE INTENT")
+		logrus.Infof("S: WROTE INTENT")
 
 		buf := make([]byte, 19) //fix buffer size
 		n, err := channel.Read(buf)
 		if err != nil {
-			logrus.Fatalf("issue reading from channel: %v", err)
+			logrus.Fatalf("S: issue reading from channel: %v", err)
 		}
 		if string(buf[0:n]) == "INTENT_CONFIRMATION" {
-			logrus.Info("INTENT APPROVED")
+			logrus.Info("S: INTENT APPROVED")
 			c.Write([]byte("INTENT_CONFIRMATION"))
 		} else {
-			logrus.Infof("INTENT DENIED: %v", string(buf[0:n]))
+			logrus.Infof("S: INTENT DENIED")
 			c.Write([]byte("INTENT_DENIED"))
 		}
 	}
@@ -200,13 +199,13 @@ func serve(args []string) {
 	}
 	pktConn, err := net.ListenPacket("udp", addr)
 	if err != nil {
-		logrus.Fatalf("error starting udp conn: %v", err)
+		logrus.Fatalf("S: error starting udp conn: %v", err)
 	}
 	// It's actually a UDP conn
 	udpConn := pktConn.(*net.UDPConn)
 	server, err := transport.NewServer(udpConn, newTestServerConfig())
 	if err != nil {
-		logrus.Fatalf("error starting transport conn: %v", err)
+		logrus.Fatalf("S: error starting transport conn: %v", err)
 	}
 
 	//Start IPC socket
@@ -219,7 +218,7 @@ func serve(args []string) {
 	config := &net.ListenConfig{Control: setListenerOptions}
 	l, err := config.Listen(context.Background(), "unix", sockAddr)
 	if err != nil {
-		log.Fatal("listen error:", err)
+		log.Fatal("S: listen error:", err)
 	}
 
 	principals := make(map[int32]string) //PID -> "principal" (what should actually rep principal?)
@@ -227,46 +226,46 @@ func serve(args []string) {
 	go server.Serve()
 
 	//TODO: make this a loop so it can handle multiple client conns
-	logrus.Infof("SERVER LISTENING ON %v", addr)
+	logrus.Infof("S: SERVER LISTENING ON %v", addr)
 	serverConn, err := server.AcceptTimeout(time.Minute) //won't be a minute in reality
 	if err != nil {
-		logrus.Fatalf("SERVER TIMEOUT: %v", err)
+		logrus.Fatalf("S: SERVER TIMEOUT: %v", err)
 	}
-	logrus.Info("ACCEPTED NEW CONNECTION")
+	logrus.Info("S: ACCEPTED NEW CONNECTION")
 	ms := channels.NewMuxer(serverConn, serverConn)
 	go ms.Start()
 	defer ms.Stop()
-	logrus.Info("STARTED CHANNEL MUXER")
+	logrus.Info("S: STARTED CHANNEL MUXER")
 
 	go authGrantServer(l, &principals, ms)
 
 	serverChan, err := ms.Accept()
 	if err != nil {
-		logrus.Fatalf("issue accepting channel: %v", err)
+		logrus.Fatalf("S: issue accepting channel: %v", err)
 	}
-	logrus.Info("ACCEPTED NEW CHANNEL (CODE EXEC)")
+	logrus.Info("S: ACCEPTED NEW CHANNEL (CODE EXEC)")
 
 	buf := make([]byte, 14)
 	bytesRead := 0
 	n, err := serverChan.Read(buf[bytesRead:])
 	if err != nil {
-		logrus.Fatalf("issue reading from channel: %v", err)
+		logrus.Fatalf("S: issue reading from channel: %v", err)
 	}
 	if string(buf[0:n]) == "INTENT_REQUEST" {
-		logrus.Info("REC: INTENT_REQUEST")
+		logrus.Info("S: REC: INTENT_REQUEST")
 		//Spawn some children processes that will act as clients
-		cmd := exec.Command("go", "run", "main.go", "hopclient.go", "hopd.go", "hop", "user@127.0.0.1:9999", "-a", "shell") //need to pass a secret when it is spawned?
+		cmd := exec.Command("go", "run", "main.go", "hopclient.go", "hopd.go", "authgrants.go", "hop", "user@127.0.0.1:9999", "-a", "shell") //need to pass a secret when it is spawned?
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err = cmd.Start()
 		if err != nil {
-			logrus.Errorf("Started w/ err: %v", err)
+			logrus.Errorf("S: Started w/ err: %v", err)
 		} else {
 			principals[int32(cmd.Process.Pid)] = "principal1" //temporary placeholder for real principal identifier
-			logrus.Infof("Started process at PID: %v", cmd.Process.Pid)
+			logrus.Infof("S: Started process at PID: %v", cmd.Process.Pid)
 		}
 	} else {
-		logrus.Info("RECEIVED NOT AN INTENT_REQEST")
+		logrus.Info("S: RECEIVED NOT AN INTENT_REQEST")
 	}
 
 	for {

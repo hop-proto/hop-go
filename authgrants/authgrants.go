@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"errors"
 	"net"
 	"strconv"
 	"strings"
@@ -40,36 +41,40 @@ type IntentRequest struct {
 type IntentCommunication struct {
 	sha3ClientId   [SHA3_LEN]byte
 	sni            [SNI_LEN]byte
-	port           uint16
+	port           uint16 //assuming port can't be 0 (is this a valid assumption?)
 	channelType    byte
 	associatedData []byte
 }
 
+//maybe I could use json encoding or something? All of this code seems gross
 func (m IntentRequest) ToByteSlice() []byte {
+	//Set the Msg type field
 	slice := []byte{INTENT_REQUEST}
-	// if m.Type == INTENT_REQUEST || m.Type == INTENT_COMMUNICATION {
-	// 	slice := append(slice, m.)
-	// } else if m.Type == INTENT_CONFIRMATION {
+	//Add the SHA3 Client Identifier
+	slice = append(slice, m.sha3ClientId[:]...)
+	slice = append(slice, m.sni[:]...)
+	b := make([]byte, 2)
+	binary.LittleEndian.PutUint16(b, uint16(m.port))
+	slice = append(slice, b...)
+	slice = append(slice, m.channelType)
+	slice = append(slice, make([]byte, RESERVED_LEN)...)
+	slice = append(slice, m.associatedData...)
+	return slice
+}
 
-	// } else if m.Type == INTENT_DENIED {
-
-	// }
+func (m IntentRequest) String() string {
+	panic("Not implemented")
 }
 
 //DEATH BY PARSING....AAAAAHHH
-func BuildIntentRequest(sha3id [32]byte, action string, user string, addr string) []byte {
-
+func BuildIntentRequest(sha3id [32]byte, action string, user string, addr string) IntentRequest {
 	/*These aren't currently part of the protocol
 	but I feel like they are important?*/
 	// client := os.Current().Username
 	// clienthostname, err := os.Hostname()
-
-	//Set the Msg type field
-	request := []byte{INTENT_REQUEST}
-
-	//Add the SHA3 Client Identifier
-	request = append(request, sha3id[:]...)
-
+	ir := IntentRequest{}
+	ir.sha3ClientId = sha3id
+	ir.port = 0
 	//TODO: Why is there a separate port field?
 	//parse addr into host:port and port
 	portstr := ""
@@ -95,7 +100,7 @@ func BuildIntentRequest(sha3id [32]byte, action string, user string, addr string
 		sni[i] = b
 	}
 	//Add the SNI
-	request = append(request, sni[:]...)
+	ir.sni = sni
 
 	//TODO: Is this necessary? Isn't this included in SNI? Can definitely be done cleaner if necessary
 	//Add the PORT number
@@ -105,24 +110,27 @@ func BuildIntentRequest(sha3id [32]byte, action string, user string, addr string
 		if port > MAXPORTNUMBER {
 			logrus.Fatal("port number out of range")
 		}
-		b := make([]byte, 2)
-		binary.LittleEndian.PutUint16(b, uint16(port))
-		request = append(request, b...)
-	} else {
-		request = append(request, make([]byte, 2)...)
+		ir.port = uint16(port)
 	}
 
 	//Add the Channel Type (how is this determined...?/Why necessary...?)
-	request = append(request, byte(0))
-
-	//Reserved byte
-	request = append(request, byte(0))
+	ir.channelType = byte(0)
 
 	//Associated data (action)
-	request = append(request, []byte(action)...)
+	ir.associatedData = []byte(action)
 
-	return request
+	return ir
 
+}
+
+func BytesToIntentRequest(b []byte) (IntentRequest, error) {
+	ir := IntentRequest{}
+	if len(b) < MIN_INTENT_REQUEST_HEADER_LENGTH {
+		return ir, errors.New("Byte slice too short to be an intent request")
+	}
+	//TODO: INCOMPLETE
+
+	return ir, nil
 }
 
 func ParseIntentRequest(intent []byte) {
