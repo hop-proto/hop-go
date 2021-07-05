@@ -105,10 +105,10 @@ func (m *Muxer) Start() {
 				if err != nil {
 					panic(err)
 				}
-				go channel.ReceiveInitiatePkt(initFrame)
+				go channel.receiveInitiatePkt(initFrame)
 			} else {
 				logrus.Info("RECEIVING NORMAL FRAME")
-				go channel.Receive(frame)
+				go channel.receive(frame)
 			}
 		}
 

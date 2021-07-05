@@ -50,6 +50,8 @@ func TestReceiveWindow(t *testing.T) {
 	for i < DATA_LENGTH/PACKET_LENGTH {
 		packets[i] = makePacket(uint32(frameNo), testData[i*PACKET_LENGTH:i*PACKET_LENGTH+PACKET_LENGTH])
 		go recvWindow.receive(packets[i])
+		// See if receiver can handle retransmits
+		go recvWindow.receive(packets[i])
 		i += 1
 		frameNo += 1
 	}

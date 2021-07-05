@@ -41,10 +41,14 @@ Precondition: r.m mutex is held. */
 func (r *Receiver) processIntoBuffer() {
 	for r.fragments.Len() > 0 {
 		frag := heap.Pop(&(r.fragments)).(*Item)
+
 		if r.windowStart != frag.priority {
+			// This packet cannot be added to the buffer yet.
 			logrus.Debug("WINDOW START: ", r.windowStart, " FRAG PRIORITY: ", frag.priority)
-			heap.Push(&r.fragments, frag)
-			break
+			if frag.priority > r.windowStart {
+				heap.Push(&r.fragments, frag)
+				break
+			}
 		} else if frag.FIN {
 			r.windowStart += 1
 			r.ackNo += 1
@@ -123,7 +127,7 @@ func (r *Receiver) receive(p *Frame) error {
 		return errors.New("received dataframe out of receive window bounds")
 	}
 
-	if p.dataLength > 0 || p.flags.FIN {
+	if (p.dataLength > 0 || p.flags.FIN) && (frameNo >= r.windowStart) {
 		heap.Push(&r.fragments, &Item{
 			value:    p.data,
 			priority: frameNo,
