@@ -1,9 +1,10 @@
-package main
+package authgrants
 
 import (
 	"encoding/binary"
-	"errors"
 	"net"
+	"os"
+	"os/user"
 	"strconv"
 	"strings"
 
@@ -12,129 +13,148 @@ import (
 
 //MSG Types
 const (
-	INTENT_REQUEST       = byte(0)
-	INTENT_COMMUNICATION = byte(1)
-	INTENT_CONFIRMATION  = byte(2)
-	INTENT_DENIED        = byte(3)
+	MAX_PORT_NUMBER  = 65535
+	DEFAULT_HOP_PORT = 8888 //TODO: default port? 8888 for now
 
-	TYPE_LEN                         = 1
-	SHA3_LEN                         = 32
-	SNI_LEN                          = 256
-	PORT_LEN                         = 2
-	CHANNEL_TYPE_LEN                 = 1
-	RESERVED_LEN                     = 1
-	MIN_INTENT_REQUEST_HEADER_LENGTH = TYPE_LEN + SHA3_LEN + SNI_LEN + PORT_LEN + CHANNEL_TYPE_LEN + RESERVED_LEN
+	INTENT_REQUEST       = byte(1)
+	INTENT_COMMUNICATION = byte(2)
+	INTENT_CONFIRMATION  = byte(3)
+	INTENT_DENIED        = byte(4)
+
+	TYPE_LEN = 1
+
+	SHA3_LEN         = 32
+	USERNAME_LEN     = 32
+	SNI_LEN          = 256
+	PORT_LEN         = 2
+	CHANNEL_TYPE_LEN = 1
+	RESERVED_LEN     = 1
+	IR_HEADER_LENGTH = TYPE_LEN + SHA3_LEN + 2*(USERNAME_LEN+SNI_LEN) + PORT_LEN + CHANNEL_TYPE_LEN + RESERVED_LEN
+
+	SHA3_OFFSET   = 0
+	CUSER_OFFSET  = SHA3_LEN
+	CSNI_OFFSET   = CUSER_OFFSET + USERNAME_LEN
+	SUSER_OFFSET  = CSNI_OFFSET + SNI_LEN
+	SSNI_OFFSET   = SUSER_OFFSET + USERNAME_LEN
+	PORT_OFFSET   = SSNI_OFFSET + SNI_LEN
+	CHTYPE_OFFSET = PORT_OFFSET + PORT_LEN
+	LEN_OFFSET    = CHTYPE_OFFSET + CHANNEL_TYPE_LEN //Using the reserved byte to hold length of action (up to 256 bytes)
+	ACT_OFFSET    = LEN_OFFSET + RESERVED_LEN
 )
 
 type IntentMsg interface {
-	ToByteSlice() []byte
+	toBytes() []byte
 }
 
 type IntentRequest struct {
-	sha3ClientId   [SHA3_LEN]byte
-	sni            [SNI_LEN]byte
+	sha3           [SHA3_LEN]byte
+	clientUsername string
+	clientSNI      string
+	serverUsername string
+	serverSNI      string
 	port           uint16
 	channelType    byte
-	associatedData []byte
+	action         []string
 }
 
 type IntentCommunication struct {
-	sha3ClientId   [SHA3_LEN]byte
-	sni            [SNI_LEN]byte
-	port           uint16 //assuming port can't be 0 (is this a valid assumption?)
+	sha3           [SHA3_LEN]byte
+	clientUsername string
+	clientSNI      string
+	serverUsername string
+	serverSNI      string
+	port           uint16
 	channelType    byte
-	associatedData []byte
+	action         []string
 }
 
-//maybe I could use json encoding or something? All of this code seems gross
-func (m IntentRequest) ToByteSlice() []byte {
-	//Set the Msg type field
-	slice := []byte{INTENT_REQUEST}
-	//Add the SHA3 Client Identifier
-	slice = append(slice, m.sha3ClientId[:]...)
-	slice = append(slice, m.sni[:]...)
-	b := make([]byte, 2)
-	binary.LittleEndian.PutUint16(b, uint16(m.port))
-	slice = append(slice, b...)
-	slice = append(slice, m.channelType)
-	slice = append(slice, make([]byte, RESERVED_LEN)...)
-	slice = append(slice, m.associatedData...)
-	return slice
+type IntentConfirmation struct {
+	//timeline
+}
+
+type IntentDenial struct {
+	//reason
+}
+
+func NewIntentRequest(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string) *IntentRequest {
+	user, _ := user.Current()
+	cSNI, _ := os.Hostname()
+	sSNI, p := parseAddr(addr)
+	r := &IntentRequest{
+		sha3:           digest,
+		clientUsername: user.Username,
+		clientSNI:      cSNI,
+		serverUsername: sUser,
+		serverSNI:      sSNI,
+		port:           p,
+		channelType:    byte(1), //TODO
+		action:         cmd,
+	}
+	return r
+}
+
+func (r *IntentRequest) toBytes() []byte {
+	s := [IR_HEADER_LENGTH]byte{}
+	copy(s[SHA3_OFFSET:CUSER_OFFSET], r.sha3[:])
+	copy(s[CUSER_OFFSET:CSNI_OFFSET], []byte(r.clientUsername))
+	copy(s[CSNI_OFFSET:SUSER_OFFSET], []byte(r.clientSNI))
+	copy(s[SUSER_OFFSET:SSNI_OFFSET], []byte(r.serverUsername))
+	copy(s[SSNI_OFFSET:PORT_OFFSET], []byte(r.serverSNI))
+	binary.BigEndian.PutUint16(s[PORT_OFFSET:CHTYPE_OFFSET], r.port)
+	s[CHTYPE_OFFSET] = r.channelType
+	action := []byte(strings.Join(r.action, " "))
+	s[LEN_OFFSET] = byte(len(action)) //TODO: This only allows for actions up to 256 bytes (and no bounds checking atm)
+	return append(s[:], action...)
+}
+
+func fromBytes(b []byte) *IntentRequest {
+	r := IntentRequest{}
+	copy(r.sha3[:], b[SHA3_OFFSET:CUSER_OFFSET])
+	r.clientUsername = string(b[CUSER_OFFSET:CSNI_OFFSET])
+	r.clientSNI = string(b[CSNI_OFFSET:SUSER_OFFSET])
+	r.serverUsername = string(b[SUSER_OFFSET:SSNI_OFFSET])
+	r.serverSNI = string(b[SSNI_OFFSET:PORT_OFFSET])
+	r.port = binary.BigEndian.Uint16(b[PORT_OFFSET:CHTYPE_OFFSET])
+	r.channelType = b[CHTYPE_OFFSET]
+	r.action = strings.Split(string(b[ACT_OFFSET:]), " ")
+	return &r
+}
+
+func GetAuthGrant(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string) bool {
+	intent := NewIntentRequest(digest, sUser, addr, cmd)
+	c, err := net.Dial("unix", "echo1.sock") //TODO: address of UDS
+	if err != nil {
+		logrus.Fatal(err)
+	}
+	defer c.Close()
+	logrus.Infof("C2: CONNECTED TO UDS: [%v]", c.RemoteAddr().String())
+	c.Write(intent.toBytes())
+
+	buf := make([]byte, 19)
+	n, err := c.Read(buf)
+	if err != nil {
+		logrus.Fatal(err)
+	}
+	logrus.Infof("C2: Client got: %v", string(buf[0:n]))
+	return string(buf[0:n]) == "INTENT_CONFIRMATION"
+}
+
+func parseAddr(addr string) (string, uint16) { //addr of format host:port or host
+	host := addr
+	port := DEFAULT_HOP_PORT
+	if strings.Contains(addr, ":") {
+		i := strings.Index(addr, ":")
+		port, _ = strconv.Atoi(addr[i+1:])
+		host = addr[:i]
+	}
+	if port > MAX_PORT_NUMBER {
+		logrus.Fatal("port number out of range")
+	}
+	return host, uint16(port)
 }
 
 func (m IntentRequest) String() string {
 	panic("Not implemented")
-}
-
-//DEATH BY PARSING....AAAAAHHH
-func BuildIntentRequest(sha3id [32]byte, action string, user string, addr string) IntentRequest {
-	/*These aren't currently part of the protocol
-	but I feel like they are important?*/
-	// client := os.Current().Username
-	// clienthostname, err := os.Hostname()
-	ir := IntentRequest{}
-	ir.sha3ClientId = sha3id
-	ir.port = 0
-	//TODO: Why is there a separate port field?
-	//parse addr into host:port and port
-	portstr := ""
-	if strings.Contains(addr, ":") {
-		i := strings.Index(addr, ":")
-		portstr = addr[i+1:]
-	}
-	//TODO: make a correct sni? Should this also include desired user on remote server?
-	// Figure out what what address to use (copied/modified from Davids gonet.go file)
-	throwaway, err := net.Dial("udp", addr) //addr needs to be of form host:port
-	if err != nil {
-		logrus.Fatal("Failed to figure out address. Check addr is in <host>:<port> format.")
-	}
-	remoteAddr := throwaway.RemoteAddr()
-	throwaway.Close()
-
-	sniinfo := []byte(remoteAddr.String())
-	if len(sniinfo) > 256 {
-		logrus.Fatalf("Invalid SNI. Length exceeded 256 bytes")
-	}
-	sni := [256]byte{}
-	for i, b := range sniinfo {
-		sni[i] = b
-	}
-	//Add the SNI
-	ir.sni = sni
-
-	//TODO: Is this necessary? Isn't this included in SNI? Can definitely be done cleaner if necessary
-	//Add the PORT number
-	if portstr != "" {
-		MAXPORTNUMBER := 65535
-		port, _ := strconv.Atoi(portstr)
-		if port > MAXPORTNUMBER {
-			logrus.Fatal("port number out of range")
-		}
-		ir.port = uint16(port)
-	}
-
-	//Add the Channel Type (how is this determined...?/Why necessary...?)
-	ir.channelType = byte(0)
-
-	//Associated data (action)
-	ir.associatedData = []byte(action)
-
-	return ir
-
-}
-
-func BytesToIntentRequest(b []byte) (IntentRequest, error) {
-	ir := IntentRequest{}
-	if len(b) < MIN_INTENT_REQUEST_HEADER_LENGTH {
-		return ir, errors.New("Byte slice too short to be an intent request")
-	}
-	//TODO: INCOMPLETE
-
-	return ir, nil
-}
-
-func ParseIntentRequest(intent []byte) {
-
 }
 
 /*How the principal should respond to different authorization

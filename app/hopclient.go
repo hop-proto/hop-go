@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"net"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -12,37 +11,19 @@ import (
 	"zmap.io/portal/transport"
 )
 
-func getAuthGrant(intent []byte) bool {
-	c, err := net.Dial("unix", "echo1.sock")
-	if err != nil {
-		logrus.Fatal(err)
-	}
-	defer c.Close()
-	logrus.Infof("C2: CONNECTED TO UDS: [%v]", c.RemoteAddr().String())
-	c.Write(intent)
-
-	buf := make([]byte, 19)
-	n, err := c.Read(buf)
-	if err != nil {
-		logrus.Fatal(err)
-	}
-	logrus.Infof("C2: Client got: %v", string(buf[0:n]))
-	return string(buf[0:n]) == "INTENT_CONFIRMATION"
-}
-
 func startClient(args []string) {
 	logrus.SetLevel(logrus.InfoLevel)
 
 	//******PROCESS ARGUMENTS******
-	if len(args) != 5 {
+	if len(args) < 5 {
 		logrus.Fatal("C: Invalid arguments. Useage: hop user@host:port -k <pathtokey> or hop user@host:port -a <action>.")
 	}
 	s := strings.SplitAfter(args[2], "@") //TODO: Add support for optional username
 	user := s[0][0 : len(s[0])-1]
 	addr := s[1]
-	action := "bash" //default action for principal is to open an interactive shell
-	//Check if this is a principal client process or one that needs to get an AG
+	cmd := []string{"bash"} //default action for principal is to open an interactive shell
 
+	//Check if this is a principal client process or one that needs to get an AG
 	//******GET AUTHORIZATION SOURCE******
 	if args[3] == "-k" {
 		logrus.Infof("C: Using key-file at %v for auth.", args[4])
@@ -50,12 +31,9 @@ func startClient(args []string) {
 	} else if args[3] == "-a" {
 		logrus.Infof("C: Initiating AGC Protocol.")
 		//TODO: generate keypair and store somehow
-		pubkey := "public key"              //need to actually generate a key (probably using David's stuff...?)
-		hash := sha3.Sum256([]byte(pubkey)) //don't know if this is correct
-		intent := authgrants.BuildIntentRequest(hash, args[4], user, addr)
-		//TODO: add support for actions with multiple arguments
-		action = args[4] //if using authorization grant then perform the action specified in cmd line
-		if !getAuthGrant(intent.ToByteSlice()) {
+		digest := sha3.Sum256([]byte("pubkey")) //don't know if this is correct
+		cmd = args[4:]                          //if using authorization grant then perform the action specified in cmd line
+		if !authgrants.GetAuthGrant(digest, user, addr, cmd) {
 			logrus.Fatal("C: Principal denied request.")
 		} else {
 			logrus.Info("C: Principal approved request.")
@@ -78,7 +56,7 @@ func startClient(args []string) {
 	defer mc.Stop()
 
 	//TODO: Either start interactive shell with server 2 or execute Auth grant command
-	logrus.Infof("Performing action: %v", action)
+	logrus.Infof("Performing action: %v", cmd)
 	// channel, err := mc.CreateChannel(1 << 8)
 	// if err != nil {
 	// 	logrus.Fatalf("C: error making channel: %v", err)

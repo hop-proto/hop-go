@@ -9,3 +9,12 @@ simpleecho: super simple UDS server (use nc -U echo.sock to interact with it)
 
 client: contains a client program that acts like a hop client that interacts with the hop server daemon
 
+Milestones:
+- Proper Intent Message encapsulation and decapsulation
+- Network Proxy Channels
+- Running custom commands (interactive shell)
+- Organize code into appropriate modules
+- Server can support multiple connections
+- Using keys for identity + actually adding authgrants
+- Enforcing time restrictions on authgrants
+
