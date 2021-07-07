@@ -24,15 +24,15 @@ import (
 func newTestServerConfig() *transport.ServerConfig {
 	keyPair, err := keys.ReadDHKeyFromPEMFile("./testdata/leaf-key.pem")
 	if err != nil {
-		logrus.Fatalf("S: error with keypair: %v", err)
+		logrus.Fatalf("S: ERROR WITH KEYPAIR %v", err)
 	}
 	certificate, err := certs.ReadCertificatePEMFile("testdata/leaf.pem")
 	if err != nil {
-		logrus.Fatalf("S: error with certs: %v", err)
+		logrus.Fatalf("S: WRROR WITH CERTS %v", err)
 	}
 	intermediate, err := certs.ReadCertificatePEMFile("testdata/intermediate.pem")
 	if err != nil {
-		logrus.Fatalf("S: error with intermediate certs: %v", err)
+		logrus.Fatalf("S: ERROR WITH INT CERTS %v", err)
 	}
 	return &transport.ServerConfig{
 		KeyPair:      keyPair,
@@ -44,7 +44,6 @@ func newTestServerConfig() *transport.ServerConfig {
 //checks tree (starting at proc) to see if cPID is a descendent
 func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
 	for _, child := range proc.Children {
-		logrus.Printf("S: Checking [%v]", child)
 		if child == cPID || checkDescendents(tree, tree.Procs[child], cPID) {
 			return true
 		}
@@ -55,7 +54,6 @@ func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
 func checkCredentials(c net.Conn, principals *map[int32]string) (int32, error) {
 	creds, err := readCreds(c)
 	if err != nil {
-		logrus.Errorf("S: Error reading credentials: %s", err)
 		return 0, err
 	}
 	//PID of client process that connected to socket
@@ -66,20 +64,16 @@ func checkCredentials(c net.Conn, principals *map[int32]string) (int32, error) {
 	tree, err := pstree.New()
 	//display(os.Getppid(), tree, 1) //displays all pstree for ipcserver
 	if err != nil {
-		logrus.Errorf("S: Error making pstree: %s", err)
 		return 0, err
 	}
 	//check all of the PIDs of processes that the server started
 	for k := range *principals {
-		logrus.Printf("S: Checking [%v]", k)
 		if k == cPID || checkDescendents(tree, tree.Procs[int(k)], int(cPID)) {
-			logrus.Infof("S: Legit descendent!")
 			ancestor = k
 			break
 		}
 	}
 	if ancestor == -1 {
-		logrus.Infof("S: Not a legitimate descendent. [%v]", ancestor)
 		return 0, errors.New("not a descendent process")
 	}
 	logrus.Info("S: CREDENTIALS VERIFIED")
@@ -144,11 +138,11 @@ func handleAuthGrantRequest(c net.Conn, principals *map[int32]string, ms *channe
 	//Verify that the client is a legit descendent
 	ancestor, e := checkCredentials(c, principals)
 	if e != nil {
-		log.Fatalf("Issue checking credentials: %v", e)
+		log.Fatalf("S: ISSUE CHECKING CREDENTIALS: %v", e)
 	}
 	// + find corresponding principal
 	principal, _ := (*principals)[ancestor]
-	logrus.Infof("S: Client connected [%s]", c.RemoteAddr().Network())
+	logrus.Infof("S: CLIENT CONNECTED [%s]", c.RemoteAddr().Network())
 
 	msgType := make([]byte, 1)
 	c.Read(msgType)
@@ -159,23 +153,24 @@ func handleAuthGrantRequest(c net.Conn, principals *map[int32]string, ms *channe
 		action := make([]byte, actionLen)
 		_, err = c.Read(action)
 
-		logrus.Infof("S: Initiating AGC w/ %v", principal)
+		logrus.Infof("S: INITIATING AGC W/ %v", principal)
 		agc, err := ms.CreateChannel(1 << 8)
 		if err != nil {
-			logrus.Fatalf("S: error making channel: %v", err)
+			logrus.Fatalf("S: ERROR MAKING CHANNEL: %v", err)
 		}
 		logrus.Infof("S: CREATED CHANNEL (AGC)")
-		agc.Write(append(irh, action...))
+		agc.Write(append(msgType, append(irh, action...)...))
 		if err != nil {
-			logrus.Fatalf("S: error writing to channel: %v", err)
+			logrus.Fatalf("S: ERROR WRITING TO CHANNEL: %v", err)
 		}
-		logrus.Infof("S: WROTE INTENT")
+		logrus.Infof("S: WROTE INTENT_REQUEST TO AGC")
 
 		responseType := make([]byte, 1)
 		_, err = agc.Read(responseType)
 		if err != nil {
-
+			logrus.Fatal(err)
 		}
+		logrus.Infof("Got response type: %v", responseType)
 		//TODO: SET TIMEOUT STUFF + BETTER ERROR CHECKING
 		if responseType[0] == authgrants.INTENT_CONFIRMATION {
 			conf := make([]byte, authgrants.INTENT_CONF_SIZE)
@@ -186,21 +181,22 @@ func handleAuthGrantRequest(c net.Conn, principals *map[int32]string, ms *channe
 			c.Write(append(responseType, conf...))
 		} else if responseType[0] == authgrants.INTENT_DENIED {
 			reason_length := make([]byte, 1)
-			_, err := c.Read(reason_length)
+			_, err := agc.Read(reason_length)
 			if err != nil {
 				logrus.Fatal(err)
 			}
+			logrus.Infof("C: EXPECTING %v BYTES OF REASON", reason_length)
 			reason := make([]byte, int(reason_length[0]))
-			_, err = c.Read(reason)
+			_, err = agc.Read(reason)
 			if err != nil {
 				logrus.Fatal(err)
 			}
 			c.Write(append(append(responseType, reason_length...), reason...))
 		} else {
-			logrus.Fatal("Received unrecognized message type")
+			logrus.Fatal("S: UNRECOGNIZED MESSAGE TYPE")
 		}
 	} else {
-		logrus.Fatal("Received unrecognized message type")
+		logrus.Fatal("S: UNRECOGNIZED MESSAGE TYPE")
 	}
 }
 
@@ -225,13 +221,13 @@ func serve(args []string) {
 	}
 	pktConn, err := net.ListenPacket("udp", addr)
 	if err != nil {
-		logrus.Fatalf("S: error starting udp conn: %v", err)
+		logrus.Fatalf("S: ERROR STARTING UDP CONN: %v", err)
 	}
 	// It's actually a UDP conn
 	udpConn := pktConn.(*net.UDPConn)
 	server, err := transport.NewServer(udpConn, newTestServerConfig())
 	if err != nil {
-		logrus.Fatalf("S: error starting transport conn: %v", err)
+		logrus.Fatalf("S: ERROR STARTING TRANSPORT CONN: %v", err)
 	}
 
 	//Start IPC socket
@@ -244,7 +240,7 @@ func serve(args []string) {
 	config := &net.ListenConfig{Control: setListenerOptions}
 	l, err := config.Listen(context.Background(), "unix", sockAddr)
 	if err != nil {
-		log.Fatal("S: listen error:", err)
+		log.Fatal("S: UDS LISTEN ERROR:", err)
 	}
 
 	principals := make(map[int32]string) //PID -> "principal" (what should actually rep principal?)
@@ -253,7 +249,7 @@ func serve(args []string) {
 
 	//TODO: make this a loop so it can handle multiple client conns
 	logrus.Infof("S: SERVER LISTENING ON %v", addr)
-	serverConn, err := server.AcceptTimeout(time.Minute) //won't be a minute in reality
+	serverConn, err := server.AcceptTimeout(5 * time.Minute) //won't be a minute in reality
 	if err != nil {
 		logrus.Fatalf("S: SERVER TIMEOUT: %v", err)
 	}
@@ -267,28 +263,28 @@ func serve(args []string) {
 
 	serverChan, err := ms.Accept()
 	if err != nil {
-		logrus.Fatalf("S: issue accepting channel: %v", err)
+		logrus.Fatalf("S: ERROR ACCEPTING CHANNEL: %v", err)
 	}
-	logrus.Info("S: ACCEPTED NEW CHANNEL (CODE EXEC)")
+	logrus.Info("S: ACCEPTED NEW CHANNEL (DECOY)")
 
 	buf := make([]byte, 14)
 	bytesRead := 0
 	n, err := serverChan.Read(buf[bytesRead:])
 	if err != nil {
-		logrus.Fatalf("S: issue reading from channel: %v", err)
+		logrus.Fatalf("S: ERROR READING FROM CHANNEL %v", err)
 	}
 	if string(buf[0:n]) == "INTENT_REQUEST" {
-		logrus.Info("S: REC: INTENT_REQUEST")
-		//Spawn some children processes that will act as clients
-		cmd := exec.Command("go", "run", "main.go", "hopclient.go", "hopd.go", "hop", "user@127.0.0.1:9999", "-a", "shell") //need to pass a secret when it is spawned?
+		logrus.Info("S: TESTING AGC PROCEDURE")
+		//Spawn a child hop client
+		cmd := exec.Command("go", "run", "main.go", "hopclient.go", "hopd.go", "hop", "user@127.0.0.1:9999", "-a", "shell", "second param") //need to pass a secret when it is spawned?
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		err = cmd.Start()
 		if err != nil {
-			logrus.Errorf("S: Started w/ err: %v", err)
+			logrus.Errorf("S: PROCESS START ERROR: %v", err)
 		} else {
 			principals[int32(cmd.Process.Pid)] = "principal1" //temporary placeholder for real principal identifier
-			logrus.Infof("S: Started process at PID: %v", cmd.Process.Pid)
+			logrus.Infof("S: STARTED PROCESS WITH PID: %v", cmd.Process.Pid)
 		}
 	} else {
 		logrus.Info("S: RECEIVED NOT AN INTENT_REQEST")
@@ -297,13 +293,5 @@ func serve(args []string) {
 	for {
 	}
 
-	err = serverChan.Close()
-	if err != nil {
-		logrus.Errorf("error closing channel: %v", err)
-	}
-
-	//infinite loop so the client program doesn't quit
-	//otherwise client quits before server can read data
-	//TODO: Figure out how to check if the other side closed channel
-
+	//TODO: close channels or muxer appropriately
 }

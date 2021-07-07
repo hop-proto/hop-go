@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/sirupsen/logrus"
@@ -20,7 +19,7 @@ func main() {
 		logrus.Infof("Starting hop client")
 		startClient(os.Args)
 	} else if os.Args[1] == "hopd" {
-		fmt.Println("Hosting hop server daemon")
+		logrus.Infof("Hosting hop server daemon")
 		serve(os.Args) //start "hop server daemon process"
 	} else {
 		logrus.Fatal("Unrecognized command")

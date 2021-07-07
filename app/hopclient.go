@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
@@ -82,51 +83,47 @@ func startClient(args []string) {
 			logrus.Fatalf("C: issue accepting channel: %v", err)
 		}
 		logrus.Info("C: ACCEPTED NEW CHANNEL (AGC)")
-		agc_buf := make([]byte, authgrants.IR_HEADER_LENGTH)
-		_, err = agc.Read(agc_buf)
+		agc_buf := make([]byte, authgrants.IR_HEADER_LENGTH+1)
+		n, err := agc.Read(agc_buf)
+		logrus.Infof("Read %v bytes", n)
 		if err != nil {
 			logrus.Fatalf("C: issue reading from channel: %v", err)
 		}
+		logrus.Infof("buf[0]: %v and INTENT_REQUEST: %v", agc_buf[0], authgrants.INTENT_REQUEST)
 		if agc_buf[0] == authgrants.INTENT_REQUEST {
 			logrus.Info("C: PRINCIPAL REC: INTENT_REQUEST")
-			//req, e := BytesToIntentRequest(agc_buf[0:n])
-			fmt.Printf("Allow user to do %v? Enter yes or no\n", "INTENT_REQUEST")
+			a := make([]byte, int(agc_buf[len(agc_buf)-1]))
+			n, err = agc.Read(a)
+			req := authgrants.FromIntentRequestBytes(append(agc_buf, a...))
+			req.Display()
 			var resp string
 			fmt.Scanln(&resp) //TODO: make sure this is safe/sanitize input/make this a popup instead.
 			if resp == "yes" {
 				logrus.Info("C: USER CONFIRMED INTENT_REQUEST. CONTACTING S2...") //TODO: ACTUALLY DO THE NPC THING
-				logrus.Info("C: PRETENDING S2 SAID YES")
-				s := []byte("INTENT_CONFIRMATION")
-				//TODO: make actual byte message type
+				//create npc with server1
+				// npcCh, _ := mc.CreateChannel(1 << 8)
+				// i := npc.NewNPCInitMsg("127.0.0.1", "9999")
+				// npcCh.Write(i.ToBytes())
 
-				_, err = agc.Write(s)
+				logrus.Info("C: PRETENDING S2 SAID YES")
+				t := time.Time(time.Now().Add(time.Duration(time.Hour)))
+				s := authgrants.NewIntentConfirmation(t)
+				_, err = agc.Write(s.ToBytes())
 				if err != nil {
 					logrus.Fatalf("C: error writing to agc: %v", err)
 				}
 				logrus.Infof("C: WROTE INTENT_CONFIRMATION")
 			} else {
-				s := []byte("INTENT_DENIAL")
-				//TODO: make actual byte message type
-
-				_, err = agc.Write(s)
+				s := authgrants.NewIntentDenied("User Denial.")
+				n, err = agc.Write(s.ToBytes())
+				logrus.Infof("C: WROTE %v BYTES OF INTENT DENIED", n)
+				logrus.Infof("C: INTENT_DENIED: %v", s.ToBytes())
 				if err != nil {
 					logrus.Fatalf("C: error writing to agc: %v", err)
 				}
 				logrus.Info("C: INTENT DENIED")
 			}
 		}
-
-		// buf := make([]byte, 50) //fix buffer size
-		// n, err = channel.Read(buf)
-		// if err != nil {
-		// 	logrus.Fatalf("C: issue reading from channel: %v", err)
-		// }
-		// if string(buf[0:n]) == "yes" {
-		// 	logrus.Info("C: INTENT APPROVED")
-		// } else {
-		// 	logrus.Info("C: INTENT DENIED")
-		// }
-
 		err = temp.Close()
 		if err != nil {
 			fmt.Printf("C: error closing channel: %v", err)
