@@ -33,11 +33,12 @@ func startClient(args []string) {
 		//TODO: generate keypair and store somehow
 		digest := sha3.Sum256([]byte("pubkey")) //don't know if this is correct
 		cmd = args[4:]                          //if using authorization grant then perform the action specified in cmd line
-		if !authgrants.GetAuthGrant(digest, user, addr, cmd) {
-			logrus.Fatal("C: Principal denied request.")
-		} else {
-			logrus.Info("C: Principal approved request.")
+		t, e := authgrants.GetAuthGrant(digest, user, addr, cmd)
+		if e != nil {
+			logrus.Fatalf("C: %v", e)
 		}
+		logrus.Infof("C: Principal approved request. Deadline: %v", t)
+		//TODO: potentially store the deadline somewhere?
 	}
 
 	//******ESTABLISH HOP SESSION******
@@ -81,7 +82,7 @@ func startClient(args []string) {
 			logrus.Fatalf("C: issue accepting channel: %v", err)
 		}
 		logrus.Info("C: ACCEPTED NEW CHANNEL (AGC)")
-		agc_buf := make([]byte, authgrants.MIN_INTENT_REQUEST_HEADER_LENGTH)
+		agc_buf := make([]byte, authgrants.IR_HEADER_LENGTH)
 		_, err = agc.Read(agc_buf)
 		if err != nil {
 			logrus.Fatalf("C: issue reading from channel: %v", err)
