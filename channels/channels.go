@@ -38,7 +38,6 @@ type Reliable struct {
 	closedCond   sync.Cond
 	cType        byte
 	id           byte
-	initiated    bool
 	localAddr    net.Addr
 	m            sync.Mutex
 	recvWindow   Receiver
@@ -54,7 +53,7 @@ var _ net.Conn = &Reliable{}
 func (r *Reliable) isInitiated() bool {
 	r.m.Lock()
 	defer r.m.Unlock()
-	return r.initiated
+	return r.channelState == INITIATED
 }
 
 func (r *Reliable) send() {
@@ -70,9 +69,9 @@ func (r *Reliable) send() {
 
 func NewReliableChannelWithChannelId(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, channelType byte, channelId byte) *Reliable {
 	r := &Reliable{
-		id:        channelId,
-		initiated: false,
-		closed:    false,
+		id:           channelId,
+		channelState: CREATED,
+		closed:       false,
 		closedCond: sync.Cond{
 			L: &sync.Mutex{},
 		},
@@ -115,9 +114,9 @@ func NewReliableChannel(underlying transport.MsgConn, netConn net.Conn, sendQueu
 		return nil, err
 	}
 	r := &Reliable{
-		id:        cid[0],
-		initiated: false,
-		closed:    false,
+		id:           cid[0],
+		channelState: CREATED,
+		closed:       false,
 		// TODO (dadrian): uncomment this when transport.Handle and transport.Client implement Local,RemoteAddr()
 		// localAddr:  netConn.LocalAddr(),
 		// remoteAddr: netConn.RemoteAddr(),
@@ -175,7 +174,7 @@ func (r *Reliable) initiate(req bool) {
 		}
 		r.sendQueue <- p.toBytes()
 		r.m.Lock()
-		not_init = !r.initiated
+		not_init = !(r.channelState == INITIATED)
 		r.m.Unlock()
 		timer := time.NewTimer(RTO)
 		<-timer.C
@@ -185,7 +184,7 @@ func (r *Reliable) initiate(req bool) {
 }
 
 func (r *Reliable) receive(pkt *Frame) error {
-	if !r.initiated {
+	if !(r.channelState == INITIATED) {
 		logrus.Error("receiving non-initiate channel frames when not initiated")
 		return errors.New("receiving non-initiate channel frames when not initiated")
 	}
@@ -204,12 +203,12 @@ func (r *Reliable) receiveInitiatePkt(pkt *InitiateFrame) error {
 	r.m.Lock()
 	defer r.m.Unlock()
 
-	if !r.initiated {
+	if !(r.channelState == INITIATED) {
 		r.recvWindow.m.Lock()
 		r.recvWindow.ackNo = 1
 		r.recvWindow.m.Unlock()
 		logrus.Debug("INITIATED! ", pkt.flags.REQ, " ", pkt.flags.RESP)
-		r.initiated = true
+		r.channelState = INITIATED
 		r.sender.recvAck(1)
 	}
 
