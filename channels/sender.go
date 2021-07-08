@@ -109,13 +109,13 @@ func (s *Sender) retransmit() {
 				frameNo:    s.frameNo,
 				data:       []byte{},
 			}
-			logrus.Info("SENDING EMPTY PACKET ON SEND QUEUE FOR ACK - FIN? ", pkt.flags.FIN)
+			//logrus.Info("SENDING EMPTY PACKET ON SEND QUEUE FOR ACK - FIN? ", pkt.flags.FIN)
 			s.sendQueue <- &pkt
 		}
 		i := 0
 		for i < len(s.frames) && i < int(s.windowSize) && i < MAX_FRAG_TRANS_PER_RTO {
 			s.sendQueue <- s.frames[i]
-			logrus.Info("PUTTING PKT ON SEND QUEUE - FIN? ", s.frames[i].flags.FIN)
+			//logrus.Info("PUTTING PKT ON SEND QUEUE - FIN? ", s.frames[i].flags.FIN)
 			i += 1
 		}
 		s.l.Unlock()
@@ -146,6 +146,6 @@ func (s *Sender) close() error {
 	s.frameDataLengths[pkt.frameNo] = 0
 	s.frameNo += 1
 	s.frames = append(s.frames, &pkt)
-	logrus.Info("ADDED FIN PACKET TO SEND QUEUE")
+	//logrus.Info("ADDED FIN PACKET TO SEND QUEUE")
 	return nil
 }

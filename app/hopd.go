@@ -154,7 +154,7 @@ func handleAuthGrantRequest(c net.Conn, principals *map[int32]string, ms *channe
 		_, err = c.Read(action)
 
 		logrus.Infof("S: INITIATING AGC W/ %v", principal)
-		agc, err := ms.CreateChannel(1 << 8)
+		agc, err := ms.CreateChannel(channels.AGC_CHANNEL)
 		if err != nil {
 			logrus.Fatalf("S: ERROR MAKING CHANNEL: %v", err)
 		}

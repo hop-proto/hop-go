@@ -65,7 +65,7 @@ func startClient(args []string) {
 	// }
 
 	if args[3] == "-k" { //temporary way to allow Principal to get server to start intent request process
-		temp, err := mc.CreateChannel(1 << 8)
+		temp, err := mc.CreateChannel(channels.EXEC_CHANNEL)
 		if err != nil {
 			logrus.Fatalf("C: error making channel: %v", err)
 		}

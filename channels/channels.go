@@ -31,6 +31,13 @@ const (
 	CLOSED      state = iota
 )
 
+//Channel Type constants
+const (
+	EXEC_CHANNEL = byte(1)
+	AGC_CHANNEL  = byte(2)
+	NPC_CHANEL   = byte(3)
+)
+
 // Reliable implements a reliable and receiveWindow channel on top
 
 type Reliable struct {
@@ -123,7 +130,7 @@ func NewReliableChannel(underlying transport.MsgConn, netConn net.Conn, sendQueu
 
 /* req: whether the channel is requesting to initiate a channel (true), or whether is respondding to an initiation request (false).*/
 func (r *Reliable) initiate(req bool) {
-	channelType := byte(0)
+	channelType := r.cType
 	not_init := true
 
 	for not_init {
@@ -154,7 +161,7 @@ func (r *Reliable) initiate(req bool) {
 
 func (r *Reliable) receive(pkt *Frame) error {
 	if r.channelState != INITIATED {
-		logrus.Error("receiving non-initiate channel frames when not initiated")
+		//logrus.Error("receiving non-initiate channel frames when not initiated")
 		return errors.New("receiving non-initiate channel frames when not initiated")
 	}
 	r.closedCond.L.Lock()
@@ -176,7 +183,7 @@ func (r *Reliable) receiveInitiatePkt(pkt *InitiateFrame) error {
 		r.recvWindow.m.Lock()
 		r.recvWindow.ackNo = 1
 		r.recvWindow.m.Unlock()
-		logrus.Debug("INITIATED! ", pkt.flags.REQ, " ", pkt.flags.RESP)
+		//logrus.Debug("INITIATED! ", pkt.flags.REQ, " ", pkt.flags.RESP)
 		r.channelState = INITIATED
 		r.sender.recvAck(1)
 	}
@@ -207,7 +214,7 @@ func (r *Reliable) Close() error {
 	if err != nil {
 		return err
 	}
-	logrus.Debug("STARTNG CLOSE")
+	//logrus.Debug("STARTNG CLOSE")
 
 	time.Sleep(time.Second)
 	// Wait until the other end of the connection has received the FIN packet from the other side.
@@ -224,7 +231,7 @@ func (r *Reliable) Close() error {
 
 		t := time.Now()
 		elapsed := t.Sub(start)
-		logrus.Debug("waiting: ", r.sender.unsentFramesRemaining(), r.recvWindow.closed, elapsed.Seconds())
+		//logrus.Debug("waiting: ", r.sender.unsentFramesRemaining(), r.recvWindow.closed, elapsed.Seconds())
 
 		if (!r.sender.unsentFramesRemaining() && r.recvWindow.closed) || elapsed.Seconds() > 5 {
 			break
@@ -233,7 +240,7 @@ func (r *Reliable) Close() error {
 	}
 	r.closedCond.L.Unlock()
 
-	logrus.Debug("CLOSED! WOOHOO")
+	//logrus.Debug("CLOSED! WOOHOO")
 	r.m.Lock()
 	r.channelState = CLOSED
 	r.m.Unlock()
