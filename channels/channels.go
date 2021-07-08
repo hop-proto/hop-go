@@ -22,20 +22,30 @@ const RTO = time.Millisecond * 500
 
 const WINDOW_SIZE = 128
 
+type state int
+
+const (
+	CREATED     state = iota
+	INITIATED   state = iota
+	CLOSE_START state = iota
+	CLOSED      state = iota
+)
+
 // Reliable implements a reliable and receiveWindow channel on top
 
 type Reliable struct {
-	closed     bool
-	id         byte
-	initiated  bool
-	localAddr  net.Addr
-	m          sync.Mutex
-	closedCond sync.Cond
-	recvWindow Receiver
-	remoteAddr net.Addr
-	sender     Sender
-	sendQueue  chan []byte
-	cType      byte
+	closed       bool
+	closedCond   sync.Cond
+	cType        byte
+	id           byte
+	initiated    bool
+	localAddr    net.Addr
+	m            sync.Mutex
+	recvWindow   Receiver
+	remoteAddr   net.Addr
+	sender       Sender
+	sendQueue    chan []byte
+	channelState state
 }
 
 // Reliable implements net.Conn
