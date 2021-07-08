@@ -143,7 +143,7 @@ func (r *Reliable) initiate(req bool) {
 		}
 		r.sendQueue <- p.toBytes()
 		r.m.Lock()
-		not_init = !(r.channelState == INITIATED)
+		not_init = r.channelState != INITIATED
 		r.m.Unlock()
 		timer := time.NewTimer(RTO)
 		<-timer.C
@@ -153,7 +153,7 @@ func (r *Reliable) initiate(req bool) {
 }
 
 func (r *Reliable) receive(pkt *Frame) error {
-	if !(r.channelState == INITIATED) {
+	if r.channelState != INITIATED {
 		logrus.Error("receiving non-initiate channel frames when not initiated")
 		return errors.New("receiving non-initiate channel frames when not initiated")
 	}

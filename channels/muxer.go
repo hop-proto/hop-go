@@ -61,7 +61,7 @@ func (m *Muxer) readMsg() (*Frame, error) {
 	if err != nil {
 		return nil, err
 	}
-	return FromBytes(pkt)
+	return fromBytes(pkt)
 
 }
 
@@ -83,7 +83,7 @@ func (m *Muxer) Start() {
 		channel, ok := m.GetChannel(frame.channelID)
 		if !ok {
 			logrus.Info("NO CHANNEL")
-			initFrame, err := FromInitiateBytes(frame.toBytes())
+			initFrame, err := fromInitiateBytes(frame.toBytes())
 
 			if initFrame.flags.REQ {
 
@@ -100,7 +100,7 @@ func (m *Muxer) Start() {
 
 		if channel != nil {
 			if frame.flags.REQ || frame.flags.RESP {
-				initFrame, err := FromInitiateBytes(frame.toBytes())
+				initFrame, err := fromInitiateBytes(frame.toBytes())
 				logrus.Info("RECEIVING INITIATE FRAME ", initFrame.channelID, " ", initFrame.frameNo, " ", frame.flags.REQ, " ", frame.flags.RESP)
 				if err != nil {
 					panic(err)
