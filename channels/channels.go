@@ -34,7 +34,6 @@ const (
 // Reliable implements a reliable and receiveWindow channel on top
 
 type Reliable struct {
-	closed       bool
 	closedCond   sync.Cond
 	cType        byte
 	id           byte
@@ -50,14 +49,14 @@ type Reliable struct {
 // Reliable implements net.Conn
 var _ net.Conn = &Reliable{}
 
-func (r *Reliable) isInitiated() bool {
+func (r *Reliable) getState() state {
 	r.m.Lock()
 	defer r.m.Unlock()
-	return r.channelState == INITIATED
+	return r.channelState
 }
 
 func (r *Reliable) send() {
-	for r.isInitiated() && !r.closed {
+	for r.getState() == INITIATED || r.getState() == CLOSE_START {
 		pkt := <-r.sender.sendQueue
 		pkt.channelID = r.id
 		pkt.ackNo = r.recvWindow.getAck()
@@ -68,55 +67,15 @@ func (r *Reliable) send() {
 }
 
 func NewReliableChannelWithChannelId(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, channelType byte, channelId byte) *Reliable {
-	r := &Reliable{
-		id:           channelId,
-		channelState: CREATED,
-		closed:       false,
-		closedCond: sync.Cond{
-			L: &sync.Mutex{},
-		},
-		// TODO (dadrian): uncomment this when transport.Handle and transport.Client implement Local,RemoteAddr()
-		// localAddr:  netConn.LocalAddr(),
-		// remoteAddr: netConn.RemoteAddr(),
-		m: sync.Mutex{},
-		recvWindow: Receiver{
-			buffer: new(bytes.Buffer),
-			bufferCond: sync.Cond{
-				L: &sync.Mutex{},
-			},
-			fragments:   make(PriorityQueue, 0),
-			windowSize:  WINDOW_SIZE,
-			windowStart: 1,
-		},
-		sender: Sender{
-			ackNo:            1,
-			buffer:           make([]byte, 0),
-			closed:           false,
-			frameDataLengths: make(map[uint32]uint16),
-			frameNo:          1,
-			RTO:              RTO,
-			sendQueue:        make(chan *Frame),
-			windowSize:       WINDOW_SIZE,
-		},
-		sendQueue: sendQueue,
-		cType:     channelType,
-	}
-	r.recvWindow.closedCond = &r.closedCond
-	r.recvWindow.init()
+	r := makeChannel(underlying, netConn, sendQueue, channelType, channelId)
 	go r.initiate(false)
 	return r
 }
 
-func NewReliableChannel(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, cType byte) (*Reliable, error) {
-	cid := []byte{0}
-	n, err := rand.Read(cid)
-	if err != nil || n != 1 {
-		return nil, err
-	}
+func makeChannel(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, cType byte, channelId byte) *Reliable {
 	r := &Reliable{
-		id:           cid[0],
+		id:           channelId,
 		channelState: CREATED,
-		closed:       false,
 		// TODO (dadrian): uncomment this when transport.Handle and transport.Client implement Local,RemoteAddr()
 		// localAddr:  netConn.LocalAddr(),
 		// remoteAddr: netConn.RemoteAddr(),
@@ -148,6 +107,16 @@ func NewReliableChannel(underlying transport.MsgConn, netConn net.Conn, sendQueu
 	}
 	r.recvWindow.closedCond = &r.closedCond
 	r.recvWindow.init()
+	return r
+}
+
+func NewReliableChannel(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, cType byte) (*Reliable, error) {
+	cid := []byte{0}
+	n, err := rand.Read(cid)
+	if err != nil || n != 1 {
+		return nil, err
+	}
+	r := makeChannel(underlying, netConn, sendQueue, cType, cid[0])
 	go r.initiate(true)
 	return r, nil
 }
@@ -203,7 +172,7 @@ func (r *Reliable) receiveInitiatePkt(pkt *InitiateFrame) error {
 	r.m.Lock()
 	defer r.m.Unlock()
 
-	if !(r.channelState == INITIATED) {
+	if r.channelState == CREATED {
 		r.recvWindow.m.Lock()
 		r.recvWindow.ackNo = 1
 		r.recvWindow.m.Unlock()
@@ -229,7 +198,7 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 
 func (r *Reliable) Close() error {
 	r.m.Lock()
-	if r.closed {
+	if r.channelState == CLOSED {
 		r.m.Unlock()
 		return errors.New("channel already closed")
 	}
@@ -266,7 +235,7 @@ func (r *Reliable) Close() error {
 
 	logrus.Debug("CLOSED! WOOHOO")
 	r.m.Lock()
-	r.closed = true
+	r.channelState = CLOSED
 	r.m.Unlock()
 	return nil
 }
