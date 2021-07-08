@@ -1,55 +1,31 @@
 package main
 
 import (
-	"errors"
-	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/term"
 )
 
-func parseHost(userHost string) (string, string, error) {
-	split := strings.Split(userHost, "@")
-	if len(split) != 2 || strings.Contains(userHost, ":") {
-		return "", "", errors.New("Invalid user host format")
-	}
-	return split[0], split[1], nil
-}
-
-func getClient(userHost string) (*ssh.Client, error) {
-
-	user, host, err := parseHost(userHost)
-	if err != nil {
-		return nil, err
-	}
+func getClient() (*ssh.Client, error) {
 	// An SSH client is represented with a ClientConn.
 	//
 	// To authenticate with the remote server you must pass at least one
 	// implementation of AuthMethod via the Auth field in ClientConfig,
 	// and provide a HostKeyCallback.
 	config := &ssh.ClientConfig{
-		User: user,
+		User: "foo",
 		Auth: []ssh.AuthMethod{
 			ssh.Password("bar"),
 		},
 		// TODO (drew): consider fixed host key
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
-
-	// TODO: support custom ports
-	port := 2234
-
-	// TODO: When the channel layer is completed, this code will look somewhat like:
-	// conn := transport.Dial("udp", "localhost:1234")
-	// mc := NewMuxer(false, transportConn)
-	// go mc.Start()
-	// channel, err := mc.CreateChannel(1 << 8)
-	// client, err := ssh.NewClientConn(reliableChannel, otherargs....)
-	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, port), config)
-
+	client, err := ssh.Dial("tcp", "localhost:2234", config)
+	//conn := transport.Dial("udp", "localhost:1234")
+	//reliableChannel = reliable.NewChannel(transportConn) // You have to define this function still
+	//client, err := ssh.NewClientConn(reliableChannel, otherargs....)
 	if err != nil {
 		return nil, err
 	}
@@ -100,8 +76,8 @@ func setupTerminal(session *ssh.Session) (*term.State, error) {
 * Inspired by https://gist.github.com/svett/b7f56afc966a6b6ac2fc and
 * https://pkg.go.dev/golang.org/x/crypto/ssh#example-Session.RequestPty.
  */
-func sshClient(userHost string) error {
-	client, err := getClient(userHost)
+func sshClient() error {
+	client, err := getClient()
 	if err != nil {
 		return err
 	}
@@ -120,7 +96,7 @@ func sshClient(userHost string) error {
 		return err
 	}
 	defer func() { term.Restore(int(os.Stdin.Fd()), oldState) }()
-	session.SendRequest("authoriziation", true, authPacket.toBytes())
+
 	if err = session.Shell(); err != nil {
 		return err
 	}

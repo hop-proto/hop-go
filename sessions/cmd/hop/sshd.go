@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -47,7 +46,7 @@ func sshd() {
 	// will need to swap out net.Listen for our own custom Listener.
 	// Listen(network, address) only takes tcp, tcp4, tcp6, unix, or unixpacket as the network
 	// pick some port to listen on
-	listener, err := net.Listen("tcp", "localhost:2234")
+	listener, err := net.Listen("tcp", "0.0.0.0:2234")
 	if err != nil {
 		log.Printf("failed to listen for connection: (%s)", err)
 	}
@@ -103,12 +102,41 @@ func handleChannel(newChannel ssh.NewChannel) {
 		return
 	}
 
+	// start bash for this session
+	bashCmd := exec.Command("bash")
+
 	// prepare teardown function
 	closeConnection := func() {
 		connection.Close()
-
+		_, err := bashCmd.Process.Wait()
+		if err != nil {
+			log.Printf("Failed to exit bash (%s)", err)
+		}
 		log.Printf("Session closed")
 	}
+
+	// Allocate a PTY for this channel
+	log.Println("Creating pty...")
+	bashf, err := pty.Start(bashCmd) // bashf is an open file descriptor
+	if err != nil {
+		log.Printf("Could not start pty (%s)", err)
+		closeConnection()
+		return
+	}
+
+	// pipe session to bash and vice-versa
+	// seems to print after client closes session?
+	var once sync.Once
+	go func() {
+		nbCopied, _ := io.Copy(connection, bashf)
+		log.Printf("Num copied bashf -> connection: (%d)", nbCopied)
+		once.Do(closeConnection)
+	}()
+	go func() {
+		nbCopied, _ := io.Copy(bashf, connection)
+		log.Printf("Num copied connection -> bashf: (%d)", nbCopied)
+		once.Do(closeConnection)
+	}()
 
 	// Sessions have out-of-band requests such as "shell", "pty-req" and "env"
 	go func() {
@@ -121,67 +149,20 @@ func handleChannel(newChannel ssh.NewChannel) {
 					req.Reply(true, nil)
 				}
 			case "pty-req":
-				// Allocate a PTY for this channel
-				log.Println("Creating pty...")
-				// start bash for this session
-				bashCmd := exec.Command("bash")
-
-				bashf, err := pty.Start(bashCmd) // bashf is an open file descriptor
-				if err != nil {
-					log.Printf("Could not start pty (%s)", err)
-					closeConnection()
-					return
-				}
-
-				// pipe session to bash and vice-versa
-				// seems to print after client closes session?
-				waitForProcess := func() {
-					_, err := bashCmd.Process.Wait()
-					if err != nil {
-						log.Printf("Failed to copy bash cmd.")
-					}
-				}
-				var once sync.Once
-				go func() {
-					io.Copy(connection, bashf)
-					once.Do(closeConnection)
-					once.Do(waitForProcess)
-				}()
-				go func() {
-					io.Copy(bashf, connection)
-					once.Do(closeConnection)
-					once.Do(waitForProcess)
-				}()
 				termLen := req.Payload[3]
 				w, h := parseDims(req.Payload[termLen+4:])
 				log.Printf("PTY req: w: %d, h: %d", w, h)
 				SetWinsize(bashf.Fd(), w, h)
-				// Responding true (OK) here will let cthe client
+				// Responding true (OK) here will let the client
 				// know we have a pty ready for input
 				req.Reply(true, nil)
-			case "scp":
-				var payload SCPRequestPayload
-
-				err := json.Unmarshal(req.Payload, &payload)
-				if err != nil {
-					return
-				}
-				mode, path := payload.Mode, payload.Path
-				if mode == SOURCE {
-					receiveFile(connection, path)
-
-				} else if mode == SINK {
-					sendFile(connection, path)
-				}
-				closeConnection()
-
+			case "window-change":
+				w, h := parseDims(req.Payload)
+				log.Printf("Window size change: w: %d, h: %d", w, h)
+				SetWinsize(bashf.Fd(), w, h)
 			}
 		}
 	}()
-}
-
-func parseScpPath(b []byte) (string, string, string) {
-	return "", "", ""
 }
 
 // parseDims extracts terminal dimensions (width x height) from the provided buffer.

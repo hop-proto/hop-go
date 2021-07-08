@@ -13,6 +13,7 @@ func main() {
 			- tunneling
 	*/
 
+	fmt.Println("This is where the SSH replacement CLI will be implemented")
 	if os.Args[1] == "sshd" {
 		fmt.Println("Hosting ssh server")
 		sshd()
@@ -20,12 +21,7 @@ func main() {
 
 	if os.Args[1] == "ssh" {
 		fmt.Println("Attempting to connect to client")
-		sshClient(os.Args[2])
-	}
-
-	if os.Args[1] == "scp" {
-		fmt.Println("Copying file over SSH.")
-		scp(os.Args[2], os.Args[3])
+		sshClient()
 	}
 
 }
