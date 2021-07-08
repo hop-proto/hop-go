@@ -32,7 +32,7 @@ func NewMuxer(msgConn transport.MsgConn, netConn net.Conn) *Muxer {
 	}
 }
 
-func (m *Muxer) AddChannel(c *Reliable) {
+func (m *Muxer) addChannel(c *Reliable) {
 	m.m.Lock()
 	m.channels[c.id] = c
 	m.m.Unlock()
@@ -45,9 +45,9 @@ func (m *Muxer) GetChannel(channelId byte) (*Reliable, bool) {
 	return c, ok
 }
 
-func (m *Muxer) CreateChannel(windowSize uint16) (*Reliable, error) {
-	r, err := NewReliableChannel(m.underlying, m.netConn, m.sendQueue, windowSize)
-	m.AddChannel(r)
+func (m *Muxer) CreateChannel(cType byte) (*Reliable, error) {
+	r, err := NewReliableChannel(m.underlying, m.netConn, m.sendQueue, cType)
+	m.addChannel(r)
 	return r, err
 }
 
@@ -55,13 +55,13 @@ func (m *Muxer) Accept() (*Reliable, error) {
 	return <-m.channelQueue, nil
 }
 
-func (m *Muxer) readMsg() (*Packet, error) {
+func (m *Muxer) readMsg() (*Frame, error) {
 	pkt := make([]byte, 65535)
 	_, err := m.underlying.ReadMsg(pkt)
 	if err != nil {
 		return nil, err
 	}
-	return FromBytes(pkt)
+	return fromBytes(pkt)
 
 }
 
@@ -82,8 +82,8 @@ func (m *Muxer) Start() {
 		}
 		channel, ok := m.GetChannel(frame.channelID)
 		if !ok {
-			//logrus.Info("NO CHANNEL")
-			initFrame, err := FromInitiateBytes(frame.toBytes())
+			logrus.Info("NO CHANNEL")
+			initFrame, err := fromInitiateBytes(frame.toBytes())
 
 			if initFrame.flags.REQ {
 
@@ -91,8 +91,8 @@ func (m *Muxer) Start() {
 					logrus.Panic(err)
 					panic(err)
 				}
-				channel = NewReliableChannelWithChannelId(m.underlying, m.netConn, m.sendQueue, initFrame.windowSize, initFrame.channelID)
-				m.AddChannel(channel)
+				channel = NewReliableChannelWithChannelId(m.underlying, m.netConn, m.sendQueue, initFrame.channelType, initFrame.channelID)
+				m.addChannel(channel)
 				m.channelQueue <- channel
 			}
 
@@ -100,15 +100,15 @@ func (m *Muxer) Start() {
 
 		if channel != nil {
 			if frame.flags.REQ || frame.flags.RESP {
-				initFrame, err := FromInitiateBytes(frame.toBytes())
-				//logrus.Info("RECEIVING INITIATE FRAME ", initFrame.channelID, " ", initFrame.frameNo, " ", frame.flags.REQ, " ", frame.flags.RESP)
+				initFrame, err := fromInitiateBytes(frame.toBytes())
+				logrus.Info("RECEIVING INITIATE FRAME ", initFrame.channelID, " ", initFrame.frameNo, " ", frame.flags.REQ, " ", frame.flags.RESP)
 				if err != nil {
 					panic(err)
 				}
-				go channel.ReceiveInitiatePkt(initFrame)
+				go channel.receiveInitiatePkt(initFrame)
 			} else {
-				//logrus.Info("RECEIVING NORMAL FRAME")
-				go channel.Receive(frame)
+				logrus.Info("RECEIVING NORMAL FRAME")
+				go channel.receive(frame)
 			}
 		}
 

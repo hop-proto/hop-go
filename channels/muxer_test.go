@@ -30,7 +30,7 @@ func newTestServerConfig(t *testing.T) *transport.ServerConfig {
 
 func TestMuxer(t *testing.T) {
 	logrus.SetLevel(logrus.InfoLevel)
-	pktConn, err := net.ListenPacket("udp", "localhost:8888")
+	pktConn, err := net.ListenPacket("udp", "localhost:8890")
 	assert.NilError(t, err)
 	// It's actually a UDP conn
 	udpConn := pktConn.(*net.UDPConn)
@@ -49,7 +49,7 @@ func TestMuxer(t *testing.T) {
 	mc := NewMuxer(transportConn, transportConn)
 	go mc.Start()
 
-	channel, err := mc.CreateChannel(1 << 8)
+	channel, err := mc.CreateChannel(1 << 6)
 	assert.NilError(t, err)
 
 	ms := NewMuxer(serverConn, serverConn)
@@ -57,20 +57,28 @@ func TestMuxer(t *testing.T) {
 
 	testData := "hi i am some data"
 
-	_, err = channel.Write([]byte(testData))
-	assert.NilError(t, err)
-	channel.Close()
+	go func() {
+		_, err = channel.Write([]byte(testData))
+		assert.NilError(t, err)
+		channel.Close()
+	}()
+
 	serverChan, err := ms.Accept()
 	assert.NilError(t, err)
+	serverChan.Close()
 
 	buf := make([]byte, len(testData))
 	time.Sleep(time.Second)
 	bytesRead := 0
+	logrus.Info("READING ")
 	n, err := serverChan.Read(buf[bytesRead:])
-	serverChan.Close()
+	logrus.Info("DONE READING ")
+
 	assert.NilError(t, err)
 	bytesRead += n
+	logrus.Info("STOPPNG MC")
 	mc.Stop()
+	logrus.Info("STOPPNG MS")
 	ms.Stop()
 	assert.Check(t, cmp.Len(testData, bytesRead))
 	assert.Equal(t, testData, string(buf))
@@ -87,32 +95,34 @@ func TestSmallWindow(t *testing.T) {
 	assert.NilError(t, err)
 	go server.Serve()
 
-	transportConn, err := transport.Dial("udp", udpConn.LocalAddr().String(), nil)
+	transportClient, err := transport.Dial("udp", udpConn.LocalAddr().String(), nil)
 	assert.NilError(t, err)
 
-	assert.NilError(t, transportConn.Handshake())
+	assert.NilError(t, transportClient.Handshake())
 
 	serverConn, err := server.AcceptTimeout(time.Minute)
 	assert.NilError(t, err)
 
-	mc := NewMuxer(transportConn, transportConn)
+	mc := NewMuxer(transportClient, transportClient)
 	go mc.Start()
-
-	channel, err := mc.CreateChannel(1 << 7)
-	assert.NilError(t, err)
 
 	ms := NewMuxer(serverConn, serverConn)
 	go ms.Start()
+
+	channel, err := mc.CreateChannel(1 << 7)
+	assert.NilError(t, err)
 
 	testData := make([]byte, 5000)
 	for i := range testData {
 		testData[i] = []byte{'g', 'h', 'i', 'j', 'k', 'l'}[rand.Intn(6)]
 	}
 
-	_, err = channel.Write([]byte(testData))
-	assert.NilError(t, err)
-	err = channel.Close()
-	assert.NilError(t, err)
+	go func() {
+		_, err = channel.Write([]byte(testData))
+		assert.NilError(t, err)
+		err = channel.Close()
+		assert.NilError(t, err)
+	}()
 
 	serverChan, err := ms.Accept()
 	assert.NilError(t, err)

@@ -22,7 +22,7 @@ type Sender struct {
 	closed  bool
 	frameNo uint32
 	// The buffer of unacknowledged channel frames that will be retransmitted if necessary.
-	frames []*Packet
+	frames []*Frame
 	// Different frames can have different data lengths -- we need to know how
 	// to update the buffer when frames are acknowledged.
 	frameDataLengths map[uint32]uint16
@@ -37,8 +37,14 @@ type Sender struct {
 	l sync.Mutex
 	// Retransmission TimeOut.
 	RTO        time.Duration
-	sendQueue  chan *Packet
+	sendQueue  chan *Frame
 	windowSize uint16
+}
+
+func (s *Sender) unsentFramesRemaining() bool {
+	s.l.Lock()
+	defer s.l.Unlock()
+	return len(s.frames) > 0
 }
 
 func (s *Sender) write(b []byte) (n int, err error) {
@@ -54,7 +60,7 @@ func (s *Sender) write(b []byte) (n int, err error) {
 		if uint16(len(s.buffer)) < dataLength {
 			dataLength = uint16(len(s.buffer))
 		}
-		pkt := Packet{
+		pkt := Frame{
 			dataLength: dataLength,
 			frameNo:    s.frameNo,
 			data:       s.buffer[:dataLength],
@@ -78,14 +84,12 @@ func (s *Sender) recvAck(ackNo uint32) error {
 		newAckNo = newAckNo + (1 << 32)
 	}
 
-	bytesAcked := uint64(0)
 	for s.ackNo < newAckNo {
-		bytesForFrame, ok := s.frameDataLengths[uint32(s.ackNo)]
+		_, ok := s.frameDataLengths[uint32(s.ackNo)]
 		if !ok {
 			logrus.Debugf("data length missing for frame %d", s.ackNo)
 			return fmt.Errorf("data length missing for frame %d", s.ackNo)
 		}
-		bytesAcked += uint64(bytesForFrame)
 		delete(s.frameDataLengths, uint32(s.ackNo))
 		s.ackNo += 1
 		s.frames = s.frames[1:]
@@ -95,21 +99,23 @@ func (s *Sender) recvAck(ackNo uint32) error {
 }
 
 func (s *Sender) retransmit() {
-	for {
+	for { // TODO - decide how to shutdown this endless loop with an enum state
 		timer := time.NewTimer(s.RTO)
 		<-timer.C
 		s.l.Lock()
 		if len(s.frames) == 0 {
-			pkt := Packet{
+			pkt := Frame{
 				dataLength: 0,
 				frameNo:    s.frameNo,
 				data:       []byte{},
 			}
+			logrus.Info("SENDING EMPTY PACKET ON SEND QUEUE FOR ACK - FIN? ", pkt.flags.FIN)
 			s.sendQueue <- &pkt
 		}
 		i := 0
 		for i < len(s.frames) && i < int(s.windowSize) && i < MAX_FRAG_TRANS_PER_RTO {
 			s.sendQueue <- s.frames[i]
+			logrus.Info("PUTTING PKT ON SEND QUEUE - FIN? ", s.frames[i].flags.FIN)
 			i += 1
 		}
 		s.l.Unlock()
@@ -125,11 +131,11 @@ func (s *Sender) close() error {
 	}
 	s.closed = true
 
-	pkt := Packet{
+	pkt := Frame{
 		dataLength: 0,
 		frameNo:    s.frameNo,
 		data:       []byte{},
-		flags: PacketFlags{
+		flags: FrameFlags{
 			ACK:  true,
 			FIN:  true,
 			REQ:  false,
@@ -140,5 +146,6 @@ func (s *Sender) close() error {
 	s.frameDataLengths[pkt.frameNo] = 0
 	s.frameNo += 1
 	s.frames = append(s.frames, &pkt)
+	logrus.Info("ADDED FIN PACKET TO SEND QUEUE")
 	return nil
 }

@@ -2,26 +2,26 @@ package channels
 
 import "encoding/binary"
 
-type Packet struct {
+type Frame struct {
 	ackNo      uint32
 	channelID  byte
 	data       []byte
 	dataLength uint16
-	flags      PacketFlags
+	flags      FrameFlags
 	frameNo    uint32
 }
 
-type InitiatePacket struct {
+type InitiateFrame struct {
 	channelID   byte
 	channelType byte
 	data        []byte
 	dataLength  uint16
-	flags       PacketFlags
+	flags       FrameFlags
 	frameNo     uint32
 	windowSize  uint16
 }
 
-type PacketFlags struct {
+type FrameFlags struct {
 	// Flag to update the acknowledgement number from the sender of the packet for the receiver of the packet.
 	ACK bool
 	// Flag to teardown channel.
@@ -40,7 +40,7 @@ const (
 	RESPIdx = 3
 )
 
-func flagsToMetaByte(p *PacketFlags) byte {
+func flagsToMetaByte(p *FrameFlags) byte {
 	meta := byte(0)
 	if p.ACK {
 		meta = meta | (1 << ACKIdx)
@@ -57,8 +57,8 @@ func flagsToMetaByte(p *PacketFlags) byte {
 	return meta
 }
 
-func metaToFlags(b byte) PacketFlags {
-	flags := PacketFlags{
+func metaToFlags(b byte) FrameFlags {
+	flags := FrameFlags{
 		ACK:  b&(1<<ACKIdx) != 0,
 		FIN:  b&(1<<FINIdx) != 0,
 		REQ:  b&(1<<REQIdx) != 0,
@@ -67,7 +67,7 @@ func metaToFlags(b byte) PacketFlags {
 	return flags
 }
 
-func (p *InitiatePacket) toBytes() []byte {
+func (p *InitiateFrame) toBytes() []byte {
 	frameNumBytes := []byte{0, 0, 0, 0}
 	binary.BigEndian.PutUint32(frameNumBytes, p.frameNo)
 	dataLength := []byte{0, 0}
@@ -86,7 +86,7 @@ func (p *InitiatePacket) toBytes() []byte {
 	)
 }
 
-func (p *Packet) toBytes() []byte {
+func (p *Frame) toBytes() []byte {
 	frameNoBytes := []byte{0, 0, 0, 0}
 	binary.BigEndian.PutUint32(frameNoBytes, p.frameNo)
 	dataLength := []byte{0, 0}
@@ -103,9 +103,9 @@ func (p *Packet) toBytes() []byte {
 	)
 }
 
-func FromBytes(b []byte) (*Packet, error) {
+func fromBytes(b []byte) (*Frame, error) {
 	dataLength := binary.BigEndian.Uint16(b[2:4])
-	return &Packet{
+	return &Frame{
 		channelID:  b[0],
 		flags:      metaToFlags(b[1]),
 		dataLength: dataLength,
@@ -115,9 +115,9 @@ func FromBytes(b []byte) (*Packet, error) {
 	}, nil
 }
 
-func FromInitiateBytes(b []byte) (*InitiatePacket, error) {
+func fromInitiateBytes(b []byte) (*InitiateFrame, error) {
 	dataLength := binary.BigEndian.Uint16(b[2:4])
-	return &InitiatePacket{
+	return &InitiateFrame{
 		channelID:   b[0],
 		flags:       metaToFlags(b[1]),
 		dataLength:  dataLength,
