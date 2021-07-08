@@ -103,7 +103,7 @@ func (p *Frame) toBytes() []byte {
 	)
 }
 
-func FromBytes(b []byte) (*Frame, error) {
+func fromBytes(b []byte) (*Frame, error) {
 	dataLength := binary.BigEndian.Uint16(b[2:4])
 	return &Frame{
 		channelID:  b[0],
@@ -115,7 +115,7 @@ func FromBytes(b []byte) (*Frame, error) {
 	}, nil
 }
 
-func FromInitiateBytes(b []byte) (*InitiateFrame, error) {
+func fromInitiateBytes(b []byte) (*InitiateFrame, error) {
 	dataLength := binary.BigEndian.Uint16(b[2:4])
 	return &InitiateFrame{
 		channelID:   b[0],
