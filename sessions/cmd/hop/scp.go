@@ -49,13 +49,13 @@ func parsePaths(sourcePath string, destPath string) (uint, string, string, strin
 
 func scp(sourcePath string, destPath string) error {
 
-	mode, _, sourcePath, destPath, err := parsePaths(sourcePath, destPath)
+	mode, userHost, sourcePath, destPath, err := parsePaths(sourcePath, destPath)
 	if err != nil || (mode != SOURCE && mode != SINK) {
 		return err
 	}
 	// TODO(drew): support both copy modes.
 
-	client, err := getClient()
+	client, err := getClient(userHost)
 	if err != nil {
 		return err
 	}
