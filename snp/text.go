@@ -55,9 +55,6 @@ func ParseTestTranscript(t *testing.T, r io.Reader) []TranscriptEntry {
 		}
 		value, err := ParseSpacedHexString(matches[3])
 		assert.NilError(t, err, "invalid byte string value: %s", matches[3])
-		if matches[2] != "" {
-			assert.Assert(t, cmp.Len(value, length), "mismatched lengths")
-		}
 		entry := TranscriptEntry{
 			Action:          action,
 			B:               value,

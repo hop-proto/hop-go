@@ -42,6 +42,9 @@ func runTranscript(t *testing.T, kv *Kravatte, transcript []snp.TranscriptEntry)
 		case "in":
 			ret := kv.Kra(entry.B, 8*len(entry.B), FlagNone)
 			assert.Check(t, cmp.Equal(0, ret), "Kra/None")
+		case "inbits":
+			ret := kv.Kra(entry.B, entry.Length, FlagLastPart)
+			assert.Check(t, cmp.Equal(0, ret), "Kra/None/Bits")
 		case "last":
 			ret := kv.Kra(entry.B, 8*len(entry.B), FlagLastPart)
 			assert.Check(t, cmp.Equal(0, ret), "Kra/Last")
@@ -83,7 +86,7 @@ func runTranscript(t *testing.T, kv *Kravatte, transcript []snp.TranscriptEntry)
 
 func TestKravatteAgainstReference(t *testing.T) {
 	implementations := []string{
-		"xkcp",
+		"xkcp-kravatte",
 	}
 	for _, implementation := range implementations {
 		implementation := implementation
