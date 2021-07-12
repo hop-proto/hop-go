@@ -7,7 +7,6 @@ import (
 	"log"
 	"net"
 	"os"
-	"os/exec"
 	"syscall"
 	"time"
 
@@ -17,6 +16,7 @@ import (
 	"zmap.io/portal/authgrants"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/channels"
+	"zmap.io/portal/exec_channels"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/transport"
 )
@@ -265,30 +265,31 @@ func serve(args []string) {
 	if err != nil {
 		logrus.Fatalf("S: ERROR ACCEPTING CHANNEL: %v", err)
 	}
-	logrus.Info("S: ACCEPTED NEW CHANNEL (DECOY)")
+	logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", serverChan.Type())
+	exec_channels.Serve(serverChan)
 
-	buf := make([]byte, 14)
-	bytesRead := 0
-	n, err := serverChan.Read(buf[bytesRead:])
-	if err != nil {
-		logrus.Fatalf("S: ERROR READING FROM CHANNEL %v", err)
-	}
-	if string(buf[0:n]) == "INTENT_REQUEST" {
-		logrus.Info("S: TESTING AGC PROCEDURE")
-		//Spawn a child hop client
-		cmd := exec.Command("go", "run", "main.go", "hopclient.go", "hopd.go", "hop", "user@127.0.0.1:9999", "-a", "shell", "second param") //need to pass a secret when it is spawned?
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		err = cmd.Start()
-		if err != nil {
-			logrus.Errorf("S: PROCESS START ERROR: %v", err)
-		} else {
-			principals[int32(cmd.Process.Pid)] = "principal1" //temporary placeholder for real principal identifier
-			logrus.Infof("S: STARTED PROCESS WITH PID: %v", cmd.Process.Pid)
-		}
-	} else {
-		logrus.Info("S: RECEIVED NOT AN INTENT_REQEST")
-	}
+	// buf := make([]byte, 14)
+	// bytesRead := 0
+	// n, err := serverChan.Read(buf[bytesRead:])
+	// if err != nil {
+	// 	logrus.Fatalf("S: ERROR READING FROM CHANNEL %v", err)
+	// }
+	// if string(buf[0:n]) == "INTENT_REQUEST" {
+	// 	logrus.Info("S: TESTING AGC PROCEDURE")
+	// 	//Spawn a child hop client
+	// 	cmd := exec.Command("go", "run", "main.go", "hopclient.go", "hopd.go", "hop", "user@127.0.0.1:9999", "-a", "shell", "second param") //need to pass a secret when it is spawned?
+	// 	cmd.Stdout = os.Stdout
+	// 	cmd.Stderr = os.Stderr
+	// 	err = cmd.Start()
+	// 	if err != nil {
+	// 		logrus.Errorf("S: PROCESS START ERROR: %v", err)
+	// 	} else {
+	// 		principals[int32(cmd.Process.Pid)] = "principal1" //temporary placeholder for real principal identifier
+	// 		logrus.Infof("S: STARTED PROCESS WITH PID: %v", cmd.Process.Pid)
+	// 	}
+	// } else {
+	// 	logrus.Info("S: RECEIVED NOT AN INTENT_REQEST")
+	// }
 
 	for {
 	}
