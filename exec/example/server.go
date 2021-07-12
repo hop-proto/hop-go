@@ -1,9 +1,14 @@
 package main
 
 import (
+	"io"
+	"log"
 	"net"
+	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/creack/pty"
@@ -13,6 +18,8 @@ import (
 	"zmap.io/portal/keys"
 	"zmap.io/portal/transport"
 )
+
+//https://dev.to/napicella/linux-terminals-tty-pty-and-shell-part-2-2cb2
 
 func newTestServerConfig() *transport.ServerConfig {
 	keyPair, err := keys.ReadDHKeyFromPEMFile("../../app/testdata/leaf-key.pem")
@@ -65,6 +72,7 @@ func startServer() {
 	if err != nil {
 		logrus.Fatalf("S: ERROR ACCEPTING CHANNEL: %v", err)
 	}
+	defer ch.Close()
 	logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", ch.Type())
 
 	l := make([]byte, 1)
@@ -72,19 +80,36 @@ func startServer() {
 	logrus.Infof("S: CMD LEN %v", int(l[0]))
 	cmd := make([]byte, int(l[0]))
 	ch.Read(cmd)
+	logrus.Infof("Executing: %v", string(cmd))
 
 	args := strings.Split(string(cmd), " ")
 	c := exec.Command(args[0], args[1:]...)
+
 	f, err := pty.Start(c)
 	if err != nil {
-		panic(err)
+		logrus.Fatalf("S: error starting pty %v", err)
 	}
 
-	//io.Copy(os.Stdout, f)
-	b := make([]byte, 1024)
-	n, _ := f.Read(b[1:])
-	b[0] = byte(n)
-	n, _ = ch.Write(b[:1+n])
-	logrus.Infof("Wrote %v bytes", n)
-	ch.Close()
+	defer func() { _ = f.Close() }() // Best effort.
+
+	// Handle pty size.
+	ch2 := make(chan os.Signal, 1)
+	signal.Notify(ch2, syscall.SIGWINCH)
+	go func() {
+		for range ch2 {
+			if err := pty.InheritSize(os.Stdin, f); err != nil {
+				log.Printf("error resizing pty: %s", err)
+			}
+		}
+	}()
+	ch2 <- syscall.SIGWINCH                         // Initial resize.
+	defer func() { signal.Stop(ch2); close(ch2) }() // Cleanup signals when done.
+
+	go func() {
+		n, _ := io.Copy(f, ch)
+		logrus.Infof("Wrote %n from ch to f", n)
+	}()
+
+	n, _ := io.Copy(ch, f)
+	logrus.Infof("Wrote %n from f to ch", n)
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"errors"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -201,6 +202,20 @@ func (r *Reliable) Read(b []byte) (n int, err error) {
 func (r *Reliable) Write(b []byte) (n int, err error) {
 	// Except with buffering and framing and concurrency control
 	return r.sender.write(b)
+}
+
+func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
+	var count int64
+	for {
+		b := make([]byte, 1)
+		n, e := r.Read(b)
+		count += int64(n)
+		if e != nil {
+			return count, e
+		}
+		w.Write(b)
+	}
+
 }
 
 func (r *Reliable) Close() error {

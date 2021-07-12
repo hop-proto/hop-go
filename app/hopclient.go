@@ -57,9 +57,9 @@ func startClient(args []string) {
 	go mc.Start()
 	defer mc.Stop()
 
-	//TODO: Either start interactive shell with server 2 or execute Auth grant command
-	logrus.Infof("Performing action: %v", cmd)
-	// channel, err := mc.CreateChannel(1 << 8)
+	//TODO: Either start interactive shell with server or execute Auth grant command
+	// logrus.Infof("Performing action: %v", cmd)
+	// ch, err := mc.CreateChannel(channels.EXEC_CHANNEL)
 	// if err != nil {
 	// 	logrus.Fatalf("C: error making channel: %v", err)
 	// }

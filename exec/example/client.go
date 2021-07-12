@@ -1,10 +1,11 @@
 package main
 
 import (
-	"fmt"
-	"strings"
+	"io"
+	"os"
 
 	"github.com/sirupsen/logrus"
+	"golang.org/x/crypto/ssh/terminal"
 	"zmap.io/portal/channels"
 	"zmap.io/portal/exec"
 	"zmap.io/portal/transport"
@@ -32,18 +33,23 @@ func startClient() {
 	if err != nil {
 		logrus.Fatalf("C: error making channel: %v", err)
 	}
+	defer ch.Close()
 	logrus.Infof("Created channel of type: %v", ch.Type())
 
-	ch.Write(exec.NewExecInitMsg("echo hello world").ToBytes())
+	// MakeRaw put the terminal connected to the given file
+	// descriptor into raw mode and returns the previous state
+	// of the terminal so that it can be restored.
+	oldState, e := terminal.MakeRaw(int(os.Stdin.Fd()))
+	if e != nil {
+		logrus.Fatalf("C: error with terminal state: %v", err)
+	}
+	defer func() { _ = terminal.Restore(int(os.Stdin.Fd()), oldState) }()
 
-	l := make([]byte, 1)
-	ch.Read(l)
-	logrus.Infof("Expecting %v bytes", int(l[0]))
-	buf := make([]byte, int(l[0]))
-	n, _ := ch.Read(buf)
-	logrus.Infof("Rec: %v", n)
+	ch.Write(exec.NewExecInitMsg("bash").ToBytes())
 
-	fmt.Println(strings.TrimSpace(string(buf)))
+	go func() {
+		io.Copy(os.Stdout, ch) //read bytes from ch to os.Stdout
+	}()
 
-	ch.Close()
+	io.Copy(ch, os.Stdin)
 }

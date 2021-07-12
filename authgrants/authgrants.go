@@ -55,6 +55,6 @@ func (r *IntentRequest) Display() {
 		r.clientUsername,
 		r.clientSNI,
 		r.action,
-		r.serverSNI,
-		r.serverUsername)
+		r.serverUsername,
+		r.serverSNI)
 }
