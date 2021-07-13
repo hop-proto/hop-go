@@ -67,12 +67,14 @@ func Serve(ch *channels.Reliable, principals *map[int32]string) {
 		}()
 		ch2 <- syscall.SIGWINCH                         // Initial resize.
 		defer func() { signal.Stop(ch2); close(ch2) }() // Cleanup signals when done.
-
 		go func() {
 			io.Copy(f, ch)
+			logrus.Info("done 1")
+			f.Close()
 		}()
 
 		io.Copy(ch, f)
+		logrus.Info("done 2")
 	} else {
 		go func() {
 			io.Copy(ch, f)
@@ -82,8 +84,11 @@ func Serve(ch *channels.Reliable, principals *map[int32]string) {
 	}
 }
 
-func Client(ch *channels.Reliable, cmd []string, w *sync.WaitGroup) {
-	defer w.Done()
+func RestoreTerm(state *terminal.State) {
+	terminal.Restore(int(os.Stdin.Fd()), state)
+}
+
+func MakeRawTerm() *terminal.State {
 	// MakeRaw put the terminal connected to the given file
 	// descriptor into raw mode and returns the previous state
 	// of the terminal so that it can be restored.
@@ -91,16 +96,20 @@ func Client(ch *channels.Reliable, cmd []string, w *sync.WaitGroup) {
 	if e != nil {
 		logrus.Fatalf("C: error with terminal state: %v", e)
 	}
-	defer func() { _ = terminal.Restore(int(os.Stdin.Fd()), oldState) }()
+	return oldState
+}
 
+func Client(ch *channels.Reliable, cmd []string, w *sync.WaitGroup) {
+	defer w.Done()
 	ch.Write(NewExecInitMsg(strings.Join(cmd, " ")).ToBytes())
 
 	if cmd[0] == "bash" { //start an interactive session
 		go func() {
 			io.Copy(os.Stdout, ch) //read bytes from ch to os.Stdout
+			logrus.Info("done 3")
 		}()
-
 		io.Copy(ch, os.Stdin)
+		logrus.Info("done 4")
 	} else { //run a one-shot command
 		wg := sync.WaitGroup{}
 		wg.Add(2)
