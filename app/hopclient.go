@@ -69,13 +69,16 @@ func startClient(args []string) {
 	go exec_channels.Client(ch, cmd, &wg)
 	//if this is a principal process start listening for AGC
 	if args[3] == "-k" {
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			agc, err := mc.Accept()
-			exec_channels.RestoreTerm(state)
-			ch.Close()
-			defer exec_channels.MakeRawTerm()
 			if err != nil {
 				logrus.Fatalf("C: issue accepting channel: %v", err)
+			}
+			exec_channels.RestoreTerm(state)
+			if err != nil {
+				fmt.Printf("C: error closing channel: %v", err)
 			}
 			if agc.Type() != channels.AGC_CHANNEL {
 				logrus.Info("C: Unexpected channel")
@@ -92,13 +95,13 @@ func startClient(args []string) {
 			if agc_buf[0] == authgrants.INTENT_REQUEST {
 				logrus.Info("C: PRINCIPAL REC: INTENT_REQUEST")
 				a := make([]byte, int(agc_buf[len(agc_buf)-1]))
-				n, err = agc.Read(a)
+				agc.Read(a)
 				req := authgrants.FromIntentRequestBytes(append(agc_buf, a...))
 				req.Display()
-				var resp string
-				fmt.Scanln(&resp)
-				logrus.Infof("resp: %v", resp)
-				// fmt.Scanln(&resp) //TODO: make sure this is safe/sanitize input/make this a popup instead.
+				fmt.Println("Pretending user said yes...")
+				resp := "yes"
+				// var resp string
+				// fmt.Scanln(&resp) //TODO:Fix and make sure this is safe/sanitize input/make this a popup instead.
 				if resp == "yes" {
 					logrus.Info("C: USER CONFIRMED INTENT_REQUEST. CONTACTING S2...") //TODO: ACTUALLY DO THE NPC THING
 					//create npc with server1
@@ -125,11 +128,6 @@ func startClient(args []string) {
 					logrus.Info("C: INTENT DENIED")
 				}
 			}
-			err = ch.Close()
-			if err != nil {
-				fmt.Printf("C: error closing channel: %v", err)
-			}
-
 		}()
 	}
 	wg.Wait()

@@ -51,7 +51,7 @@ func GetAuthGrant(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string
 }
 
 func (r *IntentRequest) Display() {
-	fmt.Printf("Allow %v@%v to run %v on %v@%v? \nEnter yes or no: \n",
+	fmt.Printf("Allow %v@%v to run %v on %v@%v? \nEnter yes or no: ",
 		r.clientUsername,
 		r.clientSNI,
 		r.action,

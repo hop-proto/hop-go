@@ -68,19 +68,17 @@ func Serve(ch *channels.Reliable, principals *map[int32]string) {
 		ch2 <- syscall.SIGWINCH                         // Initial resize.
 		defer func() { signal.Stop(ch2); close(ch2) }() // Cleanup signals when done.
 		go func() {
-			io.Copy(f, ch)
-			logrus.Info("done 1")
-			f.Close()
+			_, e := io.Copy(f, ch)
+			logrus.Infof("done 1: %v", e)
 		}()
 
-		io.Copy(ch, f)
-		logrus.Info("done 2")
+		_, e := io.Copy(ch, f)
+		logrus.Infof("done 2: %v", e)
 	} else {
 		go func() {
 			io.Copy(ch, f)
 		}()
 		c.Process.Wait()
-		ch.Close()
 	}
 }
 
@@ -105,11 +103,11 @@ func Client(ch *channels.Reliable, cmd []string, w *sync.WaitGroup) {
 
 	if cmd[0] == "bash" { //start an interactive session
 		go func() {
-			io.Copy(os.Stdout, ch) //read bytes from ch to os.Stdout
-			logrus.Info("done 3")
+			_, e := io.Copy(os.Stdout, ch) //read bytes from ch to os.Stdout
+			logrus.Infof("done 3: %v", e)
 		}()
-		io.Copy(ch, os.Stdin)
-		logrus.Info("done 4")
+		_, e := io.Copy(ch, os.Stdin)
+		logrus.Infof("done 4: %v", e)
 	} else { //run a one-shot command
 		wg := sync.WaitGroup{}
 		wg.Add(2)
