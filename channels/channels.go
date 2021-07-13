@@ -143,7 +143,7 @@ func (r *Reliable) initiate(req bool) {
 		}
 		r.sendQueue <- p.toBytes()
 		r.m.Lock()
-		not_init = r.channelState != INITIATED
+		not_init = r.channelState == CREATED
 		r.m.Unlock()
 		timer := time.NewTimer(RTO)
 		<-timer.C
@@ -153,7 +153,7 @@ func (r *Reliable) initiate(req bool) {
 }
 
 func (r *Reliable) receive(pkt *Frame) error {
-	if r.channelState != INITIATED {
+	if r.channelState == CREATED {
 		logrus.Error("receiving non-initiate channel frames when not initiated")
 		return errors.New("receiving non-initiate channel frames when not initiated")
 	}
@@ -207,7 +207,7 @@ func (r *Reliable) Close() error {
 	if err != nil {
 		return err
 	}
-	logrus.Debug("STARTNG CLOSE")
+	logrus.Info("STARTNG CLOSE")
 
 	time.Sleep(time.Second)
 	// Wait until the other end of the connection has received the FIN packet from the other side.
@@ -224,7 +224,7 @@ func (r *Reliable) Close() error {
 
 		t := time.Now()
 		elapsed := t.Sub(start)
-		logrus.Debug("waiting: ", r.sender.unsentFramesRemaining(), r.recvWindow.closed, elapsed.Seconds())
+		logrus.Info("waiting: ", r.sender.unsentFramesRemaining(), r.recvWindow.closed, elapsed.Seconds())
 
 		if (!r.sender.unsentFramesRemaining() && r.recvWindow.closed) || elapsed.Seconds() > 5 {
 			break
@@ -233,7 +233,7 @@ func (r *Reliable) Close() error {
 	}
 	r.closedCond.L.Unlock()
 
-	logrus.Debug("CLOSED! WOOHOO")
+	logrus.Info("CLOSED! WOOHOO")
 	r.m.Lock()
 	r.channelState = CLOSED
 	r.m.Unlock()
