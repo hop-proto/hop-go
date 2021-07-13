@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/creack/pty"
@@ -31,7 +32,7 @@ func (m *ExecInitMsg) ToBytes() []byte {
 	return append([]byte{m.msgLen}, []byte(m.msg)...)
 }
 
-func Serve(ch *channels.Reliable) {
+func Serve(ch *channels.Reliable, principals *map[int32]string) {
 	defer ch.Close()
 	logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", ch.Type())
 
@@ -46,33 +47,43 @@ func Serve(ch *channels.Reliable) {
 	c := exec.Command(args[0], args[1:]...)
 
 	f, err := pty.Start(c)
+	(*principals)[int32(c.Process.Pid)] = "principal1"
 	if err != nil {
 		logrus.Fatalf("S: error starting pty %v", err)
 	}
 
 	defer func() { _ = f.Close() }() // Best effort.
 
-	// Handle pty size.
-	ch2 := make(chan os.Signal, 1)
-	signal.Notify(ch2, syscall.SIGWINCH)
-	go func() {
-		for range ch2 {
-			if err := pty.InheritSize(os.Stdin, f); err != nil {
-				log.Printf("error resizing pty: %s", err)
+	if args[0] == "bash" {
+		// Handle pty size.
+		ch2 := make(chan os.Signal, 1)
+		signal.Notify(ch2, syscall.SIGWINCH)
+		go func() {
+			for range ch2 {
+				if err := pty.InheritSize(os.Stdin, f); err != nil {
+					log.Printf("error resizing pty: %s", err)
+				}
 			}
-		}
-	}()
-	ch2 <- syscall.SIGWINCH                         // Initial resize.
-	defer func() { signal.Stop(ch2); close(ch2) }() // Cleanup signals when done.
+		}()
+		ch2 <- syscall.SIGWINCH                         // Initial resize.
+		defer func() { signal.Stop(ch2); close(ch2) }() // Cleanup signals when done.
 
-	go func() {
-		io.Copy(f, ch)
-	}()
+		go func() {
+			io.Copy(f, ch)
+		}()
 
-	io.Copy(ch, f)
+		io.Copy(ch, f)
+	} else {
+		go func() {
+			io.Copy(ch, f)
+		}()
+		c.Process.Wait()
+		ch.Close()
+	}
 }
 
-func Client(ch *channels.Reliable, cmd []string) {
+func Client(ch *channels.Reliable, cmd []string, w *sync.WaitGroup) {
+	defer w.Done()
 	// MakeRaw put the terminal connected to the given file
 	// descriptor into raw mode and returns the previous state
 	// of the terminal so that it can be restored.
@@ -84,9 +95,25 @@ func Client(ch *channels.Reliable, cmd []string) {
 
 	ch.Write(NewExecInitMsg(strings.Join(cmd, " ")).ToBytes())
 
-	go func() {
-		io.Copy(os.Stdout, ch) //read bytes from ch to os.Stdout
-	}()
+	if cmd[0] == "bash" { //start an interactive session
+		go func() {
+			io.Copy(os.Stdout, ch) //read bytes from ch to os.Stdout
+		}()
 
-	io.Copy(ch, os.Stdin)
+		io.Copy(ch, os.Stdin)
+	} else { //run a one-shot command
+		wg := sync.WaitGroup{}
+		wg.Add(2)
+		go func() {
+			io.Copy(os.Stdout, ch)
+			wg.Done()
+		}()
+		go func() {
+			ch.Close()
+			wg.Done()
+		}()
+		wg.Wait()
+	}
+	//TODO: add support for interactive comands not bash (i.e. grep)
+
 }

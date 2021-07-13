@@ -11,7 +11,7 @@ import (
 /*Used by Client Process to get an authorization grant from its Principal*/
 func GetAuthGrant(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string) (int64, error) {
 	intent := NewIntentRequest(digest, sUser, addr, cmd)
-	c, err := net.Dial("unix", "echo1.sock") //TODO: address of UDS
+	c, err := net.Dial("unix", "/tmp/echo1.sock") //TODO: address of UDS
 	if err != nil {
 		logrus.Fatal(err)
 	}

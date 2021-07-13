@@ -204,6 +204,7 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 	return r.sender.write(b)
 }
 
+//Laura added. Need to implement WriteTo interface for io.Copy to work
 func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
 	var count int64
 	for {

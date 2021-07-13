@@ -214,10 +214,10 @@ func setListenerOptions(proto, addr string, c syscall.RawConn) error {
 func serve(args []string) {
 	logrus.SetLevel(logrus.InfoLevel)
 	addr := "localhost:8888"
-	sockAddr := "echo1.sock"
+	sockAddr := "/tmp/echo1.sock"
 	if args[2] == "2" {
 		addr = "localhost:9999"
-		sockAddr = "echo2.sock" //because we are on the same host => figure out how to use abstract sockets and naming
+		sockAddr = "/tmp/echo2.sock" //because we are on the same host => figure out how to use abstract sockets and naming
 	}
 	pktConn, err := net.ListenPacket("udp", addr)
 	if err != nil {
@@ -266,7 +266,8 @@ func serve(args []string) {
 		logrus.Fatalf("S: ERROR ACCEPTING CHANNEL: %v", err)
 	}
 	logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", serverChan.Type())
-	exec_channels.Serve(serverChan)
+	exec_channels.Serve(serverChan, &principals)
+	logrus.Infof("S: finished command")
 
 	// buf := make([]byte, 14)
 	// bytesRead := 0
