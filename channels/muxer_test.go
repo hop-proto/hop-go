@@ -169,20 +169,28 @@ func TestMultipleChannels(t *testing.T) {
 	c3, err := mc.CreateChannel(1 << 7)
 	assert.NilError(t, err)
 
-	testData := make([]byte, 50)
-	for i := range testData {
-		testData[i] = []byte{'g', 'h', 'i', 'j', 'k', 'l'}[rand.Intn(6)]
+	testData1 := make([]byte, 5000)
+	testData2 := make([]byte, 5000)
+	testData3 := make([]byte, 5000)
+	for i := range testData1 {
+		testData1[i] = []byte{'g', 'h', 'i', 'j', 'k', 'l'}[rand.Intn(6)]
+	}
+	for i := range testData2 {
+		testData2[i] = []byte{'g', 'h', 'i', 'j', 'k', 'l'}[rand.Intn(6)]
+	}
+	for i := range testData3 {
+		testData3[i] = []byte{'g', 'h', 'i', 'j', 'k', 'l'}[rand.Intn(6)]
 	}
 
 	go func() {
 		logrus.Info("WRITE 1")
-		_, err = c1.Write([]byte(testData))
+		_, err = c1.Write([]byte(testData1))
 		assert.NilError(t, err)
 		logrus.Info("WRITE 2")
-		_, err = c2.Write([]byte(testData))
+		_, err = c2.Write([]byte(testData2))
 		assert.NilError(t, err)
 		logrus.Info("WRITE 3")
-		_, err = c3.Write([]byte(testData))
+		_, err = c3.Write([]byte(testData3))
 		assert.NilError(t, err)
 		logrus.Info("CLOSE 1")
 		err = c1.Close()
@@ -204,27 +212,27 @@ func TestMultipleChannels(t *testing.T) {
 	rc3, err := ms.Accept()
 	assert.NilError(t, err)
 	logrus.Info("READ 1")
-	buf1 := make([]byte, len(testData)+2)
-	buf2 := make([]byte, len(testData)+2)
-	buf3 := make([]byte, len(testData)+2)
+	buf1 := make([]byte, len(testData1)+2)
+	buf2 := make([]byte, len(testData2)+2)
+	buf3 := make([]byte, len(testData3)+2)
 	rc1.Close()
 	n, err := rc1.Read(buf1)
 	logrus.Info("READ 2")
 	assert.NilError(t, err)
-	assert.Check(t, cmp.Len(testData, n))
-	assert.Equal(t, string(testData), string(buf1[:n]))
+	assert.Check(t, cmp.Len(testData1, n))
+	assert.Equal(t, string(testData1), string(buf1[:n]))
 	rc2.Close()
 	n, err = rc2.Read(buf2)
 	logrus.Info("READ 3")
 	assert.NilError(t, err)
-	assert.Check(t, cmp.Len(testData, n))
-	assert.Equal(t, string(testData), string(buf2[:n]))
+	assert.Check(t, cmp.Len(testData2, n))
+	assert.Equal(t, string(testData2), string(buf2[:n]))
 	rc3.Close()
 	n, err = rc3.Read(buf3)
 	logrus.Info("CHECKING DATA")
 	assert.NilError(t, err)
-	assert.Check(t, cmp.Len(testData, n))
-	assert.Equal(t, string(testData), string(buf3[:n]))
+	assert.Check(t, cmp.Len(testData3, n))
+	assert.Equal(t, string(testData3), string(buf3[:n]))
 	logrus.Info("STOPPING")
 	ms.Stop()
 	mc.Stop()
