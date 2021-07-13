@@ -140,7 +140,7 @@ func TestSmallWindow(t *testing.T) {
 
 func TestMultipleChannels(t *testing.T) {
 	logrus.SetLevel(logrus.InfoLevel)
-	pktConn, err := net.ListenPacket("udp", "localhost:8889")
+	pktConn, err := net.ListenPacket("udp", "localhost:8894")
 	assert.NilError(t, err)
 	// It's actually a UDP conn
 	udpConn := pktConn.(*net.UDPConn)

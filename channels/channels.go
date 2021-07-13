@@ -96,6 +96,7 @@ func makeChannel(underlying transport.MsgConn, netConn net.Conn, sendQueue chan 
 			ackNo:            1,
 			buffer:           make([]byte, 0),
 			closed:           false,
+			finSent:          false,
 			frameDataLengths: make(map[uint32]uint16),
 			frameNo:          1,
 			RTO:              RTO,
@@ -203,7 +204,7 @@ func (r *Reliable) Close() error {
 		return errors.New("channel already closed")
 	}
 	r.m.Unlock()
-	err := r.sender.close()
+	err := r.sender.sendFin()
 	if err != nil {
 		return err
 	}
@@ -232,11 +233,12 @@ func (r *Reliable) Close() error {
 		r.closedCond.Wait()
 	}
 	r.closedCond.L.Unlock()
-
+	r.sender.close()
 	logrus.Info("CLOSED! WOOHOO")
 	r.m.Lock()
 	r.channelState = CLOSED
 	r.m.Unlock()
+
 	return nil
 }
 
