@@ -29,7 +29,7 @@ func newTestServerConfig(t *testing.T) *transport.ServerConfig {
 }
 
 func TestMuxer(t *testing.T) {
-	logrus.SetLevel(logrus.InfoLevel)
+	logrus.SetLevel(logrus.DebugLevel)
 	pktConn, err := net.ListenPacket("udp", "localhost:8890")
 	assert.NilError(t, err)
 	// It's actually a UDP conn
@@ -70,15 +70,15 @@ func TestMuxer(t *testing.T) {
 	buf := make([]byte, len(testData))
 	time.Sleep(time.Second)
 	bytesRead := 0
-	logrus.Info("READING ")
+	logrus.Debug("READING ")
 	n, err := serverChan.Read(buf[bytesRead:])
-	logrus.Info("DONE READING ")
+	logrus.Debug("DONE READING ")
 
 	assert.NilError(t, err)
 	bytesRead += n
-	logrus.Info("STOPPNG MC")
+	logrus.Debug("STOPPNG MC")
 	mc.Stop()
-	logrus.Info("STOPPNG MS")
+	logrus.Debug("STOPPNG MS")
 	ms.Stop()
 	assert.Check(t, cmp.Len(testData, bytesRead))
 	assert.Equal(t, testData, string(buf))
@@ -86,7 +86,7 @@ func TestMuxer(t *testing.T) {
 }
 
 func TestSmallWindow(t *testing.T) {
-	logrus.SetLevel(logrus.InfoLevel)
+	logrus.SetLevel(logrus.DebugLevel)
 	pktConn, err := net.ListenPacket("udp", "localhost:8889")
 	assert.NilError(t, err)
 	// It's actually a UDP conn
@@ -139,7 +139,7 @@ func TestSmallWindow(t *testing.T) {
 }
 
 func TestMultipleChannels(t *testing.T) {
-	logrus.SetLevel(logrus.InfoLevel)
+	logrus.SetLevel(logrus.DebugLevel)
 	pktConn, err := net.ListenPacket("udp", "localhost:8894")
 	assert.NilError(t, err)
 	// It's actually a UDP conn
@@ -183,57 +183,57 @@ func TestMultipleChannels(t *testing.T) {
 	}
 
 	go func() {
-		logrus.Info("WRITE 1")
+		logrus.Debug("WRITE 1")
 		_, err = c1.Write([]byte(testData1))
 		assert.NilError(t, err)
-		logrus.Info("WRITE 2")
+		logrus.Debug("WRITE 2")
 		_, err = c2.Write([]byte(testData2))
 		assert.NilError(t, err)
-		logrus.Info("WRITE 3")
+		logrus.Debug("WRITE 3")
 		_, err = c3.Write([]byte(testData3))
 		assert.NilError(t, err)
-		logrus.Info("CLOSE 1")
+		logrus.Debug("CLOSE 1")
 		err = c1.Close()
 		assert.NilError(t, err)
-		logrus.Info("CLOSE 2")
+		logrus.Debug("CLOSE 2")
 		err = c2.Close()
 		assert.NilError(t, err)
-		logrus.Info("CLOSE 3")
+		logrus.Debug("CLOSE 3")
 		err = c3.Close()
 		assert.NilError(t, err)
 	}()
-	logrus.Info("ACCEPT 1")
+	logrus.Debug("ACCEPT 1")
 	rc1, err := ms.Accept()
 	assert.NilError(t, err)
-	logrus.Info("ACCEPT 2")
+	logrus.Debug("ACCEPT 2")
 	rc2, err := mc.Accept()
 	assert.NilError(t, err)
-	logrus.Info("ACCEPT 3")
+	logrus.Debug("ACCEPT 3")
 	rc3, err := ms.Accept()
 	assert.NilError(t, err)
-	logrus.Info("READ 1")
+	logrus.Debug("READ 1")
 	buf1 := make([]byte, len(testData1)+2)
 	buf2 := make([]byte, len(testData2)+2)
 	buf3 := make([]byte, len(testData3)+2)
 	rc1.Close()
 	n, err := rc1.Read(buf1)
-	logrus.Info("READ 2")
+	logrus.Debug("READ 2")
 	assert.NilError(t, err)
 	assert.Check(t, cmp.Len(testData1, n))
 	assert.Equal(t, string(testData1), string(buf1[:n]))
 	rc2.Close()
 	n, err = rc2.Read(buf2)
-	logrus.Info("READ 3")
+	logrus.Debug("READ 3")
 	assert.NilError(t, err)
 	assert.Check(t, cmp.Len(testData2, n))
 	assert.Equal(t, string(testData2), string(buf2[:n]))
 	rc3.Close()
 	n, err = rc3.Read(buf3)
-	logrus.Info("CHECKING DATA")
+	logrus.Debug("CHECKING DATA")
 	assert.NilError(t, err)
 	assert.Check(t, cmp.Len(testData3, n))
 	assert.Equal(t, string(testData3), string(buf3[:n]))
-	logrus.Info("STOPPING")
+	logrus.Debug("STOPPING")
 	ms.Stop()
 	mc.Stop()
 }
