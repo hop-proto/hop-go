@@ -12,6 +12,20 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type UDPLike interface {
+	Close() error
+	LocalAddr() net.Addr
+	Read(b []byte) (int, error)
+	ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error)
+	RemoteAddr() net.Addr
+	SetDeadline(t time.Time) error
+	SetReadDeadline(t time.Time) error
+	SetWriteDeadline(t time.Time) error
+	Write(b []byte) (int, error)
+	WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error)
+	WriteTo(b []byte, addr net.Addr) (int, error)
+}
+
 // Enforce ClientConn implements net.Conn
 var _ net.Conn = &Client{}
 
@@ -26,7 +40,7 @@ type Client struct {
 	handshakeComplete atomicBool
 	closed            atomicBool
 
-	underlyingConn *net.UDPConn
+	underlyingConn UDPLike
 	dialAddr       *net.UDPAddr
 
 	hs *HandshakeState
@@ -56,7 +70,7 @@ func (c *Client) Handshake() error {
 	if c.handshakeComplete.isSet() {
 		return nil
 	}
-
+	logrus.Debug("Handshake not complete. Locking user...")
 	c.lockUser()
 	defer c.unlockUser()
 
@@ -65,7 +79,7 @@ func (c *Client) Handshake() error {
 	if c.handshakeComplete.isSet() {
 		return nil
 	}
-
+	logrus.Debug("got lock and checked again. Completeting handshake...")
 	return c.clientHandshakeLocked()
 }
 
@@ -368,7 +382,7 @@ func (c *Client) SetWriteDeadline(t time.Time) error {
 
 // NewClient returns a Client configured as specified, using the underlying UDP
 // connection. The Client has not yet completed a handshake.
-func NewClient(conn *net.UDPConn, server *net.UDPAddr, config *ClientConfig) *Client {
+func NewClient(conn UDPLike, server *net.UDPAddr, config *ClientConfig) *Client {
 	c := &Client{
 		underlyingConn: conn,
 		dialAddr:       server,

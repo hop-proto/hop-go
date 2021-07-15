@@ -93,7 +93,7 @@ func (ss *SessionState) readCounter(b []byte) (count uint64) {
 	return
 }
 
-func (ss *SessionState) writePacket(conn *net.UDPConn, in []byte, key *[KeyLen]byte) error {
+func (ss *SessionState) writePacket(conn UDPLike, in []byte, key *[KeyLen]byte) error {
 	length := HeaderLen + SessionIDLen + CounterLen + len(in) + MacLen + 12
 	ss.rawWrite.Reset()
 	if ss.rawWrite.Cap() < length {

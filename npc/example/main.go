@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/binary"
-	"io"
 	"net"
 	"os"
 	"time"
@@ -24,7 +23,7 @@ func main() {
 }
 
 func principalProxy(ch *channels.Reliable) {
-	addr := "localhost:9999"
+	addr := "127.0.0.1:9999"
 	pktConn, err := net.ListenPacket("udp", addr)
 	if err != nil {
 		logrus.Fatalf("S: ERROR STARTING UDP CONN: %v", err)
@@ -32,10 +31,14 @@ func principalProxy(ch *channels.Reliable) {
 	// It's actually a UDP conn
 	udpConn := pktConn.(*net.UDPConn)
 	logrus.Info("principal proxy got a connection")
-	go func() {
-		io.Copy(ch, udpConn)
-	}()
-	io.Copy(udpConn, ch)
+	b := make([]byte, 11)
+	udpConn.ReadMsgUDP(b, nil)
+	logrus.Info("b: ", string(b))
+	udpConn.Close()
+	// go func() {
+	// 	io.Copy(os.Stdout, udpConn)
+	// }()
+	// io.Copy(udpConn, ch)
 
 }
 
@@ -70,34 +73,39 @@ func startClient(port string) {
 		ch.Read(make([]byte, 1))
 		logrus.Info("Receieved NPC Conf. Starting principal proxy...")
 		go principalProxy(ch)
-		transportConn2, err := transport.Dial("udp", "127.0.0.1:9999", nil)
+		transportConn2, err := net.Dial("udp", "127.0.0.1:9999")
 		if err != nil {
 			logrus.Fatalf("C: error dialing server: %v", err)
 		}
 		logrus.Info("Dialed Principal proxy")
-		err = transportConn2.Handshake() //hanging
-		if err != nil {
-			logrus.Fatalf("C: Issue with handshake: %v", err)
-		}
-		logrus.Info("conducted handshake")
-		//TODO: should these functions + things from Channels layer have errors?
-		mc := channels.NewMuxer(transportConn2, transportConn2)
-		go mc.Start()
-		defer mc.Stop()
+		transportConn2.Write([]byte("HELLO WORLD"))
+		time.Sleep(5 * time.Second)
+		transportConn2.Close()
+		logrus.Info("Wrote and closed conn to pproxy")
+		// err = transportConn2.Handshake() //hanging
+		// if err != nil {
+		// 	logrus.Fatalf("C: Issue with handshake: %v", err)
+		// }
+		// logrus.Info("conducted handshake")
+		// //TODO: should these functions + things from Channels layer have errors?
+		// mc := channels.NewMuxer(transportConn2, transportConn2)
+		// go mc.Start()
+		// defer mc.Stop()
 
-		mc.CreateChannel(channels.AGC_CHANNEL)
-		logrus.Info("CREATED AGC")
+		// mc.CreateChannel(channels.AGC_CHANNEL)
+		// logrus.Info("CREATED AGC")
 	}
 	for {
 	}
 }
 
 func startServer(port string) {
-	addr := "localhost:" + port
+	addr := "127.0.0.1:" + port
 	pktConn, err := net.ListenPacket("udp", addr)
 	if err != nil {
 		logrus.Fatalf("S: ERROR STARTING UDP CONN: %v", err)
 	}
+
 	// It's actually a UDP conn
 	udpConn := pktConn.(*net.UDPConn)
 	server, err := transport.NewServer(udpConn, newTestServerConfig())
@@ -131,18 +139,18 @@ func startServer(port string) {
 		ch.Read(init)
 		dest := npc.FromBytes(init)
 		logrus.Infof("trying to dial dest: %v", dest.Addr)
-		udpConn, err := net.Dial("udp", dest.Addr)
+		_, err := net.Dial("udp", dest.Addr)
 		if err != nil {
 			logrus.Fatalf("C: error dialing server: %v", err)
 		}
 		logrus.Info("connected to: ", dest.Addr)
-		go func() {
-			io.Copy(udpConn, ch)
-		}()
+		// go func() {
+		// 	io.Copy(udpConn, ch)
+		// }()
 		ch.Write([]byte{npc.NPC_CONF})
-		go func() {
-			io.Copy(ch, udpConn)
-		}()
+		// go func() {
+		// 	io.Copy(ch, udpConn)
+		// }()
 
 		for {
 		}

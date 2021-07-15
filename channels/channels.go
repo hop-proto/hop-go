@@ -3,6 +3,7 @@ package channels
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"io"
 	"net"
@@ -36,7 +37,7 @@ const (
 const (
 	EXEC_CHANNEL = byte(1)
 	AGC_CHANNEL  = byte(2)
-	NPC_CHANEL   = byte(3)
+	NPC_CHANEL   = byte(3) //NPC should maybe be unreliable channel?
 )
 
 // Reliable implements a reliable and receiveWindow channel on top
@@ -220,6 +221,25 @@ func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
 		}
 	}
 
+}
+
+//(Laura) Trying to make channels have the same funcs as net.UDPConn
+func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
+	length := len(b)
+	h := make([]byte, 2)
+	binary.BigEndian.PutUint16(h, uint16(length))
+	n, e := r.Write(append(h, b...))
+	return n, 0, e
+}
+
+func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
+	h := make([]byte, 2)
+	r.Read(h)
+	length := binary.BigEndian.Uint16(h)
+	data := make([]byte, length)
+	_, e := r.Read(data)
+	n = copy(b, data)
+	return n, 0, 0, nil, e
 }
 
 func (r *Reliable) Close() error {

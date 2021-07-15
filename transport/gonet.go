@@ -33,3 +33,7 @@ func Dial(network, address string, config *ClientConfig) (*Client, error) {
 	}
 	return NewClient(inner, remoteAddr.(*net.UDPAddr), config), nil
 }
+
+func DialNPC(network string, ch UDPLike) (*Client, error) {
+	return NewClient(ch, nil, nil), nil
+}
