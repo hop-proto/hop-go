@@ -15,6 +15,7 @@ import (
 )
 
 func main() {
+	//logrus.SetLevel(logrus.DebugLevel)
 	if os.Args[1] == "client" {
 		startClient(os.Args[2])
 	} else if os.Args[1] == "server" {
@@ -22,27 +23,8 @@ func main() {
 	}
 }
 
-func principalProxy(ch *channels.Reliable) {
-	addr := "127.0.0.1:9999"
-	pktConn, err := net.ListenPacket("udp", addr)
-	if err != nil {
-		logrus.Fatalf("S: ERROR STARTING UDP CONN: %v", err)
-	}
-	// It's actually a UDP conn
-	udpConn := pktConn.(*net.UDPConn)
-	logrus.Info("principal proxy got a connection")
-	b := make([]byte, 11)
-	udpConn.ReadMsgUDP(b, nil)
-	logrus.Info("b: ", string(b))
-	udpConn.Close()
-	// go func() {
-	// 	io.Copy(os.Stdout, udpConn)
-	// }()
-	// io.Copy(udpConn, ch)
-
-}
-
 func startClient(port string) {
+	//logrus.SetLevel(logrus.DebugLevel)
 	addr := "127.0.0.1:" + port
 
 	//******ESTABLISH HOP SESSION******
@@ -65,28 +47,22 @@ func startClient(port string) {
 	if e != nil {
 		logrus.Fatalf("C: error making channel: %v", e)
 	}
+	// ch.Write([]byte("Hello World"))
+	// ch.Close()
 	if port == "1111" {
 		logrus.Info("Starting NPC with Server 1 on port 1111")
 		npcinit := npc.NewNPCInitMsg("127.0.0.1:2222")
 		logrus.Infof("len: %v and addr: %v", npcinit.MsgLen, npcinit.Addr)
 		ch.Write(npc.NewNPCInitMsg("127.0.0.1:2222").ToBytes())
 		ch.Read(make([]byte, 1))
-		logrus.Info("Receieved NPC Conf. Starting principal proxy...")
-		go principalProxy(ch)
-		transportConn2, err := net.Dial("udp", "127.0.0.1:9999")
-		if err != nil {
-			logrus.Fatalf("C: error dialing server: %v", err)
+		logrus.Info("Receieved NPC Conf")
+		tclient, _ := transport.DialNPC("npc", "127.0.0.1:2222", ch)
+		//logrus.SetLevel(logrus.DebugLevel)
+		e := tclient.Handshake()
+		if e != nil {
+			logrus.Fatal("Handshake failed: ", e)
 		}
-		logrus.Info("Dialed Principal proxy")
-		transportConn2.Write([]byte("HELLO WORLD"))
-		time.Sleep(5 * time.Second)
-		transportConn2.Close()
-		logrus.Info("Wrote and closed conn to pproxy")
-		// err = transportConn2.Handshake() //hanging
-		// if err != nil {
-		// 	logrus.Fatalf("C: Issue with handshake: %v", err)
-		// }
-		// logrus.Info("conducted handshake")
+		logrus.Info("handshake successful")
 		// //TODO: should these functions + things from Channels layer have errors?
 		// mc := channels.NewMuxer(transportConn2, transportConn2)
 		// go mc.Start()
@@ -97,9 +73,11 @@ func startClient(port string) {
 	}
 	for {
 	}
+	ch.Close()
 }
 
 func startServer(port string) {
+	//logrus.SetLevel(logrus.DebugLevel)
 	addr := "127.0.0.1:" + port
 	pktConn, err := net.ListenPacket("udp", addr)
 	if err != nil {
@@ -126,6 +104,11 @@ func startServer(port string) {
 	go ms.Start()
 	defer ms.Stop()
 	logrus.Info("S: STARTED CHANNEL MUXER")
+	// ch, _ := ms.Accept()
+	// b := make([]byte, 11)
+	// ch.Read(b)
+	// logrus.Infof("GOT: %v", string(b))
+	// ch.Close()
 
 	if port == "1111" {
 		logrus.Info("Server 1: Accepting NPC and setting up Proxy to Server 2")
@@ -138,22 +121,49 @@ func startServer(port string) {
 		init := make([]byte, l)
 		ch.Read(init)
 		dest := npc.FromBytes(init)
-		logrus.Infof("trying to dial dest: %v", dest.Addr)
-		_, err := net.Dial("udp", dest.Addr)
+		logrus.Infof("actually dialing dest: %v", dest.Addr)
+		//tconn, err := transport.Dial("udp", dest.Addr, nil)
+		throwaway, _ := net.Dial("udp", dest.Addr)
+		localAddr := throwaway.LocalAddr()
+		remoteAddr := throwaway.RemoteAddr()
+		throwaway.Close()
+		tconn, err := net.DialUDP("udp", localAddr.(*net.UDPAddr), remoteAddr.(*net.UDPAddr))
 		if err != nil {
 			logrus.Fatalf("C: error dialing server: %v", err)
 		}
 		logrus.Info("connected to: ", dest.Addr)
-		// go func() {
-		// 	io.Copy(udpConn, ch)
-		// }()
 		ch.Write([]byte{npc.NPC_CONF})
-		// go func() {
-		// 	io.Copy(ch, udpConn)
-		// }()
+		logrus.Infof("wrote confirmation that NPC ready")
+		go func() {
+			for {
+				buf := make([]byte, 65500)
+				n, _, _, _, _ := ch.ReadMsgUDP(buf, nil)
+				logrus.Info("Read: ", n, " bytes from channel")
+				n, _, e := tconn.WriteMsgUDP(buf[:n], nil, nil)
+				if e != nil {
+					logrus.Fatal("Error sending packet: ", e)
+				}
+				logrus.Infof("Wrote %v bytes to UDP", n)
+			}
+		}()
+		for {
+			buf := make([]byte, 65500)
+			n, _, _, _, e := tconn.ReadMsgUDP(buf, nil)
+			if e != nil {
+				logrus.Fatal("Err reading from UDP: ", e)
+			}
+			logrus.Info("Read: ", n, " bytes from UDP Conn")
+			n, _, e = ch.WriteMsgUDP(buf[:n], nil, nil)
+			if e != nil {
+				logrus.Fatal("Error writing to channel, ", e)
+			}
+			logrus.Infof("Wrote %v bytes to channel.", n)
+		}
 
 		for {
 		}
+	}
+	for {
 	}
 }
 

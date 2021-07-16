@@ -84,6 +84,7 @@ func (c *Client) Handshake() error {
 }
 
 func (c *Client) clientHandshakeLocked() error {
+	//logrus.SetLevel(logrus.DebugLevel)
 	c.hs = new(HandshakeState)
 	c.hs.remoteAddr = c.dialAddr
 	c.hs.duplex.InitializeEmpty()

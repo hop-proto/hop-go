@@ -47,7 +47,7 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	return out, nil
 }
 
-func CookieAD(ephemeral *[DHLen]byte, clientAddr *net.UDPAddr) []byte {
+func CookieAD(ephemeral *[32]byte, clientAddr *net.UDPAddr) []byte {
 	// TODO(dadrian): Remove the memory allocation
 	h := sha3.New256()
 	h.Write(ephemeral[:])

@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
-	"io"
 	"net"
 	"sync"
 	"time"
@@ -206,22 +205,22 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 }
 
 //Laura added. Need to implement WriteTo interface for io.Copy to work
-func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
-	var count int64
-	for {
-		b := make([]byte, 1)
-		n, e := r.Read(b)
-		count += int64(n)
-		if e != nil {
-			return count, e
-		}
-		_, e = w.Write(b)
-		if e != nil {
-			return count, e
-		}
-	}
+// func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
+// 	var count int64
+// 	for {
+// 		b := make([]byte, 1)
+// 		n, e := r.Read(b)
+// 		count += int64(n)
+// 		if e != nil {
+// 			return count, e
+// 		}
+// 		_, e = w.Write(b)
+// 		if e != nil {
+// 			return count, e
+// 		}
+// 	}
 
-}
+// }
 
 //(Laura) Trying to make channels have the same funcs as net.UDPConn
 func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
@@ -229,6 +228,7 @@ func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, e
 	h := make([]byte, 2)
 	binary.BigEndian.PutUint16(h, uint16(length))
 	n, e := r.Write(append(h, b...))
+	logrus.Infof("Wrote MSG of length %v", length+2)
 	return n, 0, e
 }
 
@@ -240,6 +240,20 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 	_, e := r.Read(data)
 	n = copy(b, data)
 	return n, 0, 0, nil, e
+}
+
+func (r *Reliable) WriteTo(buf []byte, addr net.Addr) (n int, err error) {
+	var count int
+	for {
+		b := make([]byte, 1)
+		n, e := r.Read(b)
+		count += n
+		if e != nil {
+			return count, e
+		}
+		copy(buf, b)
+	}
+
 }
 
 func (r *Reliable) Close() error {
