@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -21,6 +22,7 @@ func GetAuthGrant(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string
 	if err != nil {
 		logrus.Fatal(err)
 	}
+
 	defer c.Close()
 	logrus.Infof("C: CONNECTED TO UDS: [%v]", c.RemoteAddr().String())
 	c.Write(intent.ToBytes())
@@ -63,11 +65,11 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, state *terminal.State)
 		if e != nil {
 			logrus.Fatal("C: Error starting NPC")
 		}
-		//addr := req.serverSNI + ":" + string(rune(req.port)) //Better way to do this?
-		npcCh.Write(npc.NewNPCInitMsg("127.0.0.1:9999").ToBytes())
+		addr := req.serverSNI + ":" + strconv.Itoa(int(req.port))
+		npcCh.Write(npc.NewNPCInitMsg(addr).ToBytes())
 		npcCh.Read(make([]byte, 1))
 		logrus.Info("Receieved NPC Conf")
-		tclient, e := transport.DialNPC("npc", "127.0.0.1:9999", npcCh)
+		tclient, e := transport.DialNPC("npc", addr, npcCh)
 		if e != nil {
 			logrus.Fatal("error dialing npc")
 		}

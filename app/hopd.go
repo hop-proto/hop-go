@@ -186,11 +186,14 @@ func setListenerOptions(proto, addr string, c syscall.RawConn) error {
 func serve(args []string) {
 	logrus.SetLevel(logrus.InfoLevel)
 	//TEMPORARY: Should take address from argument and socket should be abstract/same place or dependent on session?
-	addr := "localhost:8888"
+	addr := "localhost:7777"
 	sockAddr := "/tmp/auth.sock"
 	if args[2] == "2" {
-		addr = "localhost:9999"
+		addr = "localhost:8888"
 		sockAddr = "/tmp/auth2.sock" //because we are on the same host => figure out how to use abstract sockets and naming
+	} else if args[2] == "3" {
+		addr = "localhost:9999"
+		sockAddr = "/tmp/auth3.sock"
 	}
 
 	//*****TRANSPORT LAYER SET UP*****
@@ -220,6 +223,7 @@ func serve(args []string) {
 	}
 	//TODO: Make thread safe?
 	principals := make(map[int32]*channels.Muxer) //PID -> session muxer
+	muxers := make(map[string]*channels.Muxer)
 	go authGrantServer(l, &principals)
 
 	//*****ACCEPT CONNS AND START SESSIONS*****
@@ -247,6 +251,9 @@ func session(serverConn *transport.Handle, principals map[int32]*channels.Muxer,
 		}
 		logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", serverChan.Type())
 		if serverChan.Type() == channels.EXEC_CHANNEL {
+			//If session is using an authorization grant then the muxer in this goroutine
+			//should be replaced by the muxer that the server has with the principal that authorized the grant
+			//use the muxers map above (authgrant --> muxer)
 			go exec_channels.Serve(serverChan, &principals, ms)
 		} else if serverChan.Type() == channels.NPC_CHANNEL {
 			go npc.Server(serverChan)
