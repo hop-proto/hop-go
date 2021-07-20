@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"zmap.io/portal/authgrants"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/channels"
 	"zmap.io/portal/keys"
@@ -24,7 +25,6 @@ func main() {
 }
 
 func startClient(port string) {
-	//logrus.SetLevel(logrus.DebugLevel)
 	addr := "127.0.0.1:" + port
 
 	//******ESTABLISH HOP SESSION******
@@ -43,33 +43,35 @@ func startClient(port string) {
 	defer mc.Stop()
 
 	//start NPC channel
-	ch, e := mc.CreateChannel(channels.NPC_CHANEL)
+	ch, e := mc.CreateChannel(channels.NPC_CHANNEL)
 	if e != nil {
 		logrus.Fatalf("C: error making channel: %v", e)
 	}
-	// ch.Write([]byte("Hello World"))
-	// ch.Close()
 	if port == "1111" {
-		logrus.Info("Starting NPC with Server 1 on port 1111")
-		npcinit := npc.NewNPCInitMsg("127.0.0.1:2222")
-		logrus.Infof("len: %v and addr: %v", npcinit.MsgLen, npcinit.Addr)
+		logrus.Info("Starting NPC with Server 1 on port 1111 to server 2 on port 2222")
 		ch.Write(npc.NewNPCInitMsg("127.0.0.1:2222").ToBytes())
 		ch.Read(make([]byte, 1))
 		logrus.Info("Receieved NPC Conf")
 		tclient, _ := transport.DialNPC("npc", "127.0.0.1:2222", ch)
-		//logrus.SetLevel(logrus.DebugLevel)
 		e := tclient.Handshake()
 		if e != nil {
 			logrus.Fatal("Handshake failed: ", e)
 		}
 		logrus.Info("handshake successful")
 		// //TODO: should these functions + things from Channels layer have errors?
-		// mc := channels.NewMuxer(transportConn2, transportConn2)
-		// go mc.Start()
-		// defer mc.Stop()
+		mc := channels.NewMuxer(tclient, tclient)
+		go mc.Start()
+		defer mc.Stop()
 
-		// mc.CreateChannel(channels.AGC_CHANNEL)
-		// logrus.Info("CREATED AGC")
+		agc, e := mc.CreateChannel(channels.AGC_CHANNEL)
+		if e != nil {
+			logrus.Fatal("Error creating AGC: ", e)
+		}
+		logrus.Info("CREATED AGC")
+		var x [32]byte
+		cmd := []string{"bash"}
+		agc.Write(authgrants.NewIntentRequest(x, "laura", "127.0.0.1:3333", cmd).ToBytes())
+		agc.Close()
 	}
 	for {
 	}
@@ -104,11 +106,6 @@ func startServer(port string) {
 	go ms.Start()
 	defer ms.Stop()
 	logrus.Info("S: STARTED CHANNEL MUXER")
-	// ch, _ := ms.Accept()
-	// b := make([]byte, 11)
-	// ch.Read(b)
-	// logrus.Infof("GOT: %v", string(b))
-	// ch.Close()
 
 	if port == "1111" {
 		logrus.Info("Server 1: Accepting NPC and setting up Proxy to Server 2")
@@ -121,8 +118,7 @@ func startServer(port string) {
 		init := make([]byte, l)
 		ch.Read(init)
 		dest := npc.FromBytes(init)
-		logrus.Infof("actually dialing dest: %v", dest.Addr)
-		//tconn, err := transport.Dial("udp", dest.Addr, nil)
+		logrus.Infof("dialing dest: %v", dest.Addr)
 		throwaway, _ := net.Dial("udp", dest.Addr)
 		localAddr := throwaway.LocalAddr()
 		remoteAddr := throwaway.RemoteAddr()
@@ -137,9 +133,12 @@ func startServer(port string) {
 		go func() {
 			for {
 				buf := make([]byte, 65500)
-				n, _, _, _, _ := ch.ReadMsgUDP(buf, nil)
+				n, _, _, _, e := ch.ReadMsgUDP(buf, nil)
+				if e != nil {
+					logrus.Fatal("Error Reading from Channel: ", e)
+				}
 				logrus.Info("Read: ", n, " bytes from channel")
-				n, _, e := tconn.WriteMsgUDP(buf[:n], nil, nil)
+				n, _, e = tconn.WriteMsgUDP(buf[:n], nil, nil)
 				if e != nil {
 					logrus.Fatal("Error sending packet: ", e)
 				}
@@ -163,8 +162,17 @@ func startServer(port string) {
 		for {
 		}
 	}
-	for {
+	//Server 2
+	agc, e := ms.Accept()
+	if e == nil {
+		logrus.Infof("Successfully accepted channel of type: %v", agc.Type())
 	}
+	buf := make([]byte, 1)
+	agc.Read(buf)
+	data := make([]byte, int(buf[0]))
+	agc.Read(data)
+	logrus.Infof("Intent request: %v", string(data))
+	agc.Close()
 }
 
 func newTestServerConfig() *transport.ServerConfig {

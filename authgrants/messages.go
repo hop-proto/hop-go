@@ -2,6 +2,8 @@ package authgrants
 
 import (
 	"encoding/binary"
+	"errors"
+	"net"
 	"os"
 	"os/user"
 	"strconv"
@@ -104,6 +106,7 @@ func NewIntentRequest(digest [SHA3_LEN]byte, sUser string, addr string, cmd []st
 	user, _ := user.Current()
 	cSNI, _ := os.Hostname()
 	sSNI, p := parseAddr(addr)
+
 	r := &IntentRequest{
 		sha3:           digest,
 		clientUsername: user.Username,
@@ -240,6 +243,7 @@ func FromIntentDeniedBytes(b []byte) *IntentDenied {
 	return &d
 }
 
+//Other helper functions
 func parseAddr(addr string) (string, uint16) { //addr of format host:port or host
 	host := addr
 	port := DEFAULT_HOP_PORT
@@ -252,4 +256,81 @@ func parseAddr(addr string) (string, uint16) { //addr of format host:port or hos
 		logrus.Fatal("port number out of range")
 	}
 	return host, uint16(port)
+}
+
+func ReadIntentRequest(c net.Conn) ([]byte, error) {
+	msgType := make([]byte, 1)
+	c.Read(msgType)
+	if msgType[0] == INTENT_REQUEST {
+		irh := make([]byte, IR_HEADER_LENGTH)
+		_, err := c.Read(irh)
+		if err != nil {
+			return nil, err
+		}
+		actionLen := int8(irh[IR_HEADER_LENGTH-1])
+		action := make([]byte, actionLen)
+		_, err = c.Read(action)
+		if err != nil {
+			return nil, err
+		}
+		return append(msgType, append(irh, action...)...), nil
+	}
+	return nil, errors.New("bad msg type")
+}
+
+func ReadIntentCommunication(c net.Conn) ([]byte, error) {
+	msgType := make([]byte, 1)
+	c.Read(msgType)
+	if msgType[0] == INTENT_COMMUNICATION {
+		irh := make([]byte, IR_HEADER_LENGTH)
+		_, err := c.Read(irh)
+		if err != nil {
+			return nil, err
+		}
+		actionLen := int8(irh[IR_HEADER_LENGTH-1])
+		action := make([]byte, actionLen)
+		_, err = c.Read(action)
+		if err != nil {
+			return nil, err
+		}
+		return append(msgType, append(irh, action...)...), nil
+	}
+	return nil, errors.New("bad msg type")
+}
+
+func GetResponse(c net.Conn) ([]byte, error) {
+	responseType := make([]byte, 1)
+	_, err := c.Read(responseType)
+	if err != nil {
+		logrus.Fatal(err)
+	}
+	logrus.Infof("Got response type: %v", responseType)
+	//TODO: SET TIMEOUT STUFF + BETTER ERROR CHECKING
+	if responseType[0] == INTENT_CONFIRMATION {
+		conf := make([]byte, INTENT_CONF_SIZE)
+		_, err := c.Read(conf)
+		if err != nil {
+			return nil, err
+		}
+		return append(responseType, conf...), nil
+	} else if responseType[0] == INTENT_DENIED {
+		reason_length := make([]byte, 1)
+		_, err := c.Read(reason_length)
+		if err != nil {
+			return nil, err
+		}
+		logrus.Infof("C: EXPECTING %v BYTES OF REASON", reason_length)
+		reason := make([]byte, int(reason_length[0]))
+		_, err = c.Read(reason)
+		if err != nil {
+			return nil, err
+		}
+		return append(append(responseType, reason_length...), reason...), nil
+	}
+	return nil, errors.New("bad msg type")
+}
+
+//Makes an Intent Communication from an Intent Request (change msg type)
+func CommFromReq(b []byte) []byte {
+	return append([]byte{INTENT_COMMUNICATION}, b[TYPE_LEN:]...)
 }

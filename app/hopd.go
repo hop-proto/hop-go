@@ -18,6 +18,7 @@ import (
 	"zmap.io/portal/channels"
 	"zmap.io/portal/exec_channels"
 	"zmap.io/portal/keys"
+	"zmap.io/portal/npc"
 	"zmap.io/portal/transport"
 )
 
@@ -51,7 +52,7 @@ func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
 	return false
 }
 
-func checkCredentials(c net.Conn, principals *map[int32]string) (int32, error) {
+func checkCredentials(c net.Conn, principals *map[int32]*channels.Muxer) (int32, error) {
 	creds, err := readCreds(c)
 	if err != nil {
 		return 0, err
@@ -88,12 +89,12 @@ func readCreds(c net.Conn) (*unix.Ucred, error) {
 	//should only have *net.UnixConn types
 	uc, ok := c.(*net.UnixConn)
 	if !ok {
-		return nil, fmt.Errorf("S: unexpected socket type")
+		return nil, fmt.Errorf("unexpected socket type")
 	}
 
 	raw, err := uc.SyscallConn()
 	if err != nil {
-		return nil, fmt.Errorf("S: error opening raw connection: %s", err)
+		return nil, fmt.Errorf("error opening raw connection: %s", err)
 	}
 
 	// The raw.Control() callback does not return an error directly.
@@ -107,17 +108,17 @@ func readCreds(c net.Conn) (*unix.Ucred, error) {
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("S: GetsockoptUcred() error: %s", err)
+		return nil, fmt.Errorf(" GetsockoptUcred() error: %s", err)
 	}
 
 	if err2 != nil {
-		return nil, fmt.Errorf("S: Control() error: %s", err2)
+		return nil, fmt.Errorf(" Control() error: %s", err2)
 	}
 
 	return cred, nil
 }
 
-func authGrantServer(l net.Listener, principals *map[int32]string, ms *channels.Muxer) {
+func authGrantServer(l net.Listener, principals *map[int32]*channels.Muxer) {
 	defer l.Close()
 	logrus.Info("S: STARTED LISTENING AT UDS: ", l.Addr().String())
 
@@ -127,12 +128,12 @@ func authGrantServer(l net.Listener, principals *map[int32]string, ms *channels.
 			logrus.Fatal("accept error:", err)
 		}
 
-		go handleAuthGrantRequest(c, principals, ms)
+		go handleAuthGrantRequest(c, principals)
 	}
 }
 
 //TODO: check threadsafety
-func handleAuthGrantRequest(c net.Conn, principals *map[int32]string, ms *channels.Muxer) {
+func handleAuthGrantRequest(c net.Conn, principals *map[int32]*channels.Muxer) {
 	logrus.Info("S: ACCEPTED NEW UDS CONNECTION")
 	defer c.Close()
 	//Verify that the client is a legit descendent
@@ -140,63 +141,34 @@ func handleAuthGrantRequest(c net.Conn, principals *map[int32]string, ms *channe
 	if e != nil {
 		log.Fatalf("S: ISSUE CHECKING CREDENTIALS: %v", e)
 	}
-	// + find corresponding principal
-	principal, _ := (*principals)[ancestor]
+	// find corresponding session muxer
+	principal := (*principals)[ancestor]
 	logrus.Infof("S: CLIENT CONNECTED [%s]", c.RemoteAddr().Network())
+	intent, e := authgrants.ReadIntentRequest(c)
+	if e != nil {
+		logrus.Fatalf("ERROR READING INTENT REQUEST: %v", e)
+	}
+	agc, err := principal.CreateChannel(channels.AGC_CHANNEL)
+	if err != nil {
+		logrus.Fatalf("S: ERROR MAKING CHANNEL: %v", err)
+	}
+	logrus.Infof("S: CREATED CHANNEL (AGC)")
+	_, err = agc.Write(intent)
+	if err != nil {
+		logrus.Fatalf("S: ERROR WRITING TO CHANNEL: %v", err)
+	}
+	logrus.Infof("S: WROTE INTENT_REQUEST TO AGC")
+	response, err := authgrants.GetResponse(agc)
+	if err != nil {
+		logrus.Fatalf("S: ERROR GETTING RESPONSE: %v", err)
+	}
+	_, err = c.Write(response)
+	if err != nil {
+		logrus.Fatalf("S: ERROR WRITING TO CHANNEL: %v", err)
+	}
 
-	msgType := make([]byte, 1)
-	c.Read(msgType)
-	if msgType[0] == authgrants.INTENT_REQUEST {
-		irh := make([]byte, authgrants.IR_HEADER_LENGTH)
-		_, err := c.Read(irh)
-		actionLen := int8(irh[authgrants.IR_HEADER_LENGTH-1])
-		action := make([]byte, actionLen)
-		_, err = c.Read(action)
-
-		logrus.Infof("S: INITIATING AGC W/ %v", principal)
-		agc, err := ms.CreateChannel(channels.AGC_CHANNEL)
-		if err != nil {
-			logrus.Fatalf("S: ERROR MAKING CHANNEL: %v", err)
-		}
-		logrus.Infof("S: CREATED CHANNEL (AGC)")
-		agc.Write(append(msgType, append(irh, action...)...))
-		if err != nil {
-			logrus.Fatalf("S: ERROR WRITING TO CHANNEL: %v", err)
-		}
-		logrus.Infof("S: WROTE INTENT_REQUEST TO AGC")
-
-		responseType := make([]byte, 1)
-		_, err = agc.Read(responseType)
-		if err != nil {
-			logrus.Fatal(err)
-		}
-		logrus.Infof("Got response type: %v", responseType)
-		//TODO: SET TIMEOUT STUFF + BETTER ERROR CHECKING
-		if responseType[0] == authgrants.INTENT_CONFIRMATION {
-			conf := make([]byte, authgrants.INTENT_CONF_SIZE)
-			_, err := agc.Read(conf)
-			if err != nil {
-				logrus.Fatal(err)
-			}
-			c.Write(append(responseType, conf...))
-		} else if responseType[0] == authgrants.INTENT_DENIED {
-			reason_length := make([]byte, 1)
-			_, err := agc.Read(reason_length)
-			if err != nil {
-				logrus.Fatal(err)
-			}
-			logrus.Infof("C: EXPECTING %v BYTES OF REASON", reason_length)
-			reason := make([]byte, int(reason_length[0]))
-			_, err = agc.Read(reason)
-			if err != nil {
-				logrus.Fatal(err)
-			}
-			c.Write(append(append(responseType, reason_length...), reason...))
-		} else {
-			logrus.Fatal("S: UNRECOGNIZED MESSAGE TYPE")
-		}
-	} else {
-		logrus.Fatal("S: UNRECOGNIZED MESSAGE TYPE")
+	if response[0] == authgrants.INTENT_DENIED {
+		//ASK USER IF THEY WANT TO TRY AGAIN BEFORE CLOSING AGC
 	}
 }
 
@@ -213,12 +185,15 @@ func setListenerOptions(proto, addr string, c syscall.RawConn) error {
 
 func serve(args []string) {
 	logrus.SetLevel(logrus.InfoLevel)
+	//TEMPORARY: Should take address from argument and socket should be abstract/same place or dependent on session?
 	addr := "localhost:8888"
-	sockAddr := "/tmp/echo1.sock"
+	sockAddr := "/tmp/auth.sock"
 	if args[2] == "2" {
 		addr = "localhost:9999"
-		sockAddr = "/tmp/echo2.sock" //because we are on the same host => figure out how to use abstract sockets and naming
+		sockAddr = "/tmp/auth2.sock" //because we are on the same host => figure out how to use abstract sockets and naming
 	}
+
+	//*****TRANSPORT LAYER SET UP*****
 	pktConn, err := net.ListenPacket("udp", addr)
 	if err != nil {
 		logrus.Fatalf("S: ERROR STARTING UDP CONN: %v", err)
@@ -229,46 +204,54 @@ func serve(args []string) {
 	if err != nil {
 		logrus.Fatalf("S: ERROR STARTING TRANSPORT CONN: %v", err)
 	}
+	go server.Serve()
 
-	//Start IPC socket
+	//*****AUTHGRANT SERVER ON UNIX DOMAIN SOCKET SET UP*****
+	//Start IPC socket TODO: need 1 for every session? MAKE ABSTRACT?
 	//make sure the socket does not already exist.
 	if err := os.RemoveAll(sockAddr); err != nil {
 		log.Fatal(err)
 	}
-
 	//set socket options and start listening to socket
 	config := &net.ListenConfig{Control: setListenerOptions}
 	l, err := config.Listen(context.Background(), "unix", sockAddr)
 	if err != nil {
 		log.Fatal("S: UDS LISTEN ERROR:", err)
 	}
+	//TODO: Make thread safe?
+	principals := make(map[int32]*channels.Muxer) //PID -> session muxer
+	go authGrantServer(l, &principals)
 
-	principals := make(map[int32]string) //PID -> "principal" (what should actually rep principal?)
-
-	go server.Serve()
-
-	//TODO: make this a loop so it can handle multiple client conns
-	logrus.Infof("S: SERVER LISTENING ON %v", addr)
-	serverConn, err := server.AcceptTimeout(5 * time.Minute) //won't be a minute in reality
-	if err != nil {
-		logrus.Fatalf("S: SERVER TIMEOUT: %v", err)
+	//*****ACCEPT CONNS AND START SESSIONS*****
+	for {
+		logrus.Infof("S: SERVER LISTENING ON %v", addr)
+		serverConn, err := server.AcceptTimeout(5 * time.Minute) //won't be a minute in reality
+		if err != nil {
+			logrus.Fatalf("S: SERVER TIMEOUT: %v", err)
+		}
+		logrus.Info("S: ACCEPTED NEW CONNECTION")
+		go session(serverConn, principals, l)
 	}
-	logrus.Info("S: ACCEPTED NEW CONNECTION")
+}
+
+func session(serverConn *transport.Handle, principals map[int32]*channels.Muxer, l net.Listener) {
 	ms := channels.NewMuxer(serverConn, serverConn)
 	go ms.Start()
 	defer ms.Stop()
 	logrus.Info("S: STARTED CHANNEL MUXER")
 
-	go authGrantServer(l, &principals, ms)
-
-	serverChan, err := ms.Accept()
-	if err != nil {
-		logrus.Fatalf("S: ERROR ACCEPTING CHANNEL: %v", err)
-	}
-	logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", serverChan.Type())
-	exec_channels.Serve(serverChan, &principals)
-	logrus.Infof("S: finished command")
-
 	for {
+		serverChan, err := ms.Accept()
+		if err != nil {
+			logrus.Fatalf("S: ERROR ACCEPTING CHANNEL: %v", err)
+		}
+		logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", serverChan.Type())
+		if serverChan.Type() == channels.EXEC_CHANNEL {
+			go exec_channels.Serve(serverChan, &principals, ms)
+		} else if serverChan.Type() == channels.NPC_CHANNEL {
+			go npc.Server(serverChan)
+		} else if serverChan.Type() == channels.AGC_CHANNEL {
+			go authgrants.Server(serverChan)
+		}
 	}
 }

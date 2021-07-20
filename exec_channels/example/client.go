@@ -45,7 +45,7 @@ func startClient() {
 	}
 	defer func() { _ = terminal.Restore(int(os.Stdin.Fd()), oldState) }()
 
-	ch.Write(exec_channels.NewExecInitMsg("ls").ToBytes())
+	ch.Write(exec_channels.NewExecInitMsg("pwd").ToBytes())
 
 	go func() {
 		io.Copy(os.Stdout, ch) //read bytes from ch to os.Stdout

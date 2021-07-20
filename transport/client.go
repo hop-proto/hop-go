@@ -13,17 +13,9 @@ import (
 )
 
 type UDPLike interface {
-	Close() error
-	LocalAddr() net.Addr
-	Read(b []byte) (int, error)
-	ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error)
-	RemoteAddr() net.Addr
-	SetDeadline(t time.Time) error
-	SetReadDeadline(t time.Time) error
-	SetWriteDeadline(t time.Time) error
-	Write(b []byte) (int, error)
+	net.Conn
 	WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error)
-	WriteTo(b []byte, addr net.Addr) (int, error)
+	ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error)
 }
 
 // Enforce ClientConn implements net.Conn

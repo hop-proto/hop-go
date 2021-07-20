@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -36,7 +37,7 @@ const (
 const (
 	EXEC_CHANNEL = byte(1)
 	AGC_CHANNEL  = byte(2)
-	NPC_CHANEL   = byte(3) //NPC should maybe be unreliable channel?
+	NPC_CHANNEL  = byte(3) //NPC should maybe be unreliable channel?
 )
 
 // Reliable implements a reliable and receiveWindow channel on top
@@ -205,19 +206,36 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 }
 
 //Laura added. Need to implement WriteTo interface for io.Copy to work
-// func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
-// 	var count int64
+//This version of WriteTo works for io.Copy for terminal stuff
+func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
+	var count int64
+	for {
+		b := make([]byte, 1)
+		n, e := r.Read(b)
+		count += int64(n)
+		if e != nil {
+			return count, e
+		}
+		_, e = w.Write(b)
+		if e != nil {
+			return count, e
+		}
+	}
+
+}
+
+//This version of WriteTo is needed for the transport layer stuff with NPC...
+//Actually not needed apparently?
+// func (r *Reliable) WriteTo(buf []byte, addr net.Addr) (n int, err error) {
+// 	var count int
 // 	for {
 // 		b := make([]byte, 1)
 // 		n, e := r.Read(b)
-// 		count += int64(n)
+// 		count += n
 // 		if e != nil {
 // 			return count, e
 // 		}
-// 		_, e = w.Write(b)
-// 		if e != nil {
-// 			return count, e
-// 		}
+// 		copy(buf, b)
 // 	}
 
 // }
@@ -227,33 +245,21 @@ func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, e
 	length := len(b)
 	h := make([]byte, 2)
 	binary.BigEndian.PutUint16(h, uint16(length))
-	n, e := r.Write(append(h, b...))
-	logrus.Infof("Wrote MSG of length %v", length+2)
-	return n, 0, e
+	_, e := r.Write(append(h, b...))
+	return length, 0, e
 }
 
 func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
 	h := make([]byte, 2)
-	r.Read(h)
+	_, e := r.Read(h)
+	if e != nil {
+		return 0, 0, 0, nil, e
+	}
 	length := binary.BigEndian.Uint16(h)
 	data := make([]byte, length)
-	_, e := r.Read(data)
+	_, e = r.Read(data)
 	n = copy(b, data)
 	return n, 0, 0, nil, e
-}
-
-func (r *Reliable) WriteTo(buf []byte, addr net.Addr) (n int, err error) {
-	var count int
-	for {
-		b := make([]byte, 1)
-		n, e := r.Read(b)
-		count += n
-		if e != nil {
-			return count, e
-		}
-		copy(buf, b)
-	}
-
 }
 
 func (r *Reliable) Close() error {

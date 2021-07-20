@@ -32,7 +32,7 @@ func (m *ExecInitMsg) ToBytes() []byte {
 	return append([]byte{m.msgLen}, []byte(m.msg)...)
 }
 
-func Serve(ch *channels.Reliable, principals *map[int32]string) {
+func Serve(ch *channels.Reliable, principals *map[int32]*channels.Muxer, muxer *channels.Muxer) {
 	defer ch.Close()
 	logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", ch.Type())
 
@@ -47,7 +47,8 @@ func Serve(ch *channels.Reliable, principals *map[int32]string) {
 	c := exec.Command(args[0], args[1:]...)
 
 	f, err := pty.Start(c)
-	(*principals)[int32(c.Process.Pid)] = "principal1"
+	(*principals)[int32(c.Process.Pid)] = muxer
+	//change c.Stdin and c.Stdout???
 	if err != nil {
 		logrus.Fatalf("S: error starting pty %v", err)
 	}
