@@ -3,6 +3,7 @@ package kravatte
 import (
 	"crypto/cipher"
 	"crypto/subtle"
+	"errors"
 )
 
 const (
@@ -24,15 +25,61 @@ func (s *sanse) Overhead() int {
 	return KravatteSANSETagSize
 }
 
+// sliceForAppend takes a slice and a requested number of bytes. It returns a
+// slice with the contents of the given slice followed by that many bytes and a
+// second slice that aliases into it and contains only the extra bytes. If the
+// original slice has sufficient capacity then no allocation is performed.
+func sliceForAppend(in []byte, n int) (head, tail []byte) {
+	if total := len(in) + n; cap(in) >= total {
+		head = in[:total]
+	} else {
+		head = make([]byte, total)
+		copy(head, in)
+	}
+	tail = head[len(in):]
+	return
+}
+
+// Seal implements cipher.AEAD
 func (s *sanse) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
-	// This has a specific slice behavior that we need to match, look at what GCM does.
-	panic("implement me")
+	// dst might alias plaintext, so we defensively copy. This kind of defeats
+	// the purpose of reusing the storage by passing dst = plaintext[:0],
+	// unfortunately avoiding the allocation would require editing wrap and
+	// unwrap.
+	//
+	// TODO(dadrian): Figure out how to get rid of the this allocation
+	dataLen := len(plaintext)
+	total := dataLen + KravatteSANSETagSize
+	in := make([]byte, dataLen)
+	copy(in, plaintext)
+
+	ret, out := sliceForAppend(dst, total)
+	if s.wrap(in, out, 8*dataLen, additionalData, 8*len(additionalData), out[dataLen:]) != 0 {
+		panic("wrap failed")
+	}
+	return ret
 }
 
+// Open implements cipher.AEAD
 func (s *sanse) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, error) {
-	panic("implement me")
+	total := len(ciphertext)
+	if total < KravatteSANSETagSize {
+		return nil, errors.New("ciphertext smaller than minimum size")
+	}
+	dataLen := total - KravatteSANSETagSize
+
+	// TODO(dadrian): Figure out how to get rid of the this allocation
+	in := make([]byte, total)
+	copy(in, ciphertext)
+	ret, out := sliceForAppend(dst, dataLen)
+	if s.unwrap(in[:dataLen], out, 8*dataLen, additionalData, 8*len(additionalData), in[dataLen:]) != 0 {
+		return nil, errors.New("unable to decrypt ciphertext")
+	}
+	return ret, nil
 }
 
+// NewSANSE returns a SANSE implementation of cipher.AEAD. It has a NonceSize of
+// 0 and an Overhead of KravatteSANSETagSize.
 func NewSANSE(key []byte) cipher.AEAD {
 	s := &sanse{
 		kravatte: Kravatte{},
