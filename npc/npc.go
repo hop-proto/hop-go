@@ -62,12 +62,12 @@ func Server(npch *channels.Reliable) {
 			if e != nil {
 				logrus.Fatal("Error Reading from Channel: ", e)
 			}
-			logrus.Info("Read: ", n, " bytes from channel")
+			logrus.Debugf("Read: ", n, " bytes from channel")
 			n, _, e = tconn.WriteMsgUDP(buf[:n], nil, nil)
 			if e != nil {
 				logrus.Fatal("Error sending packet: ", e)
 			}
-			logrus.Infof("Wrote %v bytes to UDP", n)
+			logrus.Debugf("Wrote %v bytes to UDP", n)
 		}
 	}()
 	for {
@@ -76,11 +76,11 @@ func Server(npch *channels.Reliable) {
 		if e != nil {
 			logrus.Fatal("Err reading from UDP: ", e)
 		}
-		logrus.Info("Read: ", n, " bytes from UDP Conn")
+		logrus.Debugf("Read: ", n, " bytes from UDP Conn")
 		n, _, e = npch.WriteMsgUDP(buf[:n], nil, nil)
 		if e != nil {
 			logrus.Fatal("Error writing to channel, ", e)
 		}
-		logrus.Infof("Wrote %v bytes to channel.", n)
+		logrus.Debugf("Wrote %v bytes to channel.", n)
 	}
 }

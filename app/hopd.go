@@ -223,7 +223,7 @@ func serve(args []string) {
 	}
 	//TODO: Make thread safe?
 	principals := make(map[int32]*channels.Muxer) //PID -> session muxer
-	muxers := make(map[string]*channels.Muxer)
+	//muxers := make(map[string]*channels.Muxer)
 	go authGrantServer(l, &principals)
 
 	//*****ACCEPT CONNS AND START SESSIONS*****

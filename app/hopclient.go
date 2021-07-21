@@ -5,10 +5,10 @@ import (
 	"sync"
 
 	"github.com/sirupsen/logrus"
-	"golang.org/x/crypto/sha3"
 	"zmap.io/portal/authgrants"
 	"zmap.io/portal/channels"
 	"zmap.io/portal/exec_channels"
+	"zmap.io/portal/keys"
 	"zmap.io/portal/transport"
 )
 
@@ -23,6 +23,10 @@ func startClient(args []string) {
 	user := s[0][0 : len(s[0])-1]
 	addr := s[1]
 	cmd := []string{"bash"} //default action for principal is to open an interactive shell
+	config := transport.ClientConfig{}
+	config.KeyPair = new(keys.X25519KeyPair)
+	config.KeyPair.Generate()
+	logrus.Infof("Client generated(39): %v", config.KeyPair.Public.String())
 
 	//Check if this is a principal client process or one that needs to get an AG
 	//******GET AUTHORIZATION SOURCE******
@@ -33,9 +37,9 @@ func startClient(args []string) {
 		principal = false
 		logrus.Infof("C: Initiating AGC Protocol.")
 		//TODO: generate keypair and store somehow
-		digest := sha3.Sum256([]byte("pubkey")) //don't know if this is correct
-		cmd = args[4:]                          //if using authorization grant then perform the action specified in cmd line
-		t, e := authgrants.GetAuthGrant(digest, user, addr, cmd)
+		//digest := sha3.Sum256([]byte("pubkey")) //don't know if this is correct
+		cmd = args[4:] //if using authorization grant then perform the action specified in cmd line
+		t, e := authgrants.GetAuthGrant(config.KeyPair.Public, user, addr, cmd)
 		if e != nil {
 			logrus.Fatalf("C: %v", e)
 		}
@@ -45,7 +49,7 @@ func startClient(args []string) {
 
 	//******ESTABLISH HOP SESSION******
 	//TODO: figure out addr format requirements + check for them above
-	transportConn, err := transport.Dial("udp", addr, nil) //There seem to be limits on Dial() and addr format
+	transportConn, err := transport.Dial("udp", addr, &config) //There seem to be limits on Dial() and addr format
 	if err != nil {
 		logrus.Fatalf("C: error dialing server: %v", err)
 	}

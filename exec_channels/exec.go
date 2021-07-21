@@ -34,8 +34,6 @@ func (m *ExecInitMsg) ToBytes() []byte {
 
 func Serve(ch *channels.Reliable, principals *map[int32]*channels.Muxer, muxer *channels.Muxer) {
 	defer ch.Close()
-	logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", ch.Type())
-
 	l := make([]byte, 1)
 	ch.Read(l)
 	logrus.Infof("S: CMD LEN %v", int(l[0]))

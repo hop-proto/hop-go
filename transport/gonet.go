@@ -34,7 +34,7 @@ func Dial(network, address string, config *ClientConfig) (*Client, error) {
 	return NewClient(inner, remoteAddr.(*net.UDPAddr), config), nil
 }
 
-func DialNPC(network, address string, ch UDPLike) (*Client, error) {
+func DialNPC(network, address string, ch UDPLike, config *ClientConfig) (*Client, error) {
 	// Figure out what address we would use to dial
 	throwaway, err := net.Dial("udp", address)
 	if err != nil {
@@ -43,6 +43,10 @@ func DialNPC(network, address string, ch UDPLike) (*Client, error) {
 	//localAddr := throwaway.LocalAddr()
 	remoteAddr := throwaway.RemoteAddr()
 	throwaway.Close()
+	if config == nil {
+		return NewClient(ch, remoteAddr.(*net.UDPAddr), nil), nil
+	} else {
+		return NewClient(ch, remoteAddr.(*net.UDPAddr), config), nil
+	}
 
-	return NewClient(ch, remoteAddr.(*net.UDPAddr), nil), nil
 }

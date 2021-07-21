@@ -7,9 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"zmap.io/portal/keys"
-
 	"github.com/sirupsen/logrus"
+	"zmap.io/portal/keys"
 )
 
 type UDPLike interface {
@@ -81,10 +80,17 @@ func (c *Client) clientHandshakeLocked() error {
 	c.hs.remoteAddr = c.dialAddr
 	c.hs.duplex.InitializeEmpty()
 	c.hs.ephemeral.Generate()
-
+	logrus.SetLevel(logrus.InfoLevel)
+	//Laura modified to start authorized_key stuff
 	// TODO(dadrian): This should actually be, well, static
-	c.hs.static = new(keys.X25519KeyPair)
-	c.hs.static.Generate()
+	if c.config.KeyPair == nil {
+		c.hs.static = new(keys.X25519KeyPair)
+		c.hs.static.Generate()
+		logrus.Infof("client static is: %v from rand", c.hs.static.Public.String())
+	} else {
+		c.hs.static = c.config.KeyPair
+		logrus.Infof("client static is: %v from config", c.hs.static.Public.String())
+	}
 
 	c.hs.duplex.Absorb([]byte(ProtocolName))
 
@@ -375,10 +381,13 @@ func (c *Client) SetWriteDeadline(t time.Time) error {
 
 // NewClient returns a Client configured as specified, using the underlying UDP
 // connection. The Client has not yet completed a handshake.
-func NewClient(conn UDPLike, server *net.UDPAddr, config *ClientConfig) *Client {
+func NewClient(conn UDPLike, server *net.UDPAddr, conf *ClientConfig) *Client {
 	c := &Client{
 		underlyingConn: conn,
 		dialAddr:       server,
+	}
+	if conf != nil {
+		c.config = *conf
 	}
 	return c
 }

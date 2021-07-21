@@ -4,13 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh/terminal"
 	"zmap.io/portal/channels"
 	"zmap.io/portal/exec_channels"
+	"zmap.io/portal/keys"
 	"zmap.io/portal/npc"
 	"zmap.io/portal/transport"
 )
@@ -69,7 +72,7 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, state *terminal.State)
 		npcCh.Write(npc.NewNPCInitMsg(addr).ToBytes())
 		npcCh.Read(make([]byte, 1))
 		logrus.Info("Receieved NPC Conf")
-		tclient, e := transport.DialNPC("npc", addr, npcCh)
+		tclient, e := transport.DialNPC("npc", addr, npcCh, nil)
 		if e != nil {
 			logrus.Fatal("error dialing npc")
 		}
@@ -109,15 +112,33 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, state *terminal.State)
 //Go routine for Server to handle an INTENT_COMMUNICATION from a principal
 func Server(agc *channels.Reliable) {
 	logrus.Info("waiting for intent communication")
-	_, e := ReadIntentCommunication(agc)
+	msg, e := ReadIntentCommunication(agc)
 	if e != nil {
 		logrus.Fatalf("error reading intent communication")
 	}
 	//CHECK POLICY
 	//SET DEADLINE
 	//STORE AG INFORMATION
+	intent := FromIntentCommunicationBytes(msg[TYPE_LEN:])
 	logrus.Infof("Pretending s2 approved intent request")
 	t := time.Time(time.Now().Add(time.Duration(time.Hour))) //TODO: This should be set by server 2
+	f, err := os.OpenFile("../app/authorized_keys", os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+	if err != nil {
+		logrus.Fatalf("error opening authorized keys file: ", err)
+	}
+	defer f.Close()
+	k := keys.PublicKey(intent.sha3)
+	logrus.Infof("Added: %v", k.String())
+	_, e = f.Write([]byte(k.String()))
+	if e != nil {
+		logrus.Infof("Issue writing to authorized keys file: ", e)
+	}
+	f.WriteString(" 0 ")
+	f.WriteString(t.String())
+	f.WriteString(" user ")
+	f.WriteString(strings.Join(intent.action, " "))
+	f.WriteString("\n")
+
 	agc.Write(NewIntentConfirmation(t).ToBytes())
 	agc.Close()
 }

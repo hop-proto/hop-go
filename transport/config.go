@@ -9,7 +9,8 @@ import (
 
 // ClientConfig contains client-specific configuration settings.
 type ClientConfig struct {
-	Name certs.Name
+	Name    certs.Name
+	KeyPair *keys.X25519KeyPair
 }
 
 const (

@@ -1,12 +1,15 @@
 package transport
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"errors"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -353,6 +356,27 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	if !bytes.Equal(hs.macBuf[:], clientTag) {
 		logrus.Debugf("server: mismatched tag in client auth: expected %x, got %x", hs.macBuf, clientTag)
 		return pos, nil, ErrInvalidMessage
+	}
+	//if hs.clientStatic[:] in authorized clients continue, otherwise abandon all state
+	f, e := os.Open("../app/authorized_keys")
+	if e != nil {
+		logrus.Fatalf("error opening authorized keys file: ", e)
+	}
+	scanner := bufio.NewScanner(f)
+	authorized := false
+	k := keys.PublicKey(hs.clientStatic)
+	for scanner.Scan() {
+		if strings.Contains(scanner.Text(), k.String()) {
+			authorized = true
+			break
+		}
+	}
+	f.Close()
+	if !authorized {
+		//TODO: handle this gracefully
+		logrus.Infof("KEY NOT AUTHORIZED, but continuing anyway")
+	} else {
+		logrus.Infof("KEYS MATCHED!!!")
 	}
 	x = x[MacLen:]
 	pos += MacLen
