@@ -13,6 +13,7 @@ import (
 func runSANSETranscript(t *testing.T, s *sanse, transcript []snp.TranscriptEntry) {
 	var plaintext, ciphertext, ad []byte
 	var tag [KravatteSANSETagSize]byte
+	var recv sanse
 	for i, entry := range transcript {
 		t.Logf("test %s, entry %d (%s)", t.Name(), i, entry.Action)
 		switch entry.Action {
@@ -20,6 +21,9 @@ func runSANSETranscript(t *testing.T, s *sanse, transcript []snp.TranscriptEntry
 			s.kravatte = Kravatte{}
 			s.e = 0
 			s.kravatte.RefMaskInitialize(entry.B)
+			recv.kravatte = Kravatte{}
+			recv.e = 0
+			recv.kravatte.RefMaskInitialize(entry.B)
 		case "dumpK":
 			actual := make([]byte, entry.Length)
 			snp.StateExtractBytes(&s.kravatte.k, actual)
@@ -61,8 +65,13 @@ func runSANSETranscript(t *testing.T, s *sanse, transcript []snp.TranscriptEntry
 		case "wrap":
 			ciphertext = make([]byte, len(plaintext))
 			assert.Check(t, cmp.Equal(len(entry.B), len(ciphertext)), "ciphertext length")
-			s.wrap(plaintext, ciphertext, 8*len(plaintext), ad, 8*len(ad), tag[:])
+			ret := s.wrap(plaintext, ciphertext, 8*len(plaintext), ad, 8*len(ad), tag[:])
+			assert.Check(t, cmp.Equal(0, ret))
 			assert.Check(t, cmp.DeepEqual(entry.B, ciphertext))
+			decrypted := make([]byte, len(ciphertext))
+			ret = recv.unwrap(ciphertext, decrypted, 8*len(ciphertext), ad, 8*len(ad), tag[:])
+			assert.Check(t, cmp.Equal(0, ret))
+			assert.Check(t, cmp.DeepEqual(plaintext, decrypted))
 		case "tag":
 			assert.Check(t, cmp.DeepEqual(entry.B, tag[:]), "tag")
 		default:
