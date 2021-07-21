@@ -10,7 +10,7 @@ const (
 )
 
 type sanse struct {
-	kravatte *Kravatte
+	kravatte Kravatte
 	e        uint32
 }
 
@@ -34,14 +34,14 @@ func (s *sanse) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, err
 }
 
 func NewSANSE(key []byte) cipher.AEAD {
-	k := Kravatte{}
-	if k.RefMaskInitialize(key) != 0 {
-		panic("unable to initialize kravatte")
-	}
-	return &sanse{
-		kravatte: &k,
+	s := &sanse{
+		kravatte: Kravatte{},
 		e:        0,
 	}
+	if s.kravatte.RefMaskInitialize(key) != 0 {
+		panic("unable to initialize kravatte")
+	}
+	return s
 }
 
 func memxoris(target, source []byte, bitLen int) {
@@ -58,7 +58,7 @@ func memxoris(target, source []byte, bitLen int) {
 
 func (s *sanse) addToHistory(data []byte, dataBitLen int, appendix byte, appendixLen int) int {
 	var lastByte [1]byte
-	if s.kravatte.Kra(data, dataBitLen&0xF8, FlagNone) != 0 {
+	if s.kravatte.Kra(data, dataBitLen & ^7, FlagNone) != 0 {
 		return 1
 	}
 	data = data[dataBitLen>>3:]
@@ -95,18 +95,18 @@ func (s *sanse) wrap(plaintext []byte, ciphertext []byte, dataBitLen int, ad []b
 	}
 	// if |P| > 0 then
 	if dataBitLen != 0 {
-		initalHistory := *s.kravatte // needs to be a copy
+		initalHistory := s.kravatte // needs to be a copy
 
 		// T = 0t + FK (P || 01 || e . history)
 		if s.addToHistory(plaintext, dataBitLen, 2, 2) != 0 {
 			return 1
 		}
-		newHistory := *s.kravatte // needs to be a copy
+		newHistory := s.kravatte // needs to be a copy
 		if s.kravatte.Vatte(tag, KravatteSANSETagSize*8, FlagNone) != 0 {
 			return 1
 		}
 		// C = P + FK (T || 11 || e . history)
-		s.kravatte = &initalHistory
+		s.kravatte = initalHistory
 		if s.addToHistory(tag, KravatteSANSETagSize*8, 3, 2) != 0 {
 			return 1
 		}
@@ -116,7 +116,7 @@ func (s *sanse) wrap(plaintext []byte, ciphertext []byte, dataBitLen int, ad []b
 		memxoris(ciphertext, plaintext, dataBitLen)
 
 		// history = P || 01 || e . history
-		s.kravatte = &newHistory
+		s.kravatte = newHistory
 	} else {
 		// T = 0t + FK (history)
 		if s.kravatte.Vatte(tag, KravatteSANSETagSize*8, FlagNone) != 0 {
@@ -143,7 +143,7 @@ func (s *sanse) unwrap(ciphertext []byte, plaintext []byte, dataBitLen int, ad [
 
 	// if |C| > 0 then
 	if dataBitLen != 0 {
-		initalHistory := *s.kravatte // need to copy
+		initalHistory := s.kravatte // need to copy
 
 		// P = C + FK (T || 11 || e . history)
 		if s.addToHistory(tag, KravatteSANSETagSize*8, 3, 2) != 0 {
@@ -155,7 +155,7 @@ func (s *sanse) unwrap(ciphertext []byte, plaintext []byte, dataBitLen int, ad [
 		memxoris(plaintext, ciphertext, dataBitLen)
 
 		// history = P || 01 || e . history
-		s.kravatte = &initalHistory
+		s.kravatte = initalHistory
 		if s.addToHistory(plaintext, dataBitLen, 2, 2) != 0 {
 			return 1
 		}

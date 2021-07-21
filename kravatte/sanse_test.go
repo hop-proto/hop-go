@@ -17,7 +17,8 @@ func runSANSETranscript(t *testing.T, s *sanse, transcript []snp.TranscriptEntry
 		t.Logf("test %s, entry %d (%s)", t.Name(), i, entry.Action)
 		switch entry.Action {
 		case "key":
-			s.kravatte = new(Kravatte)
+			s.kravatte = Kravatte{}
+			s.e = 0
 			s.kravatte.RefMaskInitialize(entry.B)
 		case "dumpK":
 			actual := make([]byte, entry.Length)

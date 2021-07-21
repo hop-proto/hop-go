@@ -34,6 +34,7 @@ func TestRefMask(t *testing.T) {
 }
 
 func runTranscript(t *testing.T, kv *Kravatte, transcript []snp.TranscriptEntry) {
+	var buf []byte
 	for i, entry := range transcript {
 		t.Logf("test %s, entry %d (%s)", t.Name(), i, entry.Action)
 		switch entry.Action {
@@ -53,6 +54,12 @@ func runTranscript(t *testing.T, kv *Kravatte, transcript []snp.TranscriptEntry)
 			ret := kv.Vatte(out, 8*len(out), FlagNone)
 			assert.Check(t, cmp.Equal(0, ret), "Vatte")
 			assert.Check(t, cmp.DeepEqual(entry.B, out), "out")
+		case "kravatin":
+			buf = make([]byte, 16)
+			ret := kv.Kravatte(entry.B, buf, FlagLastPart)
+			assert.Check(t, cmp.Equal(0, ret), "KraVatte/In")
+		case "kravatout":
+			assert.Check(t, cmp.DeepEqual(entry.B, buf), "KraVatte/Out")
 		case "dumpK":
 			actual := make([]byte, entry.Length)
 			snp.StateExtractBytes(&kv.k, actual)
