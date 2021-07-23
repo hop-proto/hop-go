@@ -45,10 +45,11 @@ func Server(npch *channels.Reliable) {
 	dest := FromBytes(init)
 	logrus.Infof("dialing dest: %v", dest.Addr)
 	throwaway, _ := net.Dial("udp", dest.Addr)
-	localAddr := throwaway.LocalAddr()
+	//localAddr := throwaway.LocalAddr()
 	remoteAddr := throwaway.RemoteAddr()
 	throwaway.Close()
-	tconn, err := net.DialUDP("udp", localAddr.(*net.UDPAddr), remoteAddr.(*net.UDPAddr))
+	//tconn, err := net.DialUDP("udp", localAddr.(*net.UDPAddr), remoteAddr.(*net.UDPAddr))
+	tconn, err := net.DialUDP("udp", nil, remoteAddr.(*net.UDPAddr))
 	if err != nil {
 		logrus.Fatalf("C: error dialing server: %v", err)
 	}
@@ -56,31 +57,37 @@ func Server(npch *channels.Reliable) {
 	npch.Write([]byte{NPC_CONF})
 	logrus.Infof("wrote confirmation that NPC ready")
 	go func() {
+		//Handles all traffic from principal to server 2
 		for {
 			buf := make([]byte, 65500)
 			n, _, _, _, e := npch.ReadMsgUDP(buf, nil)
 			if e != nil {
 				logrus.Fatal("Error Reading from Channel: ", e)
 			}
-			logrus.Debugf("Read: ", n, " bytes from channel")
+			//logrus.Infof("Read: %v bytes from channel", n)
+			//logrus.Infof("buf[:n] -> %v", buf[:n])
 			n, _, e = tconn.WriteMsgUDP(buf[:n], nil, nil)
 			if e != nil {
 				logrus.Fatal("Error sending packet: ", e)
 			}
-			logrus.Debugf("Wrote %v bytes to UDP", n)
+			//logrus.Infof("Wrote %v bytes to UDP", n)
 		}
 	}()
+	//handles all traffic from server 2 back to principal
 	for {
 		buf := make([]byte, 65500)
 		n, _, _, _, e := tconn.ReadMsgUDP(buf, nil)
 		if e != nil {
-			logrus.Fatal("Err reading from UDP: ", e)
+			logrus.Errorf("Err reading from UDP: ", e)
+			continue
+
 		}
-		logrus.Debugf("Read: ", n, " bytes from UDP Conn")
+		//logrus.Infof("Read: %v bytes from UDP Conn", n)
+		//logrus.Infof("buf[:n] -> %v", buf[:n])
 		n, _, e = npch.WriteMsgUDP(buf[:n], nil, nil)
 		if e != nil {
 			logrus.Fatal("Error writing to channel, ", e)
 		}
-		logrus.Debugf("Wrote %v bytes to channel.", n)
+		//logrus.Infof("Wrote %v bytes to channel.", n)
 	}
 }

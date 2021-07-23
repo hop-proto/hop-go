@@ -1,20 +1,13 @@
 package main
 
 import (
-	"io"
-	"log"
 	"net"
-	"os"
-	"os/exec"
-	"os/signal"
-	"strings"
-	"syscall"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/channels"
+	"zmap.io/portal/exec_channels"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/transport"
 )
@@ -43,8 +36,8 @@ func newTestServerConfig() *transport.ServerConfig {
 	}
 }
 
-func startServer() {
-	addr := "localhost:7777"
+func startServer(p string) {
+	addr := "localhost:" + p
 	pktConn, err := net.ListenPacket("udp", addr)
 	if err != nil {
 		logrus.Fatalf("S: ERROR STARTING UDP CONN: %v", err)
@@ -74,42 +67,43 @@ func startServer() {
 	if err != nil {
 		logrus.Fatalf("S: ERROR ACCEPTING CHANNEL: %v", err)
 	}
-	defer ch.Close()
-	logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", ch.Type())
+	exec_channels.Serve(ch)
+	// defer ch.Close()
+	// logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", ch.Type())
 
-	l := make([]byte, 1)
-	ch.Read(l)
-	logrus.Infof("S: CMD LEN %v", int(l[0]))
-	cmd := make([]byte, int(l[0]))
-	ch.Read(cmd)
-	logrus.Infof("Executing: %v", string(cmd))
+	// l := make([]byte, 1)
+	// ch.Read(l)
+	// logrus.Infof("S: CMD LEN %v", int(l[0]))
+	// cmd := make([]byte, int(l[0]))
+	// ch.Read(cmd)
+	// logrus.Infof("Executing: %v", string(cmd))
 
-	args := strings.Split(string(cmd), " ")
-	c := exec.Command(args[0], args[1:]...)
+	// args := strings.Split(string(cmd), " ")
+	// c := exec.Command(args[0], args[1:]...)
 
-	f, err := pty.Start(c)
-	if err != nil {
-		logrus.Fatalf("S: error starting pty %v", err)
-	}
+	// f, err := pty.Start(c)
+	// if err != nil {
+	// 	logrus.Fatalf("S: error starting pty %v", err)
+	// }
 
-	defer func() { _ = f.Close() }() // Best effort.
+	// defer func() { _ = f.Close() }() // Best effort.
 
-	// Handle pty size.
-	ch2 := make(chan os.Signal, 1)
-	signal.Notify(ch2, syscall.SIGWINCH)
-	go func() {
-		for range ch2 {
-			if err := pty.InheritSize(os.Stdin, f); err != nil {
-				log.Printf("error resizing pty: %s", err)
-			}
-		}
-	}()
-	ch2 <- syscall.SIGWINCH                         // Initial resize.
-	defer func() { signal.Stop(ch2); close(ch2) }() // Cleanup signals when done.
+	// // Handle pty size.
+	// ch2 := make(chan os.Signal, 1)
+	// signal.Notify(ch2, syscall.SIGWINCH)
+	// go func() {
+	// 	for range ch2 {
+	// 		if err := pty.InheritSize(os.Stdin, f); err != nil {
+	// 			log.Printf("error resizing pty: %s", err)
+	// 		}
+	// 	}
+	// }()
+	// ch2 <- syscall.SIGWINCH                         // Initial resize.
+	// defer func() { signal.Stop(ch2); close(ch2) }() // Cleanup signals when done.
 
-	go func() {
-		io.Copy(f, ch)
-	}()
+	// go func() {
+	// 	io.Copy(f, ch)
+	// }()
 
-	io.Copy(ch, f)
+	// io.Copy(ch, f)
 }

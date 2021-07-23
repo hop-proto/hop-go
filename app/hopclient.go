@@ -13,6 +13,7 @@ import (
 )
 
 func startClient(args []string) {
+	//logrus.SetLevel(logrus.DebugLevel)
 	logrus.SetLevel(logrus.InfoLevel)
 	principal := true
 	//******PROCESS ARGUMENTS******
@@ -24,6 +25,7 @@ func startClient(args []string) {
 	addr := s[1]
 	cmd := []string{"bash"} //default action for principal is to open an interactive shell
 	config := transport.ClientConfig{}
+	//TODO: get keypair from file if principal
 	config.KeyPair = new(keys.X25519KeyPair)
 	config.KeyPair.Generate()
 	logrus.Infof("Client generated(39): %v", config.KeyPair.Public.String())
@@ -36,8 +38,6 @@ func startClient(args []string) {
 	} else if args[3] == "-a" {
 		principal = false
 		logrus.Infof("C: Initiating AGC Protocol.")
-		//TODO: generate keypair and store somehow
-		//digest := sha3.Sum256([]byte("pubkey")) //don't know if this is correct
 		cmd = args[4:] //if using authorization grant then perform the action specified in cmd line
 		t, e := authgrants.GetAuthGrant(config.KeyPair.Public, user, addr, cmd)
 		if e != nil {
@@ -67,26 +67,29 @@ func startClient(args []string) {
 	ch, _ := mc.CreateChannel(channels.EXEC_CHANNEL)
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	state := exec_channels.MakeRawTerm()
-	defer exec_channels.RestoreTerm(state)
 	go exec_channels.Client(ch, cmd, &wg)
 
 	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****
-	for {
-		c, e := mc.Accept()
-		if e != nil {
-			logrus.Fatalf("Error accepting channel: ", e)
+	go func() {
+		for {
+			c, e := mc.Accept()
+			if e != nil {
+				logrus.Fatalf("Error accepting channel: ", e)
+			}
+			logrus.Infof("ACCEPTED NEW CHANNEL of TYPE: %v", c.Type())
+			if c.Type() == channels.AGC_CHANNEL && principal {
+				go authgrants.Principal(c, mc)
+			} else if c.Type() == channels.NPC_CHANNEL {
+				//go do something?
+			} else if c.Type() == channels.EXEC_CHANNEL {
+				//go do something else?
+			} else {
+				//bad channel
+				c.Close()
+				continue
+			}
 		}
-		if c.Type() == channels.AGC_CHANNEL && principal {
-			go authgrants.Principal(c, mc, state)
-		} else if c.Type() == channels.NPC_CHANNEL {
-			//go do something?
-		} else if c.Type() == channels.EXEC_CHANNEL {
-			//go do something else?
-		} else {
-			//bad channel
-			c.Close()
-			continue
-		}
-	}
+	}()
+	wg.Wait()
+	logrus.Info("Done waiting")
 }

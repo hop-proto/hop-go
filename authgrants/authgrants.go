@@ -7,12 +7,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"golang.org/x/crypto/ssh/terminal"
 	"zmap.io/portal/channels"
-	"zmap.io/portal/exec_channels"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/npc"
 	"zmap.io/portal/transport"
@@ -21,15 +20,22 @@ import (
 /*Used by Client Process to get an authorization grant from its Principal*/
 func GetAuthGrant(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string) (int64, error) {
 	intent := NewIntentRequest(digest, sUser, addr, cmd)
-	c, err := net.Dial("unix", "/tmp/auth.sock") //TODO: address of UDS
+	sock := "/tmp/auth.sock"
+	if addr == "127.0.0.1:9999" {
+		sock = "/tmp/auth2.sock"
+	}
+
+	c, err := net.Dial("unix", sock) //TODO: address of UDS
 	if err != nil {
 		logrus.Fatal(err)
 	}
-
 	defer c.Close()
 	logrus.Infof("C: CONNECTED TO UDS: [%v]", c.RemoteAddr().String())
-	c.Write(intent.ToBytes())
-
+	_, e := c.Write(intent.ToBytes())
+	if e != nil {
+		logrus.Fatal("C: error writing to UDS")
+	}
+	logrus.Infof("C: WROTE INTENT TO UDS")
 	response, err := GetResponse(c)
 	if err != nil {
 		logrus.Fatalf("S: ERROR GETTING RESPONSE: %v", err)
@@ -47,8 +53,7 @@ func GetAuthGrant(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string
 }
 
 /*Go routine for Principal to respond to auth grant requests*/
-func Principal(agc *channels.Reliable, m *channels.Muxer, state *terminal.State) {
-	exec_channels.RestoreTerm(state)
+func Principal(agc *channels.Reliable, m *channels.Muxer) {
 	intent, err := ReadIntentRequest(agc)
 	if err != nil {
 		logrus.Fatalf("ERROR READING INTENT REQUEST: %v", err)
@@ -83,7 +88,7 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, state *terminal.State)
 		logrus.Info("handshake successful")
 		npc_muxer := channels.NewMuxer(tclient, tclient)
 		go npc_muxer.Start()
-		defer npc_muxer.Stop()
+		//defer npc_muxer.Stop()
 
 		npc_agc, e := npc_muxer.CreateChannel(channels.AGC_CHANNEL)
 		if e != nil {
@@ -104,14 +109,43 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, state *terminal.State)
 			logrus.Fatalf("C: error writing to agc: %v", err)
 		}
 		logrus.Infof("C: WROTE INTENT_CONFIRMATION")
+		npc_agc.Close()
+
+		// Want to keep this session open in case the "server 2" wants to continue chaining hop sessions together
+		// Should only get authorization grant channels?
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				c, e := npc_muxer.Accept()
+				if e != nil {
+					logrus.Fatalf("Error accepting channel: ", e)
+				}
+				logrus.Infof("Accepted channel of type: %v", c.Type())
+				if c.Type() == channels.AGC_CHANNEL {
+					go Principal(c, npc_muxer)
+				} else if c.Type() == channels.NPC_CHANNEL {
+					//go do something?
+				} else if c.Type() == channels.EXEC_CHANNEL {
+					//go do something else?
+				} else {
+					//bad channel
+					c.Close()
+					continue
+				}
+			}
+		}()
+		wg.Wait()
 	} else {
 		agc.Write(NewIntentDenied("User denied.").ToBytes())
 	}
 }
 
 //Go routine for Server to handle an INTENT_COMMUNICATION from a principal
-func Server(agc *channels.Reliable) {
+func Server(agc *channels.Reliable, muxer *channels.Muxer, agToMux map[string]*channels.Muxer) {
 	logrus.Info("waiting for intent communication")
+	defer agc.Close()
 	msg, e := ReadIntentCommunication(agc)
 	if e != nil {
 		logrus.Fatalf("error reading intent communication")
@@ -129,15 +163,14 @@ func Server(agc *channels.Reliable) {
 	defer f.Close()
 	k := keys.PublicKey(intent.sha3)
 	logrus.Infof("Added: %v", k.String())
-	_, e = f.Write([]byte(k.String()))
+	authgrant := fmt.Sprintf("%v %v %v %v %v", k.String(), 0, t.String(), "user", strings.Join(intent.action, " "))
+	_, e = f.WriteString(authgrant)
+	f.WriteString("\n")
 	if e != nil {
 		logrus.Infof("Issue writing to authorized keys file: ", e)
 	}
-	f.WriteString(" 0 ")
-	f.WriteString(t.String())
-	f.WriteString(" user ")
-	f.WriteString(strings.Join(intent.action, " "))
-	f.WriteString("\n")
+	agToMux[authgrant] = muxer
+	logrus.Infof("Added: %v with Value: %v", authgrant, agToMux[authgrant])
 
 	agc.Write(NewIntentConfirmation(t).ToBytes())
 	agc.Close()

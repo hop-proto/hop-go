@@ -4,8 +4,8 @@ import "os"
 
 func main() {
 	if os.Args[1] == "client" {
-		startClient()
+		startClient(os.Args[2])
 	} else {
-		startServer()
+		startServer(os.Args[2])
 	}
 }

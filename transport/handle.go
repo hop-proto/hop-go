@@ -26,6 +26,7 @@ type Handle struct {
 	writeTimeout atomicTimeout
 
 	sessionID SessionID
+	Authgrant string
 	recv      chan []byte
 	send      chan []byte
 

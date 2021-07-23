@@ -52,7 +52,7 @@ func startClient(port string) {
 		ch.Write(npc.NewNPCInitMsg("127.0.0.1:2222").ToBytes())
 		ch.Read(make([]byte, 1))
 		logrus.Info("Receieved NPC Conf")
-		tclient, _ := transport.DialNPC("npc", "127.0.0.1:2222", ch)
+		tclient, _ := transport.DialNPC("npc", "127.0.0.1:2222", ch, nil)
 		e := tclient.Handshake()
 		if e != nil {
 			logrus.Fatal("Handshake failed: ", e)

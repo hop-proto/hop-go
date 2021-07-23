@@ -302,7 +302,7 @@ func GetResponse(c net.Conn) ([]byte, error) {
 	responseType := make([]byte, 1)
 	_, err := c.Read(responseType)
 	if err != nil {
-		logrus.Fatal(err)
+		return nil, err
 	}
 	logrus.Infof("Got response type: %v", responseType)
 	//TODO: SET TIMEOUT STUFF + BETTER ERROR CHECKING

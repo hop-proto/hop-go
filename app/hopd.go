@@ -7,9 +7,12 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/sbinet/pstree"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
@@ -160,7 +163,7 @@ func handleAuthGrantRequest(c net.Conn, principals *map[int32]*channels.Muxer) {
 	logrus.Infof("S: WROTE INTENT_REQUEST TO AGC")
 	response, err := authgrants.GetResponse(agc)
 	if err != nil {
-		logrus.Fatalf("S: ERROR GETTING RESPONSE: %v", err)
+		logrus.Fatalf("S: ERROR GETTING RESPONSE: %v, %v", err, response)
 	}
 	_, err = c.Write(response)
 	if err != nil {
@@ -223,22 +226,25 @@ func serve(args []string) {
 	}
 	//TODO: Make thread safe?
 	principals := make(map[int32]*channels.Muxer) //PID -> session muxer
-	//muxers := make(map[string]*channels.Muxer)
+	agToMux := make(map[string]*channels.Muxer)   //AuthGrant -> session muxer (added by server when it issues an authgrant)
+	//muxers := make(map[string]*channels.Muxer)  //sessionId -> session muxer
 	go authGrantServer(l, &principals)
 
 	//*****ACCEPT CONNS AND START SESSIONS*****
 	for {
 		logrus.Infof("S: SERVER LISTENING ON %v", addr)
 		serverConn, err := server.AcceptTimeout(5 * time.Minute) //won't be a minute in reality
+		//From serverConn (handle on connection) get authgrant
 		if err != nil {
 			logrus.Fatalf("S: SERVER TIMEOUT: %v", err)
 		}
-		logrus.Info("S: ACCEPTED NEW CONNECTION")
-		go session(serverConn, principals, l)
+		logrus.Infof("S: ACCEPTED NEW CONNECTION with authgrant: %v", serverConn.Authgrant)
+		logrus.Infof("agToMux[authgrant] -> %v", agToMux[serverConn.Authgrant])
+		go session(serverConn, principals, l, agToMux)
 	}
 }
 
-func session(serverConn *transport.Handle, principals map[int32]*channels.Muxer, l net.Listener) {
+func session(serverConn *transport.Handle, principals map[int32]*channels.Muxer, l net.Listener, agToMux map[string]*channels.Muxer) {
 	ms := channels.NewMuxer(serverConn, serverConn)
 	go ms.Start()
 	defer ms.Stop()
@@ -251,14 +257,36 @@ func session(serverConn *transport.Handle, principals map[int32]*channels.Muxer,
 		}
 		logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", serverChan.Type())
 		if serverChan.Type() == channels.EXEC_CHANNEL {
+
+			l := make([]byte, 1)
+			serverChan.Read(l)
+			cmd := make([]byte, int(l[0]))
+			serverChan.Read(cmd)
+			logrus.Infof("Executing: %v", string(cmd))
+
+			args := strings.Split(string(cmd), " ")
+			c := exec.Command(args[0], args[1:]...)
+
+			f, err := pty.Start(c)
+
 			//If session is using an authorization grant then the muxer in this goroutine
 			//should be replaced by the muxer that the server has with the principal that authorized the grant
 			//use the muxers map above (authgrant --> muxer)
-			go exec_channels.Serve(serverChan, &principals, ms)
+			if mux, ok := agToMux[serverConn.Authgrant]; ok {
+				principals[int32(c.Process.Pid)] = mux
+				logrus.Infof("S: using muxer from auth grant: %v", serverConn.Authgrant)
+			} else {
+				logrus.Infof("S: using standard muxer")
+				principals[int32(c.Process.Pid)] = ms
+			}
+			if err != nil {
+				logrus.Fatalf("S: error starting pty %v", err)
+			}
+			go exec_channels.Serve(serverChan, f)
 		} else if serverChan.Type() == channels.NPC_CHANNEL {
 			go npc.Server(serverChan)
 		} else if serverChan.Type() == channels.AGC_CHANNEL {
-			go authgrants.Server(serverChan)
+			go authgrants.Server(serverChan, ms, agToMux)
 		}
 	}
 }

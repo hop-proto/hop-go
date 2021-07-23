@@ -122,5 +122,4 @@ func (m *Muxer) Stop() {
 		v.Close()
 	}
 	m.m.Unlock()
-
 }
