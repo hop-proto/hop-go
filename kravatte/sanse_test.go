@@ -157,8 +157,10 @@ func TestAEAD(t *testing.T) {
 		},
 	}
 	key := newTestKey(32)
-	initiator := NewSANSE(key)
-	responder := NewSANSE(key)
+	initiator, err := NewSANSE(key)
+	assert.NilError(t, err)
+	responder, err := NewSANSE(key)
+	assert.NilError(t, err)
 	var associatedData [1]byte
 
 	runTranscript := func(alias bool) func(t *testing.T) {

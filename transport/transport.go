@@ -2,13 +2,11 @@ package transport
 
 import (
 	"bytes"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
 	"io"
 	"net"
 
 	"github.com/sirupsen/logrus"
+	"zmap.io/portal/kravatte"
 )
 
 // SessionID is an IP-independent identifier of a tunnel.
@@ -39,8 +37,7 @@ func init() {
 // transport message. It returns a negative number for transport messages of
 // insufficient length to contain any plaintext.
 func PlaintextLen(transportLen int) int {
-	// TODO(dadrian): remove the 12-byte nonce when we get rid of AES
-	return transportLen - HeaderLen - SessionIDLen - CounterLen - MacLen - 12
+	return transportLen - HeaderLen - SessionIDLen - CounterLen - TagLen
 }
 
 // PeekSession returns the SessionID located in the provided raw transport
@@ -94,7 +91,7 @@ func (ss *SessionState) readCounter(b []byte) (count uint64) {
 }
 
 func (ss *SessionState) writePacket(conn *net.UDPConn, in []byte, key *[KeyLen]byte) error {
-	length := HeaderLen + SessionIDLen + CounterLen + len(in) + MacLen + 12
+	length := HeaderLen + SessionIDLen + CounterLen + len(in) + TagLen
 	ss.rawWrite.Reset()
 	if ss.rawWrite.Cap() < length {
 		ss.rawWrite.Grow(length)
@@ -112,28 +109,19 @@ func (ss *SessionState) writePacket(conn *net.UDPConn, in []byte, key *[KeyLen]b
 	ss.writeCounter(&ss.rawWrite)
 	logrus.Debugf("ss: writing packet with count %d", ss.count)
 
-	// Temporary Encryption via AES until Kravatte is working
-	// TODO(dadrian): Finish Kravatte and get rid of AES.
-	block, err := aes.NewCipher(key[:])
+	// Encrypt the message. The associated data is the message header. There is
+	// no nonce. The output has an overhead of TagLength.
+	aead, err := kravatte.NewSANSE(key[:])
 	if err != nil {
 		return err
 	}
-	aead, err := cipher.NewGCMWithTagSize(block, MacLen)
-	if err != nil {
-		return err
-	}
-	buf := make([]byte, 12+MacLen+len(in))
-	if n, err := rand.Read(buf[0:12]); err != nil || n != 12 {
-		panic("could not read random nonce for transport")
-	}
-	enc := aead.Seal(buf[12:12], buf[:12], in, ss.rawWrite.Bytes()[:AssociatedDataLen])
+	buf := make([]byte, TagLen+len(in))
+	enc := aead.Seal(buf[:0], nil, in, ss.rawWrite.Bytes()[:AssociatedDataLen])
 	logrus.Debugf("write: %x %x", buf[:12], enc)
 	logrus.Debugf("write(buf): %x", buf)
-	if len(enc)+12 != len(buf) {
-		logrus.Panicf("expected len(buf) = len(enc) + 12, got: %d = %d + 12", len(buf), len(enc))
+	if len(enc) != len(buf) {
+		logrus.Panicf("expected len(buf) = len(enc), got: %d = %d + 12", len(buf), len(enc))
 	}
-
-	// TODO(dadrian): Encryption
 	ss.rawWrite.Write(buf)
 
 	b := ss.rawWrite.Bytes()
@@ -151,7 +139,7 @@ func (ss *SessionState) writePacket(conn *net.UDPConn, in []byte, key *[KeyLen]b
 
 func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (int, error) {
 	plaintextLen := PlaintextLen(len(pkt))
-	ciphertextLen := plaintextLen + MacLen
+	ciphertextLen := plaintextLen + TagLen
 	if plaintextLen > len(plaintext) {
 		return 0, ErrBufOverflow
 	}
@@ -177,29 +165,23 @@ func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (in
 	logrus.Debugf("ss: read packet with count %d", count)
 	b = b[CounterLen:]
 
-	// Temporary Encryption via AES until Kravatte is working
-	// TODO(dadrian): Finish Kravatte and get rid of AES.
-	block, err := aes.NewCipher(key[:])
+	aead, err := kravatte.NewSANSE(key[:])
 	if err != nil {
 		return 0, err
 	}
-	aead, err := cipher.NewGCMWithTagSize(block, MacLen)
-	if err != nil {
-		return 0, err
-	}
-	nonce := b[:12]
-	b = b[12:]
 	enc := b[:ciphertextLen]
-	logrus.Debugf("read: %x %x", nonce, enc)
-	out, err := aead.Open(plaintext[:0], nonce, enc, pkt[:AssociatedDataLen])
+	logrus.Debugf("read enc: %x", enc)
+	b = b[ciphertextLen:]
+	if len(b) != 0 {
+		logrus.Panicf("len(b) = %d, expected 0", len(b))
+	}
+	out, err := aead.Open(plaintext[:0], nil, enc, pkt[:AssociatedDataLen])
 	if err != nil {
 		return 0, err
 	}
 	if len(out) != plaintextLen {
-		panic("wtf mate")
+		logrus.Panicf("len(out) = %d, expected plaintextLen = %d", len(out), plaintextLen)
 	}
-	b = b[plaintextLen:]
-	b = b[MacLen:] // Mac checked as part of Open
 
 	return plaintextLen, nil
 }

@@ -80,15 +80,15 @@ func (s *sanse) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, err
 
 // NewSANSE returns a SANSE implementation of cipher.AEAD. It has a NonceSize of
 // 0 and an Overhead of KravatteSANSETagSize.
-func NewSANSE(key []byte) cipher.AEAD {
-	s := &sanse{
+func NewSANSE(key []byte) (cipher.AEAD, error) {
+	s := sanse{
 		kravatte: Kravatte{},
 		e:        0,
 	}
 	if s.kravatte.RefMaskInitialize(key) != 0 {
-		panic("unable to initialize kravatte")
+		return nil, errors.New("invalid key")
 	}
-	return s
+	return &s, nil
 }
 
 func memxoris(target, source []byte, bitLen int) {
