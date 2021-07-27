@@ -10,7 +10,8 @@ run:
     - reliable
     - sessions
   skip-files:
-    - fuck
+    - .*keccakf_amd64.s
+    - .*keccakf_amd64.go
 linters:
   enable:
     - gofmt # Gofmt checks whether code was gofmt-ed. By default this tool runs with -s option to check for code simplification [fast: true, auto-fix: true]
