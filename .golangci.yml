@@ -8,6 +8,7 @@
 run:
   skip-dirs:
     - reliable
+    - channels
     - sessions
   skip-files:
     - .*keccakf_amd64.s

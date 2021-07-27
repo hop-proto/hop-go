@@ -227,7 +227,7 @@ func (kv *Kravatte) compress(message []byte, messageBitLen *int, lastFlag int) i
 		*messageBitLen %= 8
 		if *messageBitLen != 0 {
 			snp.StateAddByte(&state, message[0]|(1<<*messageBitLen), messageByteLen)
-			bytesCompressed += 1
+			bytesCompressed++
 		} else {
 			snp.StateAddByte(&state, 1, messageByteLen)
 		}

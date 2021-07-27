@@ -7,7 +7,9 @@ import (
 )
 
 const (
-	KravatteSANSETagSize = 32
+	// TagSize is the size of the authentication tag used with SANSE. It
+	// accounts for the entire Overhead of the cipher.AEAD implementation.
+	TagSize = 32
 )
 
 type sanse struct {
@@ -17,12 +19,14 @@ type sanse struct {
 
 var _ cipher.AEAD = &sanse{}
 
+// NonceSize is 0
 func (s *sanse) NonceSize() int {
 	return 0
 }
 
+// Overhead is TagSize.
 func (s *sanse) Overhead() int {
-	return KravatteSANSETagSize
+	return TagSize
 }
 
 // sliceForAppend takes a slice and a requested number of bytes. It returns a
@@ -40,7 +44,7 @@ func sliceForAppend(in []byte, n int) (head, tail []byte) {
 	return
 }
 
-// Seal implements cipher.AEAD
+// Seal implements cipher.AEAD. The nonce is unused.
 func (s *sanse) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
 	// dst might alias plaintext, so we defensively copy. This kind of defeats
 	// the purpose of reusing the storage by passing dst = plaintext[:0],
@@ -49,7 +53,7 @@ func (s *sanse) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
 	//
 	// TODO(dadrian): Figure out how to get rid of the this allocation
 	dataLen := len(plaintext)
-	total := dataLen + KravatteSANSETagSize
+	total := dataLen + TagSize
 	in := make([]byte, dataLen)
 	copy(in, plaintext)
 
@@ -60,13 +64,13 @@ func (s *sanse) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
 	return ret
 }
 
-// Open implements cipher.AEAD
+// Open implements cipher.AEAD. The nonce is unused.
 func (s *sanse) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, error) {
 	total := len(ciphertext)
-	if total < KravatteSANSETagSize {
+	if total < TagSize {
 		return nil, errors.New("ciphertext smaller than minimum size")
 	}
-	dataLen := total - KravatteSANSETagSize
+	dataLen := total - TagSize
 
 	// TODO(dadrian): Figure out how to get rid of the this allocation
 	in := make([]byte, total)
@@ -79,7 +83,7 @@ func (s *sanse) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, err
 }
 
 // NewSANSE returns a SANSE implementation of cipher.AEAD. It has a NonceSize of
-// 0 and an Overhead of KravatteSANSETagSize.
+// 0 and an Overhead of TagSize. The implementation is ported from XKCP.
 func NewSANSE(key []byte) cipher.AEAD {
 	s := &sanse{
 		kravatte: Kravatte{},
@@ -149,12 +153,12 @@ func (s *sanse) wrap(plaintext []byte, ciphertext []byte, dataBitLen int, ad []b
 			return 1
 		}
 		newHistory := s.kravatte // needs to be a copy
-		if s.kravatte.Vatte(tag, KravatteSANSETagSize*8, FlagNone) != 0 {
+		if s.kravatte.Vatte(tag, TagSize*8, FlagNone) != 0 {
 			return 1
 		}
 		// C = P + FK (T || 11 || e . history)
 		s.kravatte = initalHistory
-		if s.addToHistory(tag, KravatteSANSETagSize*8, 3, 2) != 0 {
+		if s.addToHistory(tag, TagSize*8, 3, 2) != 0 {
 			return 1
 		}
 		if s.kravatte.Vatte(ciphertext, dataBitLen, FlagLastPart) != 0 {
@@ -166,7 +170,7 @@ func (s *sanse) wrap(plaintext []byte, ciphertext []byte, dataBitLen int, ad []b
 		s.kravatte = newHistory
 	} else {
 		// T = 0t + FK (history)
-		if s.kravatte.Vatte(tag, KravatteSANSETagSize*8, FlagNone) != 0 {
+		if s.kravatte.Vatte(tag, TagSize*8, FlagNone) != 0 {
 			return 1
 		}
 	}
@@ -178,7 +182,7 @@ func (s *sanse) wrap(plaintext []byte, ciphertext []byte, dataBitLen int, ad []b
 
 // unwrap assumes all of these buffers have been preallocated to the correct length
 func (s *sanse) unwrap(ciphertext []byte, plaintext []byte, dataBitLen int, ad []byte, adBitLen int, tag []byte) int {
-	var tagPrime [KravatteSANSETagSize]byte
+	var tagPrime [TagSize]byte
 
 	// if |A| > 0 OR |C| = 0 then
 	if adBitLen != 0 || dataBitLen == 0 {
@@ -193,7 +197,7 @@ func (s *sanse) unwrap(ciphertext []byte, plaintext []byte, dataBitLen int, ad [
 		initalHistory := s.kravatte // need to copy
 
 		// P = C + FK (T || 11 || e . history)
-		if s.addToHistory(tag, KravatteSANSETagSize*8, 3, 2) != 0 {
+		if s.addToHistory(tag, TagSize*8, 3, 2) != 0 {
 			return 1
 		}
 		if s.kravatte.Vatte(plaintext, dataBitLen, FlagLastPart) != 0 {

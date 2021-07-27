@@ -15,7 +15,7 @@ import (
 
 func runSANSETranscript(t *testing.T, s *sanse, transcript []snp.TranscriptEntry) {
 	var plaintext, ciphertext, ad []byte
-	var tag [KravatteSANSETagSize]byte
+	var tag [TagSize]byte
 	var recv sanse
 	for i, entry := range transcript {
 		t.Logf("test %s, entry %d (%s)", t.Name(), i, entry.Action)
@@ -121,7 +121,7 @@ func mustReadFileToString(path string) string {
 }
 
 func allocateForSeal(plaintext string, alias bool) (src, dst []byte) {
-	dst = make([]byte, len(plaintext)+KravatteSANSETagSize)
+	dst = make([]byte, len(plaintext)+TagSize)
 	if alias {
 		copy(dst, []byte(plaintext))
 		return dst[:len(plaintext)], dst[:0]
@@ -133,7 +133,7 @@ func allocateForOpen(ciphertext []byte, alias bool) (src, dst []byte) {
 	if alias {
 		return ciphertext, ciphertext[:0]
 	}
-	dst = make([]byte, len(ciphertext)-KravatteSANSETagSize)
+	dst = make([]byte, len(ciphertext)-TagSize)
 	return ciphertext, dst[:0]
 }
 
