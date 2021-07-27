@@ -105,8 +105,9 @@ type Name struct {
 	Type  IDType
 }
 
-func (n Name) IsZero() bool {
-	return n.Label == "" && n.Type == 0
+// IsZero returns true if the label is empty and tye type is 0.
+func (name Name) IsZero() bool {
+	return name.Label == "" && name.Type == 0
 }
 
 // IDChunk contains the IDBlocks in a certificate

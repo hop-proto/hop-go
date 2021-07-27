@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -70,8 +71,8 @@ func main() {
 	default:
 		logrus.Fatalf("unknown action: %q", action)
 	}
-	done := make(chan os.Signal, 0)
-	signal.Notify(done, os.Kill, os.Interrupt)
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, syscall.SIGTERM, syscall.SIGINT)
 	<-done
 	logrus.Info("done")
 }

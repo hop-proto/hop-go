@@ -50,7 +50,7 @@ func main() {
 	}
 
 	switch certType {
-	case certs.Leaf:
+	case certs.Leaf: //nolint:dupl // not quite a full duplicate
 		data, err = ioutil.ReadFile(parentFilePath)
 		if err != nil {
 			logrus.Fatalf("could not open parent cert file: %s", err)
@@ -89,7 +89,7 @@ func main() {
 			logrus.Fatalf("unable to encode certificate to PEM: %s", err)
 		}
 		output.Write(pemBytes)
-	case certs.Intermediate:
+	case certs.Intermediate: //nolint:dupl // not quite a full duplicate
 		data, err = ioutil.ReadFile(parentFilePath)
 		if err != nil {
 			logrus.Fatalf("could not open parent cert file: %s", err)

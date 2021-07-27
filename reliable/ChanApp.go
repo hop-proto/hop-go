@@ -393,7 +393,7 @@ func (ca *chanApp) channelSendThread(cid int) {
 			latestCtrSeen := readCtr(&ca.channelLatestCtrSeen[cid])
 			for _, fr := range ca.channelRTQueues[cid].frames {
 				frame := append(fr[0:4], toBytes(latestCtrSeen)...)
-				frame = append(frame, fr[8:len(fr)]...)
+				frame = append(frame, fr[8:]...)
 				fmt.Println("Channel", cid, "restransmitting", frame)
 				ca.send(frame)
 			}
