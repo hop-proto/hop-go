@@ -17,7 +17,8 @@ type SigningPublicKey [32]byte
 // SigningPrivateKey is an Ed25519 private key used for signing. It corresponds to a public key stored in an intermediate or root certificate.
 type SigningPrivateKey [32]byte
 
-// SigningKeyPair is an Ed25519 key pair.
+// SigningKeyPair is an Ed25519 key pair. In Hop, a SigningKeyPair is used to
+// sign data in certificates.
 //
 // TODO(dadrian): Should this just use the crypto.Ed25519 types directly?
 type SigningKeyPair struct {
@@ -64,6 +65,7 @@ func VerifySignature(publicKey *SigningPublicKey, data []byte, signature *[64]by
 	return ed25519.Verify(internal, data, signature[:])
 }
 
+// SigningPublicKeyPrefix is the prefix used in public key files for signing keys.
 const SigningPublicKeyPrefix = "hop-sign-v1-"
 
 // String encodes a SigningPublicKey to a custom format.
@@ -72,6 +74,7 @@ func (p *SigningPublicKey) String() string {
 	return fmt.Sprintf("%s%s", SigningPublicKeyPrefix, b64)
 }
 
+// PEMTypeSigningPrivate is the PEM header for private keys used for signing.
 const PEMTypeSigningPrivate = "HOP PROTOCOL SIGNING PRIVATE KEY V1"
 
 // String encodes a SigningPrivateKey to PEM.
@@ -83,22 +86,23 @@ func (k *SigningPrivateKey) String() string {
 	return string(pem.EncodeToMemory(&block))
 }
 
+// SigningKeyFromPEM reads a SigninKeyPair from a PEM block. The PEM must have
+// the correct header.
 func SigningKeyFromPEM(p *pem.Block) (*SigningKeyPair, error) {
 	if p.Type != PEMTypeSigningPrivate {
 		return nil, fmt.Errorf("wront PEM type %q, want %q", p.Type, PEMTypeSigningPrivate)
 	}
 	if len(p.Bytes) != 32 {
-		panic("fuck you")
+		return nil, fmt.Errorf("invalid private key length. expected %d bytes, got %d", 32, len(p.Bytes))
 	}
 	out := new(SigningKeyPair)
-	n := copy(out.Private[:], p.Bytes)
-	if n != 32 {
-		return nil, fmt.Errorf("unexpected key length (got %d, expected 32)", n)
-	}
+	copy(out.Private[:], p.Bytes)
 	out.PublicFromPrivate()
 	return out, nil
 }
 
+// ParseSigningPublicKey parses a text public signing key. It must have the
+// expected prefix for Hop signing public keys.
 func ParseSigningPublicKey(encoded string) (*SigningPublicKey, error) {
 	if !strings.HasPrefix(encoded, SigningPublicKeyPrefix) {
 		return nil, fmt.Errorf("bad prefix, expected %s", SigningPublicKeyPrefix)
@@ -109,7 +113,7 @@ func ParseSigningPublicKey(encoded string) (*SigningPublicKey, error) {
 		return nil, err
 	}
 	if len(b) != 32 {
-		return nil, fmt.Errorf("invalid public key length, got %d, expected 32", len(b))
+		return nil, fmt.Errorf("invalid key length, got %d, expected 32", len(b))
 	}
 	out := new(SigningPublicKey)
 	copy(out[:], b)

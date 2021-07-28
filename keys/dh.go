@@ -13,7 +13,11 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
+// PublicKey is a 32-byte array
 type PublicKey [32]byte
+
+// PrivateKey is a 32-byte array. It is a distinct type from PublicKey to
+// decrease the likelihood of the byte arrays getting confused.
 type PrivateKey [32]byte
 
 // X25519KeyPair contains a Public and Private X25519 key.
@@ -50,6 +54,7 @@ func (x *X25519KeyPair) DH(other []byte) ([]byte, error) {
 	return curve25519.X25519(x.Private[:], other)
 }
 
+// DHPublicKeyPrefix is the prefix used in public key files for Hop DH keys.
 const DHPublicKeyPrefix = "hop-dh-v1-"
 
 // String encodes a PublicKey to a custom format.
@@ -60,6 +65,7 @@ func (p *PublicKey) String() string {
 	return fmt.Sprintf("%s%s", DHPublicKeyPrefix, b64)
 }
 
+// PEMTypeDHPrivate is the PEM header for Hop DH private keys.
 const PEMTypeDHPrivate = "HOP PROTOCOL DH PRIVATE KEY V1"
 
 // String encodes a PrivateKey to PEM.
@@ -71,15 +77,17 @@ func (k *PrivateKey) String() string {
 	return string(pem.EncodeToMemory(&block))
 }
 
+// DHKeyFromPEM parses a PEM block into a X25519KeyPair. The header must match,
+// and the data must be the correct length.
 func DHKeyFromPEM(p *pem.Block) (*X25519KeyPair, error) {
 	if p.Type != PEMTypeDHPrivate {
 		return nil, fmt.Errorf("wront PEM type %q, want %q", p.Type, PEMTypeDHPrivate)
 	}
 	out := new(X25519KeyPair)
-	n := copy(out.Private[:], p.Bytes)
-	if n != 32 {
-		return nil, fmt.Errorf("unexpected key length (got %d, expected 32)", n)
+	if len(p.Bytes) != 32 {
+		return nil, fmt.Errorf("invalid key length, got %d, expected 32", len(p.Bytes))
 	}
+	copy(out.Private[:], p.Bytes)
 	out.PublicFromPrivate()
 	return out, nil
 }
@@ -102,6 +110,7 @@ func ReadDHKeyFromPEMFile(path string) (*X25519KeyPair, error) {
 	return DHKeyFromPEM(p)
 }
 
+// ParseDHPublicKey reads a text-encoded X25519 Hop DH public key.
 func ParseDHPublicKey(encoded string) (*PublicKey, error) {
 	if !strings.HasPrefix(encoded, DHPublicKeyPrefix) {
 		return nil, fmt.Errorf("bad prefix, expected %s", DHPublicKeyPrefix)
@@ -112,7 +121,7 @@ func ParseDHPublicKey(encoded string) (*PublicKey, error) {
 		return nil, err
 	}
 	if len(b) != 32 {
-		return nil, fmt.Errorf("invalid public key length, got %d, expected 32", len(b))
+		return nil, fmt.Errorf("invalid key length, got %d, expected 32", len(b))
 	}
 	out := new(PublicKey)
 	copy(out[:], b)

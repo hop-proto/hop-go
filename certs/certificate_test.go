@@ -107,6 +107,7 @@ func TestWriteTo(t *testing.T) {
 	assert.Equal(t, c.PublicKey, testKeyPair.public)
 	assert.Equal(t, c.Parent, d.Parent)
 	assert.Equal(t, c.Signature, d.Signature)
+	// TODO(dadrian): Fingerprint handling
 	//assert.Equal(t, c.Fingerprint, d.Fingerprint)
 }
 

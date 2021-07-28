@@ -105,6 +105,7 @@ func makeChannel(underlying transport.MsgConn, netConn net.Conn, sendQueue chan 
 			ackNo:            1,
 			buffer:           make([]byte, 0),
 			closed:           false,
+			finSent:          false,
 			frameDataLengths: make(map[uint32]uint16),
 			frameNo:          1,
 			RTO:              RTO,
@@ -152,7 +153,7 @@ func (r *Reliable) initiate(req bool) {
 		}
 		r.sendQueue <- p.toBytes()
 		r.m.Lock()
-		not_init = r.channelState != INITIATED
+		not_init = r.channelState == CREATED
 		r.m.Unlock()
 		timer := time.NewTimer(RTO)
 		<-timer.C
@@ -269,11 +270,11 @@ func (r *Reliable) Close() error {
 		return errors.New("channel already closed")
 	}
 	r.m.Unlock()
-	err := r.sender.close()
+	err := r.sender.sendFin()
 	if err != nil {
 		return err
 	}
-	//logrus.Debug("STARTNG CLOSE")
+	logrus.Debug("STARTNG CLOSE")
 
 	time.Sleep(time.Second)
 	// Wait until the other end of the connection has received the FIN packet from the other side.
@@ -298,11 +299,12 @@ func (r *Reliable) Close() error {
 		r.closedCond.Wait()
 	}
 	r.closedCond.L.Unlock()
-
-	//logrus.Debug("CLOSED! WOOHOO")
+	r.sender.close()
+	logrus.Debug("CLOSED! WOOHOO")
 	r.m.Lock()
 	r.channelState = CLOSED
 	r.m.Unlock()
+
 	return nil
 }
 

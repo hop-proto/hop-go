@@ -1,3 +1,6 @@
+// Package cyclist contains an implementtation of the Cyclist duplex function
+// using instantiated with 12 rounds of Keccak-p[1600]. It is directly ported
+// from the XKCP implementation. This package is experimental and unoptimized.
 package cyclist
 
 // Phase is a enum used to represent internal state of Cyclist
@@ -10,8 +13,10 @@ const (
 	Down
 )
 
+// Mode is either Hash or Key
 type Mode int
 
+// Known values of Mode
 const (
 	Hash Mode = iota
 	Key
@@ -26,7 +31,15 @@ const (
 )
 
 // Cyclist is an implementation of the public interface for a Cyclist duplex
-// object as defined in https://eprint.iacr.org/2018/767.pdf.
+// object as defined in https://eprint.iacr.org/2018/767.pdf. It is instantiated
+// with 12-rounds of Keccak-p[1600] as the permutation.
+//
+// It uses a 1088-bit rKin and rKout, a 256-bit ratchet, a 1088-bit rHash, and a
+// 1600-bit permutation. For details, see
+// https://github.com/XKCP/XKCP/pull/75#issuecomment-718093434.
+//
+// Functions that are limited to Key or Hash mode will panic if called on an
+// object in the wrong mode. There are no error values returned.
 type Cyclist struct {
 	phase             Phase
 	mode              Mode
@@ -34,23 +47,7 @@ type Cyclist struct {
 	s                 [25]uint64
 }
 
-func Split(x []byte, blockSizeInBytes int) [][]byte {
-	outputLen := len(x) / blockSizeInBytes
-	if len(x)%blockSizeInBytes != 0 {
-		outputLen++
-	}
-	out := make([][]byte, outputLen)
-	for i := 0; i < outputLen; i++ {
-		start := i * blockSizeInBytes
-		end := start + blockSizeInBytes
-		if end > len(x) {
-			end = len(x)
-		}
-		out[i] = x[start:end]
-	}
-	return out
-}
-
+// InitializeEmpty resets a Cyclist object to the empty state in Hash mode.
 func (c *Cyclist) InitializeEmpty() {
 	c.phase = Up
 	c.mode = Hash
@@ -61,6 +58,7 @@ func (c *Cyclist) InitializeEmpty() {
 	}
 }
 
+// Initialize resets a Cyclist object to an initial state, with an optional key
 func (c *Cyclist) Initialize(key, id, counter []byte) {
 	c.phase = Up
 	c.mode = Hash
@@ -81,25 +79,8 @@ func min(a int, b int) int {
 	return b
 }
 
-func (c *Cyclist) arrayAddByteInPlace(src []byte, b byte, offset int) {
-	src[offset] = src[offset] ^ b
-}
-
-func (c *Cyclist) arrayAddBytes(src, b, out []byte) {
-	length := len(b)
-	for i := 0; i < length; i++ {
-		out[i] = src[i] ^ b[i]
-	}
-}
-
 func (c *Cyclist) stateAddByte(b byte, offset int) {
 	idx := offset / 8
-	/*
-		// Big Endian?
-		byteIdx := 7 - (offset % 8)
-		shift := byteIdx * 8
-	*/
-	// Little Endian?
 	byteIdx := offset % 8
 	shift := byteIdx * 8
 	x := uint64(b) << shift
@@ -113,7 +94,6 @@ func (c *Cyclist) stateAddBytes(b []byte) {
 	}
 	i := 0
 	for stateIdx := 0; stateIdx < 25; stateIdx++ {
-		// Little Endian?
 		for shift := 0; shift < 64; shift += 8 {
 			c.s[stateIdx] ^= uint64(b[i]) << shift
 			i++
@@ -199,7 +179,6 @@ func (c *Cyclist) absorbKey(key, id, counter []byte) {
 	copy(kid[klen:], id)
 	kid[klen+idlen] = byte(idlen)
 	c.absorbAny(kid[0:klen+idlen+1], c.rAbsorb, 0x02)
-	// TODO(dadrian): What are valid inputs for counter?
 	if len(counter) > 0 {
 		c.absorbAny(counter, 1, 0x00)
 	}
@@ -268,10 +247,13 @@ func (c *Cyclist) up(y []byte, cu byte) {
 	c.stateCopyOut(y)
 }
 
+// Absorb absorbs the entirety of x.
 func (c *Cyclist) Absorb(x []byte) {
 	c.absorbAny(x, c.rAbsorb, 0x03)
 }
 
+// Encrypt encrypts plaintext and writes to ciphertext. The output will be the
+// same length as the input. The ciphertext slice must already be allocated.
 func (c *Cyclist) Encrypt(ciphertext, plaintext []byte) {
 	// TODO(dadrian): Is this the correct order for input/output arguments?
 	if c.mode != Key {
@@ -280,6 +262,11 @@ func (c *Cyclist) Encrypt(ciphertext, plaintext []byte) {
 	c.crypt(ciphertext, plaintext, false)
 }
 
+// Decrypt decrypts ciphertext to plaintext. The plaintext will have the same
+// length as the ciphertext. The plaintext slice must already be allocated.
+// There is no authenticity tag checked. If the encryption operation needs
+// integrity, generate a MAC using Squeeze, and compare the outputs before
+// operating on the decrypted data.
 func (c *Cyclist) Decrypt(plaintext, ciphertext []byte) {
 	if c.mode != Key {
 		panic("can't decrypt in unkeyed mode")
@@ -287,10 +274,13 @@ func (c *Cyclist) Decrypt(plaintext, ciphertext []byte) {
 	c.crypt(plaintext, ciphertext, true)
 }
 
+// Squeeze outputs len(y) bytes. It can be used as an authenticity tag.
 func (c *Cyclist) Squeeze(y []byte) {
 	c.squeezeAny(y, 0x40)
 }
 
+// SqueezeKey squeezes out len(y) bytes to be used as a new key when in keyed
+// mode.
 func (c *Cyclist) SqueezeKey(y []byte) {
 	if c.mode != Key {
 		panic("can't squeeze key in unkeyed mode")
@@ -298,6 +288,8 @@ func (c *Cyclist) SqueezeKey(y []byte) {
 	c.squeezeAny(y, 0x20)
 }
 
+// Ratchet clears 256-bits of internal state. It can only be called in keyed
+// mode.
 func (c *Cyclist) Ratchet() {
 	if c.mode != Key {
 		panic("can't ratched key in unkeyed mode")
@@ -307,7 +299,7 @@ func (c *Cyclist) Ratchet() {
 	c.absorbAny(y[:], c.rAbsorb, 0x00)
 }
 
-// NewCyclist returns an initalized Cyclist object
+// NewCyclist returns an initialized and empty Cyclist object
 func NewCyclist() *Cyclist {
 	c := new(Cyclist)
 	c.InitializeEmpty()

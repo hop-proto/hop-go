@@ -21,11 +21,11 @@ type MessageType byte
 // MessageType constants for each type of handshake and transport message.
 const (
 	MessageTypeClientHello MessageType = 0x01
-	MessageTypeServerHello             = 0x02
-	MessageTypeClientAck               = 0x03
-	MessageTypeServerAuth              = 0x04
-	MessageTypeClientAuth              = 0x05
-	MessageTypeTransport               = 0x10
+	MessageTypeServerHello MessageType = 0x02
+	MessageTypeClientAck   MessageType = 0x03
+	MessageTypeServerAuth  MessageType = 0x04
+	MessageTypeClientAuth  MessageType = 0x05
+	MessageTypeTransport   MessageType = 0x10
 )
 
 // IsHandshakeType returns true if the message type is part of the handshake, not the transport.
@@ -111,6 +111,9 @@ func (hs *HandshakeState) decryptCookie(b []byte) (int, error) {
 	logrus.Debugf("decrypt: cookie ad: %x", ad)
 	// TODO(dadrian): Avoid allocation?
 	out, err := aead.Open(hs.ephemeral.Private[:0], nonce, encryptedCookie, ad)
+	if err != nil {
+		return 0, ErrInvalidMessage
+	}
 	if len(out) != DHLen {
 		return 0, ErrInvalidMessage
 	}
@@ -175,7 +178,7 @@ func writeServerHello(hs *HandshakeState, b []byte) (int, error) {
 	}
 
 	// Header
-	b[0] = MessageTypeServerHello
+	b[0] = byte(MessageTypeServerHello)
 	b[1] = 0
 	b[2] = 0
 	b[3] = 0
@@ -255,6 +258,8 @@ func readServerHello(hs *HandshakeState, b []byte) (int, error) {
 	return HeaderLen + DHLen + CookieLen + MacLen, nil
 }
 
+// RekeyFromSqueeze squeezes out KeyLen bytes and then re-initializes the duplex
+// using the new key.
 func (hs *HandshakeState) RekeyFromSqueeze() {
 	hs.duplex.Squeeze(hs.handshakeKey[:])
 	hs.duplex.Initialize(hs.handshakeKey[:], []byte(ProtocolName), nil)
@@ -285,7 +290,7 @@ func (hs *HandshakeState) writeClientAck(b []byte, name certs.Name) (int, error)
 	}
 
 	// Header
-	b[0] = MessageTypeClientAck
+	b[0] = byte(MessageTypeClientAck)
 	b[1] = 0
 	b[2] = 0
 	b[3] = 0
@@ -315,7 +320,7 @@ func (hs *HandshakeState) writeClientAck(b []byte, name certs.Name) (int, error)
 
 	// Mac
 	hs.duplex.Squeeze(b[:MacLen])
-	b = b[MacLen:]
+	// b = b[MacLen:]
 
 	return length, nil
 }
@@ -327,7 +332,7 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	}
 
 	// Header
-	if b[0] != MessageTypeServerAuth {
+	if mt := MessageType(b[0]); mt != MessageTypeServerAuth {
 		return 0, ErrUnexpectedMessage
 	}
 	if b[1] != 0 {
@@ -398,7 +403,7 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
 		logrus.Debugf("client: expected sa mac %x, got %x", hs.macBuf, b[:MacLen])
 	}
-	b = b[MacLen:]
+	// b = b[MacLen:]
 
 	return fullLength, nil
 }
@@ -410,7 +415,7 @@ func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
 	}
 
 	// Header
-	b[0] = MessageTypeClientAuth
+	b[0] = byte(MessageTypeClientAuth)
 	b[1] = 0
 	b[2] = 0
 	b[3] = 0
@@ -442,20 +447,20 @@ func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
 
 	// Mac
 	hs.duplex.Squeeze(b[:MacLen])
-	b = b[MacLen:]
+	// b = b[MacLen:]
 
 	return length, nil
 }
 
-func (hs *HandshakeState) deriveFinalKeys(client_to_server_key, server_to_client_key *[KeyLen]byte) error {
+func (hs *HandshakeState) deriveFinalKeys(clientToServerKey, serverToClientKey *[KeyLen]byte) error {
 	hs.duplex.Ratchet()
 	hs.duplex.Absorb([]byte("client_to_server_key"))
-	hs.duplex.Squeeze(client_to_server_key[:])
+	hs.duplex.Squeeze(clientToServerKey[:])
 	hs.duplex.Ratchet()
 	hs.duplex.Absorb([]byte("server_to_client_key"))
-	hs.duplex.Squeeze(server_to_client_key[:])
-	logrus.Debugf("client_to_server_key: %x", *client_to_server_key)
-	logrus.Debugf("server_to_client_key: %x", *server_to_client_key)
+	hs.duplex.Squeeze(serverToClientKey[:])
+	logrus.Debugf("client_to_server_key: %x", *clientToServerKey)
+	logrus.Debugf("server_to_client_key: %x", *serverToClientKey)
 	return nil
 }
 

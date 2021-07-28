@@ -8,9 +8,11 @@
 run:
   skip-dirs:
     - reliable
+    - channels
     - sessions
   skip-files:
-    - fuck
+    - .*keccakf_amd64.s
+    - .*keccakf_amd64.go
 linters:
   enable:
     - gofmt # Gofmt checks whether code was gofmt-ed. By default this tool runs with -s option to check for code simplification [fast: true, auto-fix: true]
@@ -28,7 +30,6 @@ linters:
     - gocyclo # Computes and checks the cyclomatic complexity of functions [fast: true, auto-fix: false]
     - gosimple # Linter for Go source code that specializes in simplifying a code [fast: false, auto-fix: false]
     - ineffassign # Detects when assignments to existing variables are not used [fast: true, auto-fix: false]
-    - interfacer # Linter that suggests narrower interface types [fast: false, auto-fix: false]
     - maligned # Tool to detect Go structs that would take less memory if their fields were sorted [fast: true, auto-fix: false]
     - nakedret # Finds naked returns in functions greater than a specified function length [fast: true, auto-fix: false]
     - prealloc # Finds slice declarations that could potentially be preallocated [fast: true, auto-fix: false]
@@ -58,6 +59,10 @@ linters:
 
     # Implementing interfaces can cause this to happen all the time
     - unparam # Reports unused function parameters [fast: false, auto-fix: false]
+
+    # Runs slow and often alerts on cases that you don't want to be more
+    # general.
+    - interfacer # Linter that suggests narrower interface types [fast: false, auto-fix: false]
 linters-settings:
   goimports:
     local-prefixes: github.com/nametaginc/nt

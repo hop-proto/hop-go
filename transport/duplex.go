@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"fmt"
 	"net"
 
 	"github.com/sirupsen/logrus"
@@ -8,6 +9,10 @@ import (
 	"zmap.io/portal/cyclist"
 )
 
+// ReplayDuplexFromCookie reads a cookie containing an encrypted ephemeral
+// private key, and returns a HandshakeState with the duplex replayed to a state
+// equivalent after the server sent the Server Hello message. The returned
+// duplex has not yet processed the Client Ack.
 func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAddr *net.UDPAddr) (*HandshakeState, error) {
 	out := new(HandshakeState)
 	copy(out.remoteEphemeral[:], clientEphemeral)
@@ -47,7 +52,9 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	return out, nil
 }
 
-func CookieAD(ephemeral *[32]byte, clientAddr *net.UDPAddr) []byte {
+// CookieAD generates byte array that can be used as the associated data for the
+// AEAD encrypted data in the cookie.
+func CookieAD(ephemeral *[DHLen]byte, clientAddr *net.UDPAddr) []byte {
 	// TODO(dadrian): Remove the memory allocation
 	h := sha3.New256()
 	h.Write(ephemeral[:])
@@ -60,6 +67,9 @@ func CookieAD(ephemeral *[32]byte, clientAddr *net.UDPAddr) []byte {
 	return h.Sum(nil)
 }
 
+// EncryptCertificates length-prefixes each certificate byte array and encrypts
+// them using the duplex.
+//
 // TODO(dadrian): Remove memory allocation
 // TODO(dadrian): Don't reveal length
 func EncryptCertificates(duplex *cyclist.Cyclist, leaf, intermediate []byte) ([]byte, error) {
@@ -70,7 +80,7 @@ func EncryptCertificates(duplex *cyclist.Cyclist, leaf, intermediate []byte) ([]
 		return nil, err
 	}
 	x = b[n:]
-	n, err = writeVector(x, intermediate)
+	_, err = writeVector(x, intermediate)
 	if err != nil {
 		return nil, err
 	}
@@ -79,12 +89,16 @@ func EncryptCertificates(duplex *cyclist.Cyclist, leaf, intermediate []byte) ([]
 	return out, nil
 }
 
-// TODO(dadrian): Handle padding
+// EncryptedCertificatesLength returns 4 + len(leaf) + len(intermediate).
 func EncryptedCertificatesLength(leaf, intermediate []byte) int {
+	// TODO(dadrian): Handle padding
 	return 4 + len(leaf) + len(intermediate)
 }
 
-func DecryptCertificates(duplex *cyclist.Cyclist, ciphertext []byte) ([]byte, []byte, error) {
+// DecryptCertificates decrypts a byte array and splits it into two
+// length-prefixed vectors representing the leaft and the intermediate
+// certificate. The certificates are not parsed.
+func DecryptCertificates(duplex *cyclist.Cyclist, ciphertext []byte) (leaf []byte, intermediate []byte, err error) {
 	out := make([]byte, len(ciphertext))
 	duplex.Decrypt(out, ciphertext)
 	x := out
@@ -93,9 +107,13 @@ func DecryptCertificates(duplex *cyclist.Cyclist, ciphertext []byte) ([]byte, []
 		return nil, nil, err
 	}
 	x = x[2+leafLen:]
-	_, intermediate, err := readVector(x)
+	intermediateLen, intermediate, err := readVector(x)
 	if err != nil {
 		return nil, nil, err
+	}
+	bytesRead := leafLen + intermediateLen + 4
+	if bytesRead != len(ciphertext) {
+		return nil, nil, fmt.Errorf("certificate vectors do not add up to ciphertext length (read %d bytes, expected %d)", bytesRead, len(ciphertext))
 	}
 	return leaf, intermediate, nil
 }

@@ -153,9 +153,6 @@ func rollC(state *[25]uint64) {
 // https://eprint.iacr.org/2016/1188.pdf. It is loosely based on the XKCP
 // implementation of Kravatte by the Keccak Team.
 type Kravatte struct {
-	// TODO(dadrian): Some of these probably need to be uint64 arrays, since
-	// Keccak operates on [25]uint64.
-	// TODO(dadrian): Are these all the same size?
 	k  [25]uint64
 	kr [25]uint64
 	x  [25]uint64
@@ -230,7 +227,7 @@ func (kv *Kravatte) compress(message []byte, messageBitLen *int, lastFlag int) i
 		*messageBitLen %= 8
 		if *messageBitLen != 0 {
 			snp.StateAddByte(&state, message[0]|(1<<*messageBitLen), messageByteLen)
-			bytesCompressed += 1
+			bytesCompressed++
 		} else {
 			snp.StateAddByte(&state, 1, messageByteLen)
 		}

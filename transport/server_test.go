@@ -48,7 +48,7 @@ func TestMultipleHandshakes(t *testing.T) {
 	for i := int64(0); i < 3; i++ {
 		go func(i int64) {
 			defer wg.Done()
-			delay := start.Sub(time.Now())
+			delay := time.Until(start)
 			if delay > 0 {
 				time.Sleep(delay)
 			}
@@ -61,7 +61,6 @@ func TestMultipleHandshakes(t *testing.T) {
 			assert.NilError(t, err, "error in client %d", i)
 
 			ss := s.fetchSessionState(c.ss.sessionID)
-			assert.Assert(t, ss != nil)
 			assert.Check(t, cmp.Equal(c.ss.clientToServerKey, ss.clientToServerKey))
 			assert.Check(t, cmp.Equal(c.ss.serverToClientKey, ss.serverToClientKey))
 			assert.Check(t, c.ss.clientToServerKey != zero)

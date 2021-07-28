@@ -24,6 +24,12 @@ type outgoing struct {
 	dst *net.UDPAddr
 }
 
+// Server implements a Hop server capable of multiplexing roaming Hop
+// connections.
+//
+// To run, call Start.
+//
+// TODO(dadrian): Figure out how much this should reflect the Listener API.
 type Server struct {
 	m sync.RWMutex
 
@@ -37,7 +43,6 @@ type Server struct {
 
 	handshakes map[string]*HandshakeState
 	sessions   map[SessionID]*SessionState
-	handles    map[SessionID]*Handle
 
 	pendingConnections chan *Handle
 	outgoing           chan outgoing
@@ -68,12 +73,6 @@ func (s *Server) fetchHandshakeState(remoteAddr *net.UDPAddr) *HandshakeState {
 	defer s.m.RUnlock()
 	key := AddressHashKey(remoteAddr)
 	return s.handshakes[key]
-}
-
-func (s *Server) clearHandshakeState(remoteAddr *net.UDPAddr) {
-	s.m.Lock()
-	defer s.m.Unlock()
-	s.clearHandshakeStateLocked(remoteAddr)
 }
 
 func (s *Server) clearHandshakeStateLocked(remoteAddr *net.UDPAddr) {
@@ -219,7 +218,7 @@ func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 	if len(b) < length {
 		return 0, nil, ErrBufUnderflow
 	}
-	if b[0] != MessageTypeClientAck {
+	if mt := MessageType(b[0]); mt != MessageTypeClientAck {
 		return 0, nil, ErrUnexpectedMessage
 	}
 	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
@@ -273,7 +272,7 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState)
 	}
 	x := b
 	pos := 0
-	x[0] = MessageTypeServerAuth
+	x[0] = byte(MessageTypeServerAuth)
 	x[1] = 0
 	x[2] = byte(encCertLen >> 8)
 	x[3] = byte(encCertLen)
@@ -308,7 +307,7 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState)
 	hs.duplex.Absorb(hs.es)
 	hs.duplex.Squeeze(x[:MacLen])
 	logrus.Debugf("server serverauth mac: %x", x[:MacLen])
-	x = x[MacLen:]
+	// x = x[MacLen:]
 	pos += MacLen
 	return pos, nil
 }
@@ -320,7 +319,8 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		logrus.Debug("server: client auth too short")
 		return 0, nil, "", ErrBufUnderflow
 	}
-	if b[0] != MessageTypeClientAuth {
+
+	if mt := MessageType(b[0]); mt != MessageTypeClientAuth {
 		return 0, nil, "", ErrUnexpectedMessage
 	}
 	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
@@ -397,7 +397,7 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		logrus.Debugf("server: mismatched mac in client auth: expected %x, got %x", hs.macBuf, clientMac)
 		return pos, nil, "", ErrInvalidMessage
 	}
-	x = x[MacLen:]
+	// x = x[MacLen:]
 	pos += MacLen
 	return pos, hs, ag, nil
 }
@@ -529,6 +529,7 @@ func (s *Server) lockHandleAndWriteToSession(ss *SessionState, plaintext []byte)
 	return err
 }
 
+// AcceptTimeout blocks for up to duration until a new connection is available.
 func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 	timer := time.NewTicker(duration)
 	select {
@@ -594,7 +595,7 @@ func NewServer(conn *net.UDPConn, config *ServerConfig) (*Server, error) {
 		handshakes:         make(map[string]*HandshakeState),
 		sessions:           make(map[SessionID]*SessionState),
 		pendingConnections: make(chan *Handle, config.maxPendingConnections()),
-		outgoing:           make(chan outgoing, 0), // TODO(dadrian): Is this the appropriate size?
+		outgoing:           make(chan outgoing), // TODO(dadrian): Is this the appropriate size?
 
 		staticKey:    config.KeyPair,
 		certificate:  cert.Bytes(),

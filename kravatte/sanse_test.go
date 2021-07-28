@@ -1,10 +1,13 @@
 package kravatte
 
 import (
+	"crypto/cipher"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"testing"
 
+	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
 	"zmap.io/portal/snp"
@@ -12,13 +15,18 @@ import (
 
 func runSANSETranscript(t *testing.T, s *sanse, transcript []snp.TranscriptEntry) {
 	var plaintext, ciphertext, ad []byte
-	var tag [KravatteSANSETagSize]byte
+	var tag [TagSize]byte
+	var recv sanse
 	for i, entry := range transcript {
 		t.Logf("test %s, entry %d (%s)", t.Name(), i, entry.Action)
 		switch entry.Action {
 		case "key":
-			s.kravatte = new(Kravatte)
+			s.kravatte = Kravatte{}
+			s.e = 0
 			s.kravatte.RefMaskInitialize(entry.B)
+			recv.kravatte = Kravatte{}
+			recv.e = 0
+			recv.kravatte.RefMaskInitialize(entry.B)
 		case "dumpK":
 			actual := make([]byte, entry.Length)
 			snp.StateExtractBytes(&s.kravatte.k, actual)
@@ -60,8 +68,13 @@ func runSANSETranscript(t *testing.T, s *sanse, transcript []snp.TranscriptEntry
 		case "wrap":
 			ciphertext = make([]byte, len(plaintext))
 			assert.Check(t, cmp.Equal(len(entry.B), len(ciphertext)), "ciphertext length")
-			s.wrap(plaintext, ciphertext, 8*len(plaintext), ad, 8*len(ad), tag[:])
+			ret := s.wrap(plaintext, ciphertext, 8*len(plaintext), ad, 8*len(ad), tag[:])
+			assert.Check(t, cmp.Equal(0, ret))
 			assert.Check(t, cmp.DeepEqual(entry.B, ciphertext))
+			decrypted := make([]byte, len(ciphertext))
+			ret = recv.unwrap(ciphertext, decrypted, 8*len(ciphertext), ad, 8*len(ad), tag[:])
+			assert.Check(t, cmp.Equal(0, ret))
+			assert.Check(t, cmp.DeepEqual(plaintext, decrypted))
 		case "tag":
 			assert.Check(t, cmp.DeepEqual(entry.B, tag[:]), "tag")
 		default:
@@ -85,4 +98,96 @@ func TestAgainstReference(t *testing.T) {
 			runSANSETranscript(t, &s, transcript)
 		})
 	}
+}
+
+type communicationDirection int
+
+const (
+	i2r communicationDirection = 0
+	r2i communicationDirection = 1
+)
+
+type aeadTranscriptEntry struct {
+	plaintext string
+	direction communicationDirection
+}
+
+func mustReadFileToString(path string) string {
+	content, err := ioutil.ReadFile(path)
+	if err != nil {
+		logrus.Panicf("unable to read file %q: %s", path, err)
+	}
+	return string(content)
+}
+
+func allocateForSeal(plaintext string, alias bool) (src, dst []byte) {
+	dst = make([]byte, len(plaintext)+TagSize)
+	if alias {
+		copy(dst, []byte(plaintext))
+		return dst[:len(plaintext)], dst[:0]
+	}
+	return []byte(plaintext), dst[:0]
+}
+
+func allocateForOpen(ciphertext []byte, alias bool) (src, dst []byte) {
+	if alias {
+		return ciphertext, ciphertext[:0]
+	}
+	dst = make([]byte, len(ciphertext)-TagSize)
+	return ciphertext, dst[:0]
+}
+
+func TestAEAD(t *testing.T) {
+	transcript := []aeadTranscriptEntry{
+		{
+			plaintext: "The quick brown fox jumps over the lazy dog",
+			direction: i2r,
+		},
+		{
+			plaintext: "If you will it, dude, it is no dream.",
+			direction: i2r,
+		},
+		{
+			plaintext: mustReadFileToString("testdata/rfc8446.txt"),
+			direction: r2i,
+		},
+		{
+			plaintext: "I miss SSLv2",
+			direction: i2r,
+		},
+	}
+	key := newTestKey(32)
+	initiator := NewSANSE(key)
+	responder := NewSANSE(key)
+	var associatedData [1]byte
+
+	runTranscript := func(alias bool) func(t *testing.T) {
+		return func(t *testing.T) {
+			for i, e := range transcript {
+				t.Logf("entry %d (direction %d)", i, e.direction)
+				associatedData[0] = byte(e.direction)
+				var s, r cipher.AEAD
+				switch e.direction {
+				case i2r:
+					s = initiator
+					r = responder
+				case r2i:
+					s = responder
+					r = initiator
+				default:
+					t.Fatalf("unknown direction %d", e.direction)
+				}
+				plaintext, ciphertext := allocateForSeal(e.plaintext, alias)
+				ciphertext = s.Seal(ciphertext, nil, plaintext, associatedData[:])
+
+				var err error
+				ciphertext, decrypted := allocateForOpen(ciphertext, alias)
+				decrypted, err = r.Open(decrypted, nil, ciphertext, associatedData[:])
+				assert.Check(t, err, "error decrypting on entry index %d", i)
+				assert.Check(t, cmp.DeepEqual([]byte(e.plaintext), decrypted))
+			}
+		}
+	}
+	t.Run("no alias", runTranscript(false))
+	t.Run("with alias", runTranscript(true))
 }

@@ -19,6 +19,7 @@ const MAX_FRAG_TRANS_PER_RTO = 10
 type Sender struct {
 	// The acknowledgement number sent from the other end of the connection.
 	ackNo   uint64
+	finSent bool
 	closed  bool
 	frameNo uint32
 	// The buffer of unacknowledged channel frames that will be retransmitted if necessary.
@@ -99,7 +100,7 @@ func (s *Sender) recvAck(ackNo uint32) error {
 }
 
 func (s *Sender) retransmit() {
-	for { // TODO - decide how to shutdown this endless loop with an enum state
+	for !s.isClosed() { // TODO - decide how to shutdown this endless loop with an enum state
 		timer := time.NewTimer(s.RTO)
 		<-timer.C
 		s.l.Lock()
@@ -121,15 +122,26 @@ func (s *Sender) retransmit() {
 		s.l.Unlock()
 	}
 }
-
-/* */
-func (s *Sender) close() error {
+func (s *Sender) isClosed() bool {
 	s.l.Lock()
 	defer s.l.Unlock()
-	if s.closed {
+	return s.closed
+}
+
+func (s *Sender) close() {
+	s.l.Lock()
+	defer s.l.Unlock()
+	s.closed = true
+}
+
+/* */
+func (s *Sender) sendFin() error {
+	s.l.Lock()
+	defer s.l.Unlock()
+	if s.closed || s.finSent {
 		return errors.New("channel is already closed")
 	}
-	s.closed = true
+	s.finSent = true
 
 	pkt := Frame{
 		dataLength: 0,

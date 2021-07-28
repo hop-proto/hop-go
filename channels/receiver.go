@@ -53,7 +53,11 @@ func (r *Receiver) processIntoBuffer() {
 			r.windowStart += 1
 			r.ackNo += 1
 			r.closedCond.L.Lock()
+<<<<<<< HEAD
 			//logrus.Info("RECIEVING FIN PACKET")
+=======
+			logrus.Debug("RECIEVING FIN PACKET")
+>>>>>>> main
 			r.closed = true
 			r.closedCond.Signal()
 			r.closedCond.L.Unlock()
@@ -121,7 +125,11 @@ func (r *Receiver) receive(p *Frame) error {
 	windowEnd := r.windowStart + uint64(uint32(r.windowSize))
 
 	frameNo := r.unwrapFrameNo(p.frameNo)
+<<<<<<< HEAD
 	//logrus.Info("receive frame frameNo: ", frameNo, " ackNo: ", p.ackNo, " data: ", string(p.data), " FIN? ", p.flags.FIN, " recv ack no? ", r.ackNo)
+=======
+	logrus.Debug("receive frame frameNo: ", frameNo, " ackNo: ", p.ackNo, " data: ", string(p.data), " FIN? ", p.flags.FIN, " recv ack no? ", r.ackNo)
+>>>>>>> main
 	if !frameInBounds(windowStart, windowEnd, frameNo) {
 		logrus.Debug("received dataframe out of receive window bounds")
 		return errors.New("received dataframe out of receive window bounds")
