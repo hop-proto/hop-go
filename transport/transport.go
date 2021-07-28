@@ -29,12 +29,6 @@ type SessionState struct {
 	rawWrite bytes.Buffer
 }
 
-var emptyMac []byte
-
-func init() {
-	emptyMac = make([]byte, MacLen)
-}
-
 // PlaintextLen returns the expected length of plaintext given the length of a
 // transport message. It returns a negative number for transport messages of
 // insufficient length to contain any plaintext.
@@ -100,7 +94,7 @@ func (ss *SessionState) writePacket(conn *net.UDPConn, in []byte, key *[KeyLen]b
 		ss.rawWrite.Grow(length)
 	}
 
-	ss.rawWrite.WriteByte(MessageTypeTransport)
+	ss.rawWrite.WriteByte(byte(MessageTypeTransport))
 	ss.rawWrite.WriteByte(0)
 	ss.rawWrite.WriteByte(0)
 	ss.rawWrite.WriteByte(0)
@@ -158,7 +152,7 @@ func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (in
 
 	// Header
 	b := pkt
-	if b[0] != MessageTypeTransport {
+	if mt := MessageType(b[0]); mt != MessageTypeTransport {
 		return 0, ErrUnexpectedMessage
 	}
 	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
@@ -198,8 +192,8 @@ func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (in
 	if len(out) != plaintextLen {
 		panic("wtf mate")
 	}
-	b = b[plaintextLen:]
-	b = b[MacLen:] // Mac checked as part of Open
+	// b = b[plaintextLen:]
+	// b = b[MacLen:] // Mac checked as part of Open
 
 	return plaintextLen, nil
 }

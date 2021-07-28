@@ -24,8 +24,8 @@ func TestClientServerCompatibilityHandshake(t *testing.T) {
 	err = c.Handshake()
 	assert.Check(t, err)
 	time.Sleep(time.Second)
-	ss := s.sessions[c.ss.sessionID]
-	assert.Assert(t, ss != nil)
+	ss, ok := s.sessions[c.ss.sessionID]
+	assert.Assert(t, ok)
 	assert.DeepEqual(t, c.ss.sessionID, ss.sessionID)
 	var zero [KeyLen]byte
 	assert.Check(t, cmp.Equal(c.ss.clientToServerKey, ss.clientToServerKey))

@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -102,9 +103,12 @@ func (c *Client) clientHandshakeLocked() error {
 	if n < 4 {
 		return ErrInvalidMessage
 	}
-	n, err = readServerHello(c.hs, buf)
+	shn, err := readServerHello(c.hs, buf)
 	if err != nil {
 		return err
+	}
+	if shn != n {
+		return fmt.Errorf("server hello too short. recevied %d bytes, SH only %d", n, shn)
 	}
 
 	c.hs.RekeyFromSqueeze()

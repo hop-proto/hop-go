@@ -1,10 +1,12 @@
+// Package snp contains functions for manipulating a 200-byte state used for
+// permutations. It stores the state as an [25]uint64.
 package snp
 
-// TODO(dadrian): Make this file only build on little-endian systems
+// TODO(dadrian): Figure out what part of this is endian-dependent.
 
 // MinInt returns a if it is smaller than b. Otherwise, it returns b.
-// TODO(dadrian): Enforce that this gets inlined?
 func MinInt(a, b int) int {
+	// TODO(dadrian): #inline
 	if a < b {
 		return a
 	}
@@ -13,6 +15,7 @@ func MinInt(a, b int) int {
 
 // StateAddByte adds b to state at the given offset.
 func StateAddByte(state *[25]uint64, b byte, offset int) {
+	// TODO(dadrian): #inline
 	lane := offset / 8
 	offsetInLane := offset % 8
 	shift := 8 * offsetInLane
@@ -48,6 +51,7 @@ func StateAddBytes(state *[25]uint64, b []byte) {
 
 // StateAddState adds b to the input state, in place.
 func StateAddState(state *[25]uint64, b *[25]uint64) {
+	// TODO(dadrian): #inline
 	for i := 0; i < 25; i++ {
 		state[i] ^= b[i]
 	}

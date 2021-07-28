@@ -9,7 +9,7 @@ import (
 )
 
 // Handle implements net.Conn and MsgConn for connections accepted by a Server.
-type Handle struct {
+type Handle struct { // nolint:maligned // unclear if 120-byte struct is better than 128
 
 	// TODO(dadrian): Not all of these are used, but also not all of the
 	// functions are implemented yet. Remove unused variables when the
@@ -39,18 +39,6 @@ var _ MsgWriter = &Handle{}
 var _ MsgConn = &Handle{}
 
 var _ net.Conn = &Handle{}
-
-func (c *Handle) lockUser() {
-	c.m.Lock()
-	c.readLock.Lock()
-	c.writeLock.Lock()
-}
-
-func (c *Handle) unlockUser() {
-	c.writeLock.Unlock()
-	c.readLock.Unlock()
-	c.m.Unlock()
-}
 
 // ReadMsg implements the MsgReader interface. If b is too short to hold the
 // message, it returns ErrBufOverflow.
