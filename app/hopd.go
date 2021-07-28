@@ -225,15 +225,15 @@ func serve(args []string) {
 		log.Fatal("S: UDS LISTEN ERROR:", err)
 	}
 	//TODO: Make thread safe?
-	principals := make(map[int32]*channels.Muxer) //PID -> session muxer
+	principals := make(map[int32]*channels.Muxer) //PID -> principal hop session
 	agToMux := make(map[string]*channels.Muxer)   //AuthGrant -> session muxer (added by server when it issues an authgrant)
-	//muxers := make(map[string]*channels.Muxer)  //sessionId -> session muxer
+
 	go authGrantServer(l, &principals)
 
 	//*****ACCEPT CONNS AND START SESSIONS*****
 	for {
 		logrus.Infof("S: SERVER LISTENING ON %v", addr)
-		serverConn, err := server.AcceptTimeout(5 * time.Minute) //won't be a minute in reality
+		serverConn, err := server.AcceptTimeout(30 * time.Minute) //won't be a minute in reality
 		//From serverConn (handle on connection) get authgrant
 		if err != nil {
 			logrus.Fatalf("S: SERVER TIMEOUT: %v", err)

@@ -58,11 +58,19 @@ func Principal(agc *channels.Reliable, m *channels.Muxer) {
 	if err != nil {
 		logrus.Fatalf("ERROR READING INTENT REQUEST: %v", err)
 	}
+
 	logrus.Info("C: PRINCIPAL REC: INTENT_REQUEST")
 	req := FromIntentRequestBytes(intent[TYPE_LEN:])
 	req.Display()
-	fmt.Println("Pretending user said yes...")
+	//ok := dialog.Message("%s", "Do you want to continue?").Title("Are you sure?").YesNo()
 	resp := "yes"
+
+	// buf := make([]byte, 1)
+	// r.Read(buf)
+	// if string(buf) == "y" {
+	// 	fmt.Println("user said yes...")
+	// 	resp = "yes"
+	// }
 	//var resp string
 	//fmt.Scanln(&resp) //TODO:Fix and make sure this is safe/sanitize input/make this a popup instead.
 	if resp == "yes" {

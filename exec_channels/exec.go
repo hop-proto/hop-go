@@ -54,7 +54,7 @@ func Serve(ch *channels.Reliable, f *os.File) {
 }
 
 //Sends cmd to server, makes terminal raw, copies ch -> stdout and stdin -> ch
-func Client(ch *channels.Reliable, cmd []string, w *sync.WaitGroup) {
+func Client(ch *channels.Reliable, cmd []string, w *sync.WaitGroup, r io.Reader) {
 	defer w.Done()
 	ch.Write(NewExecInitMsg(strings.Join(cmd, " ")).ToBytes())
 	oldState, e := term.MakeRaw(int(os.Stdin.Fd()))
@@ -74,4 +74,5 @@ func Client(ch *channels.Reliable, cmd []string, w *sync.WaitGroup) {
 	// }()
 	//io.Copy(ch, r)
 	io.Copy(ch, os.Stdin)
+	//io.Copy(ch, r)
 }

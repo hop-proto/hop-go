@@ -20,7 +20,7 @@ import (
 //   3. Buffering
 //   4. Concurrency controls (locks)
 
-const RTO = time.Millisecond * 500
+const RTO = time.Millisecond * 100
 
 const WINDOW_SIZE = 128
 

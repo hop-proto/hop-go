@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"os"
 	"strings"
 	"sync"
 
@@ -29,6 +31,12 @@ func startClient(args []string) {
 	config.KeyPair = new(keys.X25519KeyPair)
 	config.KeyPair.Generate()
 	logrus.Infof("Client generated(39): %v", config.KeyPair.Public.String())
+	reader, writer := io.Pipe()
+	_, writer2 := io.Pipe()
+	w := io.MultiWriter(writer, writer2)
+	go func() {
+		io.Copy(w, os.Stdin)
+	}()
 
 	//Check if this is a principal client process or one that needs to get an AG
 	//******GET AUTHORIZATION SOURCE******
@@ -67,7 +75,7 @@ func startClient(args []string) {
 	ch, _ := mc.CreateChannel(channels.EXEC_CHANNEL)
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	go exec_channels.Client(ch, cmd, &wg)
+	go exec_channels.Client(ch, cmd, &wg, reader)
 
 	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****
 	go func() {
