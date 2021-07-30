@@ -357,8 +357,7 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		logrus.Debugf("server: mismatched tag in client auth: expected %x, got %x", hs.macBuf, clientTag)
 		return pos, nil, "", ErrInvalidMessage
 	}
-	//if hs.clientStatic[:] in authorized clients continue, otherwise abandon all state
-	//TODO: Save the authorization grant in the handshake/session/handle state somehow???
+	//if hs.clientStatic[:] in authorized keys continue, otherwise abandon all state
 	f, e := os.Open("../app/authorized_keys")
 	if e != nil {
 		logrus.Fatalf("error opening authorized keys file: ", e)
@@ -368,9 +367,12 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	authorized := false
 	k := keys.PublicKey(hs.clientStatic)
 	for scanner.Scan() {
-		if strings.Contains(scanner.Text(), k.String()) {
+		line := strings.Split(scanner.Text(), " ")
+		if line[0] == k.String() {
 			authorized = true
-			ag = scanner.Text()
+			if len(line) > 1 {
+				ag = scanner.Text()
+			}
 			break
 		}
 	}

@@ -6,6 +6,7 @@ require (
 	github.com/creack/pty v1.1.11
 	github.com/google/go-cmp v0.5.4 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
+	github.com/micmonay/keybd_event v1.1.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sbinet/pstree v0.3.0
 	github.com/sirupsen/logrus v1.7.0

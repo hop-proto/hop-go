@@ -218,7 +218,7 @@ func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
 		if e != nil {
 			return count, e
 		}
-		_, e = w.Write(b)
+		w.Write(b)
 		// if e != nil {
 		// 	return count, e
 		// }

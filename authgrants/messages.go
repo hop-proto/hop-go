@@ -1,6 +1,7 @@
 package authgrants
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"net"
@@ -204,14 +205,22 @@ func (a *AgcMessage) ToBytes() []byte {
 	return append([]byte{a.msgType}, a.d.toBytes()...)
 }
 
+func trimNullBytes(b []byte) string {
+	i := bytes.Index(b, []byte{0})
+	if i != -1 {
+		return string(b[:i])
+	}
+	return string(b)
+}
+
 //fromBytes()
 func FromIntentRequestBytes(b []byte) *IntentRequest {
 	r := IntentRequest{}
 	copy(r.sha3[:], b[SHA3_OFFSET:CUSER_OFFSET])
-	r.clientUsername = string(b[CUSER_OFFSET:CSNI_OFFSET])
-	r.clientSNI = string(b[CSNI_OFFSET:SUSER_OFFSET])
-	r.serverUsername = string(b[SUSER_OFFSET:SSNI_OFFSET])
-	r.serverSNI = string(b[SSNI_OFFSET:PORT_OFFSET])
+	r.clientUsername = trimNullBytes(b[CUSER_OFFSET:CSNI_OFFSET])
+	r.clientSNI = trimNullBytes(b[CSNI_OFFSET:SUSER_OFFSET])
+	r.serverUsername = trimNullBytes(b[SUSER_OFFSET:SSNI_OFFSET])
+	r.serverSNI = trimNullBytes(b[SSNI_OFFSET:PORT_OFFSET])
 	r.port = binary.BigEndian.Uint16(b[PORT_OFFSET:CHTYPE_OFFSET])
 	r.channelType = b[CHTYPE_OFFSET]
 	r.action = strings.Split(string(b[ACT_OFFSET:]), " ")
@@ -221,10 +230,10 @@ func FromIntentRequestBytes(b []byte) *IntentRequest {
 func FromIntentCommunicationBytes(b []byte) *IntentCommunication {
 	r := IntentCommunication{}
 	copy(r.sha3[:], b[SHA3_OFFSET:CUSER_OFFSET])
-	r.clientUsername = string(b[CUSER_OFFSET:CSNI_OFFSET])
-	r.clientSNI = string(b[CSNI_OFFSET:SUSER_OFFSET])
-	r.serverUsername = string(b[SUSER_OFFSET:SSNI_OFFSET])
-	r.serverSNI = string(b[SSNI_OFFSET:PORT_OFFSET])
+	r.clientUsername = trimNullBytes(b[CUSER_OFFSET:CSNI_OFFSET])
+	r.clientSNI = trimNullBytes(b[CSNI_OFFSET:SUSER_OFFSET])
+	r.serverUsername = trimNullBytes(b[SUSER_OFFSET:SSNI_OFFSET])
+	r.serverSNI = trimNullBytes(b[SSNI_OFFSET:PORT_OFFSET])
 	r.port = binary.BigEndian.Uint16(b[PORT_OFFSET:CHTYPE_OFFSET])
 	r.channelType = b[CHTYPE_OFFSET]
 	r.action = strings.Split(string(b[ACT_OFFSET:]), " ")
@@ -278,6 +287,7 @@ func ReadIntentRequest(c net.Conn) ([]byte, error) {
 	return nil, errors.New("bad msg type")
 }
 
+//Gets Intent Communication bytes
 func ReadIntentCommunication(c net.Conn) ([]byte, error) {
 	msgType := make([]byte, 1)
 	c.Read(msgType)

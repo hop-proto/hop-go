@@ -7,10 +7,12 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/micmonay/keybd_event"
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/channels"
 	"zmap.io/portal/codex"
@@ -27,7 +29,6 @@ func GetAuthGrant(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string
 	if addr == "127.0.0.1:9999" {
 		sock = "/tmp/auth2.sock"
 	}
-
 	c, err := net.Dial("unix", sock) //TODO: address of UDS
 	if err != nil {
 		logrus.Fatal(err)
@@ -73,7 +74,35 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, exec_ch *codex.ExecCha
 
 	exec_ch.ClosePipe()
 
+	stats, _ := os.Stat("/dev/uinput")
+	fmt.Println("stats: ", stats.Mode())
+
+	// e := os.Chmod("/dev/uinput", 0666)
+	// if e != nil {
+	// 	fmt.Println("unable to modify perm: ", e)
+	// }
+	// stats, _ = os.Stat("/dev/uinput")
+	// fmt.Println("stats", stats.Mode())
+	kb, err := keybd_event.NewKeyBonding()
+	if err != nil {
+		panic(err)
+	}
+
+	// For linux, it is very important to wait 2 seconds
+	if runtime.GOOS == "linux" {
+		time.Sleep(2 * time.Second)
+	}
+
+	// Select keys to be pressed
+	kb.SetKeys(keybd_event.VK_ENTER)
+
+	fmt.Println("")
 	req.Display()
+	// Press the selected keys
+	err = kb.Launching()
+	if err != nil {
+		panic(err)
+	}
 	var resp string
 	fmt.Scanln(&resp) //TODO:Fix and make sure this is safe/sanitize input/make this a popup instead.
 
@@ -165,12 +194,9 @@ func Server(agc *channels.Reliable, muxer *channels.Muxer, agToMux map[string]*c
 	if e != nil {
 		logrus.Fatalf("error reading intent communication")
 	}
-	//CHECK POLICY
-	//SET DEADLINE
-	//STORE AG INFORMATION
 	intent := FromIntentCommunicationBytes(msg[TYPE_LEN:])
-	logrus.Infof("Pretending s2 approved intent request")
-	t := time.Time(time.Now().Add(time.Duration(time.Hour))) //TODO: This should be set by server 2
+	logrus.Infof("Pretending s2 approved intent request")    //TODO: check policy or something?
+	t := time.Time(time.Now().Add(time.Duration(time.Hour))) //TODO: What should this actually be?
 	f, err := os.OpenFile("../app/authorized_keys", os.O_APPEND|os.O_WRONLY, os.ModeAppend)
 	if err != nil {
 		logrus.Fatalf("error opening authorized keys file: ", err)
@@ -178,14 +204,15 @@ func Server(agc *channels.Reliable, muxer *channels.Muxer, agToMux map[string]*c
 	defer f.Close()
 	k := keys.PublicKey(intent.sha3)
 	logrus.Infof("Added: %v", k.String())
-	authgrant := fmt.Sprintf("%v %v %v %v %v", k.String(), 0, t.String(), "user", strings.Join(intent.action, " "))
+	//format: <static key> <deadline> <username> <action>
+	authgrant := fmt.Sprintf("%v %v %v %v", k.String(), t.Unix(), strings.TrimSpace(intent.serverUsername), strings.Join(intent.action, " "))
 	_, e = f.WriteString(authgrant)
 	f.WriteString("\n")
 	if e != nil {
 		logrus.Infof("Issue writing to authorized keys file: ", e)
 	}
-	agToMux[authgrant] = muxer
-	logrus.Infof("Added: %v with Value: %v", authgrant, agToMux[authgrant])
+	agToMux[k.String()] = muxer
+	logrus.Infof("Added: %v with Value: %v", k.String(), agToMux[k.String()])
 
 	agc.Write(NewIntentConfirmation(t).ToBytes())
 	agc.Close()

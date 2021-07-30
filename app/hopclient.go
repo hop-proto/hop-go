@@ -24,10 +24,6 @@ func client(args []string) {
 	addr := s[1]
 	cmd := []string{"bash"} //default action for principal is to open an interactive shell
 	config := transport.ClientConfig{}
-	//TODO: get keypair from file if principal
-	config.KeyPair = new(keys.X25519KeyPair)
-	config.KeyPair.Generate()
-	logrus.Infof("Client generated(39): %v", config.KeyPair.Public.String())
 
 	//Check if this is a principal client process or one that needs to get an AG
 	//******GET AUTHORIZATION SOURCE******
@@ -35,8 +31,21 @@ func client(args []string) {
 	if args[3] == "-k" {
 		principal = true
 		logrus.Infof("C: Using key-file at %v for auth.", args[4]) //TODO: actually do this somehow???
+		var e error
+		path := args[4]
+		if path == "path" {
+			logrus.Info("C: using default key")
+			path = "keys/default"
+		}
+		config.KeyPair, e = keys.ReadDHKeyFromPEMFile(path)
+		if e != nil {
+			logrus.Fatalf("C: Error using key at path %v. Error: %v", path, e)
+		}
 	} else if args[3] == "-a" {
 		principal = false
+		config.KeyPair = new(keys.X25519KeyPair)
+		config.KeyPair.Generate()
+		logrus.Infof("Client generated: %v", config.KeyPair.Public.String())
 		logrus.Infof("C: Initiating AGC Protocol.")
 		cmd = args[4:]                                                          //if using authorization grant then perform the action specified in cmd line
 		t, e := authgrants.GetAuthGrant(config.KeyPair.Public, user, addr, cmd) //TODO: potentially store the deadline somewhere?
