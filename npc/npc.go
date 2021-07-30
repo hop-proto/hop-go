@@ -36,6 +36,7 @@ func FromBytes(b []byte) *npcInitMsg {
 	}
 }
 
+//Starts UDP Conn with remote addr and proxies traffic from ch -> udp and upd -> ch
 func Server(npch *channels.Reliable) {
 	b := make([]byte, 4)
 	npch.Read(b)

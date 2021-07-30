@@ -55,6 +55,7 @@ func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
 	return false
 }
 
+//verifies that client is a descendent of a process started by the principal and returns its ancestor process PID if found
 func checkCredentials(c net.Conn, principals *map[int32]*channels.Muxer) (int32, error) {
 	creds, err := readCreds(c)
 	if err != nil {
@@ -121,6 +122,7 @@ func readCreds(c net.Conn) (*unix.Ucred, error) {
 	return cred, nil
 }
 
+//handles connections to the hop server UDS to allow hop client processes to get authorization grants from their principal
 func authGrantServer(l net.Listener, principals *map[int32]*channels.Muxer) {
 	defer l.Close()
 	logrus.Info("S: STARTED LISTENING AT UDS: ", l.Addr().String())
@@ -136,6 +138,7 @@ func authGrantServer(l net.Listener, principals *map[int32]*channels.Muxer) {
 }
 
 //TODO: check threadsafety
+//Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
 func handleAuthGrantRequest(c net.Conn, principals *map[int32]*channels.Muxer) {
 	logrus.Info("S: ACCEPTED NEW UDS CONNECTION")
 	defer c.Close()
@@ -161,7 +164,7 @@ func handleAuthGrantRequest(c net.Conn, principals *map[int32]*channels.Muxer) {
 		logrus.Fatalf("S: ERROR WRITING TO CHANNEL: %v", err)
 	}
 	logrus.Infof("S: WROTE INTENT_REQUEST TO AGC")
-	response, err := authgrants.GetResponse(agc)
+	response, _, err := authgrants.GetResponse(agc)
 	if err != nil {
 		logrus.Fatalf("S: ERROR GETTING RESPONSE: %v, %v", err, response)
 	}
@@ -186,6 +189,7 @@ func setListenerOptions(proto, addr string, c syscall.RawConn) error {
 	})
 }
 
+//listen for incoming hop connection requests and start corresponding authGrantServer on a Unix Domain socket
 func serve(args []string) {
 	logrus.SetLevel(logrus.InfoLevel)
 	//TEMPORARY: Should take address from argument and socket should be abstract/same place or dependent on session?
@@ -213,7 +217,7 @@ func serve(args []string) {
 	go server.Serve()
 
 	//*****AUTHGRANT SERVER ON UNIX DOMAIN SOCKET SET UP*****
-	//Start IPC socket TODO: need 1 for every session? MAKE ABSTRACT?
+	//Start UDS socket
 	//make sure the socket does not already exist.
 	if err := os.RemoveAll(sockAddr); err != nil {
 		log.Fatal(err)
@@ -224,26 +228,27 @@ func serve(args []string) {
 	if err != nil {
 		log.Fatal("S: UDS LISTEN ERROR:", err)
 	}
+
 	//TODO: Make thread safe?
+	//principal hop sessions are represented by the appropriate channel muxer for that session
 	principals := make(map[int32]*channels.Muxer) //PID -> principal hop session
-	agToMux := make(map[string]*channels.Muxer)   //AuthGrant -> session muxer (added by server when it issues an authgrant)
+	agToMux := make(map[string]*channels.Muxer)   //AuthGrant -> principal hop session (added by server when it issues an authgrant)
 
 	go authGrantServer(l, &principals)
 
 	//*****ACCEPT CONNS AND START SESSIONS*****
 	for {
 		logrus.Infof("S: SERVER LISTENING ON %v", addr)
-		serverConn, err := server.AcceptTimeout(30 * time.Minute) //won't be a minute in reality
-		//From serverConn (handle on connection) get authgrant
+		serverConn, err := server.AcceptTimeout(30 * time.Minute)
 		if err != nil {
 			logrus.Fatalf("S: SERVER TIMEOUT: %v", err)
 		}
-		logrus.Infof("S: ACCEPTED NEW CONNECTION with authgrant: %v", serverConn.Authgrant)
-		logrus.Infof("agToMux[authgrant] -> %v", agToMux[serverConn.Authgrant])
+		logrus.Debugf("S: ACCEPTED NEW CONNECTION with authgrant: %v", serverConn.Authgrant)
 		go session(serverConn, principals, l, agToMux)
 	}
 }
 
+//Starts a session muxer and manages incoming channel requests
 func session(serverConn *transport.Handle, principals map[int32]*channels.Muxer, l net.Listener, agToMux map[string]*channels.Muxer) {
 	ms := channels.NewMuxer(serverConn, serverConn)
 	go ms.Start()
@@ -256,12 +261,10 @@ func session(serverConn *transport.Handle, principals map[int32]*channels.Muxer,
 			logrus.Fatalf("S: ERROR ACCEPTING CHANNEL: %v", err)
 		}
 		logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", serverChan.Type())
-		if serverChan.Type() == channels.EXEC_CHANNEL {
 
-			l := make([]byte, 1)
-			serverChan.Read(l)
-			cmd := make([]byte, int(l[0]))
-			serverChan.Read(cmd)
+		switch serverChan.Type() {
+		case channels.EXEC_CHANNEL:
+			cmd, _ := codex.GetCmd(serverChan)
 			logrus.Infof("Executing: %v", string(cmd))
 
 			args := strings.Split(string(cmd), " ")
@@ -272,21 +275,26 @@ func session(serverConn *transport.Handle, principals map[int32]*channels.Muxer,
 			//If session is using an authorization grant then the muxer in this goroutine
 			//should be replaced by the muxer that the server has with the principal that authorized the grant
 			//use the muxers map above (authgrant --> muxer)
-			if mux, ok := agToMux[serverConn.Authgrant]; ok {
+			//TODO: If principal session closed probably should be removed from agToMux map, how to tell?
+			if mux, ok := agToMux[serverConn.Authgrant]; ok { //used authgrant and principal session still available
 				principals[int32(c.Process.Pid)] = mux
 				logrus.Infof("S: using muxer from auth grant: %v", serverConn.Authgrant)
-			} else {
+			} else if serverConn.Authgrant == "" { //direct conn with principal
 				logrus.Infof("S: using standard muxer")
 				principals[int32(c.Process.Pid)] = ms
+			} else { //used authgrant, but no principal session available (won't be able to hop further using auth grants)
+				logrus.Info("S: no principal session available")
 			}
 			if err != nil {
 				logrus.Fatalf("S: error starting pty %v", err)
 			}
-			go codex.Serve(serverChan, f)
-		} else if serverChan.Type() == channels.NPC_CHANNEL {
-			go npc.Server(serverChan)
-		} else if serverChan.Type() == channels.AGC_CHANNEL {
+			go codex.Server(serverChan, f)
+		case channels.AGC_CHANNEL:
 			go authgrants.Server(serverChan, ms, agToMux)
+		case channels.NPC_CHANNEL:
+			go npc.Server(serverChan)
+		default:
+			serverChan.Close()
 		}
 	}
 }

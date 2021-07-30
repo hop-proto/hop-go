@@ -1,8 +1,8 @@
 package main
 
 import (
-	"errors"
 	"strings"
+	"sync"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/authgrants"
@@ -12,13 +12,10 @@ import (
 	"zmap.io/portal/transport"
 )
 
-var errAg = errors.New("hello")
-
-func startClient(args []string) {
-	//logrus.SetLevel(logrus.DebugLevel)
+//parses cmd line arguments and establishes hop session with remote hop server
+func client(args []string) {
 	logrus.SetLevel(logrus.InfoLevel)
-	principal := true
-	//******PROCESS ARGUMENTS******
+	//******PROCESS CMD LINE ARGUMENTS******
 	if len(args) < 5 {
 		logrus.Fatal("C: Invalid arguments. Useage: hop user@host:port -k <pathtokey> or hop user@host:port -a <action>.")
 	}
@@ -34,19 +31,19 @@ func startClient(args []string) {
 
 	//Check if this is a principal client process or one that needs to get an AG
 	//******GET AUTHORIZATION SOURCE******
+	var principal bool
 	if args[3] == "-k" {
-		logrus.Infof("C: Using key-file at %v for auth.", args[4])
-		//TODO: actually do this somehow???
+		principal = true
+		logrus.Infof("C: Using key-file at %v for auth.", args[4]) //TODO: actually do this somehow???
 	} else if args[3] == "-a" {
 		principal = false
 		logrus.Infof("C: Initiating AGC Protocol.")
-		cmd = args[4:] //if using authorization grant then perform the action specified in cmd line
-		t, e := authgrants.GetAuthGrant(config.KeyPair.Public, user, addr, cmd)
+		cmd = args[4:]                                                          //if using authorization grant then perform the action specified in cmd line
+		t, e := authgrants.GetAuthGrant(config.KeyPair.Public, user, addr, cmd) //TODO: potentially store the deadline somewhere?
 		if e != nil {
 			logrus.Fatalf("C: %v", e)
 		}
 		logrus.Infof("C: Principal approved request. Deadline: %v", t)
-		//TODO: potentially store the deadline somewhere?
 	}
 
 	//******ESTABLISH HOP SESSION******
@@ -67,7 +64,9 @@ func startClient(args []string) {
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	logrus.Infof("Performing action: %v", cmd)
 	ch, _ := mc.CreateChannel(channels.EXEC_CHANNEL)
-	exec_ch := codex.NewExecChan(cmd, ch)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	exec_ch := codex.NewExecChan(cmd, ch, &wg)
 
 	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****
 	go func() {
@@ -90,7 +89,6 @@ func startClient(args []string) {
 			}
 		}
 	}()
-	for {
-	}
+	wg.Wait()
 	logrus.Info("Done waiting")
 }

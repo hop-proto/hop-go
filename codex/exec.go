@@ -5,8 +5,10 @@ package codex
 
 import (
 	"context"
+	"encoding/binary"
 	"io"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -23,71 +25,81 @@ import (
 type ExecChan struct {
 	ch *channels.Reliable
 
-	w *io.PipeWriter
-	r *io.PipeReader
-
 	cancel context.CancelFunc
 	state  *term.State
 	closed bool
 }
 
-func NewExecChan(cmd []string, ch *channels.Reliable) *ExecChan {
+//Sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
+//Stores state in an ExecChan struct so stdin can be manipulated during authgrant process
+func NewExecChan(cmd []string, ch *channels.Reliable, wg *sync.WaitGroup) *ExecChan {
 	oldState, e := term.MakeRaw(int(os.Stdin.Fd()))
 	// defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
 	if e != nil {
 		logrus.Fatalf("C: error with terminal state: %v", e)
 	}
-	ch.Write(NewExecInitMsg(strings.Join(cmd, " ")).ToBytes())
+	ch.Write(NewexecInitMsg(strings.Join(cmd, " ")).ToBytes())
 
 	go func() {
+		defer wg.Done()
 		io.Copy(os.Stdout, ch) //read bytes from ch to os.Stdout
 		logrus.Info("Stopped io.Copy(os.Stdout, ch)")
 	}()
 
-	r, w := io.Pipe()
 	ctx, cancel := context.WithCancel(context.Background())
-	cr := ctxio.NewReader(ctx, os.Stdin)
+	in := ctxio.NewReader(ctx, os.Stdin)
+	go io.Copy(ch, in)
 
-	go func() {
-		io.Copy(w, cr)
-		logrus.Info("Stopped io.Copy(w, os.Stdin)")
-	}()
-
-	go func() {
-		io.Copy(ch, r)
-		logrus.Info("Stopped io.Copy(ch, r)")
-	}()
 	return &ExecChan{
 		ch:     ch,
-		w:      w,
-		r:      r,
 		cancel: cancel,
 		state:  oldState,
 		closed: false,
 	}
 }
 
-type ExecInitMsg struct {
-	msgLen byte
-	msg    string
+type execInitMsg struct {
+	msgLen uint32
+	cmd    string
 }
 
-func NewExecInitMsg(c string) *ExecInitMsg {
-	return &ExecInitMsg{
-		msgLen: byte(len(c)),
-		msg:    c,
+func NewexecInitMsg(c string) *execInitMsg {
+	return &execInitMsg{
+		msgLen: uint32(len(c)),
+		cmd:    c,
 	}
 }
 
-func (m *ExecInitMsg) ToBytes() []byte {
-	return append([]byte{m.msgLen}, []byte(m.msg)...)
+func (m *execInitMsg) ToBytes() []byte {
+	r := make([]byte, 4)
+	binary.BigEndian.PutUint32(r, m.msgLen)
+	return append(r, []byte(m.cmd)...)
+}
+
+//Parses raw bytes (not including length) of an execInitMsg
+func FromBytes(b []byte) *execInitMsg {
+	return &execInitMsg{
+		msgLen: uint32(len(b)),
+		cmd:    string(b),
+	}
+}
+
+//Reads execInitMsg from an EXEC_CHANNEL and returns the cmd to run
+func GetCmd(c net.Conn) (string, error) {
+	l := make([]byte, 4)
+	c.Read(l)
+	buf := make([]byte, binary.BigEndian.Uint32(l))
+	c.Read(buf)
+	msg := FromBytes(buf)
+	return msg.cmd, nil
 }
 
 //deals with pty size, copies ch -> pty and pty -> ch
-func Serve(ch *channels.Reliable, f *os.File) {
+func Server(ch *channels.Reliable, f *os.File) {
 	defer ch.Close()
 	defer func() { _ = f.Close() }() // Best effort.
 	// Handle pty size.
+	//TODO: Check that this is working properly
 	ch2 := make(chan os.Signal, 1)
 	signal.Notify(ch2, syscall.SIGWINCH)
 	go func() {
@@ -107,56 +119,32 @@ func Serve(ch *channels.Reliable, f *os.File) {
 	logrus.Info("io.Copy(ch, f) stopped with error: ", e)
 }
 
-//Sends cmd to server, makes terminal raw, copies ch -> stdout
-func Client(ch *channels.Reliable, cmd []string, w *sync.WaitGroup) {
-	defer w.Done()
-
-	oldState, e := term.MakeRaw(int(os.Stdin.Fd()))
-	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
-	if e != nil {
-		logrus.Fatalf("C: error with terminal state: %v", e)
-	}
-
-	ch.Write(NewExecInitMsg(strings.Join(cmd, " ")).ToBytes())
-
-	io.Copy(os.Stdout, ch) //read bytes from ch to os.Stdout
-	logrus.Info("Stopped io.Copy(os.Stdout, ch)")
-}
-
+//Pipe stdin -> ch
 func (e *ExecChan) Pipe() {
 	if !e.closed {
 		return
 	}
-	r, w := io.Pipe()
+
 	ctx, cancel := context.WithCancel(context.Background())
-	cr := ctxio.NewReader(ctx, os.Stdin)
+	in := ctxio.NewReader(ctx, os.Stdin)
 
-	go func() {
-		io.Copy(w, cr)
-		logrus.Debug("Stopped io.Copy(w, os.Stdin)")
-	}()
-
-	go func() {
-		io.Copy(e.ch, r)
-		logrus.Debug("Stopped io.Copy(ch, r)")
-	}()
-	e.w = w
-	e.r = r
+	go io.Copy(e.ch, in)
 	e.cancel = cancel
 	e.closed = false
 }
 
+//Stop stdin -> ch
 func (e *ExecChan) ClosePipe() {
-	e.w.Close()
-	e.r.Close()
 	e.cancel()
 	e.closed = true
 }
 
+//Restores terminal to regular state
 func (e *ExecChan) Restore() {
 	term.Restore(int(os.Stdin.Fd()), e.state)
 }
 
+//Switches terminal to raw mode
 func (e *ExecChan) Raw() {
 	term.MakeRaw(int(os.Stdin.Fd()))
 }

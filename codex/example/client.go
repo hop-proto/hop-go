@@ -50,31 +50,20 @@ func startClient(p string) {
 		logrus.Fatalf("C: error with terminal state: %v", err)
 	}
 
-	ch.Write(codex.NewExecInitMsg("bash").ToBytes())
+	ch.Write(codex.NewexecInitMsg("bash").ToBytes())
 	go func() {
 		io.Copy(os.Stdout, ch) //read bytes from ch to os.Stdout
 		logrus.Info("Stopped io.Copy(os.Stdout, ch)")
 	}()
 
-	r, w := io.Pipe()
 	ctx, cancel := context.WithCancel(context.Background())
 	cr := ctxio.NewReader(ctx, os.Stdin)
 
-	go func() {
-		io.Copy(w, cr)
-		//logrus.Info("Stopped io.Copy(w, os.Stdin)")
-	}()
-
-	go func() {
-		io.Copy(ch, r)
-		//logrus.Info("Stopped io.Copy(ch, r)")
-	}()
+	go io.Copy(ch, cr)
 
 	time.Sleep(5 * time.Second)
 
 	term.Restore(int(os.Stdin.Fd()), oldState)
-	w.Close()
-	r.Close()
 	cancel()
 	fmt.Println("")
 	i.Run(&i.Interact{
@@ -101,17 +90,20 @@ func startClient(p string) {
 		logrus.Fatalf("C: error with terminal state: %v", err)
 	}
 	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
+	ctx, cancel = context.WithCancel(context.Background())
+	cr = ctxio.NewReader(ctx, os.Stdin)
 
-	r, w = io.Pipe()
-	go func() {
-		io.Copy(w, os.Stdin)
-		logrus.Info("Stopped io.Copy(w, os.Stdin)")
-	}()
+	// r, w = io.Pipe()
+	// go func() {
+	// 	io.Copy(w, os.Stdin)
+	// 	logrus.Info("Stopped io.Copy(w, os.Stdin)")
+	// }()
 
-	go func() {
-		io.Copy(ch, r)
-		logrus.Info("Stopped io.Copy(ch, r)")
-	}()
+	// go func() {
+	// 	io.Copy(ch, r)
+	// 	logrus.Info("Stopped io.Copy(ch, r)")
+	// }()
+	go io.Copy(ch, cr)
 	time.Sleep(5 * time.Second)
 	//logrus.Info("All done now!")
 }

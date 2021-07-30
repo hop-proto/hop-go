@@ -15,6 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/channels"
+	"zmap.io/portal/codex"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/transport"
 )
@@ -78,11 +79,7 @@ func startServer(p string) {
 	defer ch.Close()
 	logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", ch.Type())
 
-	l := make([]byte, 1)
-	ch.Read(l)
-	logrus.Infof("S: CMD LEN %v", int(l[0]))
-	cmd := make([]byte, int(l[0]))
-	ch.Read(cmd)
+	cmd, _ := codex.GetCmd(ch)
 	logrus.Infof("Executing: %v", string(cmd))
 
 	args := strings.Split(string(cmd), " ")

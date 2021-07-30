@@ -17,7 +17,7 @@ import (
 func main() {
 	if os.Args[1] == "hop" {
 		logrus.Infof("Starting hop client")
-		startClient(os.Args)
+		client(os.Args)
 	} else if os.Args[1] == "hopd" {
 		logrus.Infof("Hosting hop server daemon")
 		serve(os.Args) //start "hop server daemon process"

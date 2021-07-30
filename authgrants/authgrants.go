@@ -4,6 +4,7 @@ package authgrants
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strconv"
@@ -18,10 +19,11 @@ import (
 	"zmap.io/portal/transport"
 )
 
-/*Used by Client Process to get an authorization grant from its Principal*/
+/*Used by client to get an authorization grant from its Principal*/
 func GetAuthGrant(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string) (int64, error) {
 	intent := NewIntentRequest(digest, sUser, addr, cmd)
-	sock := "/tmp/auth.sock"
+
+	sock := "/tmp/auth.sock" //TODO: make generalizeable
 	if addr == "127.0.0.1:9999" {
 		sock = "/tmp/auth2.sock"
 	}
@@ -31,30 +33,35 @@ func GetAuthGrant(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string
 		logrus.Fatal(err)
 	}
 	defer c.Close()
+
 	logrus.Infof("C: CONNECTED TO UDS: [%v]", c.RemoteAddr().String())
 	_, e := c.Write(intent.ToBytes())
 	if e != nil {
 		logrus.Fatal("C: error writing to UDS")
 	}
 	logrus.Infof("C: WROTE INTENT TO UDS")
-	response, err := GetResponse(c)
+	response, resptype, err := GetResponse(c)
 	if err != nil {
 		logrus.Fatalf("S: ERROR GETTING RESPONSE: %v", err)
 	}
 
 	//TODO: SET TIMEOUT STUFF + BETTER ERROR CHECKING
-	if response[0] == INTENT_CONFIRMATION {
+	switch resptype {
+	case INTENT_CONFIRMATION:
 		return FromIntentConfirmationBytes(response[TYPE_LEN:]).Deadline, nil
-	} else if response[0] == INTENT_DENIED {
+	case INTENT_DENIED:
 		reason := FromIntentDeniedBytes(response[TYPE_LEN:]).reason
 		logrus.Infof("Reason for denial: %v", reason)
 		return 0, errors.New("principal denied Intent Request")
+	default:
+		return 0, errors.New("received message with unknown message type")
 	}
-	return 0, errors.New("received message with unknown message type")
+
 }
 
 /*Go routine for Principal to respond to auth grant requests*/
 func Principal(agc *channels.Reliable, m *channels.Muxer, exec_ch *codex.ExecChan) {
+	logrus.SetOutput(io.Discard)
 	exec_ch.Restore()
 	intent, err := ReadIntentRequest(agc)
 	if err != nil {
@@ -107,7 +114,7 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, exec_ch *codex.ExecCha
 		if e != nil {
 			logrus.Info("Issue writing intent comm to npc_agc")
 		}
-		response, e := GetResponse(npc_agc)
+		response, _, e := GetResponse(npc_agc)
 		logrus.Info("got response")
 		if e != nil {
 			logrus.Fatalf("C: error reading from agc: %v", e)

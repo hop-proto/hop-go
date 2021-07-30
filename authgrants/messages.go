@@ -298,36 +298,39 @@ func ReadIntentCommunication(c net.Conn) ([]byte, error) {
 	return nil, errors.New("bad msg type")
 }
 
-func GetResponse(c net.Conn) ([]byte, error) {
+//Waits and reads INTENT_CONFIRMATION or INTENT_DENIED from net.Conn
+func GetResponse(c net.Conn) ([]byte, byte, error) {
 	responseType := make([]byte, 1)
 	_, err := c.Read(responseType)
 	if err != nil {
-		return nil, err
+		return nil, responseType[0], err
 	}
 	logrus.Infof("Got response type: %v", responseType)
 	//TODO: SET TIMEOUT STUFF + BETTER ERROR CHECKING
-	if responseType[0] == INTENT_CONFIRMATION {
+	switch responseType[0] {
+	case INTENT_CONFIRMATION:
 		conf := make([]byte, INTENT_CONF_SIZE)
 		_, err := c.Read(conf)
 		if err != nil {
-			return nil, err
+			return nil, responseType[0], err
 		}
-		return append(responseType, conf...), nil
-	} else if responseType[0] == INTENT_DENIED {
+		return append(responseType, conf...), responseType[0], nil
+	case INTENT_DENIED:
 		reason_length := make([]byte, 1)
 		_, err := c.Read(reason_length)
 		if err != nil {
-			return nil, err
+			return nil, responseType[0], err
 		}
 		logrus.Infof("C: EXPECTING %v BYTES OF REASON", reason_length)
 		reason := make([]byte, int(reason_length[0]))
 		_, err = c.Read(reason)
 		if err != nil {
-			return nil, err
+			return nil, responseType[0], err
 		}
-		return append(append(responseType, reason_length...), reason...), nil
+		return append(append(responseType, reason_length...), reason...), responseType[0], nil
+	default:
+		return nil, responseType[0], errors.New("bad msg type")
 	}
-	return nil, errors.New("bad msg type")
 }
 
 //Makes an Intent Communication from an Intent Request (change msg type)
