@@ -20,7 +20,7 @@ import (
 //   3. Buffering
 //   4. Concurrency controls (locks)
 
-const RTO = time.Millisecond * 50 //Drew originally had this at 500ms but that made code_exec channels very laggy. (think the issue is actually in sender.go retransmission)
+const RTO = time.Millisecond * 500 //Drew originally had this at 500ms but that made code_exec channels very laggy. (think the issue is actually in sender.go retransmission)
 
 const WINDOW_SIZE = 128
 
@@ -111,6 +111,7 @@ func makeChannel(underlying transport.MsgConn, netConn net.Conn, sendQueue chan 
 			RTO:              RTO,
 			sendQueue:        make(chan *Frame),
 			windowSize:       WINDOW_SIZE,
+			ret:              make(chan int),
 		},
 		sendQueue: sendQueue,
 		cType:     cType,

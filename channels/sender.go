@@ -24,6 +24,7 @@ type Sender struct {
 	frameNo uint32
 	// The buffer of unacknowledged channel frames that will be retransmitted if necessary.
 	frames []*Frame
+	ret    chan int
 	// Different frames can have different data lengths -- we need to know how
 	// to update the buffer when frames are acknowledged.
 	frameDataLengths map[uint32]uint16
@@ -50,7 +51,10 @@ func (s *Sender) unsentFramesRemaining() bool {
 
 func (s *Sender) write(b []byte) (n int, err error) {
 	s.l.Lock()
-	defer s.l.Unlock()
+	defer func() {
+		s.l.Unlock()
+		s.ret <- 1
+	}()
 	if s.closed {
 		return 0, errors.New("trying to write to closed channel")
 	}
@@ -71,7 +75,9 @@ func (s *Sender) write(b []byte) (n int, err error) {
 		s.frameNo += 1
 		s.buffer = s.buffer[dataLength:]
 		s.frames = append(s.frames, &pkt)
+
 	}
+
 	return len(b), nil
 }
 
@@ -101,25 +107,37 @@ func (s *Sender) recvAck(ackNo uint32) error {
 
 func (s *Sender) retransmit() {
 	for !s.isClosed() { // TODO - decide how to shutdown this endless loop with an enum state
-		timer := time.NewTimer(s.RTO) //TODO (baumanl) - add in select statement so doesn't wait on timer when new data available.
-		<-timer.C
-		s.l.Lock()
-		if len(s.frames) == 0 {
-			pkt := Frame{
-				dataLength: 0,
-				frameNo:    s.frameNo,
-				data:       []byte{},
+		timer := time.NewTimer(s.RTO)
+		select {
+		case <-timer.C:
+			s.l.Lock()
+			if len(s.frames) == 0 {
+				pkt := Frame{
+					dataLength: 0,
+					frameNo:    s.frameNo,
+					data:       []byte{},
+				}
+				//logrus.Info("SENDING EMPTY PACKET ON SEND QUEUE FOR ACK - FIN? ", pkt.flags.FIN)
+				s.sendQueue <- &pkt
 			}
-			//logrus.Info("SENDING EMPTY PACKET ON SEND QUEUE FOR ACK - FIN? ", pkt.flags.FIN)
-			s.sendQueue <- &pkt
+			i := 0
+			for i < len(s.frames) && i < int(s.windowSize) && i < MAX_FRAG_TRANS_PER_RTO {
+				s.sendQueue <- s.frames[i]
+				//logrus.Info("PUTTING PKT ON SEND QUEUE - FIN? ", s.frames[i].flags.FIN)
+				i += 1
+			}
+			s.l.Unlock()
+		case <-s.ret: //case received new data
+			s.l.Lock()
+			i := 0
+			for i < len(s.frames) && i < int(s.windowSize) && i < MAX_FRAG_TRANS_PER_RTO {
+				s.sendQueue <- s.frames[i]
+				//logrus.Info("PUTTING PKT ON SEND QUEUE - FIN? ", s.frames[i].flags.FIN)
+				i += 1
+			}
+			s.l.Unlock()
 		}
-		i := 0
-		for i < len(s.frames) && i < int(s.windowSize) && i < MAX_FRAG_TRANS_PER_RTO {
-			s.sendQueue <- s.frames[i]
-			//logrus.Info("PUTTING PKT ON SEND QUEUE - FIN? ", s.frames[i].flags.FIN)
-			i += 1
-		}
-		s.l.Unlock()
+
 	}
 }
 func (s *Sender) isClosed() bool {
