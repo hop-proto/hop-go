@@ -1,3 +1,4 @@
+//Package npc provides utilities for network proxy channels
 package npc
 
 import (
@@ -11,27 +12,27 @@ import (
 const NPC_CONF = byte(1)
 
 type npcInitMsg struct {
-	MsgLen uint32
-	Addr   string
+	msgLen uint32
+	addr   string
 }
 
 func NewNPCInitMsg(address string) *npcInitMsg {
 	return &npcInitMsg{
-		MsgLen: uint32(len(address)),
-		Addr:   address,
+		msgLen: uint32(len(address)),
+		addr:   address,
 	}
 }
 
 func (n *npcInitMsg) ToBytes() []byte {
 	r := make([]byte, 4)
-	binary.BigEndian.PutUint32(r, n.MsgLen)
-	return append(r, []byte(n.Addr)...)
+	binary.BigEndian.PutUint32(r, n.msgLen)
+	return append(r, []byte(n.addr)...)
 }
 
 func FromBytes(b []byte) *npcInitMsg {
 	return &npcInitMsg{
-		MsgLen: uint32(len(b)),
-		Addr:   string(b),
+		msgLen: uint32(len(b)),
+		addr:   string(b),
 	}
 }
 
@@ -43,19 +44,18 @@ func Server(npch *channels.Reliable) {
 	init := make([]byte, l)
 	npch.Read(init)
 	dest := FromBytes(init)
-	logrus.Infof("dialing dest: %v", dest.Addr)
-	throwaway, _ := net.Dial("udp", dest.Addr)
-	//localAddr := throwaway.LocalAddr()
+	logrus.Infof("dialing dest: %v", dest.addr)
+	throwaway, _ := net.Dial("udp", dest.addr)
 	remoteAddr := throwaway.RemoteAddr()
 	throwaway.Close()
-	//tconn, err := net.DialUDP("udp", localAddr.(*net.UDPAddr), remoteAddr.(*net.UDPAddr))
 	tconn, err := net.DialUDP("udp", nil, remoteAddr.(*net.UDPAddr))
 	if err != nil {
 		logrus.Fatalf("C: error dialing server: %v", err)
 	}
-	logrus.Info("connected to: ", dest.Addr)
+	logrus.Info("connected to: ", dest.addr)
 	npch.Write([]byte{NPC_CONF})
 	logrus.Infof("wrote confirmation that NPC ready")
+	//could net.Pipe() be useful here?
 	go func() {
 		//Handles all traffic from principal to server 2
 		for {

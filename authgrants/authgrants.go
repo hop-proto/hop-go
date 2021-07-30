@@ -1,3 +1,4 @@
+//Package providing support for the authorization grant protocol.
 package authgrants
 
 import (
@@ -7,11 +8,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/channels"
+	"zmap.io/portal/codex"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/npc"
 	"zmap.io/portal/transport"
@@ -53,7 +54,8 @@ func GetAuthGrant(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string
 }
 
 /*Go routine for Principal to respond to auth grant requests*/
-func Principal(agc *channels.Reliable, m *channels.Muxer) {
+func Principal(agc *channels.Reliable, m *channels.Muxer, exec_ch *codex.ExecChan) {
+	exec_ch.Restore()
 	intent, err := ReadIntentRequest(agc)
 	if err != nil {
 		logrus.Fatalf("ERROR READING INTENT REQUEST: %v", err)
@@ -61,18 +63,16 @@ func Principal(agc *channels.Reliable, m *channels.Muxer) {
 
 	logrus.Info("C: PRINCIPAL REC: INTENT_REQUEST")
 	req := FromIntentRequestBytes(intent[TYPE_LEN:])
-	req.Display()
-	//ok := dialog.Message("%s", "Do you want to continue?").Title("Are you sure?").YesNo()
-	resp := "yes"
 
-	// buf := make([]byte, 1)
-	// r.Read(buf)
-	// if string(buf) == "y" {
-	// 	fmt.Println("user said yes...")
-	// 	resp = "yes"
-	// }
-	//var resp string
-	//fmt.Scanln(&resp) //TODO:Fix and make sure this is safe/sanitize input/make this a popup instead.
+	exec_ch.ClosePipe()
+
+	req.Display()
+	var resp string
+	fmt.Scanln(&resp) //TODO:Fix and make sure this is safe/sanitize input/make this a popup instead.
+
+	exec_ch.Pipe()
+	exec_ch.Raw()
+
 	if resp == "yes" {
 		logrus.Info("C: USER CONFIRMED INTENT_REQUEST. CONTACTING S2...") //TODO: ACTUALLY DO THE NPC THING
 
@@ -121,10 +121,10 @@ func Principal(agc *channels.Reliable, m *channels.Muxer) {
 
 		// Want to keep this session open in case the "server 2" wants to continue chaining hop sessions together
 		// Should only get authorization grant channels?
-		wg := sync.WaitGroup{}
-		wg.Add(1)
+		// wg := sync.WaitGroup{}
+		// wg.Add(1)
 		go func() {
-			defer wg.Done()
+			//defer wg.Done()
 			for {
 				c, e := npc_muxer.Accept()
 				if e != nil {
@@ -132,7 +132,7 @@ func Principal(agc *channels.Reliable, m *channels.Muxer) {
 				}
 				logrus.Infof("Accepted channel of type: %v", c.Type())
 				if c.Type() == channels.AGC_CHANNEL {
-					go Principal(c, npc_muxer)
+					go Principal(c, npc_muxer, exec_ch)
 				} else if c.Type() == channels.NPC_CHANNEL {
 					//go do something?
 				} else if c.Type() == channels.EXEC_CHANNEL {
@@ -144,7 +144,7 @@ func Principal(agc *channels.Reliable, m *channels.Muxer) {
 				}
 			}
 		}()
-		wg.Wait()
+		//wg.Wait()
 	} else {
 		agc.Write(NewIntentDenied("User denied.").ToBytes())
 	}

@@ -1,18 +1,18 @@
 package main
 
 import (
-	"io"
-	"os"
+	"errors"
 	"strings"
-	"sync"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/authgrants"
 	"zmap.io/portal/channels"
-	"zmap.io/portal/exec_channels"
+	"zmap.io/portal/codex"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/transport"
 )
+
+var errAg = errors.New("hello")
 
 func startClient(args []string) {
 	//logrus.SetLevel(logrus.DebugLevel)
@@ -31,12 +31,6 @@ func startClient(args []string) {
 	config.KeyPair = new(keys.X25519KeyPair)
 	config.KeyPair.Generate()
 	logrus.Infof("Client generated(39): %v", config.KeyPair.Public.String())
-	reader, writer := io.Pipe()
-	_, writer2 := io.Pipe()
-	w := io.MultiWriter(writer, writer2)
-	go func() {
-		io.Copy(w, os.Stdin)
-	}()
 
 	//Check if this is a principal client process or one that needs to get an AG
 	//******GET AUTHORIZATION SOURCE******
@@ -73,9 +67,7 @@ func startClient(args []string) {
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	logrus.Infof("Performing action: %v", cmd)
 	ch, _ := mc.CreateChannel(channels.EXEC_CHANNEL)
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go exec_channels.Client(ch, cmd, &wg, reader)
+	exec_ch := codex.NewExecChan(cmd, ch)
 
 	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****
 	go func() {
@@ -86,7 +78,7 @@ func startClient(args []string) {
 			}
 			logrus.Infof("ACCEPTED NEW CHANNEL of TYPE: %v", c.Type())
 			if c.Type() == channels.AGC_CHANNEL && principal {
-				go authgrants.Principal(c, mc)
+				go authgrants.Principal(c, mc, exec_ch)
 			} else if c.Type() == channels.NPC_CHANNEL {
 				//go do something?
 			} else if c.Type() == channels.EXEC_CHANNEL {
@@ -98,6 +90,7 @@ func startClient(args []string) {
 			}
 		}
 	}()
-	wg.Wait()
+	for {
+	}
 	logrus.Info("Done waiting")
 }

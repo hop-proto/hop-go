@@ -101,7 +101,7 @@ func (s *Sender) recvAck(ackNo uint32) error {
 
 func (s *Sender) retransmit() {
 	for !s.isClosed() { // TODO - decide how to shutdown this endless loop with an enum state
-		timer := time.NewTimer(s.RTO)
+		timer := time.NewTimer(s.RTO) //TODO (baumanl) - add in select statement so doesn't wait on timer when new data available.
 		<-timer.C
 		s.l.Lock()
 		if len(s.frames) == 0 {

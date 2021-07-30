@@ -19,7 +19,7 @@ import (
 	"zmap.io/portal/authgrants"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/channels"
-	"zmap.io/portal/exec_channels"
+	"zmap.io/portal/codex"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/npc"
 	"zmap.io/portal/transport"
@@ -282,7 +282,7 @@ func session(serverConn *transport.Handle, principals map[int32]*channels.Muxer,
 			if err != nil {
 				logrus.Fatalf("S: error starting pty %v", err)
 			}
-			go exec_channels.Serve(serverChan, f)
+			go codex.Serve(serverChan, f)
 		} else if serverChan.Type() == channels.NPC_CHANNEL {
 			go npc.Server(serverChan)
 		} else if serverChan.Type() == channels.AGC_CHANNEL {

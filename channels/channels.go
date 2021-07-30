@@ -20,7 +20,7 @@ import (
 //   3. Buffering
 //   4. Concurrency controls (locks)
 
-const RTO = time.Millisecond * 100
+const RTO = time.Millisecond * 50 //Drew originally had this at 500ms but that made code_exec channels very laggy. (think the issue is actually in sender.go retransmission)
 
 const WINDOW_SIZE = 128
 
@@ -218,28 +218,12 @@ func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
 			return count, e
 		}
 		_, e = w.Write(b)
-		if e != nil {
-			return count, e
-		}
+		// if e != nil {
+		// 	return count, e
+		// }
 	}
 
 }
-
-//This version of WriteTo is needed for the transport layer stuff with NPC...
-//Actually not needed apparently?
-// func (r *Reliable) WriteTo(buf []byte, addr net.Addr) (n int, err error) {
-// 	var count int
-// 	for {
-// 		b := make([]byte, 1)
-// 		n, e := r.Read(b)
-// 		count += n
-// 		if e != nil {
-// 			return count, e
-// 		}
-// 		copy(buf, b)
-// 	}
-
-// }
 
 //(Laura) Trying to make channels have the same funcs as net.UDPConn
 func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
@@ -250,6 +234,7 @@ func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, e
 	return length, 0, e
 }
 
+//(Laura) Trying to make channels have the same funcs as net.UDPConn
 func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
 	h := make([]byte, 2)
 	_, e := r.Read(h)

@@ -29,11 +29,7 @@ func newTestServerConfig(t *testing.T) *transport.ServerConfig {
 }
 
 func TestMuxer(t *testing.T) {
-<<<<<<< HEAD
-	logrus.SetLevel(logrus.InfoLevel)
-=======
 	logrus.SetLevel(logrus.DebugLevel)
->>>>>>> main
 	pktConn, err := net.ListenPacket("udp", "localhost:8890")
 	assert.NilError(t, err)
 	// It's actually a UDP conn
@@ -74,17 +70,6 @@ func TestMuxer(t *testing.T) {
 	buf := make([]byte, len(testData))
 	time.Sleep(time.Second)
 	bytesRead := 0
-<<<<<<< HEAD
-	logrus.Info("READING ")
-	n, err := serverChan.Read(buf[bytesRead:])
-	logrus.Info("DONE READING ")
-
-	assert.NilError(t, err)
-	bytesRead += n
-	logrus.Info("STOPPNG MC")
-	mc.Stop()
-	logrus.Info("STOPPNG MS")
-=======
 	logrus.Debug("READING ")
 	n, err := serverChan.Read(buf[bytesRead:])
 	logrus.Debug("DONE READING ")
@@ -94,7 +79,6 @@ func TestMuxer(t *testing.T) {
 	logrus.Debug("STOPPNG MC")
 	mc.Stop()
 	logrus.Debug("STOPPNG MS")
->>>>>>> main
 	ms.Stop()
 	assert.Check(t, cmp.Len(testData, bytesRead))
 	assert.Equal(t, testData, string(buf))
@@ -102,11 +86,7 @@ func TestMuxer(t *testing.T) {
 }
 
 func TestSmallWindow(t *testing.T) {
-<<<<<<< HEAD
-	logrus.SetLevel(logrus.InfoLevel)
-=======
 	logrus.SetLevel(logrus.DebugLevel)
->>>>>>> main
 	pktConn, err := net.ListenPacket("udp", "localhost:8889")
 	assert.NilError(t, err)
 	// It's actually a UDP conn
@@ -156,8 +136,6 @@ func TestSmallWindow(t *testing.T) {
 	mc.Stop()
 	assert.Check(t, cmp.Len(testData, n))
 	assert.Equal(t, string(testData), string(buf[:n]))
-<<<<<<< HEAD
-=======
 }
 
 func TestMultipleChannels(t *testing.T) {
@@ -258,5 +236,4 @@ func TestMultipleChannels(t *testing.T) {
 	logrus.Debug("STOPPING")
 	ms.Stop()
 	mc.Stop()
->>>>>>> main
 }
