@@ -23,6 +23,10 @@ func NewNPCInitMsg(address string) *npcInitMsg {
 	}
 }
 
+func (n *npcInitMsg) Addr() string {
+	return n.addr
+}
+
 func (n *npcInitMsg) ToBytes() []byte {
 	r := make([]byte, 4)
 	binary.BigEndian.PutUint32(r, n.msgLen)

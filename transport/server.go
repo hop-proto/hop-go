@@ -357,11 +357,15 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		logrus.Debugf("server: mismatched tag in client auth: expected %x, got %x", hs.macBuf, clientTag)
 		return pos, nil, "", ErrInvalidMessage
 	}
-	//if hs.clientStatic[:] in authorized keys continue, otherwise abandon all state
-	f, e := os.Open("../app/authorized_keys")
+
+	//if the client static key is in authorized keys continue, otherwise abandon all state
+	//if the key contains authorization grant information then return that line
+	//(so it can be set into the connection Handle)
+	f, e := os.Open("../app/authorized_keys") //TODO: fix to actual address
 	if e != nil {
-		logrus.Fatalf("error opening authorized keys file: ", e)
+		return pos, nil, "", ErrOpeningAuthKeys
 	}
+	f.Close()
 	var ag string
 	scanner := bufio.NewScanner(f)
 	authorized := false
@@ -376,12 +380,12 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 			break
 		}
 	}
-	f.Close()
+
 	if !authorized {
-		//TODO: handle this gracefully
-		logrus.Infof("KEY NOT AUTHORIZED, but continuing anyway")
+		//TODO: handle this gracefully (i.e. abandon all state)
+		logrus.Debugf("KEY NOT AUTHORIZED, but continuing anyway")
 	} else {
-		logrus.Infof("KEYS MATCHED!!!")
+		logrus.Debugf("KEYS MATCHED!!!")
 	}
 	x = x[MacLen:]
 	pos += MacLen
@@ -514,11 +518,14 @@ func (s *Server) finishHandshake(hs *HandshakeState, ag string) error {
 func (s *Server) createHandleLocked(ss *SessionState, ag string) *Handle {
 	handle := &Handle{
 		sessionID:    ss.sessionID,
-		Authgrant:    ag, //added
 		recv:         make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
 		send:         make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
 		readTimeout:  atomicTimeout(s.config.StartingReadTimeout),
 		writeTimeout: atomicTimeout(s.config.StartingWriteTimeout),
+
+		//TODO(baumanl): Simplify how to add this to handle? right now ag is passed from
+		//handleClientAuth() -> finishHandshake() -> createHandleLocked()
+		Authgrant: ag,
 	}
 	ss.handle = handle
 	return handle

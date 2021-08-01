@@ -24,7 +24,11 @@ type Sender struct {
 	frameNo uint32
 	// The buffer of unacknowledged channel frames that will be retransmitted if necessary.
 	frames []*Frame
-	ret    chan int
+
+	//TODO(baumanl): is it safe and good style to have this channel here?
+	//First attempt at stopping laggy behavior due to retransmit previously always waiting for RTO.
+	ret chan int //signaled whenever frame added to frames so retransmit() starts
+
 	// Different frames can have different data lengths -- we need to know how
 	// to update the buffer when frames are acknowledged.
 	frameDataLengths map[uint32]uint16

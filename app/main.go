@@ -7,13 +7,19 @@ import (
 	"zmap.io/portal/keys"
 )
 
-//If on principal: hop user@host:port -k <pathtokey>
-//If on intermediate: hop user@host:port -a <action>
+//If on principal: hop <user>@<host>:<port> -k <pathtokey>
+//If on intermediate: hop <user>@<host>:<port> -a <action>
 
 //Demo:
-//principal: go run *.go hop user@127.0.0.1:8888 -k path
-//server1: go run *.go hopd 1
-//server2: go run *.go hopd 2
+//server1: 			go run *.go hopd 1 							(will run on localhost port 7777)
+//server2: 			go run *.go hopd 2 							(will run on localhost port 8888)
+//server3: 			go run *.go hopd 3 							(will run on localhost port 9999)
+//principal: 		go run *.go hop user@127.0.0.1:7777 -k path ("path" will use default keys I set up in app folder or you can put in an actual filename)
+//p -> s1: 			go run *.go hop user@127.0.0.1:8888 -a bash
+//p -> s1 -> s2: 	go run *.go hop user@127.0.0.1:9999 -a bash
+
+//Actions besides bash work, but closing/ending behavior is still rough,
+//so issues might come up after a oneshot command is finished running.
 
 func main() {
 	if os.Args[1] == "hop" {

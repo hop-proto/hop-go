@@ -26,9 +26,15 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	writeTimeout atomicTimeout
 
 	sessionID SessionID
+
+	//used by server to determine:
+	//1.) if an authgrant was used for the session and
+	//2.) to know which principal session to contact if the user wants to hop further
+	//3.) (potentially) verify that only the allowed command is executed?
 	Authgrant string
-	recv      chan []byte
-	send      chan []byte
+
+	recv chan []byte
+	send chan []byte
 
 	closed atomicBool
 

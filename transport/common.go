@@ -70,3 +70,7 @@ var ErrWouldBlock = errors.New("operation would block")
 
 // ErrTimeout is returned for operations that timed out
 var ErrTimeout = errors.New("operation timed out")
+
+//Err OpeningAuthKeys is returned when the server is unable to open the authorized keys file
+//when processing the client authentication message during handshake.
+var ErrOpeningAuthKeys = errors.New("unable to open authorized keys file")
