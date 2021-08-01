@@ -14,10 +14,12 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+//TODO(baumanl): Some of this may be over complex. Figure out best way to standardize/simplify.
+
 //General Constants
 const (
 	MAX_PORT_NUMBER  = 65535
-	DEFAULT_HOP_PORT = 8888 //TODO: default port? 8888 for now
+	DEFAULT_HOP_PORT = 8888 //TODO(baumanl): default port? 8888 for now
 
 	INTENT_REQUEST       = byte(1)
 	INTENT_COMMUNICATION = byte(2)
@@ -82,7 +84,7 @@ type IntentRequest struct {
 }
 
 //Actually necessary to have different struct?
-//TODO: figure out best way to restructure to min. duplicate code
+//TODO(baumanl): figure out best way to restructure to min. duplicate code
 type IntentCommunication struct {
 	sha3           [SHA3_LEN]byte
 	clientUsername string
@@ -115,7 +117,7 @@ func NewIntentRequest(digest [SHA3_LEN]byte, sUser string, addr string, cmd []st
 		serverUsername: sUser,
 		serverSNI:      sSNI,
 		port:           p,
-		channelType:    byte(1), //TODO
+		channelType:    byte(1), //TODO(baumanl): how should this be used/enforced?
 		action:         cmd,
 	}
 	return &AgcMessage{
@@ -172,11 +174,11 @@ func (r *IntentRequest) toBytes() []byte {
 	binary.BigEndian.PutUint16(s[PORT_OFFSET:CHTYPE_OFFSET], r.port)
 	s[CHTYPE_OFFSET] = r.channelType
 	action := []byte(strings.Join(r.action, " "))
-	s[LEN_OFFSET] = byte(len(action)) //TODO: This only allows for actions up to 256 bytes (and no bounds checking atm)
+	s[LEN_OFFSET] = byte(len(action)) //TODO(baumanl): This only allows for actions up to 256 bytes (and no bounds checking atm)
 	return append(s[:], action...)
 }
 
-func (c *IntentCommunication) toBytes() []byte { //TODO: This is literally identical to the above function.
+func (c *IntentCommunication) toBytes() []byte { //TODO(baumanl): This is literally identical to the above function.
 	s := [IR_HEADER_LENGTH]byte{}
 	copy(s[SHA3_OFFSET:CUSER_OFFSET], c.sha3[:])
 	copy(s[CUSER_OFFSET:CSNI_OFFSET], []byte(c.clientUsername))
@@ -186,7 +188,7 @@ func (c *IntentCommunication) toBytes() []byte { //TODO: This is literally ident
 	binary.BigEndian.PutUint16(s[PORT_OFFSET:CHTYPE_OFFSET], c.port)
 	s[CHTYPE_OFFSET] = c.channelType
 	action := []byte(strings.Join(c.action, " "))
-	s[LEN_OFFSET] = byte(len(action)) //TODO: This only allows for actions up to 256 bytes (and no bounds checking atm)
+	s[LEN_OFFSET] = byte(len(action)) //TODO(baumanl): This only allows for actions up to 256 bytes (and no bounds checking atm)
 	return append(s[:], action...)
 }
 
@@ -205,6 +207,7 @@ func (a *AgcMessage) ToBytes() []byte {
 	return append([]byte{a.msgType}, a.d.toBytes()...)
 }
 
+//Given a byte slice return the string representation of the bytes before the first null byte.
 func trimNullBytes(b []byte) string {
 	i := bytes.Index(b, []byte{0})
 	if i != -1 {
@@ -267,6 +270,7 @@ func parseAddr(addr string) (string, uint16) { //addr of format host:port or hos
 	return host, uint16(port)
 }
 
+//Gets Intent Request bytes
 func ReadIntentRequest(c net.Conn) ([]byte, error) {
 	msgType := make([]byte, 1)
 	c.Read(msgType)
@@ -316,7 +320,7 @@ func GetResponse(c net.Conn) ([]byte, byte, error) {
 		return nil, responseType[0], err
 	}
 	logrus.Infof("Got response type: %v", responseType)
-	//TODO: SET TIMEOUT STUFF + BETTER ERROR CHECKING
+	//TODO(baumanl): SET TIMEOUT STUFF + BETTER ERROR CHECKING
 	switch responseType[0] {
 	case INTENT_CONFIRMATION:
 		conf := make([]byte, INTENT_CONF_SIZE)
@@ -343,7 +347,7 @@ func GetResponse(c net.Conn) ([]byte, byte, error) {
 	}
 }
 
-//Makes an Intent Communication from an Intent Request (change msg type)
+//Makes an Intent Communication from an Intent Request (just change msg type)
 func CommFromReq(b []byte) []byte {
 	return append([]byte{INTENT_COMMUNICATION}, b[TYPE_LEN:]...)
 }

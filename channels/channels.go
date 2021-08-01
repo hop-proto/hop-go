@@ -207,8 +207,7 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 	return r.sender.write(b)
 }
 
-//Laura added. Need to implement WriteTo interface for io.Copy to work
-//This version of WriteTo works for io.Copy for terminal stuff
+//Need to implement WriteTo interface for io.Copy() to work
 func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
 	var count int64
 	for {
@@ -219,6 +218,7 @@ func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
 			return count, e
 		}
 		w.Write(b)
+		//TODO(baumanl): finalize that this function closes correctly according to WriteTo interface
 		// if e != nil {
 		// 	return count, e
 		// }
@@ -226,7 +226,7 @@ func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
 
 }
 
-//(Laura) Trying to make channels have the same funcs as net.UDPConn
+//implement the "UDPLike" interface for transport layer NPC. Trying to make channels have the same funcs as net.UDPConn
 func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
 	length := len(b)
 	h := make([]byte, 2)
@@ -235,7 +235,7 @@ func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, e
 	return length, 0, e
 }
 
-//(Laura) Trying to make channels have the same funcs as net.UDPConn
+//implement the "UDPLike" interface for transport layer NPC. Trying to make channels have the same funcs as net.UDPConn
 func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
 	h := make([]byte, 2)
 	_, e := r.Read(h)

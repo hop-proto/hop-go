@@ -25,7 +25,7 @@ import (
 type ExecChan struct {
 	ch *channels.Reliable
 
-	cancel context.CancelFunc
+	cancel context.CancelFunc //TODO(baumanl): make sure this is safe/reliable. Context doesn't even solve the user input glitch like I hoped it would.
 	state  *term.State
 	closed bool
 }
@@ -99,7 +99,7 @@ func Server(ch *channels.Reliable, f *os.File) {
 	defer ch.Close()
 	defer func() { _ = f.Close() }() // Best effort.
 	// Handle pty size.
-	//TODO: Check that this is working properly
+	//TODO(baumanl): Check that this is working properly
 	ch2 := make(chan os.Signal, 1)
 	signal.Notify(ch2, syscall.SIGWINCH)
 	go func() {

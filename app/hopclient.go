@@ -19,9 +19,10 @@ func client(args []string) {
 	if len(args) < 5 {
 		logrus.Fatal("C: Invalid arguments. Useage: hop user@host:port -k <pathtokey> or hop user@host:port -a <action>.")
 	}
-	s := strings.SplitAfter(args[2], "@") //TODO: Add support for optional username
+	s := strings.SplitAfter(args[2], "@") //TODO(bauman): Add support for optional username
 	user := s[0][0 : len(s[0])-1]
 	addr := s[1]
+	//TODO(bauman): get users default shell ($SHELL ?)
 	cmd := []string{"bash"} //default action for principal is to open an interactive shell
 	config := transport.ClientConfig{}
 
@@ -30,12 +31,12 @@ func client(args []string) {
 	var principal bool
 	if args[3] == "-k" {
 		principal = true
-		logrus.Infof("C: Using key-file at %v for auth.", args[4]) //TODO: actually do this somehow???
+		logrus.Infof("C: Using key-file at %v for auth.", args[4])
 		var e error
 		path := args[4]
 		if path == "path" {
 			logrus.Info("C: using default key")
-			path = "keys/default"
+			path = "keys/default" //TODO(baumanl): fix default behavior for general program
 		}
 		config.KeyPair, e = keys.ReadDHKeyFromPEMFile(path)
 		if e != nil {
@@ -48,7 +49,7 @@ func client(args []string) {
 		logrus.Infof("Client generated: %v", config.KeyPair.Public.String())
 		logrus.Infof("C: Initiating AGC Protocol.")
 		cmd = args[4:]                                                          //if using authorization grant then perform the action specified in cmd line
-		t, e := authgrants.GetAuthGrant(config.KeyPair.Public, user, addr, cmd) //TODO: potentially store the deadline somewhere?
+		t, e := authgrants.GetAuthGrant(config.KeyPair.Public, user, addr, cmd) //TODO(baumanl): necessary to store the deadline somewhere?
 		if e != nil {
 			logrus.Fatalf("C: %v", e)
 		}
@@ -56,7 +57,7 @@ func client(args []string) {
 	}
 
 	//******ESTABLISH HOP SESSION******
-	//TODO: figure out addr format requirements + check for them above
+	//TODO(baumanl): figure out addr format requirements + check for them above
 	transportConn, err := transport.Dial("udp", addr, &config) //There seem to be limits on Dial() and addr format
 	if err != nil {
 		logrus.Fatalf("C: error dialing server: %v", err)
@@ -65,7 +66,7 @@ func client(args []string) {
 	if err != nil {
 		logrus.Fatalf("C: Issue with handshake: %v", err)
 	}
-	//TODO: should these functions + things from Channels layer have errors?
+	//TODO(baumanl): should these functions + things from Channels layer have errors?
 	mc := channels.NewMuxer(transportConn, transportConn)
 	go mc.Start()
 	defer mc.Stop()
@@ -77,6 +78,7 @@ func client(args []string) {
 	wg.Add(1)
 	exec_ch := codex.NewExecChan(cmd, ch, &wg)
 
+	//TODO(baumanl): figure out responses to different channel types/what all should be allowed
 	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****
 	go func() {
 		for {
@@ -98,6 +100,7 @@ func client(args []string) {
 			}
 		}
 	}()
-	wg.Wait()
+	wg.Wait() //client program ends when the code execution channel ends.
+	//TODO(baumanl): figure out definitive closing behavior --> multiple code exec channels?
 	logrus.Info("Done waiting")
 }

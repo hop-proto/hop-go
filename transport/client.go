@@ -12,6 +12,7 @@ import (
 	"zmap.io/portal/keys"
 )
 
+//Reliable channels implement this interface so they can be used as the underlying conn for Clients
 type UDPLike interface {
 	net.Conn
 	WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error)
@@ -82,7 +83,7 @@ func (c *Client) clientHandshakeLocked() error {
 	c.hs.duplex.InitializeEmpty()
 	c.hs.ephemeral.Generate()
 	logrus.SetLevel(logrus.InfoLevel)
-	//Laura modified to start authorized_key stuff
+
 	// TODO(dadrian): This should actually be, well, static
 	if c.config.KeyPair == nil {
 		c.hs.static = new(keys.X25519KeyPair)

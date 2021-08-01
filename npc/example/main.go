@@ -1,3 +1,4 @@
+//Simple example to work with Network Proxy Channels
 package main
 
 import (
@@ -75,7 +76,7 @@ func startClient(port string) {
 	}
 	for {
 	}
-	ch.Close()
+	//ch.Close()
 }
 
 func startServer(port string) {
@@ -118,8 +119,8 @@ func startServer(port string) {
 		init := make([]byte, l)
 		ch.Read(init)
 		dest := npc.FromBytes(init)
-		logrus.Infof("dialing dest: %v", dest.Addr)
-		throwaway, _ := net.Dial("udp", dest.Addr)
+		logrus.Infof("dialing dest: %v", dest.Addr())
+		throwaway, _ := net.Dial("udp", dest.Addr())
 		localAddr := throwaway.LocalAddr()
 		remoteAddr := throwaway.RemoteAddr()
 		throwaway.Close()
