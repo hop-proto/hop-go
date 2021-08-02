@@ -61,6 +61,10 @@ func GetAuthGrant(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string
 
 //Used by Principal to respond to INTENT_REQUESTS from a Client
 func Principal(agc *channels.Reliable, m *channels.Muxer, exec_ch *codex.ExecChan) {
+	defer func() {
+		agc.Close()
+		logrus.Info("Closed AGC")
+	}()
 	logrus.SetOutput(io.Discard)
 	exec_ch.Restore()
 	intent, err := ReadIntentRequest(agc)
@@ -87,12 +91,13 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, exec_ch *codex.ExecCha
 
 	exec_ch.Pipe()
 	exec_ch.Raw()
-
+	logrus.SetOutput(os.Stdout)
 	if resp == "yes" {
 		logrus.Info("C: USER CONFIRMED INTENT_REQUEST. CONTACTING S2...")
 
 		//create npc with server
 		npcCh, e := m.CreateChannel(channels.NPC_CHANNEL)
+		logrus.Info("started NPC from principal")
 		if e != nil {
 			logrus.Fatal("C: Error starting NPC")
 		}
@@ -220,6 +225,7 @@ func ProxyAuthGrantRequest(c net.Conn, principals *map[int32]*channels.Muxer) {
 		logrus.Fatalf("ERROR READING INTENT REQUEST: %v", e)
 	}
 	agc, err := principal.CreateChannel(channels.AGC_CHANNEL)
+	defer agc.Close()
 	if err != nil {
 		logrus.Fatalf("S: ERROR MAKING CHANNEL: %v", err)
 	}
