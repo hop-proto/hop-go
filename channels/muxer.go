@@ -48,11 +48,14 @@ func (m *Muxer) GetChannel(channelId byte) (*Reliable, bool) {
 func (m *Muxer) CreateChannel(cType byte) (*Reliable, error) {
 	r, err := NewReliableChannel(m.underlying, m.netConn, m.sendQueue, cType)
 	m.addChannel(r)
+	logrus.Infof("Created Channel: %v", r.id)
 	return r, err
 }
 
 func (m *Muxer) Accept() (*Reliable, error) {
-	return <-m.channelQueue, nil
+	s := <-m.channelQueue
+	logrus.Infof("Accepted Channel: %v", s.id)
+	return s, nil
 }
 
 func (m *Muxer) readMsg() (*Frame, error) {

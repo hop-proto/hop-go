@@ -25,7 +25,6 @@ import (
 //Used by Client to get an authorization grant from its Principal
 func GetAuthGrant(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string) (int64, error) {
 	intent := NewIntentRequest(digest, sUser, addr, cmd)
-
 	sock := "/tmp/auth.sock" //TODO(baumanl): make generalizeable
 	if addr == "127.0.0.1:9999" {
 		sock = "/tmp/auth2.sock"
@@ -156,12 +155,13 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, exec_ch *codex.ExecCha
 					go Principal(c, npc_muxer, exec_ch)
 				} else if c.Type() == channels.NPC_CHANNEL {
 					//go do something?
+					c.Close()
 				} else if c.Type() == channels.EXEC_CHANNEL {
 					//go do something else?
+					c.Close()
 				} else {
 					//bad channel
 					c.Close()
-					continue
 				}
 			}
 		}()

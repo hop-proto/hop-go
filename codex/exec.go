@@ -43,12 +43,19 @@ func NewExecChan(cmd []string, ch *channels.Reliable, wg *sync.WaitGroup) *ExecC
 	go func() {
 		defer wg.Done()
 		io.Copy(os.Stdout, ch) //read bytes from ch to os.Stdout
+		term.Restore(int(os.Stdin.Fd()), oldState)
 		logrus.Info("Stopped io.Copy(os.Stdout, ch)")
+		ch.Close()
+		logrus.Info("closed chan")
+
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	in := ctxio.NewReader(ctx, os.Stdin)
-	go io.Copy(ch, in)
+	go func() {
+		io.Copy(ch, in)
+		logrus.Info("Stopped io.Copy")
+	}()
 
 	return &ExecChan{
 		ch:     ch,

@@ -62,14 +62,17 @@ func client(args []string) {
 	if err != nil {
 		logrus.Fatalf("C: error dialing server: %v", err)
 	}
-	err = transportConn.Handshake()
+	err = transportConn.Handshake() //This hangs if the server is not available when it starts. Add retry or timeout?
 	if err != nil {
 		logrus.Fatalf("C: Issue with handshake: %v", err)
 	}
 	//TODO(baumanl): should these functions + things from Channels layer have errors?
 	mc := channels.NewMuxer(transportConn, transportConn)
 	go mc.Start()
-	defer mc.Stop()
+	defer func() {
+		mc.Stop()
+		logrus.Info("muxer stopped")
+	}()
 
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	logrus.Infof("Performing action: %v", cmd)
@@ -100,6 +103,7 @@ func client(args []string) {
 			}
 		}
 	}()
+
 	wg.Wait() //client program ends when the code execution channel ends.
 	//TODO(baumanl): figure out definitive closing behavior --> multiple code exec channels?
 	logrus.Info("Done waiting")

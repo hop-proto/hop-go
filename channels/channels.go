@@ -251,6 +251,7 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 
 func (r *Reliable) Close() error {
 	r.m.Lock()
+	name := r.id
 	if r.channelState == CLOSED {
 		r.m.Unlock()
 		return errors.New("channel already closed")
@@ -286,7 +287,7 @@ func (r *Reliable) Close() error {
 	}
 	r.closedCond.L.Unlock()
 	r.sender.close()
-	logrus.Debug("CLOSED! WOOHOO")
+	logrus.Infof("closed channel: %v", name)
 	r.m.Lock()
 	r.channelState = CLOSED
 	r.m.Unlock()

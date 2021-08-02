@@ -151,6 +151,12 @@ func session(serverConn *transport.Handle, principals map[int32]*channels.Muxer,
 
 			f, err := pty.Start(c)
 
+			go func() {
+				c.Wait()
+				serverChan.Close()
+				logrus.Info("closed chan")
+			}()
+
 			//If session is using an authorization grant then the muxer in this goroutine
 			//should be replaced by the muxer that the server has with the principal that authorized the grant
 			//use the muxers map above (authgrant --> muxer)
