@@ -92,6 +92,7 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, exec_ch *codex.ExecCha
 	exec_ch.Pipe()
 	exec_ch.Raw()
 	logrus.SetOutput(os.Stdout)
+
 	if resp == "yes" {
 		logrus.Info("C: USER CONFIRMED INTENT_REQUEST. CONTACTING S2...")
 
