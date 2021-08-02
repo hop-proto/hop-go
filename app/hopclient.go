@@ -103,7 +103,6 @@ func client(args []string) {
 			}
 		}
 	}()
-
 	wg.Wait() //client program ends when the code execution channel ends.
 	//TODO(baumanl): figure out definitive closing behavior --> multiple code exec channels?
 	logrus.Info("Done waiting")
