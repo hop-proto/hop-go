@@ -261,7 +261,7 @@ func (r *Reliable) Close() error {
 	if err != nil {
 		return err
 	}
-	logrus.Debug("STARTNG CLOSE")
+	logrus.Debug("Starting close of ", r.id)
 
 	time.Sleep(time.Second)
 	// Wait until the other end of the connection has received the FIN packet from the other side.
@@ -275,12 +275,12 @@ func (r *Reliable) Close() error {
 	}()
 	r.closedCond.L.Lock()
 	for {
-
 		t := time.Now()
 		elapsed := t.Sub(start)
-		//logrus.Debug("waiting: ", r.sender.unsentFramesRemaining(), r.recvWindow.closed, elapsed.Seconds())
+		logrus.Debug("waiting: ", r.sender.unsentFramesRemaining(), r.recvWindow.closed, elapsed.Seconds())
 
-		if (!r.sender.unsentFramesRemaining() && r.recvWindow.closed) || elapsed.Seconds() > 5 {
+		if elapsed.Seconds() > 5 || (!r.sender.unsentFramesRemaining() && r.recvWindow.closed) {
+			logrus.Debug("Breaking out! ", r.id)
 			break
 		}
 		r.closedCond.Wait()

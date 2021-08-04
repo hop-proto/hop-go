@@ -118,11 +118,18 @@ func (m *Muxer) Start() {
 	}
 }
 
+//muxer closes all channels
 func (m *Muxer) Stop() {
 	m.m.Lock()
-	m.stopped = true
+	wg := sync.WaitGroup{}
 	for _, v := range m.channels {
-		v.Close()
+		wg.Add(1)
+		go func(v *Reliable) { //parallelized closing channels because other side may close them in a different order
+			defer wg.Done()
+			v.Close() //TODO(baumanl): If a channel was already closed this returns an error that is ignored atm. Remove channel from map after closing?
+		}(v)
 	}
 	m.m.Unlock()
+	wg.Wait()
+	m.stopped = true //This has to come after all the channels are closed otherwise the channels can't finish sending all their frames and deadlock
 }

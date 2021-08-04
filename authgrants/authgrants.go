@@ -60,7 +60,7 @@ func GetAuthGrant(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string
 }
 
 //Used by Principal to respond to INTENT_REQUESTS from a Client
-func Principal(agc *channels.Reliable, m *channels.Muxer, exec_ch *codex.ExecChan) {
+func Principal(agc *channels.Reliable, m *channels.Muxer, exec_ch *codex.ExecChan, npcs *[]*channels.Reliable) {
 	defer func() {
 		agc.Close()
 		logrus.Info("Closed AGC")
@@ -97,11 +97,12 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, exec_ch *codex.ExecCha
 		logrus.Info("C: USER CONFIRMED INTENT_REQUEST. CONTACTING S2...")
 
 		//create npc with server
-		npcCh, e := m.CreateChannel(channels.NPC_CHANNEL)
+		npcCh, e := m.CreateChannel(channels.NPC_CHANNEL) //How do I close this on the principal side?
 		logrus.Info("started NPC from principal")
 		if e != nil {
 			logrus.Fatal("C: Error starting NPC")
 		}
+		*npcs = append(*npcs, npcCh)
 		addr := req.serverSNI + ":" + strconv.Itoa(int(req.port))
 		npcCh.Write(npc.NewNPCInitMsg(addr).ToBytes()) //tell server to prepare to proxy to addr (start a UDP conn)
 
@@ -158,7 +159,7 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, exec_ch *codex.ExecCha
 				}
 				logrus.Infof("Accepted channel of type: %v", c.Type())
 				if c.Type() == channels.AGC_CHANNEL {
-					go Principal(c, npc_muxer, exec_ch)
+					go Principal(c, npc_muxer, exec_ch, npcs)
 				} else if c.Type() == channels.NPC_CHANNEL {
 					//go do something?
 					c.Close()

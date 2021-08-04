@@ -10,11 +10,11 @@ import (
 )
 
 // The largest channel frame data length field.
-const MAX_FRAME_DATA_LENGTH = 500
+const MAX_FRAME_DATA_LENGTH = 2000
 
 // The highest number of frames we will transmit per timeout period,
 // even if the window size is large enough.
-const MAX_FRAG_TRANS_PER_RTO = 10
+const MAX_FRAG_TRANS_PER_RTO = 50
 
 type Sender struct {
 	// The acknowledgement number sent from the other end of the connection.

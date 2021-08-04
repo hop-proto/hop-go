@@ -54,6 +54,7 @@ func Server(npch *channels.Reliable) {
 	remoteAddr := throwaway.RemoteAddr()
 	throwaway.Close()
 	tconn, err := net.DialUDP("udp", nil, remoteAddr.(*net.UDPAddr))
+	defer tconn.Close()
 	if err != nil {
 		logrus.Fatalf("C: error dialing server: %v", err)
 	}
@@ -67,7 +68,9 @@ func Server(npch *channels.Reliable) {
 			buf := make([]byte, 65500)
 			n, _, _, _, e := npch.ReadMsgUDP(buf, nil)
 			if e != nil {
-				logrus.Fatal("Error Reading from Channel: ", e)
+				logrus.Info("Error Reading from Channel: ", e)
+				npch.Close()
+				break
 			}
 			//logrus.Infof("Read: %v bytes from channel", n)
 			//logrus.Infof("buf[:n] -> %v", buf[:n])

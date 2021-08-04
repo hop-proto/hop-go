@@ -74,6 +74,8 @@ func client(args []string) {
 		logrus.Info("muxer stopped")
 	}()
 
+	npcs := []*channels.Reliable{}
+
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	logrus.Infof("Performing action: %v", cmd)
 	ch, _ := mc.CreateChannel(channels.EXEC_CHANNEL)
@@ -91,7 +93,7 @@ func client(args []string) {
 			}
 			logrus.Infof("ACCEPTED NEW CHANNEL of TYPE: %v", c.Type())
 			if c.Type() == channels.AGC_CHANNEL && principal {
-				go authgrants.Principal(c, mc, exec_ch)
+				go authgrants.Principal(c, mc, exec_ch, &npcs)
 			} else if c.Type() == channels.NPC_CHANNEL {
 				//go do something?
 			} else if c.Type() == channels.EXEC_CHANNEL {
@@ -106,4 +108,7 @@ func client(args []string) {
 	wg.Wait() //client program ends when the code execution channel ends.
 	//TODO(baumanl): figure out definitive closing behavior --> multiple code exec channels?
 	logrus.Info("Done waiting")
+	// for _, c := range npcs {
+	// 	c.Close()
+	// }
 }

@@ -3,6 +3,7 @@ package channels
 import (
 	"math/rand"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -83,6 +84,83 @@ func TestMuxer(t *testing.T) {
 	assert.Check(t, cmp.Len(testData, bytesRead))
 	assert.Equal(t, testData, string(buf))
 
+}
+
+func TestClosingMuxer(t *testing.T) {
+	logrus.SetLevel(logrus.DebugLevel)
+	pktConn, err := net.ListenPacket("udp", "localhost:8891")
+	assert.NilError(t, err)
+	// It's actually a UDP conn
+	udpConn := pktConn.(*net.UDPConn)
+	server, err := transport.NewServer(udpConn, newTestServerConfig(t))
+	assert.NilError(t, err)
+	go server.Serve()
+
+	transportConn, err := transport.Dial("udp", udpConn.LocalAddr().String(), nil)
+	assert.NilError(t, err)
+
+	assert.NilError(t, transportConn.Handshake())
+
+	serverConn, err := server.AcceptTimeout(time.Minute)
+	assert.NilError(t, err)
+
+	mc := NewMuxer(transportConn, transportConn)
+	go mc.Start()
+
+	ms := NewMuxer(serverConn, serverConn)
+	go ms.Start()
+
+	agc, err := mc.CreateChannel(AGC_CHANNEL)
+	assert.NilError(t, err)
+
+	npc, err := mc.CreateChannel(NPC_CHANNEL)
+	assert.NilError(t, err)
+
+	codex, err := mc.CreateChannel(EXEC_CHANNEL)
+	assert.NilError(t, err)
+
+	agcs, err := ms.Accept()
+	assert.NilError(t, err)
+
+	npcs, err := ms.Accept()
+	assert.NilError(t, err)
+
+	codexs, err := ms.Accept()
+	assert.NilError(t, err)
+
+	n, e := agc.Write([]byte("sent over agc"))
+	assert.NilError(t, e)
+	logrus.Infof("Wrote %v bytes", n)
+	n, e = npc.Write([]byte("sent over npc"))
+	assert.NilError(t, e)
+	logrus.Infof("Wrote %v bytes", n)
+	n, e = codex.Write([]byte("sent over cod"))
+	assert.NilError(t, e)
+	logrus.Infof("Wrote %v bytes", n)
+
+	buf1 := make([]byte, 13)
+	buf2 := make([]byte, 13)
+	buf3 := make([]byte, 13)
+
+	agcs.Read(buf1)
+	logrus.Info("agcs recvd: ", string(buf1))
+	npcs.Read(buf2)
+	logrus.Info("npcs recvd: ", string(buf2))
+	codexs.Read(buf3)
+	logrus.Info("codexs recvd: ", string(buf3))
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		mc.Stop()
+	}()
+
+	ms.Stop()
+
+	wg.Wait()
+	logrus.Info("All done!")
 }
 
 func TestSmallWindow(t *testing.T) {
