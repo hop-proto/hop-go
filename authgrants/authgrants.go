@@ -1,4 +1,4 @@
-//Package providing support for the authorization grant protocol.
+//Package authgrants provides support for the authorization grant protocol.
 package authgrants
 
 import (
@@ -22,9 +22,9 @@ import (
 	"zmap.io/portal/transport"
 )
 
-//Used by Client to get an authorization grant from its Principal
-func GetAuthGrant(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string) (int64, error) {
-	intent := NewIntentRequest(digest, sUser, addr, cmd)
+//GetAuthGrant is used by the Client to get an authorization grant from its Principal
+func GetAuthGrant(digest [sha3Len]byte, sUser string, addr string, cmd []string) (int64, error) {
+	intent := newIntentRequest(digest, sUser, addr, cmd)
 	sock := "/tmp/auth.sock" //TODO(baumanl): make generalizeable
 	if addr == "127.0.0.1:9999" {
 		sock = "/tmp/auth2.sock"
@@ -36,22 +36,22 @@ func GetAuthGrant(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string
 	defer c.Close()
 
 	logrus.Infof("C: CONNECTED TO UDS: [%v]", c.RemoteAddr().String())
-	_, e := c.Write(intent.ToBytes())
+	_, e := c.Write(intent.toBytes())
 	if e != nil {
 		logrus.Fatal("C: error writing to UDS")
 	}
 	logrus.Infof("C: WROTE INTENT TO UDS")
-	response, resptype, err := GetResponse(c)
+	response, resptype, err := getResponse(c)
 	if err != nil {
 		logrus.Fatalf("S: ERROR GETTING RESPONSE: %v", err)
 	}
 
 	//TODO(baumanl): SET TIMEOUT STUFF + BETTER ERROR CHECKING
 	switch resptype {
-	case INTENT_CONFIRMATION:
-		return FromIntentConfirmationBytes(response[TYPE_LEN:]).Deadline, nil
-	case INTENT_DENIED:
-		reason := FromIntentDeniedBytes(response[TYPE_LEN:]).reason
+	case IntentConfirmation:
+		return fromIntentConfirmationBytes(response[TypeLen:]).Deadline, nil
+	case IntentDenied:
+		reason := fromIntentDeniedBytes(response[TypeLen:]).reason
 		logrus.Infof("Reason for denial: %v", reason)
 		return 0, errors.New("principal denied Intent Request")
 	default:
@@ -59,39 +59,38 @@ func GetAuthGrant(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string
 	}
 }
 
-//Used by Principal to respond to INTENT_REQUESTS from a Client
-func Principal(agc *channels.Reliable, m *channels.Muxer, exec_ch *codex.ExecChan, npcs *[]*channels.Reliable) {
+//Principal is used by the Principal to respond to INTENT_REQUESTS from a Client
+func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan, npcs *[]*channels.Reliable) {
 	defer func() {
 		agc.Close()
 		logrus.Info("Closed AGC")
 	}()
 	logrus.SetOutput(io.Discard)
-	exec_ch.Restore()
-	intent, err := ReadIntentRequest(agc)
+	execCh.Restore()
+	intent, err := readIntentRequest(agc)
 	if err != nil {
 		logrus.Fatalf("ERROR READING INTENT REQUEST: %v", err)
 	}
 
 	logrus.Info("C: PRINCIPAL REC: INTENT_REQUEST")
-	req := FromIntentRequestBytes(intent[TYPE_LEN:])
+	req := fromIntentRequestBytes(intent[TypeLen:])
 
 	//TODO(baumanl): FIX THIS!
 	//This still doesn't work great for getting user input to principal.
 	//User has to hit enter once and then actually provide your input.
 	//(i.e. the first time the user provides input and presses enter the principal does not receive the input
 	//and I'm assuming it is still being sent to the server over the code execution channel)
-	//Can't figure out how to stop the io.Copy() that takes Stdin -> exec_ch to stop without this issue.
+	//Can't figure out how to stop the io.Copy() that takes Stdin -> execCh to stop without this issue.
 	//Tried simulating user input by sending keystrokes to /dev/uinput, but that
 	//	1.) requires sudo priv of principal (bad) and
 	// 	2.) didn't even seem to fix the issue
-	exec_ch.ClosePipe()
+	execCh.ClosePipe()
 	req.Display()
 	var resp string
 	fmt.Scanln(&resp) //TODO(baumanl):Replace this with a better format question/response like "github.com/tockins/interact"
 
-	exec_ch.Pipe()
-	exec_ch.Raw()
-	logrus.SetOutput(os.Stdout)
+	execCh.Pipe()
+	execCh.Raw()
 
 	if resp == "yes" {
 		logrus.Info("C: USER CONFIRMED INTENT_REQUEST. CONTACTING S2...")
@@ -121,20 +120,20 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, exec_ch *codex.ExecCha
 			logrus.Fatal("Handshake failed: ", e)
 		}
 		logrus.Info("handshake successful")
-		npc_muxer := channels.NewMuxer(tclient, tclient)
-		go npc_muxer.Start()
+		npcMuxer := channels.NewMuxer(tclient, tclient)
+		go npcMuxer.Start()
 
 		//start AGC and send INTENT_COMMUNICATION
-		npc_agc, e := npc_muxer.CreateChannel(channels.AGC_CHANNEL)
+		npcAgc, e := npcMuxer.CreateChannel(channels.AGC_CHANNEL)
 		if e != nil {
 			logrus.Fatal("Error creating AGC: ", e)
 		}
 		logrus.Info("CREATED AGC")
-		_, e = npc_agc.Write(CommFromReq(intent))
+		_, e = npcAgc.Write(commFromReq(intent))
 		if e != nil {
-			logrus.Info("Issue writing intent comm to npc_agc")
+			logrus.Info("Issue writing intent comm to npcAgc")
 		}
-		response, _, e := GetResponse(npc_agc)
+		response, _, e := getResponse(npcAgc)
 		logrus.Info("got response")
 		if e != nil {
 			logrus.Fatalf("C: error reading from agc: %v", e)
@@ -145,21 +144,21 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, exec_ch *codex.ExecCha
 		if err != nil {
 			logrus.Fatalf("C: error writing to agc: %v", err)
 		}
-		//TODO(baumanl): Add logic to deal with potential INTENT_DENIED from server
-		logrus.Infof("C: WROTE INTENT_CONFIRMATION")
-		npc_agc.Close()
+		//TODO(baumanl): Add logic to deal with potential IntentDenied from server
+		logrus.Infof("C: WROTE IntentConfirmation")
+		npcAgc.Close()
 
 		// Want to keep this session open in case the "server 2" wants to continue chaining hop sessions together
 		// TODO(baumanl): Simplify this. Should only get authorization grant channels?
 		go func() {
 			for {
-				c, e := npc_muxer.Accept()
+				c, e := npcMuxer.Accept()
 				if e != nil {
-					logrus.Fatalf("Error accepting channel: ", e)
+					logrus.Fatalf("Error accepting channel: %v", e)
 				}
 				logrus.Infof("Accepted channel of type: %v", c.Type())
 				if c.Type() == channels.AGC_CHANNEL {
-					go Principal(c, npc_muxer, exec_ch, npcs)
+					go Principal(c, npcMuxer, execCh, npcs)
 				} else if c.Type() == channels.NPC_CHANNEL {
 					//go do something?
 					c.Close()
@@ -173,24 +172,24 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, exec_ch *codex.ExecCha
 			}
 		}()
 	} else {
-		agc.Write(NewIntentDenied("User denied.").ToBytes())
+		agc.Write(newIntentDenied("User denied.").toBytes())
 	}
 }
 
-//Used by Server to handle an INTENT_COMMUNICATION from a Principal
+//Server is used by a Server to handle an INTENT_COMMUNICATION from a Principal
 func Server(agc *channels.Reliable, muxer *channels.Muxer, agToMux map[string]*channels.Muxer) {
 	logrus.Info("waiting for intent communication")
 	defer agc.Close()
-	msg, e := ReadIntentCommunication(agc)
+	msg, e := readIntentCommunication(agc)
 	if e != nil {
 		logrus.Fatalf("error reading intent communication")
 	}
-	intent := FromIntentCommunicationBytes(msg[TYPE_LEN:])
+	intent := fromIntentCommunicationBytes(msg[TypeLen:])
 	logrus.Infof("Pretending s2 approved intent request")                                   //TODO(baumanl): check policy or something?
-	t := time.Time(time.Now().Add(time.Duration(time.Hour)))                                //TODO(baumanl): What should this actually be? (probably much shorter)
+	t := time.Now().Add(time.Hour)                                                          //TODO(baumanl): What should this actually be? (probably much shorter)
 	f, err := os.OpenFile("../app/authorized_keys", os.O_APPEND|os.O_WRONLY, os.ModeAppend) //TODO(baumanl): fix authorized_keys file location
 	if err != nil {
-		logrus.Fatalf("error opening authorized keys file: ", err)
+		logrus.Fatalf("error opening authorized keys file: %v", err)
 	}
 	defer f.Close()
 	k := keys.PublicKey(intent.sha3)
@@ -200,15 +199,15 @@ func Server(agc *channels.Reliable, muxer *channels.Muxer, agToMux map[string]*c
 	_, e = f.WriteString(authgrant)
 	f.WriteString("\n")
 	if e != nil {
-		logrus.Infof("Issue writing to authorized keys file: ", e)
+		logrus.Infof("Issue writing to authorized keys file: %v", e)
 	}
 	agToMux[k.String()] = muxer
 
-	agc.Write(NewIntentConfirmation(t).ToBytes())
+	agc.Write(newIntentConfirmation(t).toBytes())
 	agc.Close()
 }
 
-//Used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
+//ProxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
 //Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
 func ProxyAuthGrantRequest(c net.Conn, principals *map[int32]*channels.Muxer) {
 	//TODO(baumanl): check threadsafety
@@ -222,22 +221,22 @@ func ProxyAuthGrantRequest(c net.Conn, principals *map[int32]*channels.Muxer) {
 	// find corresponding session muxer
 	principal := (*principals)[ancestor]
 	logrus.Infof("S: CLIENT CONNECTED [%s]", c.RemoteAddr().Network())
-	intent, e := ReadIntentRequest(c)
+	intent, e := readIntentRequest(c)
 	if e != nil {
 		logrus.Fatalf("ERROR READING INTENT REQUEST: %v", e)
 	}
 	agc, err := principal.CreateChannel(channels.AGC_CHANNEL)
-	defer agc.Close()
 	if err != nil {
 		logrus.Fatalf("S: ERROR MAKING CHANNEL: %v", err)
 	}
+	defer agc.Close()
 	logrus.Infof("S: CREATED CHANNEL (AGC)")
 	_, err = agc.Write(intent)
 	if err != nil {
 		logrus.Fatalf("S: ERROR WRITING TO CHANNEL: %v", err)
 	}
 	logrus.Infof("S: WROTE INTENT_REQUEST TO AGC")
-	response, _, err := GetResponse(agc)
+	response, _, err := getResponse(agc)
 	if err != nil {
 		logrus.Fatalf("S: ERROR GETTING RESPONSE: %v, %v", err, response)
 	}
@@ -246,15 +245,15 @@ func ProxyAuthGrantRequest(c net.Conn, principals *map[int32]*channels.Muxer) {
 		logrus.Fatalf("S: ERROR WRITING TO CHANNEL: %v", err)
 	}
 
-	//TODO(baumanl): Add retry logic if INTENT_DENIED
-	// if response[0] == INTENT_DENIED {
+	//TODO(baumanl): Add retry logic if IntentDenied
+	// if response[0] == IntentDenied {
 	// 	//ASK USER IF THEY WANT TO TRY AGAIN BEFORE CLOSING AGC
 	// }
 }
 
-//Print authgrant approval prompt to terminal
-func (r *IntentRequest) Display() {
-	fmt.Printf("\nAllow %v@%v to run %v on %v@%v? \nEnter yes or no: \n (Bug: hit enter once before responding)",
+//Display prints the authgrant approval prompt to terminal
+func (r *intentRequestMsg) Display() {
+	fmt.Printf("\nAllow %v@%v to run %v on %v@%v? \nEnter yes or no: \n (Bug: hit enter once before responding)\n",
 		r.clientUsername,
 		r.clientSNI,
 		r.action,

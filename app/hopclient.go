@@ -14,10 +14,11 @@ import (
 
 //parses cmd line arguments and establishes hop session with remote hop server
 func client(args []string) {
+	//logrus.SetOutput(io.Discard)
 	logrus.SetLevel(logrus.InfoLevel)
 	//******PROCESS CMD LINE ARGUMENTS******
 	if len(args) < 5 {
-		logrus.Fatal("C: Invalid arguments. Useage: hop user@host:port -k <pathtokey> or hop user@host:port -a <action>.")
+		logrus.Fatal("C: Invalid arguments. Usage: hop user@host:port -k <pathtokey> or hop user@host:port -a <action>.")
 	}
 	s := strings.SplitAfter(args[2], "@") //TODO(bauman): Add support for optional username
 	user := s[0][0 : len(s[0])-1]
@@ -81,7 +82,7 @@ func client(args []string) {
 	ch, _ := mc.CreateChannel(channels.EXEC_CHANNEL)
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	exec_ch := codex.NewExecChan(cmd, ch, &wg)
+	execCh := codex.NewExecChan(cmd, ch, &wg)
 
 	//TODO(baumanl): figure out responses to different channel types/what all should be allowed
 	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****
@@ -89,11 +90,11 @@ func client(args []string) {
 		for {
 			c, e := mc.Accept()
 			if e != nil {
-				logrus.Fatalf("Error accepting channel: ", e)
+				logrus.Fatalf("Error accepting channel: %v", e)
 			}
 			logrus.Infof("ACCEPTED NEW CHANNEL of TYPE: %v", c.Type())
 			if c.Type() == channels.AGC_CHANNEL && principal {
-				go authgrants.Principal(c, mc, exec_ch, &npcs)
+				go authgrants.Principal(c, mc, execCh, &npcs)
 			} else if c.Type() == channels.NPC_CHANNEL {
 				//go do something?
 			} else if c.Type() == channels.EXEC_CHANNEL {
@@ -108,7 +109,4 @@ func client(args []string) {
 	wg.Wait() //client program ends when the code execution channel ends.
 	//TODO(baumanl): figure out definitive closing behavior --> multiple code exec channels?
 	logrus.Info("Done waiting")
-	// for _, c := range npcs {
-	// 	c.Close()
-	// }
 }

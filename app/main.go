@@ -34,15 +34,15 @@ func main() {
 		pair.Generate()
 		f, e := os.OpenFile("keys/default", os.O_APPEND|os.O_WRONLY, os.ModeAppend)
 		if e != nil {
-			logrus.Fatalf("error opening default key file: ", e)
+			logrus.Fatalf("error opening default key file: %v", e)
 		}
 		defer f.Close()
-		logrus.Infof("adding private to keys/default", pair.Private.String())
+		logrus.Infof("adding private to keys/default: %v", pair.Private.String())
 		f.WriteString(pair.Private.String())
 
 		auth, e := os.OpenFile("authorized_keys", os.O_APPEND|os.O_WRONLY, os.ModeAppend)
 		if e != nil {
-			logrus.Fatalf("error opening auth key file: ", e)
+			logrus.Fatalf("error opening auth key file: %v", e)
 		}
 		defer auth.Close()
 		logrus.Infof("adding public to auth keys: %v", pair.Public.String())

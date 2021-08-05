@@ -15,34 +15,19 @@ transport:
 
 
 Miscellaneous Issues/TODOs:
-
+- store authorization grants in memory instead of authorized_keys file (!!!!)
 - Principal needs to get user input as a background process (!!!) --> semi-fixed, still have one weird line. Don't know how to make a GUI cmd line app but could work if exec.CMD? Another process?
-
-- fixed laggy typing echo, but getting stdout from channel seems laggy -> Adjust max data length params
-
-- start hop client as specified user 
-
-- oneshot command functionality
-- exiting from bash or other cmd --> restore client terminal to original shell
-
-- parse cmd intelligently (have to move away from exec.Cmd?)
-
-
--thread safety of maps to principal sessions (muxers)
-
--check codex.Server() for issues relating to pty/terminal display crap
-
+- start hop client as specified user (!!!)
+- add timeouts/deadlines (!!!)
+- authorized_keys file location standard (!!!)
+- test on multiple VMS (!!!)
 
 - Unix domain socket address standard --> convert to abstract sockets???
-- authorized_keys file location standard
+- thread safety of maps to principal sessions (muxers) (!!)
+- parse cmd intelligently (have to move away from exec.Cmd?) (!!)
+- check codex.Server() for issues relating to pty/terminal display crap (!!)
 
-- how should server set deadline for authgrant?
+- change all "channels" -> "tubes"
+- fine tune constants in channels/muxer code
 - should server 2 somehow check a security policy or something before adding authgrant? (Like make sure that the principal is allowed to give authgrants?)
-
-- Better error handling
-- Commenting
-- More idiomatic go code
-- better decomp/abstraction
--struct for "session" instead of directly using muxers???
-- Closing/Exit behavior
 

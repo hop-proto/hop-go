@@ -71,6 +71,7 @@ func setListenerOptions(proto, addr string, c syscall.RawConn) error {
 //listen for incoming hop connection requests and start corresponding authGrantServer on a Unix Domain socket
 func serve(args []string) {
 	logrus.SetLevel(logrus.InfoLevel)
+	//logrus.SetOutput(io.Discard)
 	//TEMPORARY: Should take address from argument and socket should be abstract/same place or dependent on session?
 	addr := "localhost:7777"
 	sockAddr := "/tmp/auth.sock"
@@ -144,9 +145,9 @@ func session(serverConn *transport.Handle, principals map[int32]*channels.Muxer,
 		switch serverChan.Type() {
 		case channels.EXEC_CHANNEL:
 			cmd, _ := codex.GetCmd(serverChan)
-			logrus.Infof("Executing: %v", string(cmd))
+			logrus.Infof("Executing: %v", cmd)
 
-			args := strings.Split(string(cmd), " ")
+			args := strings.Split(cmd, " ")
 			c := exec.Command(args[0], args[1:]...)
 
 			f, err := pty.Start(c)

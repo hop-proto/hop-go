@@ -18,62 +18,63 @@ import (
 
 //General Constants
 const (
-	MAX_PORT_NUMBER  = 65535
-	DEFAULT_HOP_PORT = 8888 //TODO(baumanl): default port? 8888 for now
+	MaxPortNumber  = 65535
+	DefaultHopPort = 8888 //TODO(baumanl): default port? 8888 for now
 
-	INTENT_REQUEST       = byte(1)
-	INTENT_COMMUNICATION = byte(2)
-	INTENT_CONFIRMATION  = byte(3)
-	INTENT_DENIED        = byte(4)
+	IntentRequest       = byte(1)
+	IntentCommunication = byte(2)
+	IntentConfirmation  = byte(3)
+	IntentDenied        = byte(4)
 
-	TYPE_LEN = 1
+	TypeLen = 1
 )
 
 //Intent Request and Communication constants
 const (
-	SHA3_LEN         = 32
-	USERNAME_LEN     = 32
-	SNI_LEN          = 256
-	PORT_LEN         = 2
-	CHANNEL_TYPE_LEN = 1
-	RESERVED_LEN     = 1
-	IR_HEADER_LENGTH = SHA3_LEN + 2*(USERNAME_LEN+SNI_LEN) + PORT_LEN + CHANNEL_TYPE_LEN + RESERVED_LEN
+	sha3Len        = 32
+	usernameLen    = 32
+	sniLen         = 256
+	portLen        = 2
+	channelTypeLen = 1
+	reservedLen    = 1
+	irHeaderLen    = sha3Len + 2*(usernameLen+sniLen) + portLen + channelTypeLen + reservedLen
 
-	SHA3_OFFSET   = 0
-	CUSER_OFFSET  = SHA3_OFFSET + SHA3_LEN
-	CSNI_OFFSET   = CUSER_OFFSET + USERNAME_LEN
-	SUSER_OFFSET  = CSNI_OFFSET + SNI_LEN
-	SSNI_OFFSET   = SUSER_OFFSET + USERNAME_LEN
-	PORT_OFFSET   = SSNI_OFFSET + SNI_LEN
-	CHTYPE_OFFSET = PORT_OFFSET + PORT_LEN
-	LEN_OFFSET    = CHTYPE_OFFSET + CHANNEL_TYPE_LEN //Using the reserved byte to hold length of action (up to 256 bytes)
-	ACT_OFFSET    = LEN_OFFSET + RESERVED_LEN
+	sha3Offset   = 0
+	cUserOffset  = sha3Offset + sha3Len
+	cSNIOffset   = cUserOffset + usernameLen
+	sUserOffset  = cSNIOffset + sniLen
+	sSNIOffset   = sUserOffset + usernameLen
+	portOffset   = sSNIOffset + sniLen
+	chTypeOffset = portOffset + portLen
+	lenOffset    = chTypeOffset + channelTypeLen //Using the reserved byte to hold length of action (up to 256 bytes)
+	actOffset    = lenOffset + reservedLen
 )
 
 //Intent Confirmation constants
 const (
-	DEADLINE_OFFSET  = 0
-	DEADLINE_LEN     = 8
-	INTENT_CONF_SIZE = DEADLINE_LEN
+	deadlineOffset = 0
+	deadlineLen    = 8
+	intentConfSize = deadlineLen
 )
 
 //Intent Denied constants
 const (
-	REASON_LEN_OFFSET = 0 //1 byte to record length of reason
-	REASON_OFFSET     = 1
+	//reasonLenOffset = 0 //1 byte to record length of reason
+	reasonOffset = 1
 )
 
-type AgcMessage struct {
+type agcMessage struct {
 	msgType byte
-	d       Data
+	d       data
 }
 
-type Data interface {
+type data interface {
 	toBytes() []byte
 }
 
-type IntentRequest struct {
-	sha3           [SHA3_LEN]byte
+//intentRequestMsg contains all data fields of an intent request msg
+type intentRequestMsg struct {
+	sha3           [sha3Len]byte
 	clientUsername string
 	clientSNI      string
 	serverUsername string
@@ -83,10 +84,11 @@ type IntentRequest struct {
 	action         []string
 }
 
+//intentCommunicationMsg contains all data fields of an intent comm msg
 //Actually necessary to have different struct?
 //TODO(baumanl): figure out best way to restructure to min. duplicate code
-type IntentCommunication struct {
-	sha3           [SHA3_LEN]byte
+type intentCommunicationMsg struct {
+	sha3           [sha3Len]byte
 	clientUsername string
 	clientSNI      string
 	serverUsername string
@@ -96,21 +98,23 @@ type IntentCommunication struct {
 	action         []string
 }
 
-type IntentConfirmation struct {
+//intentConfirmationMsg contains deadline for an approved auth grant
+type intentConfirmationMsg struct {
 	Deadline int64 //Unix time
 }
 
-type IntentDenied struct {
+//intentDeniedMsg contains reason for a denied auth grant
+type intentDeniedMsg struct {
 	reason string
 }
 
 //Constructors
-func NewIntentRequest(digest [SHA3_LEN]byte, sUser string, addr string, cmd []string) *AgcMessage {
+func newIntentRequest(digest [sha3Len]byte, sUser string, addr string, cmd []string) *agcMessage {
 	user, _ := user.Current()
 	cSNI, _ := os.Hostname()
 	sSNI, p := parseAddr(addr)
 
-	r := &IntentRequest{
+	r := &intentRequestMsg{
 		sha3:           digest,
 		clientUsername: user.Username,
 		clientSNI:      cSNI,
@@ -120,90 +124,73 @@ func NewIntentRequest(digest [SHA3_LEN]byte, sUser string, addr string, cmd []st
 		channelType:    byte(1), //TODO(baumanl): how should this be used/enforced?
 		action:         cmd,
 	}
-	return &AgcMessage{
-		msgType: INTENT_REQUEST,
+	return &agcMessage{
+		msgType: IntentRequest,
 		d:       r,
 	}
 }
 
-func NewIntentCommunication(r *IntentRequest) *AgcMessage {
-	c := &IntentCommunication{
-		sha3:           r.sha3,
-		clientUsername: r.clientUsername,
-		clientSNI:      r.clientSNI,
-		serverUsername: r.serverUsername,
-		serverSNI:      r.serverSNI,
-		port:           r.port,
-		channelType:    r.channelType,
-		action:         r.action,
-	}
-	return &AgcMessage{
-		msgType: INTENT_COMMUNICATION,
-		d:       c,
-	}
-}
-
-func NewIntentConfirmation(t time.Time) *AgcMessage {
-	c := &IntentConfirmation{
+func newIntentConfirmation(t time.Time) *agcMessage {
+	c := &intentConfirmationMsg{
 		Deadline: t.Unix(),
 	}
-	return &AgcMessage{
-		msgType: INTENT_CONFIRMATION,
+	return &agcMessage{
+		msgType: IntentConfirmation,
 		d:       c,
 	}
 }
 
-func NewIntentDenied(r string) *AgcMessage {
-	c := &IntentDenied{
+func newIntentDenied(r string) *agcMessage {
+	c := &intentDeniedMsg{
 		reason: r,
 	}
-	return &AgcMessage{
-		msgType: INTENT_DENIED,
+	return &agcMessage{
+		msgType: IntentDenied,
 		d:       c,
 	}
 }
 
 //toBytes()
-func (r *IntentRequest) toBytes() []byte {
-	s := [IR_HEADER_LENGTH]byte{}
-	copy(s[SHA3_OFFSET:CUSER_OFFSET], r.sha3[:])
-	copy(s[CUSER_OFFSET:CSNI_OFFSET], []byte(r.clientUsername))
-	copy(s[CSNI_OFFSET:SUSER_OFFSET], []byte(r.clientSNI))
-	copy(s[SUSER_OFFSET:SSNI_OFFSET], []byte(r.serverUsername))
-	copy(s[SSNI_OFFSET:PORT_OFFSET], []byte(r.serverSNI))
-	binary.BigEndian.PutUint16(s[PORT_OFFSET:CHTYPE_OFFSET], r.port)
-	s[CHTYPE_OFFSET] = r.channelType
+func (r *intentRequestMsg) toBytes() []byte {
+	s := [irHeaderLen]byte{}
+	copy(s[sha3Offset:cUserOffset], r.sha3[:])
+	copy(s[cUserOffset:cSNIOffset], []byte(r.clientUsername))
+	copy(s[cSNIOffset:sUserOffset], []byte(r.clientSNI))
+	copy(s[sUserOffset:sSNIOffset], []byte(r.serverUsername))
+	copy(s[sSNIOffset:portOffset], []byte(r.serverSNI))
+	binary.BigEndian.PutUint16(s[portOffset:chTypeOffset], r.port)
+	s[chTypeOffset] = r.channelType
 	action := []byte(strings.Join(r.action, " "))
-	s[LEN_OFFSET] = byte(len(action)) //TODO(baumanl): This only allows for actions up to 256 bytes (and no bounds checking atm)
+	s[lenOffset] = byte(len(action)) //TODO(baumanl): This only allows for actions up to 256 bytes (and no bounds checking atm)
 	return append(s[:], action...)
 }
 
-func (c *IntentCommunication) toBytes() []byte { //TODO(baumanl): This is literally identical to the above function.
-	s := [IR_HEADER_LENGTH]byte{}
-	copy(s[SHA3_OFFSET:CUSER_OFFSET], c.sha3[:])
-	copy(s[CUSER_OFFSET:CSNI_OFFSET], []byte(c.clientUsername))
-	copy(s[CSNI_OFFSET:SUSER_OFFSET], []byte(c.clientSNI))
-	copy(s[SUSER_OFFSET:SSNI_OFFSET], []byte(c.serverUsername))
-	copy(s[SSNI_OFFSET:PORT_OFFSET], []byte(c.serverSNI))
-	binary.BigEndian.PutUint16(s[PORT_OFFSET:CHTYPE_OFFSET], c.port)
-	s[CHTYPE_OFFSET] = c.channelType
+func (c *intentCommunicationMsg) toBytes() []byte { //TODO(baumanl): This is literally identical to the above function.
+	s := [irHeaderLen]byte{}
+	copy(s[sha3Offset:cUserOffset], c.sha3[:])
+	copy(s[cUserOffset:cSNIOffset], []byte(c.clientUsername))
+	copy(s[cSNIOffset:sUserOffset], []byte(c.clientSNI))
+	copy(s[sUserOffset:sSNIOffset], []byte(c.serverUsername))
+	copy(s[sSNIOffset:portOffset], []byte(c.serverSNI))
+	binary.BigEndian.PutUint16(s[portOffset:chTypeOffset], c.port)
+	s[chTypeOffset] = c.channelType
 	action := []byte(strings.Join(c.action, " "))
-	s[LEN_OFFSET] = byte(len(action)) //TODO(baumanl): This only allows for actions up to 256 bytes (and no bounds checking atm)
+	s[lenOffset] = byte(len(action)) //TODO(baumanl): This only allows for actions up to 256 bytes (and no bounds checking atm)
 	return append(s[:], action...)
 }
 
-func (c *IntentConfirmation) toBytes() []byte {
-	s := [INTENT_CONF_SIZE]byte{}
-	binary.BigEndian.PutUint64(s[DEADLINE_OFFSET:], uint64(c.Deadline))
+func (c *intentConfirmationMsg) toBytes() []byte {
+	s := [intentConfSize]byte{}
+	binary.BigEndian.PutUint64(s[deadlineOffset:], uint64(c.Deadline))
 	return s[:]
 }
 
-func (c *IntentDenied) toBytes() []byte {
+func (c *intentDeniedMsg) toBytes() []byte {
 	s := []byte{byte(len(c.reason))}
 	return append(s[:], []byte(c.reason)...)
 }
 
-func (a *AgcMessage) ToBytes() []byte {
+func (a *agcMessage) toBytes() []byte {
 	return append([]byte{a.msgType}, a.d.toBytes()...)
 }
 
@@ -217,70 +204,70 @@ func trimNullBytes(b []byte) string {
 }
 
 //fromBytes()
-func FromIntentRequestBytes(b []byte) *IntentRequest {
-	r := IntentRequest{}
-	copy(r.sha3[:], b[SHA3_OFFSET:CUSER_OFFSET])
-	r.clientUsername = trimNullBytes(b[CUSER_OFFSET:CSNI_OFFSET])
-	r.clientSNI = trimNullBytes(b[CSNI_OFFSET:SUSER_OFFSET])
-	r.serverUsername = trimNullBytes(b[SUSER_OFFSET:SSNI_OFFSET])
-	r.serverSNI = trimNullBytes(b[SSNI_OFFSET:PORT_OFFSET])
-	r.port = binary.BigEndian.Uint16(b[PORT_OFFSET:CHTYPE_OFFSET])
-	r.channelType = b[CHTYPE_OFFSET]
-	r.action = strings.Split(string(b[ACT_OFFSET:]), " ")
+func fromIntentRequestBytes(b []byte) *intentRequestMsg {
+	r := intentRequestMsg{}
+	copy(r.sha3[:], b[sha3Offset:cUserOffset])
+	r.clientUsername = trimNullBytes(b[cSNIOffset:cSNIOffset])
+	r.clientSNI = trimNullBytes(b[cSNIOffset:sUserOffset])
+	r.serverUsername = trimNullBytes(b[sUserOffset:sSNIOffset])
+	r.serverSNI = trimNullBytes(b[sSNIOffset:portOffset])
+	r.port = binary.BigEndian.Uint16(b[portOffset:chTypeOffset])
+	r.channelType = b[chTypeOffset]
+	r.action = strings.Split(string(b[actOffset:]), " ")
 	return &r
 }
 
-func FromIntentCommunicationBytes(b []byte) *IntentCommunication {
-	r := IntentCommunication{}
-	copy(r.sha3[:], b[SHA3_OFFSET:CUSER_OFFSET])
-	r.clientUsername = trimNullBytes(b[CUSER_OFFSET:CSNI_OFFSET])
-	r.clientSNI = trimNullBytes(b[CSNI_OFFSET:SUSER_OFFSET])
-	r.serverUsername = trimNullBytes(b[SUSER_OFFSET:SSNI_OFFSET])
-	r.serverSNI = trimNullBytes(b[SSNI_OFFSET:PORT_OFFSET])
-	r.port = binary.BigEndian.Uint16(b[PORT_OFFSET:CHTYPE_OFFSET])
-	r.channelType = b[CHTYPE_OFFSET]
-	r.action = strings.Split(string(b[ACT_OFFSET:]), " ")
+func fromIntentCommunicationBytes(b []byte) *intentCommunicationMsg {
+	r := intentCommunicationMsg{}
+	copy(r.sha3[:], b[sha3Offset:cUserOffset])
+	r.clientUsername = trimNullBytes(b[cSNIOffset:cSNIOffset])
+	r.clientSNI = trimNullBytes(b[cSNIOffset:sUserOffset])
+	r.serverUsername = trimNullBytes(b[sUserOffset:sSNIOffset])
+	r.serverSNI = trimNullBytes(b[sSNIOffset:portOffset])
+	r.port = binary.BigEndian.Uint16(b[portOffset:chTypeOffset])
+	r.channelType = b[lenOffset]
+	r.action = strings.Split(string(b[actOffset:]), " ")
 	return &r
 }
 
-func FromIntentConfirmationBytes(b []byte) *IntentConfirmation {
-	n := IntentConfirmation{}
-	n.Deadline = int64(binary.BigEndian.Uint64(b[DEADLINE_OFFSET:]))
+func fromIntentConfirmationBytes(b []byte) *intentConfirmationMsg {
+	n := intentConfirmationMsg{}
+	n.Deadline = int64(binary.BigEndian.Uint64(b[deadlineOffset:]))
 	return &n
 }
 
-func FromIntentDeniedBytes(b []byte) *IntentDenied {
-	d := IntentDenied{}
-	d.reason = string(b[REASON_OFFSET:])
+func fromIntentDeniedBytes(b []byte) *intentDeniedMsg {
+	d := intentDeniedMsg{}
+	d.reason = string(b[reasonOffset:])
 	return &d
 }
 
 //Other helper functions
 func parseAddr(addr string) (string, uint16) { //addr of format host:port or host
 	host := addr
-	port := DEFAULT_HOP_PORT
+	port := DefaultHopPort
 	if strings.Contains(addr, ":") {
 		i := strings.Index(addr, ":")
 		port, _ = strconv.Atoi(addr[i+1:])
 		host = addr[:i]
 	}
-	if port > MAX_PORT_NUMBER {
+	if port > MaxPortNumber {
 		logrus.Fatal("port number out of range")
 	}
 	return host, uint16(port)
 }
 
 //Gets Intent Request bytes
-func ReadIntentRequest(c net.Conn) ([]byte, error) {
+func readIntentRequest(c net.Conn) ([]byte, error) {
 	msgType := make([]byte, 1)
 	c.Read(msgType)
-	if msgType[0] == INTENT_REQUEST {
-		irh := make([]byte, IR_HEADER_LENGTH)
+	if msgType[0] == IntentRequest {
+		irh := make([]byte, irHeaderLen)
 		_, err := c.Read(irh)
 		if err != nil {
 			return nil, err
 		}
-		actionLen := int8(irh[IR_HEADER_LENGTH-1])
+		actionLen := int8(irh[irHeaderLen-1])
 		action := make([]byte, actionLen)
 		_, err = c.Read(action)
 		if err != nil {
@@ -292,16 +279,16 @@ func ReadIntentRequest(c net.Conn) ([]byte, error) {
 }
 
 //Gets Intent Communication bytes
-func ReadIntentCommunication(c net.Conn) ([]byte, error) {
+func readIntentCommunication(c net.Conn) ([]byte, error) {
 	msgType := make([]byte, 1)
 	c.Read(msgType)
-	if msgType[0] == INTENT_COMMUNICATION {
-		irh := make([]byte, IR_HEADER_LENGTH)
+	if msgType[0] == IntentCommunication {
+		irh := make([]byte, irHeaderLen)
 		_, err := c.Read(irh)
 		if err != nil {
 			return nil, err
 		}
-		actionLen := int8(irh[IR_HEADER_LENGTH-1])
+		actionLen := int8(irh[irHeaderLen-1])
 		action := make([]byte, actionLen)
 		_, err = c.Read(action)
 		if err != nil {
@@ -312,8 +299,8 @@ func ReadIntentCommunication(c net.Conn) ([]byte, error) {
 	return nil, errors.New("bad msg type")
 }
 
-//Waits and reads INTENT_CONFIRMATION or INTENT_DENIED from net.Conn
-func GetResponse(c net.Conn) ([]byte, byte, error) {
+//Waits and reads IntentConfirmation or IntentDenied from net.Conn
+func getResponse(c net.Conn) ([]byte, byte, error) {
 	responseType := make([]byte, 1)
 	_, err := c.Read(responseType)
 	if err != nil {
@@ -322,32 +309,32 @@ func GetResponse(c net.Conn) ([]byte, byte, error) {
 	logrus.Infof("Got response type: %v", responseType)
 	//TODO(baumanl): SET TIMEOUT STUFF + BETTER ERROR CHECKING
 	switch responseType[0] {
-	case INTENT_CONFIRMATION:
-		conf := make([]byte, INTENT_CONF_SIZE)
+	case IntentConfirmation:
+		conf := make([]byte, intentConfSize)
 		_, err := c.Read(conf)
 		if err != nil {
 			return nil, responseType[0], err
 		}
 		return append(responseType, conf...), responseType[0], nil
-	case INTENT_DENIED:
-		reason_length := make([]byte, 1)
-		_, err := c.Read(reason_length)
+	case IntentDenied:
+		reasonLength := make([]byte, 1)
+		_, err := c.Read(reasonLength)
 		if err != nil {
 			return nil, responseType[0], err
 		}
-		logrus.Infof("C: EXPECTING %v BYTES OF REASON", reason_length)
-		reason := make([]byte, int(reason_length[0]))
+		logrus.Infof("C: EXPECTING %v BYTES OF REASON", reasonLength)
+		reason := make([]byte, int(reasonLength[0]))
 		_, err = c.Read(reason)
 		if err != nil {
 			return nil, responseType[0], err
 		}
-		return append(append(responseType, reason_length...), reason...), responseType[0], nil
+		return append(append(responseType, reasonLength...), reason...), responseType[0], nil
 	default:
 		return nil, responseType[0], errors.New("bad msg type")
 	}
 }
 
 //Makes an Intent Communication from an Intent Request (just change msg type)
-func CommFromReq(b []byte) []byte {
-	return append([]byte{INTENT_COMMUNICATION}, b[TYPE_LEN:]...)
+func commFromReq(b []byte) []byte {
+	return append([]byte{IntentCommunication}, b[TypeLen:]...)
 }
