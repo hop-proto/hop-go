@@ -1,6 +1,4 @@
-/*
-Package provides functions specific to code execution channels
-*/
+//Package codex provides functions specific to code execution channels
 package codex
 
 import (
@@ -22,6 +20,7 @@ import (
 	"zmap.io/portal/channels"
 )
 
+//ExecChan wraps a code execution channel with additional terminal state
 type ExecChan struct {
 	ch *channels.Reliable
 
@@ -30,7 +29,7 @@ type ExecChan struct {
 	closed bool
 }
 
-//Sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
+//NewExecChan sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
 //Stores state in an ExecChan struct so stdin can be manipulated during authgrant process
 func NewExecChan(cmd []string, ch *channels.Reliable, wg *sync.WaitGroup) *ExecChan {
 	oldState, e := term.MakeRaw(int(os.Stdin.Fd()))
@@ -38,7 +37,7 @@ func NewExecChan(cmd []string, ch *channels.Reliable, wg *sync.WaitGroup) *ExecC
 	if e != nil {
 		logrus.Fatalf("C: error with terminal state: %v", e)
 	}
-	ch.Write(NewexecInitMsg(strings.Join(cmd, " ")).ToBytes())
+	ch.Write(newExecInitMsg(strings.Join(cmd, " ")).ToBytes())
 
 	go func() {
 		defer wg.Done()
@@ -70,7 +69,7 @@ type execInitMsg struct {
 	cmd    string
 }
 
-func NewexecInitMsg(c string) *execInitMsg {
+func newExecInitMsg(c string) *execInitMsg {
 	return &execInitMsg{
 		msgLen: uint32(len(c)),
 		cmd:    c,
@@ -84,24 +83,24 @@ func (m *execInitMsg) ToBytes() []byte {
 }
 
 //Parses raw bytes (not including length) of an execInitMsg
-func FromBytes(b []byte) *execInitMsg {
+func fromBytes(b []byte) *execInitMsg {
 	return &execInitMsg{
 		msgLen: uint32(len(b)),
 		cmd:    string(b),
 	}
 }
 
-//Reads execInitMsg from an EXEC_CHANNEL and returns the cmd to run
+//GetCmd reads execInitMsg from an EXEC_CHANNEL and returns the cmd to run
 func GetCmd(c net.Conn) (string, error) {
 	l := make([]byte, 4)
 	c.Read(l)
 	buf := make([]byte, binary.BigEndian.Uint32(l))
 	c.Read(buf)
-	msg := FromBytes(buf)
+	msg := fromBytes(buf)
 	return msg.cmd, nil
 }
 
-//deals with pty size, copies ch -> pty and pty -> ch
+//Server deals with serverside code exec channe details like pty size, copies ch -> pty and pty -> ch
 func Server(ch *channels.Reliable, f *os.File) {
 	defer ch.Close()
 	defer func() { _ = f.Close() }() // Best effort.
@@ -140,18 +139,18 @@ func (e *ExecChan) Pipe() {
 	e.closed = false
 }
 
-//Stop stdin -> ch
+//ClosePipe stops stdin -> ch
 func (e *ExecChan) ClosePipe() {
 	e.cancel()
 	e.closed = true
 }
 
-//Restores terminal to regular state
+//Restore returns the terminal to regular state
 func (e *ExecChan) Restore() {
 	term.Restore(int(os.Stdin.Fd()), e.state)
 }
 
-//Switches terminal to raw mode
+//Raw switches the terminal to raw mode
 func (e *ExecChan) Raw() {
 	term.MakeRaw(int(os.Stdin.Fd()))
 }

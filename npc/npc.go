@@ -9,14 +9,14 @@ import (
 	"zmap.io/portal/channels"
 )
 
-const NPC_CONF = byte(1)
+const npcConf = byte(1)
 
 type npcInitMsg struct {
 	msgLen uint32
 	addr   string
 }
 
-func NewNPCInitMsg(address string) *npcInitMsg {
+func newNPCInitMsg(address string) *npcInitMsg {
 	return &npcInitMsg{
 		msgLen: uint32(len(address)),
 		addr:   address,
@@ -27,20 +27,30 @@ func (n *npcInitMsg) Addr() string {
 	return n.addr
 }
 
-func (n *npcInitMsg) ToBytes() []byte {
+func (n *npcInitMsg) toBytes() []byte {
 	r := make([]byte, 4)
 	binary.BigEndian.PutUint32(r, n.msgLen)
 	return append(r, []byte(n.addr)...)
 }
 
-func FromBytes(b []byte) *npcInitMsg {
+func fromBytes(b []byte) *npcInitMsg {
 	return &npcInitMsg{
 		msgLen: uint32(len(b)),
 		addr:   string(b),
 	}
 }
 
-//Starts UDP Conn with remote addr and proxies traffic from ch -> udp and upd -> ch
+//Start sends an NPCInitMsg and waits for confirmation that the proxy connection is ready
+func Start(npcCh *channels.Reliable, addr string) error {
+	npcCh.Write(newNPCInitMsg(addr).toBytes()) //tell server to prepare to proxy to addr (start a UDP conn)
+	//TODO(baumanl): Make better conf/denial messages for NPC
+	//wait until server says it has a UDP conn to desired address
+	npcCh.Read(make([]byte, 1))
+	logrus.Info("Receieved NPC Conf")
+	return nil
+}
+
+//Server starts a UDP Conn with remote addr and proxies traffic from ch -> udp and upd -> ch
 func Server(npch *channels.Reliable) {
 	b := make([]byte, 4)
 	npch.Read(b)
@@ -48,18 +58,18 @@ func Server(npch *channels.Reliable) {
 	logrus.Infof("Expecting %v bytes", l)
 	init := make([]byte, l)
 	npch.Read(init)
-	dest := FromBytes(init)
+	dest := fromBytes(init)
 	logrus.Infof("dialing dest: %v", dest.addr)
 	throwaway, _ := net.Dial("udp", dest.addr)
 	remoteAddr := throwaway.RemoteAddr()
 	throwaway.Close()
 	tconn, err := net.DialUDP("udp", nil, remoteAddr.(*net.UDPAddr))
-	defer tconn.Close()
 	if err != nil {
 		logrus.Fatalf("C: error dialing server: %v", err)
 	}
+	defer tconn.Close()
 	logrus.Info("connected to: ", dest.addr)
-	npch.Write([]byte{NPC_CONF})
+	npch.Write([]byte{npcConf})
 	logrus.Infof("wrote confirmation that NPC ready")
 	//could net.Pipe() be useful here?
 	go func() {
@@ -74,7 +84,7 @@ func Server(npch *channels.Reliable) {
 			}
 			//logrus.Infof("Read: %v bytes from channel", n)
 			//logrus.Infof("buf[:n] -> %v", buf[:n])
-			n, _, e = tconn.WriteMsgUDP(buf[:n], nil, nil)
+			_, _, e = tconn.WriteMsgUDP(buf[:n], nil, nil)
 			if e != nil {
 				logrus.Fatal("Error sending packet: ", e)
 			}
@@ -86,13 +96,13 @@ func Server(npch *channels.Reliable) {
 		buf := make([]byte, 65500)
 		n, _, _, _, e := tconn.ReadMsgUDP(buf, nil)
 		if e != nil {
-			logrus.Errorf("Err reading from UDP: ", e)
+			logrus.Errorf("Err reading from UDP: %v", e)
 			continue
 
 		}
 		//logrus.Infof("Read: %v bytes from UDP Conn", n)
 		//logrus.Infof("buf[:n] -> %v", buf[:n])
-		n, _, e = npch.WriteMsgUDP(buf[:n], nil, nil)
+		_, _, e = npch.WriteMsgUDP(buf[:n], nil, nil)
 		if e != nil {
 			logrus.Fatal("Error writing to channel, ", e)
 		}

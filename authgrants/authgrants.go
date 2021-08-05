@@ -101,14 +101,12 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan
 		if e != nil {
 			logrus.Fatal("C: Error starting NPC")
 		}
-		*npcs = append(*npcs, npcCh)
-		addr := req.serverSNI + ":" + strconv.Itoa(int(req.port))
-		npcCh.Write(npc.NewNPCInitMsg(addr).ToBytes()) //tell server to prepare to proxy to addr (start a UDP conn)
 
-		//TODO(baumanl): Make better conf/denial messages for NPC
-		//wait until server says it has a UDP conn to desired address
-		npcCh.Read(make([]byte, 1))
-		logrus.Info("Receieved NPC Conf")
+		addr := req.serverSNI + ":" + strconv.Itoa(int(req.port))
+		e = npc.Start(npcCh, addr)
+		if e != nil {
+			logrus.Fatal("Issue proxying connection")
+		}
 
 		//start hop session over NPC
 		tclient, e := transport.DialNPC("npc", addr, npcCh, nil)
