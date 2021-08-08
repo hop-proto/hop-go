@@ -66,6 +66,7 @@ type Server struct {
 
 //AddAuthgrant adds auth grant to server map
 func (s *Server) AddAuthgrant(k keys.PublicKey, t time.Time, user string, action string, handle *Handle) {
+	logrus.Info("started adding authgrant")
 	ag := &AuthGrant{
 		Deadline:         t,
 		User:             user,
@@ -75,6 +76,7 @@ func (s *Server) AddAuthgrant(k keys.PublicKey, t time.Time, user string, action
 	s.m.Lock()
 	s.authgrants[k] = ag
 	s.m.Unlock()
+	logrus.Info("finished adding authgrant")
 }
 
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
@@ -635,8 +637,11 @@ func NewServer(conn *net.UDPConn, config *ServerConfig) (*Server, error) {
 		udpConn: conn,
 		config:  config,
 
-		handshakes:         make(map[string]*HandshakeState),
-		sessions:           make(map[SessionID]*SessionState),
+		handshakes: make(map[string]*HandshakeState),
+		sessions:   make(map[SessionID]*SessionState),
+
+		authgrants: make(map[keys.PublicKey]*AuthGrant),
+
 		pendingConnections: make(chan *Handle, config.maxPendingConnections()),
 		outgoing:           make(chan outgoing), // TODO(dadrian): Is this the appropriate size?
 

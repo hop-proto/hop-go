@@ -60,7 +60,7 @@ func (c *Handle) GetPrincipalSession() (*Handle, bool) {
 
 //IsClosed returns closed member variable value
 func (c *Handle) IsClosed() bool {
-	return c.principal.isSet()
+	return c.closed.isSet()
 }
 
 // ReadMsg implements the MsgReader interface. If b is too short to hold the

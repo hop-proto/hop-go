@@ -178,6 +178,7 @@ func session(server *transport.Server, serverConn *transport.Handle, principals 
 			}
 			server.AddAuthgrant(k, t, user, action, serverConn)
 			authgrants.SendIntentConf(serverChan, t)
+			logrus.Info("Sent intent conf")
 			serverChan.Close()
 		case channels.NPC_CHANNEL:
 			go npc.Server(serverChan)

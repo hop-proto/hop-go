@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -90,7 +91,7 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan
 
 	execCh.Pipe()
 	execCh.Raw()
-
+	logrus.SetOutput(os.Stdout)
 	if resp == "yes" {
 		logrus.Info("C: USER CONFIRMED INTENT_REQUEST. CONTACTING S2...")
 
@@ -175,7 +176,6 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan
 
 //HandleIntentComm is used by a Server to handle an INTENT_COMMUNICATION from a Principal
 func HandleIntentComm(agc *channels.Reliable) (keys.PublicKey, time.Time, string, string, error) {
-	defer agc.Close()
 	msg, e := readIntentCommunication(agc)
 	if e != nil {
 		logrus.Fatalf("error reading intent communication")
@@ -195,7 +195,10 @@ func SendIntentDenied(agc *channels.Reliable, reason string) {
 }
 
 func SendIntentConf(agc *channels.Reliable, t time.Time) {
-	agc.Write(newIntentConfirmation(t).toBytes())
+	_, e := agc.Write(newIntentConfirmation(t).toBytes())
+	if e != nil {
+		logrus.Errorf("Issue writing intent conf")
+	}
 }
 
 //ProxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
