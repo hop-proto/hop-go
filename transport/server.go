@@ -9,15 +9,21 @@ import (
 	"errors"
 	"net"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/keys"
-
-	"github.com/sirupsen/logrus"
 )
+
+//AuthGrant contains deadline, user, action
+type AuthGrant struct {
+	Deadline         time.Time
+	User             string
+	Action           string
+	PrincipalSession *Handle
+}
 
 type outgoing struct {
 	pkt []byte
@@ -44,6 +50,8 @@ type Server struct {
 	handshakes map[string]*HandshakeState
 	sessions   map[SessionID]*SessionState
 
+	authgrants map[keys.PublicKey]*AuthGrant //static key -> authgrant
+
 	pendingConnections chan *Handle
 	outgoing           chan outgoing
 
@@ -54,6 +62,19 @@ type Server struct {
 	staticKey    *keys.X25519KeyPair
 	certificate  []byte
 	intermediate []byte
+}
+
+//AddAuthgrant adds auth grant to server map
+func (s *Server) AddAuthgrant(k keys.PublicKey, t time.Time, user string, action string, handle *Handle) {
+	ag := &AuthGrant{
+		Deadline:         t,
+		User:             user,
+		Action:           action,
+		PrincipalSession: handle,
+	}
+	s.m.Lock()
+	s.authgrants[k] = ag
+	s.m.Unlock()
 }
 
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
@@ -187,12 +208,12 @@ func (s *Server) readPacket() error {
 		}
 	case MessageTypeClientAuth:
 		logrus.Debug("server: received client auth")
-		_, hs, ag, err := s.handleClientAuth(s.rawRead[:msgLen], addr)
+		_, hs, k, err := s.handleClientAuth(s.rawRead[:msgLen], addr)
 		if err != nil {
 			return err
 		}
 		logrus.Debug("server: finishHandshakeLocked")
-		s.finishHandshake(hs, ag)
+		s.finishHandshake(hs, k)
 	case MessageTypeServerHello, MessageTypeServerAuth:
 		// Server-side should not receive messages only sent by the server
 		return ErrUnexpectedMessage
@@ -312,24 +333,25 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState)
 	return pos, nil
 }
 
-func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeState, string, error) {
+func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeState, keys.PublicKey, error) {
 	x := b
 	pos := 0
+	var k keys.PublicKey
 	if len(b) < HeaderLen+SessionIDLen+MacLen+MacLen {
 		logrus.Debug("server: client auth too short")
-		return 0, nil, "", ErrBufUnderflow
+		return 0, nil, k, ErrBufUnderflow
 	}
 
 	if mt := MessageType(b[0]); mt != MessageTypeClientAuth {
-		return 0, nil, "", ErrUnexpectedMessage
+		return 0, nil, k, ErrUnexpectedMessage
 	}
 	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
-		return 0, nil, "", ErrInvalidMessage
+		return 0, nil, k, ErrInvalidMessage
 	}
 	hs := s.fetchHandshakeState(addr)
 	if hs == nil {
 		logrus.Debugf("server: no handshake state for handshake packet from %s", addr)
-		return pos, nil, "", ErrUnexpectedMessage
+		return pos, nil, k, ErrUnexpectedMessage
 	}
 	hs.duplex.Absorb(x[:HeaderLen])
 	x = x[HeaderLen:]
@@ -337,12 +359,12 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	sessionID := x[:SessionIDLen]
 	if !bytes.Equal(hs.sessionID[:], sessionID) {
 		logrus.Debugf("server: mismatched session ID for %s: expected %x, got %x", addr, hs.sessionID, sessionID)
-		return pos, nil, "", ErrUnexpectedMessage
+		return pos, nil, k, ErrUnexpectedMessage
 	}
 	ss := s.fetchSessionState(hs.sessionID)
 	if ss == nil {
 		logrus.Debugf("server: could not find session ID %x", hs.sessionID)
-		return pos, nil, "", ErrUnexpectedMessage
+		return pos, nil, k, ErrUnexpectedMessage
 	}
 	hs.duplex.Absorb(sessionID)
 	x = x[SessionIDLen:]
@@ -355,37 +377,41 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	clientTag := x[:MacLen]
 	if !bytes.Equal(hs.macBuf[:], clientTag) {
 		logrus.Debugf("server: mismatched tag in client auth: expected %x, got %x", hs.macBuf, clientTag)
-		return pos, nil, "", ErrInvalidMessage
+		return pos, nil, k, ErrInvalidMessage
 	}
 
 	//if the client static key is in authorized keys continue, otherwise abandon all state
-	//if the key contains authorization grant information then return that line
-	//(so it can be set into the connection Handle)
+	//Check if the client is authorized permanently
 	f, e := os.Open("../app/authorized_keys") //TODO: fix to actual address
 	if e != nil {
-		return pos, nil, "", ErrOpeningAuthKeys
+		return pos, nil, k, ErrOpeningAuthKeys
 	}
-	f.Close()
-	var ag string
+	defer f.Close()
 	scanner := bufio.NewScanner(f)
 	authorized := false
-	k := keys.PublicKey(hs.clientStatic)
+	k = keys.PublicKey(hs.clientStatic)
 	for scanner.Scan() {
-		line := strings.Split(scanner.Text(), " ")
-		if line[0] == k.String() {
+		logrus.Info("COMPARING: ")
+		if scanner.Text() == k.String() {
 			authorized = true
-			if len(line) > 1 {
-				ag = scanner.Text()
-			}
+			logrus.Debugf("USER AUTHORIZED")
 			break
 		}
 	}
-
 	if !authorized {
-		//TODO: handle this gracefully (i.e. abandon all state)
-		logrus.Debugf("KEY NOT AUTHORIZED, but continuing anyway")
-	} else {
-		logrus.Debugf("KEYS MATCHED!!!")
+		//Check for a matching authgrant
+		val, ok := s.authgrants[k]
+		if !ok {
+			//TODO: handle this gracefully (i.e. abandon all state)
+			logrus.Info("KEY NOT AUTHORIZED")
+		}
+		if val.Deadline.Before(time.Now()) {
+			delete(s.authgrants, k)
+			//TODO: handle this gracefully (i.e. abandon all state)
+			logrus.Info("AUTHGRANT DEADLINE EXCEEDED")
+		}
+		delete(s.authgrants, k)
+		logrus.Info("USER AUTHORIZED")
 	}
 	x = x[MacLen:]
 	pos += MacLen
@@ -393,7 +419,7 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	hs.se, err = hs.ephemeral.DH(hs.clientStatic[:])
 	if err != nil {
 		logrus.Debugf("server: unable to calculated se: %s", err)
-		return pos, nil, "", err
+		return pos, nil, k, err
 	}
 	logrus.Debugf("server: se %x", hs.se)
 	hs.duplex.Absorb(hs.se)
@@ -401,11 +427,11 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	clientMac := x[:MacLen]
 	if !bytes.Equal(hs.macBuf[:], clientMac) {
 		logrus.Debugf("server: mismatched mac in client auth: expected %x, got %x", hs.macBuf, clientMac)
-		return pos, nil, "", ErrInvalidMessage
+		return pos, nil, k, ErrInvalidMessage
 	}
 	// x = x[MacLen:]
 	pos += MacLen
-	return pos, hs, ag, nil
+	return pos, hs, k, nil
 }
 
 func (s *Server) readPacketFromSession(ss *SessionState, plaintext []byte, pkt []byte, key *[KeyLen]byte) (int, error) {
@@ -488,7 +514,7 @@ func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
 	return hs, nil
 }
 
-func (s *Server) finishHandshake(hs *HandshakeState, ag string) error {
+func (s *Server) finishHandshake(hs *HandshakeState, k keys.PublicKey) error {
 	s.m.Lock()
 	defer s.m.Unlock()
 	defer s.clearHandshakeStateLocked(hs.remoteAddr)
@@ -503,7 +529,7 @@ func (s *Server) finishHandshake(hs *HandshakeState, ag string) error {
 	}
 	// TODO(dadrian): Create this earlier on so that the handshake fails earlier
 	// if the queue is full.
-	h := s.createHandleLocked(ss, ag)
+	h := s.createHandleLocked(ss, k)
 	select {
 	case s.pendingConnections <- h:
 		break
@@ -515,7 +541,14 @@ func (s *Server) finishHandshake(hs *HandshakeState, ag string) error {
 	return nil
 }
 
-func (s *Server) createHandleLocked(ss *SessionState, ag string) *Handle {
+func (s *Server) createHandleLocked(ss *SessionState, k keys.PublicKey) *Handle {
+	val, ok := s.authgrants[k]
+	var p atomicBool
+	p.setFalse()
+	if !ok {
+		val = &AuthGrant{}
+		p.setTrue()
+	}
 	handle := &Handle{
 		sessionID:    ss.sessionID,
 		recv:         make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
@@ -525,7 +558,8 @@ func (s *Server) createHandleLocked(ss *SessionState, ag string) *Handle {
 
 		//TODO(baumanl): Simplify how to add this to handle? right now ag is passed from
 		//handleClientAuth() -> finishHandshake() -> createHandleLocked()
-		Authgrant: ag,
+		AG:        *val,
+		principal: p,
 	}
 	ss.handle = handle
 	return handle

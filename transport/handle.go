@@ -31,7 +31,8 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	//1.) if an authgrant was used for the session and
 	//2.) to know which principal session to contact if the user wants to hop further
 	//3.) (potentially) verify that only the allowed command is executed?
-	Authgrant string
+	AG        AuthGrant
+	principal atomicBool //if true then no AG, if false then yes AG
 
 	recv chan []byte
 	send chan []byte
@@ -46,6 +47,21 @@ var _ MsgWriter = &Handle{}
 var _ MsgConn = &Handle{}
 
 var _ net.Conn = &Handle{}
+
+//GetPrincipalSession returns the Handle to the principal if this session is not it's own principal
+func (c *Handle) GetPrincipalSession() (*Handle, bool) {
+	if !c.principal.isSet() {
+		c.readLock.Lock()
+		defer c.readLock.Unlock()
+		return c.AG.PrincipalSession, true
+	}
+	return nil, false
+}
+
+//IsClosed returns closed member variable value
+func (c *Handle) IsClosed() bool {
+	return c.principal.isSet()
+}
 
 // ReadMsg implements the MsgReader interface. If b is too short to hold the
 // message, it returns ErrBufOverflow.

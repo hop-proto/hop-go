@@ -75,8 +75,6 @@ func client(args []string) {
 		logrus.Info("muxer stopped")
 	}()
 
-	npcs := []*channels.Reliable{}
-
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	logrus.Infof("Performing action: %v", cmd)
 	ch, _ := mc.CreateChannel(channels.EXEC_CHANNEL)
@@ -94,7 +92,7 @@ func client(args []string) {
 			}
 			logrus.Infof("ACCEPTED NEW CHANNEL of TYPE: %v", c.Type())
 			if c.Type() == channels.AGC_CHANNEL && principal {
-				go authgrants.Principal(c, mc, execCh, &npcs)
+				go authgrants.Principal(c, mc, execCh, &config)
 			} else if c.Type() == channels.NPC_CHANNEL {
 				//go do something?
 			} else if c.Type() == channels.EXEC_CHANNEL {

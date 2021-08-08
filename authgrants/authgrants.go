@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -60,7 +59,7 @@ func GetAuthGrant(digest [sha3Len]byte, sUser string, addr string, cmd []string)
 }
 
 //Principal is used by the Principal to respond to INTENT_REQUESTS from a Client
-func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan, npcs *[]*channels.Reliable) {
+func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan, config *transport.ClientConfig) {
 	defer func() {
 		agc.Close()
 		logrus.Info("Closed AGC")
@@ -109,7 +108,7 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan
 		}
 
 		//start hop session over NPC
-		tclient, e := transport.DialNPC("npc", addr, npcCh, nil)
+		tclient, e := transport.DialNPC("npc", addr, npcCh, config)
 		if e != nil {
 			logrus.Fatal("error dialing npc")
 		}
@@ -156,7 +155,7 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan
 				}
 				logrus.Infof("Accepted channel of type: %v", c.Type())
 				if c.Type() == channels.AGC_CHANNEL {
-					go Principal(c, npcMuxer, execCh, npcs)
+					go Principal(c, npcMuxer, execCh, config)
 				} else if c.Type() == channels.NPC_CHANNEL {
 					//go do something?
 					c.Close()
@@ -174,40 +173,34 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan
 	}
 }
 
-//Server is used by a Server to handle an INTENT_COMMUNICATION from a Principal
-func Server(agc *channels.Reliable, muxer *channels.Muxer, agToMux map[string]*channels.Muxer) {
-	logrus.Info("waiting for intent communication")
+//HandleIntentComm is used by a Server to handle an INTENT_COMMUNICATION from a Principal
+func HandleIntentComm(agc *channels.Reliable) (keys.PublicKey, time.Time, string, string, error) {
 	defer agc.Close()
 	msg, e := readIntentCommunication(agc)
 	if e != nil {
 		logrus.Fatalf("error reading intent communication")
 	}
 	intent := fromIntentCommunicationBytes(msg[TypeLen:])
-	logrus.Infof("Pretending s2 approved intent request")                                   //TODO(baumanl): check policy or something?
-	t := time.Now().Add(time.Hour)                                                          //TODO(baumanl): What should this actually be? (probably much shorter)
-	f, err := os.OpenFile("../app/authorized_keys", os.O_APPEND|os.O_WRONLY, os.ModeAppend) //TODO(baumanl): fix authorized_keys file location
-	if err != nil {
-		logrus.Fatalf("error opening authorized keys file: %v", err)
-	}
-	defer f.Close()
+	logrus.Infof("Pretending s2 approved intent request") //TODO(baumanl): check policy or something?
 	k := keys.PublicKey(intent.sha3)
-	logrus.Infof("Added: %v", k.String())
-	//authgrant format: <static key> <deadline> <username> <action>
-	authgrant := fmt.Sprintf("%v %v %v %v", k.String(), t.Unix(), strings.TrimSpace(intent.serverUsername), strings.Join(intent.action, " "))
-	_, e = f.WriteString(authgrant)
-	f.WriteString("\n")
-	if e != nil {
-		logrus.Infof("Issue writing to authorized keys file: %v", e)
-	}
-	agToMux[k.String()] = muxer
+	t := time.Now().Add(time.Minute)
+	user := intent.serverUsername
+	action := strings.Join(intent.action, " ")
+	return k, t, user, action, nil
 
+}
+
+func SendIntentDenied(agc *channels.Reliable, reason string) {
+	agc.Write(newIntentDenied(reason).toBytes())
+}
+
+func SendIntentConf(agc *channels.Reliable, t time.Time) {
 	agc.Write(newIntentConfirmation(t).toBytes())
-	agc.Close()
 }
 
 //ProxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
 //Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
-func ProxyAuthGrantRequest(c net.Conn, principals *map[int32]*channels.Muxer) {
+func ProxyAuthGrantRequest(c net.Conn, principals map[int32]*transport.Handle, sessions map[*transport.Handle]*channels.Muxer) {
 	//TODO(baumanl): check threadsafety
 	logrus.Info("S: ACCEPTED NEW UDS CONNECTION")
 	defer c.Close()
@@ -217,7 +210,12 @@ func ProxyAuthGrantRequest(c net.Conn, principals *map[int32]*channels.Muxer) {
 		log.Fatalf("S: ISSUE CHECKING CREDENTIALS: %v", e)
 	}
 	// find corresponding session muxer
-	principal := (*principals)[ancestor]
+	handle := principals[ancestor]
+	if handle.IsClosed() {
+		logrus.Info("Connection with Principal is closed")
+		return
+	}
+	principal := sessions[handle]
 	logrus.Infof("S: CLIENT CONNECTED [%s]", c.RemoteAddr().Network())
 	intent, e := readIntentRequest(c)
 	if e != nil {
@@ -270,7 +268,7 @@ func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
 }
 
 //verifies that client is a descendent of a process started by the principal and returns its ancestor process PID if found
-func checkCredentials(c net.Conn, principals *map[int32]*channels.Muxer) (int32, error) {
+func checkCredentials(c net.Conn, principals map[int32]*transport.Handle) (int32, error) {
 	creds, err := readCreds(c)
 	if err != nil {
 		return 0, err
@@ -286,7 +284,7 @@ func checkCredentials(c net.Conn, principals *map[int32]*channels.Muxer) (int32,
 		return 0, err
 	}
 	//check all of the PIDs of processes that the server started
-	for k := range *principals {
+	for k := range principals {
 		if k == cPID || checkDescendents(tree, tree.Procs[int(k)], int(cPID)) {
 			ancestor = k
 			break

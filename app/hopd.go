@@ -43,7 +43,7 @@ func newTestServerConfig() *transport.ServerConfig {
 }
 
 //handles connections to the hop server UDS to allow hop client processes to get authorization grants from their principal
-func authGrantServer(l net.Listener, principals *map[int32]*channels.Muxer) {
+func authGrantServer(l net.Listener, principals map[int32]*transport.Handle, sessions map[*transport.Handle]*channels.Muxer) {
 	defer l.Close()
 	logrus.Info("S: STARTED LISTENING AT UDS: ", l.Addr().String())
 
@@ -53,7 +53,7 @@ func authGrantServer(l net.Listener, principals *map[int32]*channels.Muxer) {
 			logrus.Fatal("accept error:", err)
 		}
 
-		go authgrants.ProxyAuthGrantRequest(c, principals)
+		go authgrants.ProxyAuthGrantRequest(c, principals, sessions)
 	}
 }
 
@@ -111,10 +111,12 @@ func serve(args []string) {
 
 	//TODO(baumanl): Make thread safe?
 	//principal hop sessions are represented by the appropriate channel muxer for that session
-	principals := make(map[int32]*channels.Muxer) //PID -> principal hop session
-	agToMux := make(map[string]*channels.Muxer)   //AuthGrant -> principal hop session (added by server when it issues an authgrant)
+	principals := make(map[int32]*transport.Handle) //PID -> principal hop session
+	//agToMux := make(map[string]*channels.Muxer)   //AuthGrant -> principal hop session (added by server when it issues an authgrant)
 
-	go authGrantServer(l, &principals)
+	sessions := make(map[*transport.Handle]*channels.Muxer) //all hop sessions -> their channel muxers
+
+	go authGrantServer(l, principals, sessions)
 
 	//*****ACCEPT CONNS AND START SESSIONS*****
 	for {
@@ -123,18 +125,18 @@ func serve(args []string) {
 		if err != nil {
 			logrus.Fatalf("S: SERVER TIMEOUT: %v", err)
 		}
-		logrus.Debugf("S: ACCEPTED NEW CONNECTION with authgrant: %v", serverConn.Authgrant)
-		go session(serverConn, principals, l, agToMux)
+		logrus.Debugf("S: ACCEPTED NEW CONNECTION with authgrant")
+		go session(server, serverConn, principals, l, sessions)
 	}
 }
 
 //Starts a session muxer and manages incoming channel requests
-func session(serverConn *transport.Handle, principals map[int32]*channels.Muxer, l net.Listener, agToMux map[string]*channels.Muxer) {
+func session(server *transport.Server, serverConn *transport.Handle, principals map[int32]*transport.Handle, l net.Listener, sessions map[*transport.Handle]*channels.Muxer) {
 	ms := channels.NewMuxer(serverConn, serverConn)
 	go ms.Start()
 	defer ms.Stop()
 	logrus.Info("S: STARTED CHANNEL MUXER")
-
+	sessions[serverConn] = ms
 	for {
 		serverChan, err := ms.Accept()
 		if err != nil {
@@ -151,32 +153,32 @@ func session(serverConn *transport.Handle, principals map[int32]*channels.Muxer,
 			c := exec.Command(args[0], args[1:]...)
 
 			f, err := pty.Start(c)
-
+			if err != nil {
+				logrus.Fatalf("S: error starting pty %v", err)
+			}
 			go func() {
 				c.Wait()
 				serverChan.Close()
 				logrus.Info("closed chan")
 			}()
 
-			//If session is using an authorization grant then the muxer in this goroutine
-			//should be replaced by the muxer that the server has with the principal that authorized the grant
-			//use the muxers map above (authgrant --> muxer)
-			//TODO(baumanl): If principal session closed probably should be removed from agToMux map, how to tell?
-			if mux, ok := agToMux[serverConn.Authgrant]; ok { //used authgrant and principal session still available
-				principals[int32(c.Process.Pid)] = mux
-				logrus.Infof("S: using muxer from auth grant: %v", serverConn.Authgrant)
-			} else if serverConn.Authgrant == "" { //direct conn with principal
+			if handle, ok := serverConn.GetPrincipalSession(); ok {
+				principals[int32(c.Process.Pid)] = handle
+			} else {
 				logrus.Infof("S: using standard muxer")
-				principals[int32(c.Process.Pid)] = ms
-			} else { //used authgrant, but no principal session available (won't be able to hop further using auth grants)
-				logrus.Info("S: no principal session available")
-			}
-			if err != nil {
-				logrus.Fatalf("S: error starting pty %v", err)
+				principals[int32(c.Process.Pid)] = serverConn
 			}
 			go codex.Server(serverChan, f)
 		case channels.AGC_CHANNEL:
-			go authgrants.Server(serverChan, ms, agToMux)
+			k, t, user, action, e := authgrants.HandleIntentComm(serverChan)
+			if e != nil {
+				logrus.Info("Server denied authgrant")
+				authgrants.SendIntentDenied(serverChan, "Server denied")
+				continue
+			}
+			server.AddAuthgrant(k, t, user, action, serverConn)
+			authgrants.SendIntentConf(serverChan, t)
+			serverChan.Close()
 		case channels.NPC_CHANNEL:
 			go npc.Server(serverChan)
 		default:

@@ -12,6 +12,7 @@ import (
 	"zmap.io/portal/keys"
 )
 
+//UDPLike interface standardizes Reliable channels and UDPConn.
 //Reliable channels implement this interface so they can be used as the underlying conn for Clients
 type UDPLike interface {
 	net.Conn
