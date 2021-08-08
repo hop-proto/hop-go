@@ -13,9 +13,10 @@ transport:
     - added capability to use a Reliable channel as underlying connection
     - introduced authorized key logic
 
+Done: 
+- store authorization grants in memory instead of authorized_keys file (!!!!)
 
 Miscellaneous Issues/TODOs:
-- store authorization grants in memory instead of authorized_keys file (!!!!)
 - Principal needs to get user input as a background process (!!!) --> semi-fixed, still have one weird line. Don't know how to make a GUI cmd line app but could work if exec.CMD? Another process?
 - start hop client as specified user (!!!)
 - add timeouts/deadlines (!!!)

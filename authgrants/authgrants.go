@@ -190,10 +190,12 @@ func HandleIntentComm(agc *channels.Reliable) (keys.PublicKey, time.Time, string
 
 }
 
+//SendIntentDenied writes an intent denied message to provided channel
 func SendIntentDenied(agc *channels.Reliable, reason string) {
 	agc.Write(newIntentDenied(reason).toBytes())
 }
 
+//SendIntentConf writes and intent conf message to provided channel
 func SendIntentConf(agc *channels.Reliable, t time.Time) {
 	_, e := agc.Write(newIntentConfirmation(t).toBytes())
 	if e != nil {
