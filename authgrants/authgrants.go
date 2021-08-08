@@ -2,6 +2,7 @@
 package authgrants
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -84,14 +85,16 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan
 	//Tried simulating user input by sending keystrokes to /dev/uinput, but that
 	//	1.) requires sudo priv of principal (bad) and
 	// 	2.) didn't even seem to fix the issue
-	execCh.ClosePipe()
-	req.Display()
-	var resp string
-	fmt.Scanln(&resp) //TODO(baumanl):Replace this with a better format question/response like "github.com/tockins/interact"
-
-	execCh.Pipe()
-	execCh.Raw()
+	execCh.Restore()
 	logrus.SetOutput(os.Stdout)
+	r := execCh.Redirect()
+	req.Display()
+	scanner := bufio.NewScanner(r)
+	scanner.Scan()
+	resp := scanner.Text() //TODO(baumanl):Replace this with a better format question/response like "github.com/tockins/interact"
+	execCh.Raw()
+	execCh.Resume()
+	logrus.SetOutput(io.Discard)
 	if resp == "yes" {
 		logrus.Info("C: USER CONFIRMED INTENT_REQUEST. CONTACTING S2...")
 
@@ -254,7 +257,7 @@ func ProxyAuthGrantRequest(c net.Conn, principals map[int32]*transport.Handle, s
 
 //Display prints the authgrant approval prompt to terminal
 func (r *intentRequestMsg) Display() {
-	fmt.Printf("\nAllow %v@%v to run %v on %v@%v? \nEnter yes or no: \n (Bug: hit enter once before responding)\n",
+	fmt.Printf("\nAllow %v@%v to run %v on %v@%v? \nEnter yes or no: ",
 		r.clientUsername,
 		r.clientSNI,
 		r.action,

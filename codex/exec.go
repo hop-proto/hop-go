@@ -2,7 +2,6 @@
 package codex
 
 import (
-	"context"
 	"encoding/binary"
 	"io"
 	"log"
@@ -14,7 +13,6 @@ import (
 	"syscall"
 
 	"github.com/creack/pty"
-	ctxio "github.com/jbenet/go-context/io"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/term"
 	"zmap.io/portal/channels"
@@ -22,11 +20,11 @@ import (
 
 //ExecChan wraps a code execution channel with additional terminal state
 type ExecChan struct {
-	ch *channels.Reliable
-
-	cancel context.CancelFunc //TODO(baumanl): make sure this is safe/reliable. Context doesn't even solve the user input glitch like I hoped it would.
-	state  *term.State
-	closed bool
+	ch    *channels.Reliable
+	state *term.State
+	redir bool
+	r     *io.PipeReader
+	w     *io.PipeWriter
 }
 
 //NewExecChan sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
@@ -39,29 +37,38 @@ func NewExecChan(cmd []string, ch *channels.Reliable, wg *sync.WaitGroup) *ExecC
 	}
 	ch.Write(newExecInitMsg(strings.Join(cmd, " ")).ToBytes())
 
-	go func() {
+	r, w := io.Pipe()
+	ex := ExecChan{
+		ch:    ch,
+		state: oldState,
+		redir: false,
+		r:     r,
+		w:     w,
+	}
+
+	go func(ex ExecChan) {
 		defer wg.Done()
-		io.Copy(os.Stdout, ch) //read bytes from ch to os.Stdout
-		term.Restore(int(os.Stdin.Fd()), oldState)
+		io.Copy(os.Stdout, ex.ch) //read bytes from ch to os.Stdout
+		term.Restore(int(os.Stdin.Fd()), ex.state)
 		logrus.Info("Stopped io.Copy(os.Stdout, ch)")
-		ch.Close()
+		ex.ch.Close()
 		logrus.Info("closed chan")
 
-	}()
+	}(ex)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	in := ctxio.NewReader(ctx, os.Stdin)
-	go func() {
-		io.Copy(ch, in)
-		logrus.Info("Stopped io.Copy")
-	}()
+	go func(ex *ExecChan) {
+		p := make([]byte, 1)
+		for {
+			_, _ = os.Stdin.Read(p)
+			if ex.redir {
+				ex.w.Write(p)
+			} else {
+				ex.ch.Write(p)
+			}
+		}
+	}(&ex)
 
-	return &ExecChan{
-		ch:     ch,
-		cancel: cancel,
-		state:  oldState,
-		closed: false,
-	}
+	return &ex
 }
 
 type execInitMsg struct {
@@ -125,24 +132,15 @@ func Server(ch *channels.Reliable, f *os.File) {
 	logrus.Info("io.Copy(ch, f) stopped with error: ", e)
 }
 
-//Pipe stdin -> ch
-func (e *ExecChan) Pipe() {
-	if !e.closed {
-		return
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	in := ctxio.NewReader(ctx, os.Stdin)
-
-	go io.Copy(e.ch, in)
-	e.cancel = cancel
-	e.closed = false
+//Resume makes sure the input is piped to the exec channel
+func (e *ExecChan) Resume() {
+	e.redir = false
 }
 
-//ClosePipe stops stdin -> ch
-func (e *ExecChan) ClosePipe() {
-	e.cancel()
-	e.closed = true
+//Redirect moves input to a pipe and returns the read end of the pipe
+func (e *ExecChan) Redirect() *io.PipeReader {
+	e.redir = true
+	return e.r
 }
 
 //Restore returns the terminal to regular state

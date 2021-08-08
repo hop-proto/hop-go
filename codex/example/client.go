@@ -36,8 +36,8 @@ func startClient(p string) {
 	}()
 
 	go func() {
+		p := make([]byte, 1)
 		for {
-			p := make([]byte, 1)
 			_, _ = os.Stdin.Read(p)
 			if redir {
 				w.Write(p)
@@ -67,6 +67,7 @@ func startClient(p string) {
 	redir = false
 	time.Sleep(5 * time.Second)
 	term.Restore(int(os.Stdin.Fd()), oldState)
+	fmt.Println()
 }
 
 // var i interface{} = os.Stdin
