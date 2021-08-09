@@ -76,26 +76,16 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan
 	logrus.Info("C: PRINCIPAL REC: INTENT_REQUEST")
 	req := fromIntentRequestBytes(intent[TypeLen:])
 
-	//TODO(baumanl): FIX THIS!
-	//This still doesn't work great for getting user input to principal.
-	//User has to hit enter once and then actually provide your input.
-	//(i.e. the first time the user provides input and presses enter the principal does not receive the input
-	//and I'm assuming it is still being sent to the server over the code execution channel)
-	//Can't figure out how to stop the io.Copy() that takes Stdin -> execCh to stop without this issue.
-	//Tried simulating user input by sending keystrokes to /dev/uinput, but that
-	//	1.) requires sudo priv of principal (bad) and
-	// 	2.) didn't even seem to fix the issue
 	execCh.Restore()
 	logrus.SetOutput(os.Stdout)
 	r := execCh.Redirect()
-	req.Display()
-	scanner := bufio.NewScanner(r)
-	scanner.Scan()
-	resp := scanner.Text() //TODO(baumanl):Replace this with a better format question/response like "github.com/tockins/interact"
+
+	allow := req.prompt(r)
+
 	execCh.Raw()
 	execCh.Resume()
 	logrus.SetOutput(io.Discard)
-	if resp == "yes" {
+	if allow {
 		logrus.Info("C: USER CONFIRMED INTENT_REQUEST. CONTACTING S2...")
 
 		//create npc with server
@@ -255,14 +245,22 @@ func ProxyAuthGrantRequest(c net.Conn, principals map[int32]*transport.Handle, s
 	// }
 }
 
-//Display prints the authgrant approval prompt to terminal
-func (r *intentRequestMsg) Display() {
-	fmt.Printf("\nAllow %v@%v to run %v on %v@%v? \nEnter yes or no: ",
-		r.clientUsername,
-		r.clientSNI,
-		r.action,
-		r.serverUsername,
-		r.serverSNI)
+//Display prints the authgrant approval prompt to terminal and continues prompting until user enters "y" or "n"
+func (r *intentRequestMsg) prompt(reader *io.PipeReader) bool {
+	var ans string
+	for ans != "y" && ans != "n" {
+		fmt.Printf("\nAllow %v@%v to run %v on %v@%v? [y/n]: ",
+			r.clientUsername,
+			r.clientSNI,
+			r.action,
+			r.serverUsername,
+			r.serverSNI)
+		scanner := bufio.NewScanner(reader)
+		scanner.Scan()
+		ans = scanner.Text()
+	}
+	return ans == "y"
+
 }
 
 //checks tree (starting at proc) to see if cPID is a descendent

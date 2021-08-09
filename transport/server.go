@@ -66,7 +66,6 @@ type Server struct {
 
 //AddAuthgrant adds auth grant to server map
 func (s *Server) AddAuthgrant(k keys.PublicKey, t time.Time, user string, action string, handle *Handle) {
-	logrus.Info("started adding authgrant")
 	ag := &AuthGrant{
 		Deadline:         t,
 		User:             user,
@@ -76,7 +75,6 @@ func (s *Server) AddAuthgrant(k keys.PublicKey, t time.Time, user string, action
 	s.m.Lock()
 	s.authgrants[k] = ag
 	s.m.Unlock()
-	logrus.Info("finished adding authgrant")
 }
 
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
@@ -551,6 +549,10 @@ func (s *Server) createHandleLocked(ss *SessionState, k keys.PublicKey) *Handle 
 		val = &AuthGrant{}
 		p.setTrue()
 	}
+
+	var used atomicBool
+	used.setFalse()
+
 	handle := &Handle{
 		sessionID:    ss.sessionID,
 		recv:         make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
@@ -562,6 +564,7 @@ func (s *Server) createHandleLocked(ss *SessionState, k keys.PublicKey) *Handle 
 		//handleClientAuth() -> finishHandshake() -> createHandleLocked()
 		AG:        *val,
 		principal: p,
+		used:      used,
 	}
 	ss.handle = handle
 	return handle

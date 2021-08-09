@@ -147,6 +147,17 @@ func session(server *transport.Server, serverConn *transport.Handle, principals 
 		switch serverChan.Type() {
 		case channels.EXEC_CHANNEL:
 			cmd, _ := codex.GetCmd(serverChan)
+			if _, p := serverConn.GetPrincipalSession(); !p {
+				if cmd != serverConn.AG.Action {
+					logrus.Error("CMD does not match Authgrant approved action")
+					continue
+				}
+				if serverConn.Used() { //Probably not necessary to check because the client can't create another code execution channel with the current framework anyway
+					logrus.Error("Already performed Authgrant approved action")
+					continue
+				}
+				serverConn.SetUsed()
+			}
 			logrus.Infof("Executing: %v", cmd)
 
 			args := strings.Split(cmd, " ")

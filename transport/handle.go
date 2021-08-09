@@ -32,6 +32,7 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	//2.) to know which principal session to contact if the user wants to hop further
 	//3.) (potentially) verify that only the allowed command is executed?
 	AG        AuthGrant
+	used      atomicBool //set to true after AG command has been executed
 	principal atomicBool //if true then no AG, if false then yes AG
 
 	recv chan []byte
@@ -61,6 +62,16 @@ func (c *Handle) GetPrincipalSession() (*Handle, bool) {
 //IsClosed returns closed member variable value
 func (c *Handle) IsClosed() bool {
 	return c.closed.isSet()
+}
+
+//Used tells whether the authorized action has already been executed
+func (c *Handle) Used() bool {
+	return c.used.isSet()
+}
+
+//SetUsed should be called after executing authorized action so it can't be repeated
+func (c *Handle) SetUsed() {
+	c.used.setTrue()
 }
 
 // ReadMsg implements the MsgReader interface. If b is too short to hold the

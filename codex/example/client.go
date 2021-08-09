@@ -60,7 +60,6 @@ func startClient(p string) {
 	scanner := bufio.NewScanner(r)
 	scanner.Scan()
 	name = scanner.Text()
-	//logrus.Error(e)
 	fmt.Println("Your name is: ", name)
 	logrus.Info("Going back to reg copying for 5 sec...")
 	term.MakeRaw(int(os.Stdin.Fd()))

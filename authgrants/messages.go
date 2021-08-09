@@ -207,7 +207,7 @@ func trimNullBytes(b []byte) string {
 func fromIntentRequestBytes(b []byte) *intentRequestMsg {
 	r := intentRequestMsg{}
 	copy(r.sha3[:], b[sha3Offset:cUserOffset])
-	r.clientUsername = trimNullBytes(b[cSNIOffset:cSNIOffset])
+	r.clientUsername = trimNullBytes(b[cUserOffset:cSNIOffset])
 	r.clientSNI = trimNullBytes(b[cSNIOffset:sUserOffset])
 	r.serverUsername = trimNullBytes(b[sUserOffset:sSNIOffset])
 	r.serverSNI = trimNullBytes(b[sSNIOffset:portOffset])
