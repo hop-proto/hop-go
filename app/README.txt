@@ -16,6 +16,8 @@ transport:
 Done: 
 - store authorization grants in memory instead of authorized_keys file (!!!!)
 - Principal needs to get user input as a background process (!!!) --> semi-fixed, still have one weird line. Don't know how to make a GUI cmd line app but could work if exec.CMD? Another process?
+- Server checks cmd against auth grant before running (maybe made this unnecessarily complex)
+- switched to abstract sockets
 
 Miscellaneous Issues/TODOs:
 - start hop client as specified user (!!!)
@@ -23,7 +25,7 @@ Miscellaneous Issues/TODOs:
 - authorized_keys file location standard (!!!)
 - test on multiple VMS (!!!)
 
-- Unix domain socket address standard --> convert to abstract sockets???
+- Unix domain socket address standard
 - thread safety of maps to principal sessions (muxers) (!!)
 - parse cmd intelligently (have to move away from exec.Cmd?) (!!)
 - check codex.Server() for issues relating to pty/terminal display crap (!!)

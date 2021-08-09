@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -21,6 +22,15 @@ import (
 	"zmap.io/portal/npc"
 	"zmap.io/portal/transport"
 )
+
+type hopServer struct {
+	m          sync.Mutex
+	principals map[int32]*transport.Handle
+	sessions   map[*transport.Handle]*channels.Muxer
+
+	server   *transport.Server
+	authsock net.Listener
+}
 
 func newTestServerConfig() *transport.ServerConfig {
 	keyPair, err := keys.ReadDHKeyFromPEMFile("./testdata/leaf-key.pem")
@@ -43,17 +53,17 @@ func newTestServerConfig() *transport.ServerConfig {
 }
 
 //handles connections to the hop server UDS to allow hop client processes to get authorization grants from their principal
-func authGrantServer(l net.Listener, principals map[int32]*transport.Handle, sessions map[*transport.Handle]*channels.Muxer) {
-	defer l.Close()
-	logrus.Info("S: STARTED LISTENING AT UDS: ", l.Addr().String())
+func (server *hopServer) authGrantServer() {
+	defer server.authsock.Close()
+	logrus.Info("S: STARTED LISTENING AT UDS: ", server.authsock.Addr().String())
 
 	for {
-		c, err := l.Accept()
+		c, err := server.authsock.Accept()
 		if err != nil {
 			logrus.Fatal("accept error:", err)
 		}
 
-		go authgrants.ProxyAuthGrantRequest(c, principals, sessions)
+		go authgrants.ProxyAuthGrantRequest(c, server.principals, server.sessions)
 	}
 }
 
@@ -74,13 +84,13 @@ func serve(args []string) {
 	//logrus.SetOutput(io.Discard)
 	//TEMPORARY: Should take address from argument and socket should be abstract/same place or dependent on session?
 	addr := "localhost:7777"
-	sockAddr := "/tmp/auth.sock"
+	sockAddr := "@auth1"
 	if args[2] == "2" {
 		addr = "localhost:8888"
-		sockAddr = "/tmp/auth2.sock" //because we are on the same host => figure out how to use abstract sockets and naming
+		sockAddr = "@auth2" //because we are on the same host => figure out how to use abstract sockets and naming
 	} else if args[2] == "3" {
 		addr = "localhost:9999"
-		sockAddr = "/tmp/auth3.sock"
+		sockAddr = "@auth3"
 	}
 
 	//*****TRANSPORT LAYER SET UP*****
@@ -90,11 +100,11 @@ func serve(args []string) {
 	}
 	// It's actually a UDP conn
 	udpConn := pktConn.(*net.UDPConn)
-	server, err := transport.NewServer(udpConn, newTestServerConfig())
+	transportServer, err := transport.NewServer(udpConn, newTestServerConfig())
 	if err != nil {
 		logrus.Fatalf("S: ERROR STARTING TRANSPORT CONN: %v", err)
 	}
-	go server.Serve()
+	go transportServer.Serve()
 
 	//*****AUTHGRANT SERVER ON UNIX DOMAIN SOCKET SET UP*****
 	//Start UDS socket
@@ -105,6 +115,7 @@ func serve(args []string) {
 	//set socket options and start listening to socket
 	config := &net.ListenConfig{Control: setListenerOptions}
 	l, err := config.Listen(context.Background(), "unix", sockAddr)
+	logrus.Infof("address: %v", l.Addr())
 	if err != nil {
 		log.Fatal("S: UDS LISTEN ERROR:", err)
 	}
@@ -113,20 +124,28 @@ func serve(args []string) {
 	//principal hop sessions are represented by the appropriate channel muxer for that session
 	principals := make(map[int32]*transport.Handle) //PID -> principal hop session
 	//agToMux := make(map[string]*channels.Muxer)   //AuthGrant -> principal hop session (added by server when it issues an authgrant)
-
 	sessions := make(map[*transport.Handle]*channels.Muxer) //all hop sessions -> their channel muxers
 
-	go authGrantServer(l, principals, sessions)
+	server := &hopServer{
+		m:          sync.Mutex{},
+		principals: principals,
+		sessions:   sessions,
+
+		server:   transportServer,
+		authsock: l,
+	}
+
+	go server.authGrantServer()
 
 	//*****ACCEPT CONNS AND START SESSIONS*****
 	for {
 		logrus.Infof("S: SERVER LISTENING ON %v", addr)
-		serverConn, err := server.AcceptTimeout(30 * time.Minute)
+		serverConn, err := transportServer.AcceptTimeout(30 * time.Minute)
 		if err != nil {
 			logrus.Fatalf("S: SERVER TIMEOUT: %v", err)
 		}
 		logrus.Debugf("S: ACCEPTED NEW CONNECTION with authgrant")
-		go session(server, serverConn, principals, l, sessions)
+		go session(transportServer, serverConn, principals, l, sessions)
 	}
 }
 
@@ -147,7 +166,7 @@ func session(server *transport.Server, serverConn *transport.Handle, principals 
 		switch serverChan.Type() {
 		case channels.EXEC_CHANNEL:
 			cmd, _ := codex.GetCmd(serverChan)
-			if _, p := serverConn.GetPrincipalSession(); !p {
+			if _, p := serverConn.GetPrincipalSession(); p {
 				if cmd != serverConn.AG.Action {
 					logrus.Error("CMD does not match Authgrant approved action")
 					continue
@@ -162,6 +181,8 @@ func session(server *transport.Server, serverConn *transport.Handle, principals 
 
 			args := strings.Split(cmd, " ")
 			c := exec.Command(args[0], args[1:]...)
+			// c.SysProcAttr = &syscall.SysProcAttr{}
+			// c.SysProcAttr.Credential = &syscall.Credential{Uid: uid}
 
 			f, err := pty.Start(c)
 			if err != nil {

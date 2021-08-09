@@ -32,7 +32,7 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	//2.) to know which principal session to contact if the user wants to hop further
 	//3.) (potentially) verify that only the allowed command is executed?
 	AG        AuthGrant
-	used      atomicBool //set to true after AG command has been executed
+	used      atomicBool //set to true after AG command has been executed. Not sure if this is necessary. Right now there isn't really a way for a client to start another code execution channel so it should be fine without this.
 	principal atomicBool //if true then no AG, if false then yes AG
 
 	recv chan []byte
