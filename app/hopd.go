@@ -221,7 +221,7 @@ func serve(args []string) {
 	hostname, _ := os.Hostname()
 	port := ":7777"
 	sockAddr := "@auth1"
-	if args[2] == "local" {
+	if len(args) > 2 && args[2] == "local" {
 		hostname = "localhost"
 		if len(args) > 3 {
 			port = ":" + args[3]
