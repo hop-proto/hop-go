@@ -6,16 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/sbinet/pstree"
 	"github.com/sirupsen/logrus"
-	"golang.org/x/sys/unix"
 	"zmap.io/portal/channels"
 	"zmap.io/portal/codex"
 	"zmap.io/portal/keys"
@@ -42,7 +39,7 @@ func GetAuthGrant(digest [sha3Len]byte, sUser string, addr string, cmd []string)
 		logrus.Fatal("C: error writing to UDS")
 	}
 	logrus.Infof("C: WROTE INTENT TO UDS")
-	response, resptype, err := getResponse(c)
+	response, resptype, err := GetResponse(c)
 	if err != nil {
 		logrus.Fatalf("S: ERROR GETTING RESPONSE: %v", err)
 	}
@@ -68,7 +65,7 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan
 	}()
 	logrus.SetOutput(io.Discard)
 	execCh.Restore()
-	intent, err := readIntentRequest(agc)
+	intent, err := ReadIntentRequest(agc)
 	if err != nil {
 		logrus.Fatalf("ERROR READING INTENT REQUEST: %v", err)
 	}
@@ -124,7 +121,7 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan
 		if e != nil {
 			logrus.Info("Issue writing intent comm to npcAgc")
 		}
-		response, _, e := getResponse(npcAgc)
+		response, _, e := GetResponse(npcAgc)
 		logrus.Info("got response")
 		if e != nil {
 			logrus.Fatalf("C: error reading from agc: %v", e)
@@ -196,55 +193,6 @@ func SendIntentConf(agc *channels.Reliable, t time.Time) {
 	}
 }
 
-//ProxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
-//Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
-func ProxyAuthGrantRequest(c net.Conn, principals map[int32]*transport.Handle, sessions map[*transport.Handle]*channels.Muxer) {
-	//TODO(baumanl): check threadsafety
-	logrus.Info("S: ACCEPTED NEW UDS CONNECTION")
-	defer c.Close()
-	//Verify that the client is a legit descendent
-	ancestor, e := checkCredentials(c, principals)
-	if e != nil {
-		log.Fatalf("S: ISSUE CHECKING CREDENTIALS: %v", e)
-	}
-	// find corresponding session muxer
-	handle := principals[ancestor]
-	if handle.IsClosed() {
-		logrus.Info("Connection with Principal is closed")
-		return
-	}
-	principal := sessions[handle]
-	logrus.Infof("S: CLIENT CONNECTED [%s]", c.RemoteAddr().Network())
-	intent, e := readIntentRequest(c)
-	if e != nil {
-		logrus.Fatalf("ERROR READING INTENT REQUEST: %v", e)
-	}
-	agc, err := principal.CreateChannel(channels.AGC_CHANNEL)
-	if err != nil {
-		logrus.Fatalf("S: ERROR MAKING CHANNEL: %v", err)
-	}
-	defer agc.Close()
-	logrus.Infof("S: CREATED CHANNEL (AGC)")
-	_, err = agc.Write(intent)
-	if err != nil {
-		logrus.Fatalf("S: ERROR WRITING TO CHANNEL: %v", err)
-	}
-	logrus.Infof("S: WROTE INTENT_REQUEST TO AGC")
-	response, _, err := getResponse(agc)
-	if err != nil {
-		logrus.Fatalf("S: ERROR GETTING RESPONSE: %v, %v", err, response)
-	}
-	_, err = c.Write(response)
-	if err != nil {
-		logrus.Fatalf("S: ERROR WRITING TO CHANNEL: %v", err)
-	}
-
-	//TODO(baumanl): Add retry logic if IntentDenied
-	// if response[0] == IntentDenied {
-	// 	//ASK USER IF THEY WANT TO TRY AGAIN BEFORE CLOSING AGC
-	// }
-}
-
 //Display prints the authgrant approval prompt to terminal and continues prompting until user enters "y" or "n"
 func (r *intentRequestMsg) prompt(reader *io.PipeReader) bool {
 	var ans string
@@ -261,81 +209,4 @@ func (r *intentRequestMsg) prompt(reader *io.PipeReader) bool {
 	}
 	return ans == "y"
 
-}
-
-//checks tree (starting at proc) to see if cPID is a descendent
-func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
-	for _, child := range proc.Children {
-		if child == cPID || checkDescendents(tree, tree.Procs[child], cPID) {
-			return true
-		}
-	}
-	return false
-}
-
-//verifies that client is a descendent of a process started by the principal and returns its ancestor process PID if found
-func checkCredentials(c net.Conn, principals map[int32]*transport.Handle) (int32, error) {
-	creds, err := readCreds(c)
-	if err != nil {
-		return 0, err
-	}
-	//PID of client process that connected to socket
-	cPID := creds.Pid
-	//ancestor represents the PID of the ancestor of the client and child of server daemon
-	var ancestor int32 = -1
-	//get a picture of the entire system process tree
-	tree, err := pstree.New()
-	//display(os.Getppid(), tree, 1) //displays all pstree
-	if err != nil {
-		return 0, err
-	}
-	//check all of the PIDs of processes that the server started
-	for k := range principals {
-		if k == cPID || checkDescendents(tree, tree.Procs[int(k)], int(cPID)) {
-			ancestor = k
-			break
-		}
-	}
-	if ancestor == -1 {
-		return 0, errors.New("not a descendent process")
-	}
-	logrus.Info("S: CREDENTIALS VERIFIED")
-	return ancestor, nil
-}
-
-//Src: https://blog.jbowen.dev/2019/09/using-so_peercred-in-go/src/peercred/cred.go
-//Parses the credentials sent by the client when it connects to the socket
-func readCreds(c net.Conn) (*unix.Ucred, error) {
-	var cred *unix.Ucred
-
-	//should only have *net.UnixConn types
-	uc, ok := c.(*net.UnixConn)
-	if !ok {
-		return nil, fmt.Errorf("unexpected socket type")
-	}
-
-	raw, err := uc.SyscallConn()
-	if err != nil {
-		return nil, fmt.Errorf("error opening raw connection: %s", err)
-	}
-
-	// The raw.Control() callback does not return an error directly.
-	// In order to capture errors, we wrap already defined variable
-	// 'err' within the closure. 'err2' is then the error returned
-	// by Control() itself.
-	err2 := raw.Control(func(fd uintptr) {
-		cred, err = unix.GetsockoptUcred(int(fd),
-			unix.SOL_SOCKET,
-			unix.SO_PEERCRED)
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf(" GetsockoptUcred() error: %s", err)
-	}
-
-	if err2 != nil {
-		return nil, fmt.Errorf(" Control() error: %s", err2)
-	}
-
-	return cred, nil
 }

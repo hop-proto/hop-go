@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/sbinet/pstree"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 	"zmap.io/portal/authgrants"
@@ -53,18 +56,113 @@ func newTestServerConfig() *transport.ServerConfig {
 }
 
 //handles connections to the hop server UDS to allow hop client processes to get authorization grants from their principal
-func (server *hopServer) authGrantServer() {
-	defer server.authsock.Close()
-	logrus.Info("S: STARTED LISTENING AT UDS: ", server.authsock.Addr().String())
+func (s *hopServer) authGrantServer() {
+	defer s.authsock.Close()
+	logrus.Info("S: STARTED LISTENING AT UDS: ", s.authsock.Addr().String())
 
 	for {
-		c, err := server.authsock.Accept()
+		c, err := s.authsock.Accept()
 		if err != nil {
 			logrus.Fatal("accept error:", err)
 		}
 
-		go authgrants.ProxyAuthGrantRequest(c, server.principals, server.sessions)
+		go s.ProxyAuthGrantRequest(c)
 	}
+}
+
+//ProxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
+//Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
+func (s *hopServer) ProxyAuthGrantRequest(c net.Conn) {
+	//TODO(baumanl): check threadsafety
+	logrus.Info("S: ACCEPTED NEW UDS CONNECTION")
+	defer c.Close()
+	//Verify that the client is a legit descendent
+	ancestor, e := s.checkCredentials(c)
+	if e != nil {
+		log.Fatalf("S: ISSUE CHECKING CREDENTIALS: %v", e)
+	}
+	s.m.Lock()
+	// find corresponding session muxer
+	handle := s.principals[ancestor]
+	s.m.Unlock()
+	if handle.IsClosed() {
+		logrus.Info("Connection with Principal is closed")
+		return
+	}
+	s.m.Lock()
+	principal := s.sessions[handle]
+	s.m.Unlock()
+	logrus.Infof("S: CLIENT CONNECTED [%s]", c.RemoteAddr().Network())
+	intent, e := authgrants.ReadIntentRequest(c)
+	if e != nil {
+		logrus.Fatalf("ERROR READING INTENT REQUEST: %v", e)
+	}
+	agc, err := principal.CreateChannel(channels.AGC_CHANNEL)
+	if err != nil {
+		logrus.Fatalf("S: ERROR MAKING CHANNEL: %v", err)
+	}
+	defer agc.Close()
+	logrus.Infof("S: CREATED CHANNEL (AGC)")
+	_, err = agc.Write(intent)
+	if err != nil {
+		logrus.Fatalf("S: ERROR WRITING TO CHANNEL: %v", err)
+	}
+	logrus.Infof("S: WROTE INTENT_REQUEST TO AGC")
+	response, _, err := authgrants.GetResponse(agc)
+	if err != nil {
+		logrus.Fatalf("S: ERROR GETTING RESPONSE: %v, %v", err, response)
+	}
+	_, err = c.Write(response)
+	if err != nil {
+		logrus.Fatalf("S: ERROR WRITING TO CHANNEL: %v", err)
+	}
+
+	//TODO(baumanl): Add retry logic if IntentDenied
+	// if response[0] == IntentDenied {
+	// 	//ASK USER IF THEY WANT TO TRY AGAIN BEFORE CLOSING AGC
+	// }
+}
+
+//verifies that client is a descendent of a process started by the principal and returns its ancestor process PID if found
+func (s *hopServer) checkCredentials(c net.Conn) (int32, error) {
+	creds, err := readCreds(c)
+	if err != nil {
+		return 0, err
+	}
+	//PID of client process that connected to socket
+	cPID := creds.Pid
+	//ancestor represents the PID of the ancestor of the client and child of server daemon
+	var ancestor int32 = -1
+	//get a picture of the entire system process tree
+	tree, err := pstree.New()
+	//display(os.Getppid(), tree, 1) //displays all pstree
+	if err != nil {
+		return 0, err
+	}
+	//check all of the PIDs of processes that the server started
+	s.m.Lock()
+	for k := range s.principals {
+		if k == cPID || checkDescendents(tree, tree.Procs[int(k)], int(cPID)) {
+			ancestor = k
+			break
+		}
+	}
+	s.m.Unlock()
+	if ancestor == -1 {
+		return 0, errors.New("not a descendent process")
+	}
+	logrus.Info("S: CREDENTIALS VERIFIED")
+	return ancestor, nil
+}
+
+//checks tree (starting at proc) to see if cPID is a descendent
+func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
+	for _, child := range proc.Children {
+		if child == cPID || checkDescendents(tree, tree.Procs[child], cPID) {
+			return true
+		}
+	}
+	return false
 }
 
 //Callback function that sets the appropriate socket options
@@ -76,6 +174,43 @@ func setListenerOptions(proto, addr string, c syscall.RawConn) error {
 			unix.SO_PASSCRED,
 			1)
 	})
+}
+
+//Src: https://blog.jbowen.dev/2019/09/using-so_peercred-in-go/src/peercred/cred.go
+//Parses the credentials sent by the client when it connects to the socket
+func readCreds(c net.Conn) (*unix.Ucred, error) {
+	var cred *unix.Ucred
+
+	//should only have *net.UnixConn types
+	uc, ok := c.(*net.UnixConn)
+	if !ok {
+		return nil, fmt.Errorf("unexpected socket type")
+	}
+
+	raw, err := uc.SyscallConn()
+	if err != nil {
+		return nil, fmt.Errorf("error opening raw connection: %s", err)
+	}
+
+	// The raw.Control() callback does not return an error directly.
+	// In order to capture errors, we wrap already defined variable
+	// 'err' within the closure. 'err2' is then the error returned
+	// by Control() itself.
+	err2 := raw.Control(func(fd uintptr) {
+		cred, err = unix.GetsockoptUcred(int(fd),
+			unix.SOL_SOCKET,
+			unix.SO_PEERCRED)
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf(" GetsockoptUcred() error: %s", err)
+	}
+
+	if err2 != nil {
+		return nil, fmt.Errorf(" Control() error: %s", err2)
+	}
+
+	return cred, nil
 }
 
 //listen for incoming hop connection requests and start corresponding authGrantServer on a Unix Domain socket
@@ -145,17 +280,19 @@ func serve(args []string) {
 			logrus.Fatalf("S: SERVER TIMEOUT: %v", err)
 		}
 		logrus.Debugf("S: ACCEPTED NEW CONNECTION with authgrant")
-		go session(transportServer, serverConn, principals, l, sessions)
+		go server.session(serverConn)
 	}
 }
 
 //Starts a session muxer and manages incoming channel requests
-func session(server *transport.Server, serverConn *transport.Handle, principals map[int32]*transport.Handle, l net.Listener, sessions map[*transport.Handle]*channels.Muxer) {
+func (s *hopServer) session(serverConn *transport.Handle) {
 	ms := channels.NewMuxer(serverConn, serverConn)
 	go ms.Start()
 	defer ms.Stop()
 	logrus.Info("S: STARTED CHANNEL MUXER")
-	sessions[serverConn] = ms
+	s.m.Lock()
+	s.sessions[serverConn] = ms
+	s.m.Unlock()
 	for {
 		serverChan, err := ms.Accept()
 		if err != nil {
@@ -194,12 +331,14 @@ func session(server *transport.Server, serverConn *transport.Handle, principals 
 				logrus.Info("closed chan")
 			}()
 
+			s.m.Lock()
 			if handle, ok := serverConn.GetPrincipalSession(); ok {
-				principals[int32(c.Process.Pid)] = handle
+				s.principals[int32(c.Process.Pid)] = handle
 			} else {
 				logrus.Infof("S: using standard muxer")
-				principals[int32(c.Process.Pid)] = serverConn
+				s.principals[int32(c.Process.Pid)] = serverConn
 			}
+			s.m.Unlock()
 			go codex.Server(serverChan, f)
 		case channels.AGC_CHANNEL:
 			k, t, user, action, e := authgrants.HandleIntentComm(serverChan)
@@ -208,7 +347,7 @@ func session(server *transport.Server, serverConn *transport.Handle, principals 
 				authgrants.SendIntentDenied(serverChan, "Server denied")
 				continue
 			}
-			server.AddAuthgrant(k, t, user, action, serverConn)
+			s.server.AddAuthgrant(k, t, user, action, serverConn)
 			authgrants.SendIntentConf(serverChan, t)
 			logrus.Info("Sent intent conf")
 			serverChan.Close()

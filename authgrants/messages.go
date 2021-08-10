@@ -258,7 +258,7 @@ func parseAddr(addr string) (string, uint16) { //addr of format host:port or hos
 }
 
 //Gets Intent Request bytes
-func readIntentRequest(c net.Conn) ([]byte, error) {
+func ReadIntentRequest(c net.Conn) ([]byte, error) {
 	msgType := make([]byte, 1)
 	c.Read(msgType)
 	if msgType[0] == IntentRequest {
@@ -300,7 +300,7 @@ func readIntentCommunication(c net.Conn) ([]byte, error) {
 }
 
 //Waits and reads IntentConfirmation or IntentDenied from net.Conn
-func getResponse(c net.Conn) ([]byte, byte, error) {
+func GetResponse(c net.Conn) ([]byte, byte, error) {
 	responseType := make([]byte, 1)
 	_, err := c.Read(responseType)
 	if err != nil {
