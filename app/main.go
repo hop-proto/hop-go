@@ -39,7 +39,9 @@ func main() {
 		if errors.Is(err, os.ErrNotExist) {
 			logrus.Info("file does not exist, creating...")
 			f, e := os.Create(path)
-			logrus.Error(e)
+			if e != nil {
+				logrus.Error(e)
+			}
 			f.Close()
 		}
 		f, e := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
@@ -56,12 +58,9 @@ func main() {
 		if errors.Is(err, os.ErrNotExist) {
 			logrus.Info("file does not exist, creating...")
 			f, e := os.Create(path)
-			logrus.Error(e)
-			f.Close()
-		}
-		_, err = os.Stat(path)
-		if errors.Is(err, os.ErrNotExist) {
-			f, _ := os.Create(path)
+			if e != nil {
+				logrus.Error(e)
+			}
 			f.Close()
 		}
 		f, e = os.OpenFile(path, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
@@ -72,7 +71,18 @@ func main() {
 		f.WriteString(pair.Public.String())
 		f.Close()
 
-		auth, e := os.OpenFile("~/.hop/authorized_keys", os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+		path, _ = os.UserHomeDir()
+		path += "/.hop/authorized_keys"
+		_, err = os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			logrus.Info("file does not exist, creating...")
+			f, e := os.Create(path)
+			if e != nil {
+				logrus.Error(e)
+			}
+			f.Close()
+		}
+		auth, e := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
 		if e != nil {
 			logrus.Fatalf("error opening auth key file: %v", e)
 		}

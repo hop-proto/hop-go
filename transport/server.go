@@ -382,7 +382,9 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 
 	//if the client static key is in authorized keys continue, otherwise abandon all state
 	//Check if the client is authorized permanently
-	f, e := os.Open("../app/authorized_keys") //TODO: fix to actual address
+	path, _ := os.UserHomeDir()
+	path += "/.hop/authorized_keys"
+	f, e := os.Open(path) //TODO: fix to actual address
 	if e != nil {
 		return pos, nil, k, ErrOpeningAuthKeys
 	}
