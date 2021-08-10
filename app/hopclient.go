@@ -12,6 +12,13 @@ import (
 	"zmap.io/portal/transport"
 )
 
+var hostToIPAddr = map[string]string{
+	"scratch-01": "10.216.2.64",
+	"scratch-02": "10.216.2.128",
+	"scratch-07": "10.216.2.208",
+	"localhost":  "127.0.0.1",
+}
+
 //parses cmd line arguments and establishes hop session with remote hop server
 func client(args []string) {
 	//logrus.SetOutput(io.Discard)
@@ -22,7 +29,14 @@ func client(args []string) {
 	}
 	s := strings.SplitAfter(args[2], "@") //TODO(bauman): Add support for optional username
 	user := s[0][0 : len(s[0])-1]
-	addr := s[1]
+	addrParts := strings.SplitAfter(s[1], ":")
+	hostname := addrParts[0][0 : len(addrParts[0])-1]
+	port := addrParts[1]
+	addr := hostname + ":" + port
+	if ip, ok := hostToIPAddr[hostname]; ok {
+		addr = ip + ":" + port
+	}
+	logrus.Infof("Using path: %v", addr)
 	//TODO(bauman): get users default shell ($SHELL ?)
 	cmd := []string{"bash"} //default action for principal is to open an interactive shell
 	config := transport.ClientConfig{}

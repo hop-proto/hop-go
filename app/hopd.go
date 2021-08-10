@@ -218,15 +218,18 @@ func serve(args []string) {
 	logrus.SetLevel(logrus.InfoLevel)
 	//logrus.SetOutput(io.Discard)
 	//TEMPORARY: Should take address from argument and socket should be abstract/same place or dependent on session?
-	addr := "localhost:7777"
+	hostname, _ := os.Hostname()
+	port := ":7777"
 	sockAddr := "@auth1"
-	if args[2] == "2" {
-		addr = "localhost:8888"
-		sockAddr = "@auth2" //because we are on the same host => figure out how to use abstract sockets and naming
-	} else if args[2] == "3" {
-		addr = "localhost:9999"
-		sockAddr = "@auth3"
+	if args[2] == "local" {
+		hostname = "localhost"
+		if len(args) > 3 {
+			port = ":" + args[3]
+		}
+	} else if len(args) > 2 {
+		port = ":" + args[2]
 	}
+	addr := hostname + port
 
 	//*****TRANSPORT LAYER SET UP*****
 	pktConn, err := net.ListenPacket("udp", addr)
