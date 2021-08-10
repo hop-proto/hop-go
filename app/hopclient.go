@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"sync"
 
@@ -51,7 +52,8 @@ func client(args []string) {
 		path := args[4]
 		if path == "path" {
 			logrus.Info("C: using default key")
-			path = "keys/default" //TODO(baumanl): fix default behavior for general program
+			path, _ = os.UserHomeDir()
+			path += "/.hop/key" //TODO(baumanl): fix default behavior for general program
 		}
 		config.KeyPair, e = keys.ReadDHKeyFromPEMFile(path)
 		if e != nil {

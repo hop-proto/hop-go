@@ -220,7 +220,7 @@ func serve(args []string) {
 	//TEMPORARY: Should take address from argument and socket should be abstract/same place or dependent on session?
 	hostname, _ := os.Hostname()
 	port := ":7777"
-	sockAddr := "@auth1"
+	sockAddr := "@auth"
 	if len(args) > 2 && args[2] == "local" {
 		hostname = "localhost"
 		if len(args) > 3 {

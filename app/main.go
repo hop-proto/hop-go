@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 
 	"github.com/sirupsen/logrus"
@@ -32,15 +33,46 @@ func main() {
 		//add a key
 		pair := new(keys.X25519KeyPair)
 		pair.Generate()
-		f, e := os.OpenFile("keys/default", os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+		path, _ := os.UserHomeDir()
+		path += "/.hop/key"
+		_, err := os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			logrus.Info("file does not exist, creating...")
+			f, e := os.Create(path)
+			logrus.Error(e)
+			f.Close()
+		}
+		f, e := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
 		if e != nil {
 			logrus.Fatalf("error opening default key file: %v", e)
 		}
-		defer f.Close()
-		logrus.Infof("adding private to keys/default: %v", pair.Private.String())
+		logrus.Infof("adding private to ~/.hop/key: %v", pair.Private.String())
 		f.WriteString(pair.Private.String())
+		f.Close()
 
-		auth, e := os.OpenFile("authorized_keys", os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+		path, _ = os.UserHomeDir()
+		path += "/.hop/key.pub"
+		_, err = os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			logrus.Info("file does not exist, creating...")
+			f, e := os.Create(path)
+			logrus.Error(e)
+			f.Close()
+		}
+		_, err = os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			f, _ := os.Create(path)
+			f.Close()
+		}
+		f, e = os.OpenFile(path, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+		if e != nil {
+			logrus.Fatalf("error opening default key file: %v", e)
+		}
+		logrus.Infof("adding public to ~/.hop/key.pub: %v", pair.Public.String())
+		f.WriteString(pair.Public.String())
+		f.Close()
+
+		auth, e := os.OpenFile("~/.hop/authorized_keys", os.O_APPEND|os.O_WRONLY, os.ModeAppend)
 		if e != nil {
 			logrus.Fatalf("error opening auth key file: %v", e)
 		}
