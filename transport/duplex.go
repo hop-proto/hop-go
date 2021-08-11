@@ -58,6 +58,7 @@ func CookieAD(ephemeral *[DHLen]byte, clientAddr *net.UDPAddr) []byte {
 	// TODO(dadrian): Remove the memory allocation
 	h := sha3.New256()
 	h.Write(ephemeral[:])
+
 	// TODO(dadrian): Ensure this is always 4 or 12 bytes
 	h.Write(clientAddr.IP)
 	var port [2]byte

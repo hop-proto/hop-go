@@ -393,7 +393,6 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	authorized := false
 	k = keys.PublicKey(hs.clientStatic)
 	for scanner.Scan() {
-		logrus.Info("COMPARING: ")
 		if scanner.Text() == k.String() {
 			authorized = true
 			logrus.Debugf("USER AUTHORIZED")

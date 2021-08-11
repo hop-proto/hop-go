@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"os"
@@ -20,15 +20,15 @@ var hostToIPAddr = map[string]string{
 	"localhost":  "127.0.0.1",
 }
 
-//parses cmd line arguments and establishes hop session with remote hop server
-func client(args []string) {
+//Client parses cmd line arguments and establishes hop session with remote hop server
+func Client(args []string) {
 	//logrus.SetOutput(io.Discard)
 	logrus.SetLevel(logrus.InfoLevel)
 	//******PROCESS CMD LINE ARGUMENTS******
-	if len(args) < 5 {
+	if len(args) < 4 {
 		logrus.Fatal("C: Invalid arguments. Usage: hop user@host:port -k <pathtokey> or hop user@host:port -a <action>.")
 	}
-	s := strings.SplitAfter(args[2], "@") //TODO(bauman): Add support for optional username
+	s := strings.SplitAfter(args[1], "@") //TODO(bauman): Add support for optional username
 	user := s[0][0 : len(s[0])-1]
 	addrParts := strings.SplitAfter(s[1], ":")
 	hostname := addrParts[0][0 : len(addrParts[0])-1]
@@ -45,11 +45,11 @@ func client(args []string) {
 	//Check if this is a principal client process or one that needs to get an AG
 	//******GET AUTHORIZATION SOURCE******
 	var principal bool
-	if args[3] == "-k" {
+	if args[2] == "-k" {
 		principal = true
-		logrus.Infof("C: Using key-file at %v for auth.", args[4])
+		logrus.Infof("C: Using key-file at %v for auth.", args[3])
 		var e error
-		path := args[4]
+		path := args[3]
 		if path == "path" {
 			logrus.Info("C: using default key")
 			path, _ = os.UserHomeDir()
@@ -59,13 +59,13 @@ func client(args []string) {
 		if e != nil {
 			logrus.Fatalf("C: Error using key at path %v. Error: %v", path, e)
 		}
-	} else if args[3] == "-a" {
+	} else if args[2] == "-a" {
 		principal = false
 		config.KeyPair = new(keys.X25519KeyPair)
 		config.KeyPair.Generate()
 		logrus.Infof("Client generated: %v", config.KeyPair.Public.String())
 		logrus.Infof("C: Initiating AGC Protocol.")
-		cmd = args[4:]                                                          //if using authorization grant then perform the action specified in cmd line
+		cmd = args[3:]                                                          //if using authorization grant then perform the action specified in cmd line
 		t, e := authgrants.GetAuthGrant(config.KeyPair.Public, user, addr, cmd) //TODO(baumanl): necessary to store the deadline somewhere?
 		if e != nil {
 			logrus.Fatalf("C: %v", e)

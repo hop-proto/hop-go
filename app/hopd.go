@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -66,13 +66,13 @@ func (s *hopServer) authGrantServer() {
 			logrus.Fatal("accept error:", err)
 		}
 
-		go s.ProxyAuthGrantRequest(c)
+		go s.proxyAuthGrantRequest(c)
 	}
 }
 
 //ProxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
 //Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
-func (s *hopServer) ProxyAuthGrantRequest(c net.Conn) {
+func (s *hopServer) proxyAuthGrantRequest(c net.Conn) {
 	//TODO(baumanl): check threadsafety
 	logrus.Info("S: ACCEPTED NEW UDS CONNECTION")
 	defer c.Close()
@@ -213,21 +213,21 @@ func readCreds(c net.Conn) (*unix.Ucred, error) {
 	return cred, nil
 }
 
-//listen for incoming hop connection requests and start corresponding authGrantServer on a Unix Domain socket
-func serve(args []string) {
+//Serve listens for incoming hop connection requests and start corresponding authGrantServer on a Unix Domain socket
+func Serve(args []string) {
 	logrus.SetLevel(logrus.InfoLevel)
 	//logrus.SetOutput(io.Discard)
 	//TEMPORARY: Should take address from argument and socket should be abstract/same place or dependent on session?
 	hostname, _ := os.Hostname()
 	port := ":7777"
 	sockAddr := "@auth"
-	if len(args) > 2 && args[2] == "local" {
+	if len(args) > 1 && args[1] == "local" {
 		hostname = "localhost"
-		if len(args) > 3 {
-			port = ":" + args[3]
+		if len(args) > 2 {
+			port = ":" + args[2]
 		}
-	} else if len(args) > 2 {
-		port = ":" + args[2]
+	} else if len(args) > 1 {
+		port = ":" + args[1]
 	}
 	addr := hostname + port
 
