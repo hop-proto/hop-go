@@ -18,6 +18,7 @@ import (
 	"zmap.io/portal/keys"
 	"zmap.io/portal/npc"
 	"zmap.io/portal/transport"
+	"zmap.io/portal/userauth"
 )
 
 //GetAuthGrant is used by the Client to get an authorization grant from its Principal
@@ -107,6 +108,12 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan
 		logrus.Info("handshake successful")
 		npcMuxer := channels.NewMuxer(tclient, tclient)
 		go npcMuxer.Start()
+
+		uaCh, _ := npcMuxer.CreateChannel(channels.UserAuthChannel)
+		if ok := userauth.RequestAuthorization(uaCh, config.KeyPair.Public, req.serverUsername); !ok {
+			logrus.Fatal("Not authorized.")
+		}
+		logrus.Info("User authorization complete")
 
 		//start AGC and send INTENT_COMMUNICATION
 		npcAgc, e := npcMuxer.CreateChannel(channels.AgcChannel)

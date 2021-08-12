@@ -31,9 +31,9 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	//1.) if an authgrant was used for the session and
 	//2.) to know which principal session to contact if the user wants to hop further
 	//3.) (potentially) verify that only the allowed command is executed?
-	AG        AuthGrant
-	used      atomicBool //set to true after AG command has been executed. Not sure if this is necessary. Right now there isn't really a way for a client to start another code execution channel so it should be fine without this.
-	principal atomicBool //if true then no AG, if false then yes AG
+	// AG        AuthGrant
+	// used      atomicBool //set to true after AG command has been executed. Not sure if this is necessary. Right now there isn't really a way for a client to start another code execution channel so it should be fine without this.
+	// principal atomicBool //if true then no AG, if false then yes AG
 
 	recv chan []byte
 	send chan []byte
@@ -50,14 +50,14 @@ var _ MsgConn = &Handle{}
 var _ net.Conn = &Handle{}
 
 //GetPrincipalSession returns the Handle to the principal if this session is not it's own principal
-func (c *Handle) GetPrincipalSession() (*Handle, bool) {
-	if !c.principal.isSet() {
-		c.readLock.Lock()
-		defer c.readLock.Unlock()
-		return c.AG.PrincipalSession, true
-	}
-	return nil, false
-}
+// func (c *Handle) GetPrincipalSession() (*Handle, bool) {
+// 	if !c.principal.isSet() {
+// 		c.readLock.Lock()
+// 		defer c.readLock.Unlock()
+// 		return c.AG.PrincipalSession, true
+// 	}
+// 	return nil, false
+// }
 
 //IsClosed returns closed member variable value
 func (c *Handle) IsClosed() bool {
@@ -65,14 +65,14 @@ func (c *Handle) IsClosed() bool {
 }
 
 //Used tells whether the authorized action has already been executed
-func (c *Handle) Used() bool {
-	return c.used.isSet()
-}
+// func (c *Handle) Used() bool {
+// 	return c.used.isSet()
+// }
 
 //SetUsed should be called after executing authorized action so it can't be repeated
-func (c *Handle) SetUsed() {
-	c.used.setTrue()
-}
+// func (c *Handle) SetUsed() {
+// 	c.used.setTrue()
+// }
 
 // ReadMsg implements the MsgReader interface. If b is too short to hold the
 // message, it returns ErrBufOverflow.

@@ -16,12 +16,12 @@ import (
 )
 
 //AuthGrant contains deadline, user, action
-type AuthGrant struct {
-	Deadline         time.Time
-	User             string
-	Action           string
-	PrincipalSession *Handle
-}
+// type AuthGrant struct {
+// 	Deadline         time.Time
+// 	User             string
+// 	Action           string
+// 	PrincipalSession *Handle
+// }
 
 type outgoing struct {
 	pkt []byte
@@ -48,7 +48,7 @@ type Server struct {
 	handshakes map[string]*HandshakeState
 	sessions   map[SessionID]*SessionState
 
-	authgrants map[keys.PublicKey]*AuthGrant //static key -> authgrant
+	//authgrants map[keys.PublicKey]*AuthGrant //static key -> authgrant
 
 	pendingConnections chan *Handle
 	outgoing           chan outgoing
@@ -63,17 +63,17 @@ type Server struct {
 }
 
 //AddAuthgrant adds auth grant to server map
-func (s *Server) AddAuthgrant(k keys.PublicKey, t time.Time, user string, action string, handle *Handle) {
-	ag := &AuthGrant{
-		Deadline:         t,
-		User:             user,
-		Action:           action,
-		PrincipalSession: handle,
-	}
-	s.m.Lock()
-	s.authgrants[k] = ag
-	s.m.Unlock()
-}
+// func (s *Server) AddAuthgrant(k keys.PublicKey, t time.Time, user string, action string, handle *Handle) {
+// 	ag := &AuthGrant{
+// 		Deadline:         t,
+// 		User:             user,
+// 		Action:           action,
+// 		PrincipalSession: handle,
+// 	}
+// 	s.m.Lock()
+// 	s.authgrants[k] = ag
+// 	s.m.Unlock()
+// }
 
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
 	s.m.Lock()
@@ -541,13 +541,13 @@ func (s *Server) finishHandshake(hs *HandshakeState, k keys.PublicKey) error {
 }
 
 func (s *Server) createHandleLocked(ss *SessionState, k keys.PublicKey) *Handle {
-	val, ok := s.authgrants[k]
+	//val, ok := s.authgrants[k]
 	var p atomicBool
 	p.setFalse()
-	if !ok {
-		val = &AuthGrant{}
-		p.setTrue()
-	}
+	// if !ok {
+	// 	val = &AuthGrant{}
+	// 	p.setTrue()
+	// }
 
 	var used atomicBool
 	used.setFalse()
@@ -561,9 +561,9 @@ func (s *Server) createHandleLocked(ss *SessionState, k keys.PublicKey) *Handle 
 
 		//TODO(baumanl): Simplify how to add this to handle? right now ag is passed from
 		//handleClientAuth() -> finishHandshake() -> createHandleLocked()
-		AG:        *val,
-		principal: p,
-		used:      used,
+		//AG:        *val,
+		// principal: p,
+		// used:      used,
 	}
 	ss.handle = handle
 	return handle
@@ -642,7 +642,7 @@ func NewServer(conn *net.UDPConn, config *ServerConfig) (*Server, error) {
 		handshakes: make(map[string]*HandshakeState),
 		sessions:   make(map[SessionID]*SessionState),
 
-		authgrants: make(map[keys.PublicKey]*AuthGrant),
+		//authgrants: make(map[keys.PublicKey]*AuthGrant),
 
 		pendingConnections: make(chan *Handle, config.maxPendingConnections()),
 		outgoing:           make(chan outgoing), // TODO(dadrian): Is this the appropriate size?

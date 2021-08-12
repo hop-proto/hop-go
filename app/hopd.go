@@ -46,6 +46,15 @@ type hopServer struct {
 	authsock net.Listener
 }
 
+//TODO(bauman): figure out best way for these structs to be organized. Eliminate unnecessary member variables
+type hopSession struct {
+	isPrincipal   bool
+	principal     *hopSession
+	authgrant     *AuthGrant
+	channelMuxer  *channels.Muxer
+	transportConn *transport.Handle
+}
+
 func newTestServerConfig() *transport.ServerConfig {
 	keyPair, err := keys.ReadDHKeyFromPEMFile("./testdata/leaf-key.pem")
 	if err != nil {
@@ -296,25 +305,28 @@ func Serve(args []string) {
 			logrus.Fatalf("S: SERVER TIMEOUT: %v", err)
 		}
 		logrus.Debugf("S: ACCEPTED NEW CONNECTION with authgrant")
-		go server.session(serverConn)
+		sess := &hopSession{
+			transportConn: serverConn,
+		}
+		go server.session(sess)
 	}
 }
 
-func (s *hopServer) checkAuthorization(ch *channels.Reliable) bool {
+func (s *hopServer) checkAuthorization(ch *channels.Reliable) (bool, bool) {
 	k, user := userauth.GetInitMsg(ch)
 	//check /user/.hop/authorized_keys first
 	path := "/home/" + user + "/.hop/authorized_keys"
 	f, e := os.Open(path)
 	if e != nil {
 		logrus.Error("Could not open file at path: ", path)
-		return false
+		return false, false
 	}
 	defer f.Close()
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		if scanner.Text() == k.String() {
 			logrus.Debugf("USER AUTHORIZED")
-			return true
+			return true, true
 		}
 	}
 	//Check for a matching authgrant
@@ -322,42 +334,44 @@ func (s *hopServer) checkAuthorization(ch *channels.Reliable) bool {
 	if !ok {
 		//TODO: handle this gracefully (i.e. abandon all state)
 		logrus.Info("KEY NOT AUTHORIZED")
-		return false
+		return false, false
 	}
 	if val.Deadline.Before(time.Now()) {
 		delete(s.authgrants, k)
 		//TODO: handle this gracefully (i.e. abandon all state)
 		logrus.Info("AUTHGRANT DEADLINE EXCEEDED")
-		return false
+		return false, false
 	}
 	delete(s.authgrants, k)
 	logrus.Info("USER AUTHORIZED")
-	return true
+	return false, true
 }
 
 //Starts a session muxer and manages incoming channel requests
-func (s *hopServer) session(serverConn *transport.Handle) {
-	ms := channels.NewMuxer(serverConn, serverConn)
-	go ms.Start()
-	defer ms.Stop()
+func (s *hopServer) session(sess *hopSession) {
+	sess.channelMuxer = channels.NewMuxer(sess.transportConn, sess.transportConn)
+	go sess.channelMuxer.Start()
+	defer sess.channelMuxer.Stop()
 	logrus.Info("S: STARTED CHANNEL MUXER")
 	//User Authorization Step
-	uaCh, _ := ms.Accept()
-	if !s.checkAuthorization(uaCh) {
+	uaCh, _ := sess.channelMuxer.Accept()
+	if p, ok := s.checkAuthorization(uaCh); !ok {
 		logrus.Info("USER NOT AUTHORIZED")
 		uaCh.Write([]byte{userauth.UserAuthDen})
 		return
 		//TODO(baumanl): Check closing behavior. how to end session completely
+	} else {
+		sess.isPrincipal = p
+		uaCh.Write([]byte{userauth.UserAuthConf})
+		logrus.Info("USER AUTHORIZED")
 	}
-	uaCh.Write([]byte{userauth.UserAuthConf})
-	logrus.Info("USER AUTHORIZED")
 
 	s.m.Lock()
-	s.sessions[serverConn] = ms
+	s.sessions[sess.transportConn] = sess.channelMuxer
 	s.m.Unlock()
 	logrus.Info("STARTING CHANNEL LOOP")
 	for {
-		serverChan, err := ms.Accept()
+		serverChan, err := sess.channelMuxer.Accept()
 		if err != nil {
 			logrus.Fatalf("S: ERROR ACCEPTING CHANNEL: %v", err)
 		}
@@ -366,16 +380,16 @@ func (s *hopServer) session(serverConn *transport.Handle) {
 		switch serverChan.Type() {
 		case channels.ExecChannel:
 			cmd, _ := codex.GetCmd(serverChan)
-			if _, p := serverConn.GetPrincipalSession(); p {
-				if cmd != serverConn.AG.Action {
+			if !sess.isPrincipal {
+				if cmd != sess.authgrant.Action {
 					logrus.Error("CMD does not match Authgrant approved action")
 					continue
 				}
-				if serverConn.Used() { //Probably not necessary to check because the client can't create another code execution channel with the current framework anyway
-					logrus.Error("Already performed Authgrant approved action")
-					continue
-				}
-				serverConn.SetUsed()
+				// if serverConn.Used() { //Probably not necessary to check because the client can't create another code execution channel with the current framework anyway
+				// 	logrus.Error("Already performed Authgrant approved action")
+				// 	continue
+				// }
+				// serverConn.SetUsed()
 			}
 			logrus.Infof("Executing: %v", cmd)
 
@@ -395,11 +409,11 @@ func (s *hopServer) session(serverConn *transport.Handle) {
 			}()
 
 			s.m.Lock()
-			if handle, ok := serverConn.GetPrincipalSession(); ok {
-				s.principals[int32(c.Process.Pid)] = handle
+			if !sess.isPrincipal {
+				s.principals[int32(c.Process.Pid)] = sess.principal.transportConn
 			} else {
 				logrus.Infof("S: using standard muxer")
-				s.principals[int32(c.Process.Pid)] = serverConn
+				s.principals[int32(c.Process.Pid)] = sess.transportConn
 			}
 			s.m.Unlock()
 			go codex.Server(serverChan, f)
@@ -410,7 +424,13 @@ func (s *hopServer) session(serverConn *transport.Handle) {
 				authgrants.SendIntentDenied(serverChan, "Server denied")
 				continue
 			}
-			s.server.AddAuthgrant(k, t, user, action, serverConn)
+			//s.server.AddAuthgrant(k, t, user, action, serverConn)
+			s.authgrants[k] = &AuthGrant{
+				Deadline:         t,
+				User:             user,
+				Action:           action,
+				PrincipalSession: sess.transportConn,
+			}
 			authgrants.SendIntentConf(serverChan, t)
 			logrus.Info("Sent intent conf")
 			serverChan.Close()
