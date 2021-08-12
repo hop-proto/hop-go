@@ -11,6 +11,7 @@ import (
 	"zmap.io/portal/codex"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/transport"
+	"zmap.io/portal/userauth"
 )
 
 var hostToIPAddr = map[string]string{
@@ -51,7 +52,7 @@ func Client(args []string) {
 		var e error
 		path := args[3]
 		if path == "path" {
-			logrus.Info("C: using default key")
+			logrus.Info("C: using default key at ~/.hop/key")
 			path, _ = os.UserHomeDir()
 			path += "/.hop/key" //TODO(baumanl): fix default behavior for general program
 		}
@@ -91,9 +92,16 @@ func Client(args []string) {
 		logrus.Info("muxer stopped")
 	}()
 
+	//*****PERFORM USER AUTHORIZATION******
+	uaCh, _ := mc.CreateChannel(channels.UserAuthChannel)
+	if ok := userauth.RequestAuthorization(uaCh, config.KeyPair.Public, user); !ok {
+		logrus.Fatal("Not authorized.")
+	}
+	logrus.Info("User authorization complete")
+
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	logrus.Infof("Performing action: %v", cmd)
-	ch, _ := mc.CreateChannel(channels.EXEC_CHANNEL)
+	ch, _ := mc.CreateChannel(channels.ExecChannel)
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	execCh := codex.NewExecChan(cmd, ch, &wg)
@@ -107,11 +115,11 @@ func Client(args []string) {
 				logrus.Fatalf("Error accepting channel: %v", e)
 			}
 			logrus.Infof("ACCEPTED NEW CHANNEL of TYPE: %v", c.Type())
-			if c.Type() == channels.AGC_CHANNEL && principal {
+			if c.Type() == channels.AgcChannel && principal {
 				go authgrants.Principal(c, mc, execCh, &config)
-			} else if c.Type() == channels.NPC_CHANNEL {
+			} else if c.Type() == channels.NpcChannel {
 				//go do something?
-			} else if c.Type() == channels.EXEC_CHANNEL {
+			} else if c.Type() == channels.ExecChannel {
 				//go do something else?
 			} else {
 				//bad channel

@@ -50,9 +50,8 @@ func startClient(port string) {
 	}
 	if port == "1111" {
 		logrus.Info("Starting NPC with Server 1 on port 1111 to server 2 on port 2222")
-		ch.Write(npc.NewNPCInitMsg("127.0.0.1:2222").ToBytes())
-		ch.Read(make([]byte, 1))
-		logrus.Info("Receieved NPC Conf")
+		npc.Start(ch, "127.0.0.1:2222")
+
 		tclient, _ := transport.DialNPC("npc", "127.0.0.1:2222", ch, nil)
 		e := tclient.Handshake()
 		if e != nil {

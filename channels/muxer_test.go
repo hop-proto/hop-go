@@ -110,13 +110,13 @@ func TestClosingMuxer(t *testing.T) {
 	ms := NewMuxer(serverConn, serverConn)
 	go ms.Start()
 
-	agc, err := mc.CreateChannel(AGC_CHANNEL)
+	agc, err := mc.CreateChannel(AgcChannel)
 	assert.NilError(t, err)
 
-	npc, err := mc.CreateChannel(NPC_CHANNEL)
+	npc, err := mc.CreateChannel(NpcChannel)
 	assert.NilError(t, err)
 
-	codex, err := mc.CreateChannel(EXEC_CHANNEL)
+	codex, err := mc.CreateChannel(ExecChannel)
 	assert.NilError(t, err)
 
 	agcs, err := ms.Accept()

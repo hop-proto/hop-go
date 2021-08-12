@@ -1,14 +1,12 @@
 package transport
 
 import (
-	"bufio"
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"errors"
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -382,38 +380,38 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 
 	//if the client static key is in authorized keys continue, otherwise abandon all state
 	//Check if the client is authorized permanently
-	path, _ := os.UserHomeDir()
-	path += "/.hop/authorized_keys"
-	f, e := os.Open(path) //TODO: fix to actual address
-	if e != nil {
-		return pos, nil, k, ErrOpeningAuthKeys
-	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	authorized := false
-	k = keys.PublicKey(hs.clientStatic)
-	for scanner.Scan() {
-		if scanner.Text() == k.String() {
-			authorized = true
-			logrus.Debugf("USER AUTHORIZED")
-			break
-		}
-	}
-	if !authorized {
-		//Check for a matching authgrant
-		val, ok := s.authgrants[k]
-		if !ok {
-			//TODO: handle this gracefully (i.e. abandon all state)
-			logrus.Info("KEY NOT AUTHORIZED")
-		}
-		if val.Deadline.Before(time.Now()) {
-			delete(s.authgrants, k)
-			//TODO: handle this gracefully (i.e. abandon all state)
-			logrus.Info("AUTHGRANT DEADLINE EXCEEDED")
-		}
-		delete(s.authgrants, k)
-		logrus.Info("USER AUTHORIZED")
-	}
+	// path, _ := os.UserHomeDir()
+	// path += "/.hop/authorized_keys"
+	// f, e := os.Open(path) //TODO: fix to actual address
+	// if e != nil {
+	// 	return pos, nil, k, ErrOpeningAuthKeys
+	// }
+	// defer f.Close()
+	// scanner := bufio.NewScanner(f)
+	// authorized := false
+	// k = keys.PublicKey(hs.clientStatic)
+	// for scanner.Scan() {
+	// 	if scanner.Text() == k.String() {
+	// 		authorized = true
+	// 		logrus.Debugf("USER AUTHORIZED")
+	// 		break
+	// 	}
+	// }
+	// if !authorized {
+	// 	//Check for a matching authgrant
+	// 	val, ok := s.authgrants[k]
+	// 	if !ok {
+	// 		//TODO: handle this gracefully (i.e. abandon all state)
+	// 		logrus.Info("KEY NOT AUTHORIZED")
+	// 	}
+	// 	if val.Deadline.Before(time.Now()) {
+	// 		delete(s.authgrants, k)
+	// 		//TODO: handle this gracefully (i.e. abandon all state)
+	// 		logrus.Info("AUTHGRANT DEADLINE EXCEEDED")
+	// 	}
+	// 	delete(s.authgrants, k)
+	// 	logrus.Info("USER AUTHORIZED")
+	// }
 	x = x[MacLen:]
 	pos += MacLen
 	var err error

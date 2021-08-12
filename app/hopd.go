@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -24,12 +25,22 @@ import (
 	"zmap.io/portal/keys"
 	"zmap.io/portal/npc"
 	"zmap.io/portal/transport"
+	"zmap.io/portal/userauth"
 )
+
+//AuthGrant contains deadline, user, action
+type AuthGrant struct {
+	Deadline         time.Time
+	User             string
+	Action           string
+	PrincipalSession *transport.Handle
+}
 
 type hopServer struct {
 	m          sync.Mutex
 	principals map[int32]*transport.Handle
 	sessions   map[*transport.Handle]*channels.Muxer
+	authgrants map[keys.PublicKey]*AuthGrant //static key -> authgrant
 
 	server   *transport.Server
 	authsock net.Listener
@@ -97,7 +108,7 @@ func (s *hopServer) proxyAuthGrantRequest(c net.Conn) {
 	if e != nil {
 		logrus.Fatalf("ERROR READING INTENT REQUEST: %v", e)
 	}
-	agc, err := principal.CreateChannel(channels.AGC_CHANNEL)
+	agc, err := principal.CreateChannel(channels.AgcChannel)
 	if err != nil {
 		logrus.Fatalf("S: ERROR MAKING CHANNEL: %v", err)
 	}
@@ -263,11 +274,13 @@ func Serve(args []string) {
 	principals := make(map[int32]*transport.Handle) //PID -> principal hop session
 	//agToMux := make(map[string]*channels.Muxer)   //AuthGrant -> principal hop session (added by server when it issues an authgrant)
 	sessions := make(map[*transport.Handle]*channels.Muxer) //all hop sessions -> their channel muxers
+	authgrants := make(map[keys.PublicKey]*AuthGrant)       //static key -> authgrant
 
 	server := &hopServer{
 		m:          sync.Mutex{},
 		principals: principals,
 		sessions:   sessions,
+		authgrants: authgrants,
 
 		server:   transportServer,
 		authsock: l,
@@ -287,15 +300,62 @@ func Serve(args []string) {
 	}
 }
 
+func (s *hopServer) checkAuthorization(ch *channels.Reliable) bool {
+	k, user := userauth.GetInitMsg(ch)
+	//check /user/.hop/authorized_keys first
+	path := "/home/" + user + "/.hop/authorized_keys"
+	f, e := os.Open(path)
+	if e != nil {
+		logrus.Error("Could not open file at path: ", path)
+		return false
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		if scanner.Text() == k.String() {
+			logrus.Debugf("USER AUTHORIZED")
+			return true
+		}
+	}
+	//Check for a matching authgrant
+	val, ok := s.authgrants[k]
+	if !ok {
+		//TODO: handle this gracefully (i.e. abandon all state)
+		logrus.Info("KEY NOT AUTHORIZED")
+		return false
+	}
+	if val.Deadline.Before(time.Now()) {
+		delete(s.authgrants, k)
+		//TODO: handle this gracefully (i.e. abandon all state)
+		logrus.Info("AUTHGRANT DEADLINE EXCEEDED")
+		return false
+	}
+	delete(s.authgrants, k)
+	logrus.Info("USER AUTHORIZED")
+	return true
+}
+
 //Starts a session muxer and manages incoming channel requests
 func (s *hopServer) session(serverConn *transport.Handle) {
 	ms := channels.NewMuxer(serverConn, serverConn)
 	go ms.Start()
 	defer ms.Stop()
 	logrus.Info("S: STARTED CHANNEL MUXER")
+	//User Authorization Step
+	uaCh, _ := ms.Accept()
+	if !s.checkAuthorization(uaCh) {
+		logrus.Info("USER NOT AUTHORIZED")
+		uaCh.Write([]byte{userauth.UserAuthDen})
+		return
+		//TODO(baumanl): Check closing behavior. how to end session completely
+	}
+	uaCh.Write([]byte{userauth.UserAuthConf})
+	logrus.Info("USER AUTHORIZED")
+
 	s.m.Lock()
 	s.sessions[serverConn] = ms
 	s.m.Unlock()
+	logrus.Info("STARTING CHANNEL LOOP")
 	for {
 		serverChan, err := ms.Accept()
 		if err != nil {
@@ -304,7 +364,7 @@ func (s *hopServer) session(serverConn *transport.Handle) {
 		logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", serverChan.Type())
 
 		switch serverChan.Type() {
-		case channels.EXEC_CHANNEL:
+		case channels.ExecChannel:
 			cmd, _ := codex.GetCmd(serverChan)
 			if _, p := serverConn.GetPrincipalSession(); p {
 				if cmd != serverConn.AG.Action {
@@ -343,7 +403,7 @@ func (s *hopServer) session(serverConn *transport.Handle) {
 			}
 			s.m.Unlock()
 			go codex.Server(serverChan, f)
-		case channels.AGC_CHANNEL:
+		case channels.AgcChannel:
 			k, t, user, action, e := authgrants.HandleIntentComm(serverChan)
 			if e != nil {
 				logrus.Info("Server denied authgrant")
@@ -354,7 +414,7 @@ func (s *hopServer) session(serverConn *transport.Handle) {
 			authgrants.SendIntentConf(serverChan, t)
 			logrus.Info("Sent intent conf")
 			serverChan.Close()
-		case channels.NPC_CHANNEL:
+		case channels.NpcChannel:
 			go npc.Server(serverChan)
 		default:
 			serverChan.Close()

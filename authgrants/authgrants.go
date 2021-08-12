@@ -83,7 +83,7 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan
 		logrus.Info("C: USER CONFIRMED INTENT_REQUEST. CONTACTING S2...")
 
 		//create npc with server
-		npcCh, e := m.CreateChannel(channels.NPC_CHANNEL) //How do I close this on the principal side?
+		npcCh, e := m.CreateChannel(channels.NpcChannel) //How do I close this on the principal side?
 		logrus.Info("started NPC from principal")
 		if e != nil {
 			logrus.Fatal("C: Error starting NPC")
@@ -109,7 +109,7 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan
 		go npcMuxer.Start()
 
 		//start AGC and send INTENT_COMMUNICATION
-		npcAgc, e := npcMuxer.CreateChannel(channels.AGC_CHANNEL)
+		npcAgc, e := npcMuxer.CreateChannel(channels.AgcChannel)
 		if e != nil {
 			logrus.Fatal("Error creating AGC: ", e)
 		}
@@ -142,12 +142,12 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan
 					logrus.Fatalf("Error accepting channel: %v", e)
 				}
 				logrus.Infof("Accepted channel of type: %v", c.Type())
-				if c.Type() == channels.AGC_CHANNEL {
+				if c.Type() == channels.AgcChannel {
 					go Principal(c, npcMuxer, execCh, config)
-				} else if c.Type() == channels.NPC_CHANNEL {
+				} else if c.Type() == channels.NpcChannel {
 					//go do something?
 					c.Close()
-				} else if c.Type() == channels.EXEC_CHANNEL {
+				} else if c.Type() == channels.ExecChannel {
 					//go do something else?
 					c.Close()
 				} else {

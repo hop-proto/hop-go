@@ -35,13 +35,13 @@ const (
 
 //Channel Type constants
 const (
-	EXEC_CHANNEL = byte(1)
-	AGC_CHANNEL  = byte(2)
-	NPC_CHANNEL  = byte(3) //NPC should maybe be unreliable channel?
+	ExecChannel     = byte(1)
+	AgcChannel      = byte(2)
+	NpcChannel      = byte(3) //NPC should maybe be unreliable channel?
+	UserAuthChannel = byte(4)
 )
 
 // Reliable implements a reliable and receiveWindow channel on top
-
 type Reliable struct {
 	closedCond   sync.Cond
 	cType        byte
