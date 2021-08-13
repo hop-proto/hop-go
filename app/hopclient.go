@@ -1,6 +1,7 @@
 package app
 
 import (
+	"flag"
 	"os"
 	"strings"
 	"sync"
@@ -39,35 +40,52 @@ func Client(args []string) {
 		addr = ip + ":" + port
 	}
 	logrus.Infof("Using path: %v", addr)
-	//TODO(bauman): get users default shell ($SHELL ?)
-	cmd := []string{"bash"} //default action for principal is to open an interactive shell
+
+	var fs flag.FlagSet
+	var keypath string
+	var principal bool
+	fs.Func("k", "indicates principal and key location", func(s string) error {
+		principal = true
+		keypath = s
+		return nil
+	})
+
+	//TODO: implement this option to allow for piping and expansion
+	//var runCmdInShell bool
+	// fs.BoolVar(&runCmdInShell, "s", false, "run specified command within a shell")
+
+	var cmd string
+	fs.StringVar(&cmd, "c", "", "specific command to execute on remote server")
+
+	fs.Parse(os.Args[2:])
+
 	config := transport.ClientConfig{}
 
 	//Check if this is a principal client process or one that needs to get an AG
 	//******GET AUTHORIZATION SOURCE******
-	var principal bool
-	if args[2] == "-k" {
-		principal = true
-		logrus.Infof("C: Using key-file at %v for auth.", args[3])
+
+	if principal {
+		logrus.Infof("C: Using key-file at %v for auth.", keypath)
 		var e error
-		path := args[3]
-		if path == "path" {
+		if keypath == "path" { //TODO(baumanl): fix default behavior for general program (i.e. Delete this)
 			logrus.Info("C: using default key at ~/.hop/key")
-			path, _ = os.UserHomeDir()
-			path += "/.hop/key" //TODO(baumanl): fix default behavior for general program
+			keypath, _ = os.UserHomeDir()
+			keypath += "/.hop/key"
 		}
-		config.KeyPair, e = keys.ReadDHKeyFromPEMFile(path)
+		config.KeyPair, e = keys.ReadDHKeyFromPEMFile(keypath)
 		if e != nil {
-			logrus.Fatalf("C: Error using key at path %v. Error: %v", path, e)
+			logrus.Fatalf("C: Error using key at path %v. Error: %v", keypath, e)
 		}
-	} else if args[2] == "-a" {
-		principal = false
+	} else {
+		if cmd == "" {
+			logrus.Error("Authgrant requires an explicit action")
+			return
+		}
 		config.KeyPair = new(keys.X25519KeyPair)
 		config.KeyPair.Generate()
 		logrus.Infof("Client generated: %v", config.KeyPair.Public.String())
 		logrus.Infof("C: Initiating AGC Protocol.")
-		cmd = args[3:]                                                          //if using authorization grant then perform the action specified in cmd line
-		t, e := authgrants.GetAuthGrant(config.KeyPair.Public, user, addr, cmd) //TODO(baumanl): necessary to store the deadline somewhere?
+		t, e := authgrants.GetAuthGrant(config.KeyPair.Public, user, addr, cmd)
 		if e != nil {
 			logrus.Fatalf("C: %v", e)
 		}
@@ -90,6 +108,7 @@ func Client(args []string) {
 	defer func() {
 		mc.Stop()
 		logrus.Info("muxer stopped")
+		//TODO: finish closing behavior
 		// e := transportConn.Close()
 		// logrus.Error("closing transport: ", e)
 	}()

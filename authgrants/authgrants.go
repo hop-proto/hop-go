@@ -22,7 +22,7 @@ import (
 )
 
 //GetAuthGrant is used by the Client to get an authorization grant from its Principal
-func GetAuthGrant(digest [sha3Len]byte, sUser string, addr string, cmd []string) (int64, error) {
+func GetAuthGrant(digest [sha3Len]byte, sUser string, addr string, cmd string) (int64, error) {
 	intent := newIntentRequest(digest, sUser, addr, cmd)
 	sock := "@auth"                  //TODO(baumanl): make generalizeable
 	c, err := net.Dial("unix", sock) //TODO(baumanl): address of UDS (probably switch to abstract location)

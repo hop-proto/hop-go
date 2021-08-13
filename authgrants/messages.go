@@ -81,7 +81,7 @@ type intentRequestMsg struct {
 	serverSNI      string
 	port           uint16
 	channelType    byte
-	action         []string
+	action         string
 }
 
 //intentCommunicationMsg contains all data fields of an intent comm msg
@@ -109,7 +109,7 @@ type intentDeniedMsg struct {
 }
 
 //Constructors
-func newIntentRequest(digest [sha3Len]byte, sUser string, addr string, cmd []string) *agcMessage {
+func newIntentRequest(digest [sha3Len]byte, sUser string, addr string, cmd string) *agcMessage {
 	user, _ := user.Current()
 	cSNI, _ := os.Hostname()
 	sSNI, p := parseAddr(addr)
@@ -160,9 +160,8 @@ func (r *intentRequestMsg) toBytes() []byte {
 	copy(s[sSNIOffset:portOffset], []byte(r.serverSNI))
 	binary.BigEndian.PutUint16(s[portOffset:chTypeOffset], r.port)
 	s[chTypeOffset] = r.channelType
-	action := []byte(strings.Join(r.action, " "))
-	s[lenOffset] = byte(len(action)) //TODO(baumanl): This only allows for actions up to 256 bytes (and no bounds checking atm)
-	return append(s[:], action...)
+	s[lenOffset] = byte(len(r.action)) //TODO(baumanl): This only allows for actions up to 256 bytes (and no bounds checking atm)
+	return append(s[:], []byte(r.action)...)
 }
 
 func (c *intentCommunicationMsg) toBytes() []byte { //TODO(baumanl): This is literally identical to the above function.
@@ -213,7 +212,7 @@ func fromIntentRequestBytes(b []byte) *intentRequestMsg {
 	r.serverSNI = trimNullBytes(b[sSNIOffset:portOffset])
 	r.port = binary.BigEndian.Uint16(b[portOffset:chTypeOffset])
 	r.channelType = b[chTypeOffset]
-	r.action = strings.Split(string(b[actOffset:]), " ")
+	r.action = string(b[actOffset:])
 	return &r
 }
 

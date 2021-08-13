@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 
@@ -27,15 +26,24 @@ type ExecChan struct {
 	w     *io.PipeWriter
 }
 
+const (
+	defaultShell = byte(1)
+	specificCmd  = byte(2)
+)
+
 //NewExecChan sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
 //Stores state in an ExecChan struct so stdin can be manipulated during authgrant process
-func NewExecChan(cmd []string, ch *channels.Reliable, wg *sync.WaitGroup) *ExecChan {
+func NewExecChan(cmd string, ch *channels.Reliable, wg *sync.WaitGroup) *ExecChan {
 	oldState, e := term.MakeRaw(int(os.Stdin.Fd()))
 	// defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
 	if e != nil {
 		logrus.Fatalf("C: error with terminal state: %v", e)
 	}
-	ch.Write(newExecInitMsg(strings.Join(cmd, " ")).ToBytes())
+	msg := newExecInitMsg(specificCmd, cmd)
+	if cmd == "" {
+		msg = newExecInitMsg(defaultShell, cmd)
+	}
+	ch.Write(msg.ToBytes())
 
 	r, w := io.Pipe()
 	ex := ExecChan{
@@ -72,39 +80,58 @@ func NewExecChan(cmd []string, ch *channels.Reliable, wg *sync.WaitGroup) *ExecC
 }
 
 type execInitMsg struct {
-	msgLen uint32
-	cmd    string
+	cmdType byte
+	cmdLen  uint32
+	cmd     string
 }
 
-func newExecInitMsg(c string) *execInitMsg {
+func newExecInitMsg(t byte, c string) *execInitMsg {
 	return &execInitMsg{
-		msgLen: uint32(len(c)),
-		cmd:    c,
+		cmdType: t,
+		cmdLen:  uint32(len(c)),
+		cmd:     c,
 	}
 }
 
 func (m *execInitMsg) ToBytes() []byte {
-	r := make([]byte, 4)
-	binary.BigEndian.PutUint32(r, m.msgLen)
-	return append(r, []byte(m.cmd)...)
+	r := make([]byte, 5+m.cmdLen)
+	r[0] = m.cmdType
+	binary.BigEndian.PutUint32(r[1:], m.cmdLen)
+	if m.cmdLen > 0 {
+		copy(r[5:], []byte(m.cmd))
+	}
+	return r
 }
 
 //Parses raw bytes (not including length) of an execInitMsg
-func fromBytes(b []byte) *execInitMsg {
-	return &execInitMsg{
-		msgLen: uint32(len(b)),
-		cmd:    string(b),
-	}
-}
+// func fromBytes(b []byte) *execInitMsg {
+// 	m := execInitMsg{
+// 		cmdType: b[0],
+// 		cmdLen:  uint32(len(b) - 1),
+// 	}
+// 	m.cmd = ""
+// 	if m.cmdLen > 0 {
+// 		m.cmd = string(b[1:])
+// 	}
+// 	return &m
+// }
 
 //GetCmd reads execInitMsg from an EXEC_CHANNEL and returns the cmd to run
 func GetCmd(c net.Conn) (string, error) {
+	t := make([]byte, 1)
+	c.Read(t)
 	l := make([]byte, 4)
 	c.Read(l)
-	buf := make([]byte, binary.BigEndian.Uint32(l))
-	c.Read(buf)
-	msg := fromBytes(buf)
-	return msg.cmd, nil
+	cmd := ""
+	if t[0] == defaultShell {
+		cmd = "$SHELL"
+	} else {
+		buf := make([]byte, binary.BigEndian.Uint32(l))
+		c.Read(buf)
+		cmd = string(buf)
+	}
+	cmd = os.ExpandEnv(cmd)
+	return cmd, nil
 }
 
 //Server deals with serverside code exec channe details like pty size, copies ch -> pty and pty -> ch
