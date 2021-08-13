@@ -287,7 +287,7 @@ func (r *Reliable) Close() error {
 	}
 	r.closedCond.L.Unlock()
 	r.sender.close()
-	logrus.Infof("closed channel: %v", name)
+	logrus.Debugf("closed channel: %v", name)
 	r.m.Lock()
 	r.channelState = CLOSED
 	r.m.Unlock()

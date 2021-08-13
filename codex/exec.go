@@ -124,12 +124,16 @@ func Server(ch *channels.Reliable, f *os.File) {
 	}()
 	ch2 <- syscall.SIGWINCH                         // Initial resize.
 	defer func() { signal.Stop(ch2); close(ch2) }() // Cleanup signals when done.
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
 		_, e := io.Copy(f, ch)
 		logrus.Info("io.Copy(f, ch) stopped with error: ", e)
+		wg.Done()
 	}()
 	_, e := io.Copy(ch, f)
 	logrus.Info("io.Copy(ch, f) stopped with error: ", e)
+	wg.Wait()
 }
 
 //Resume makes sure the input is piped to the exec channel

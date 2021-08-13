@@ -90,6 +90,8 @@ func Client(args []string) {
 	defer func() {
 		mc.Stop()
 		logrus.Info("muxer stopped")
+		// e := transportConn.Close()
+		// logrus.Error("closing transport: ", e)
 	}()
 
 	//*****PERFORM USER AUTHORIZATION******
