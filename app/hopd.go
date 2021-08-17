@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -456,13 +457,21 @@ func (sess *hopSession) startCodex(ch *channels.Reliable) {
 	//start the command as the requested user (hopd must be a root privileged process)
 	u, _ := user.Lookup(sess.user)
 	uid, _ := strconv.ParseUint(u.Uid, 10, 32)
+
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()     //TODO(baumanl): should this be deferred or called after starting command?
+	syscall.Setgroups([]int{int(uid)}) //TODO(baumanl): Check that: These permissions changes should only affect this thread
+	syscall.Setgid(int(uid))
+	syscall.Setuid(int(uid))
+
 	args := strings.Split(cmd, " ")
 	c := exec.Command(args[0], args[1:]...)
-	c.SysProcAttr = &syscall.SysProcAttr{}
-	c.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(uid)}
+	// c.SysProcAttr = &syscall.SysProcAttr{}
+	// c.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(uid)}
+	// c.Env = user.Lookup(sess.user)
 	//TODO(baumanl): Is this sufficient and secure? Do I need to do any other modifications like group id?
-
 	f, err := pty.Start(c)
+
 	if err != nil {
 		logrus.Fatalf("S: error starting pty %v", err)
 	}

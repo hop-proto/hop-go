@@ -7,6 +7,7 @@ import (
 	"zmap.io/portal/app"
 )
 
+// must run with privileged user or with sudo at the moment
 // ./hopd 			--> starts server on <hostname>:7777
 // ./hopd <port> 	--> starts server on <hostname>:<port>
 

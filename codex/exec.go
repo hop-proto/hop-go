@@ -3,6 +3,7 @@ package codex
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -124,7 +125,16 @@ func GetCmd(c net.Conn) (string, error) {
 	c.Read(l)
 	cmd := ""
 	if t[0] == defaultShell {
-		cmd = "$SHELL"
+		if c, ok := os.LookupEnv("SHELL"); ok {
+			cmd = c + " --login"
+			//" --login" forces bash to start as a login shell so it evaluates stuff in .bashrc,
+			//but this probably isn't generalizeable to all possible default shells
+			logrus.Infof("SHELL: %v", cmd)
+		} else {
+			logrus.Error("SHELL not set and no cmd specified")
+			return "", errors.New("no command or shell")
+		}
+
 	} else {
 		buf := make([]byte, binary.BigEndian.Uint32(l))
 		c.Read(buf)
