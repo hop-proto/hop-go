@@ -1,3 +1,5 @@
+github.com/AstromechZA/etcpwdparse v0.0.0-20170319193008-f0e5f0779716 h1:JRevDvQQOgv10srk9WAVWPeZcQ26u5ajUGw2UYB0Ci4=
+github.com/AstromechZA/etcpwdparse v0.0.0-20170319193008-f0e5f0779716/go.mod h1:O3zfbZlbGuEo47ctiOIcXolZac3RYnkK90TE/phwRoQ=
 github.com/TheTitanrain/w32 v0.0.0-20180517000239-4f5cfb03fabf h1:FPsprx82rdrX2jiKyS17BH6IrTmUBYqZa/CXT4uvb+I=
 github.com/TheTitanrain/w32 v0.0.0-20180517000239-4f5cfb03fabf/go.mod h1:peYoMncQljjNS6tZwI9WVyQB3qZS6u79/N3mBOcnd3I=
 github.com/creack/pty v1.1.11 h1:07n33Z8lZxZ2qwegKbObQohDhXDQxiMMz1NOUGYlesw=

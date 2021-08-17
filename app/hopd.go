@@ -10,14 +10,13 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"os/user"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/AstromechZA/etcpwdparse"
 	"github.com/creack/pty"
 	"github.com/sbinet/pstree"
 	"github.com/sirupsen/logrus"
@@ -440,7 +439,7 @@ func (sess *hopSession) handleAgc(ch *channels.Reliable) {
 }
 
 func (sess *hopSession) startCodex(ch *channels.Reliable) {
-	cmd, _ := codex.GetCmd(ch)
+	cmd, shell, _ := codex.GetCmd(ch)
 	if !sess.isPrincipal {
 		if sess.authgrant.used {
 			logrus.Error("Already performed approved action")
@@ -452,46 +451,59 @@ func (sess *hopSession) startCodex(ch *channels.Reliable) {
 			return
 		}
 	}
-	logrus.Infof("Executing: %v", cmd)
-
-	//start the command as the requested user (hopd must be a root privileged process)
-	u, _ := user.Lookup(sess.user)
-	uid, _ := strconv.ParseUint(u.Uid, 10, 32)
-
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()     //TODO(baumanl): should this be deferred or called after starting command?
-	syscall.Setgroups([]int{int(uid)}) //TODO(baumanl): Check that: These permissions changes should only affect this thread
-	syscall.Setgid(int(uid))
-	syscall.Setuid(int(uid))
-
-	args := strings.Split(cmd, " ")
-	c := exec.Command(args[0], args[1:]...)
-	// c.SysProcAttr = &syscall.SysProcAttr{}
-	// c.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(uid)}
-	// c.Env = user.Lookup(sess.user)
-	//TODO(baumanl): Is this sufficient and secure? Do I need to do any other modifications like group id?
-	f, err := pty.Start(c)
-
+	cache, err := etcpwdparse.NewLoadedEtcPasswdCache() //Best way to do this? should I load this only once and then just reload on misses? What if /etc/passwd modified between accesses?
 	if err != nil {
-		logrus.Fatalf("S: error starting pty %v", err)
+		logrus.Error("issue loading /etc/passwd")
 	}
-	go func() {
-		c.Wait()
-		ch.Close()
-		logrus.Info("closed chan")
-	}()
+	if user, ok := cache.LookupUserByName(sess.user); ok {
+		//Default behavior is for command.Env to inherit parents environment unless given and explicit alternative.
+		//TODO(baumanl): These are minimal environment variables. SSH allows for more inheritance from client, but it gets complicated.
+		env := []string{
+			"USER=" + sess.user,
+			"SHELL=" + user.Shell(),
+			"LOGNAME=" + user.Username(),
+			"HOME=" + user.Homedir(),
+		}
+		if !shell {
+			//start the command as the requested user (hopd must be a root privileged process)
+			runtime.LockOSThread()
+			defer runtime.UnlockOSThread() //TODO(baumanl): should this be deferred or called after starting command?
+			syscall.Chdir(user.Homedir())
+			syscall.Setgroups([]int{user.Gid()}) //TODO(baumanl): Check that: These permissions changes should only affect this thread
+			syscall.Setgid(user.Gid())
+			syscall.Setuid(user.Uid())
+		} else {
+			cmd = "login -f " + sess.user //login(1) starts default shell for user and changes all privileges and environment variables
+		}
 
-	sess.server.m.Lock()
-	if !sess.isPrincipal {
-		sess.server.principals[int32(c.Process.Pid)] = sess.authgrant.principalSession
+		args := strings.Split(cmd, " ")
+		c := exec.Command(args[0], args[1:]...)
+		c.Env = env
+		logrus.Infof("Executing: %v", cmd)
+		f, err := pty.Start(c)
+		if err != nil {
+			logrus.Fatalf("S: error starting pty %v", err)
+		}
+		go func() {
+			c.Wait()
+			ch.Close()
+			logrus.Info("closed chan")
+		}()
+
+		sess.server.m.Lock()
+		if !sess.isPrincipal {
+			sess.server.principals[int32(c.Process.Pid)] = sess.authgrant.principalSession
+		} else {
+			logrus.Infof("S: using standard muxer")
+			sess.server.principals[int32(c.Process.Pid)] = sess
+		}
+		sess.server.m.Unlock()
+		go func() {
+			codex.Server(ch, f)
+			logrus.Info("signaling done")
+			sess.done <- 1
+		}()
 	} else {
-		logrus.Infof("S: using standard muxer")
-		sess.server.principals[int32(c.Process.Pid)] = sess
+		logrus.Error("could not find entry for user ", sess.user)
 	}
-	sess.server.m.Unlock()
-	go func() {
-		codex.Server(ch, f)
-		logrus.Info("signaling done")
-		sess.done <- 1
-	}()
 }

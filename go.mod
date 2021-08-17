@@ -3,6 +3,7 @@ module zmap.io/portal
 go 1.15
 
 require (
+	github.com/AstromechZA/etcpwdparse v0.0.0-20170319193008-f0e5f0779716 // indirect
 	github.com/creack/pty v1.1.11
 	github.com/google/go-cmp v0.5.4 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect

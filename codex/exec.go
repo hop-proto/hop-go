@@ -3,7 +3,6 @@ package codex
 
 import (
 	"encoding/binary"
-	"errors"
 	"io"
 	"log"
 	"net"
@@ -118,30 +117,19 @@ func (m *execInitMsg) ToBytes() []byte {
 // }
 
 //GetCmd reads execInitMsg from an EXEC_CHANNEL and returns the cmd to run
-func GetCmd(c net.Conn) (string, error) {
+func GetCmd(c net.Conn) (string, bool, error) {
 	t := make([]byte, 1)
 	c.Read(t)
 	l := make([]byte, 4)
 	c.Read(l)
-	cmd := ""
+	buf := make([]byte, binary.BigEndian.Uint32(l))
+	c.Read(buf)
 	if t[0] == defaultShell {
-		if c, ok := os.LookupEnv("SHELL"); ok {
-			cmd = c + " --login"
-			//" --login" forces bash to start as a login shell so it evaluates stuff in .bashrc,
-			//but this probably isn't generalizeable to all possible default shells
-			logrus.Infof("SHELL: %v", cmd)
-		} else {
-			logrus.Error("SHELL not set and no cmd specified")
-			return "", errors.New("no command or shell")
-		}
-
-	} else {
-		buf := make([]byte, binary.BigEndian.Uint32(l))
-		c.Read(buf)
-		cmd = string(buf)
+		return "", true, nil
 	}
+	cmd := string(buf)
 	cmd = os.ExpandEnv(cmd)
-	return cmd, nil
+	return cmd, false, nil
 }
 
 //Server deals with serverside code exec channe details like pty size, copies ch -> pty and pty -> ch
