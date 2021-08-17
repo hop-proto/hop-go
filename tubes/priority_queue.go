@@ -1,4 +1,4 @@
-package channels
+package tubes
 
 type Item struct {
 	value    []byte

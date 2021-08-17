@@ -1,4 +1,4 @@
-//Package codex provides functions specific to code execution channels
+//Package codex provides functions specific to code execution tubes
 package codex
 
 import (
@@ -14,12 +14,12 @@ import (
 	"github.com/creack/pty"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/term"
-	"zmap.io/portal/channels"
+	"zmap.io/portal/tubes"
 )
 
-//ExecChan wraps a code execution channel with additional terminal state
-type ExecChan struct {
-	ch    *channels.Reliable
+//ExecTube wraps a code execution tube with additional terminal state
+type ExecTube struct {
+	tube  *tubes.Reliable
 	state *term.State
 	redir bool
 	r     *io.PipeReader
@@ -31,9 +31,9 @@ const (
 	specificCmd  = byte(2)
 )
 
-//NewExecChan sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
+//NewExecTube sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
 //Stores state in an ExecChan struct so stdin can be manipulated during authgrant process
-func NewExecChan(cmd string, ch *channels.Reliable, wg *sync.WaitGroup) *ExecChan {
+func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) *ExecTube {
 	oldState, e := term.MakeRaw(int(os.Stdin.Fd()))
 	// defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
 	if e != nil {
@@ -43,35 +43,35 @@ func NewExecChan(cmd string, ch *channels.Reliable, wg *sync.WaitGroup) *ExecCha
 	if cmd == "" {
 		msg = newExecInitMsg(defaultShell, cmd)
 	}
-	ch.Write(msg.ToBytes())
+	tube.Write(msg.ToBytes())
 
 	r, w := io.Pipe()
-	ex := ExecChan{
-		ch:    ch,
+	ex := ExecTube{
+		tube:  tube,
 		state: oldState,
 		redir: false,
 		r:     r,
 		w:     w,
 	}
 
-	go func(ex ExecChan) {
+	go func(ex ExecTube) {
 		defer wg.Done()
-		io.Copy(os.Stdout, ex.ch) //read bytes from ch to os.Stdout
+		io.Copy(os.Stdout, ex.tube) //read bytes from ch to os.Stdout
 		term.Restore(int(os.Stdin.Fd()), ex.state)
-		logrus.Info("Stopped io.Copy(os.Stdout, ch)")
-		ex.ch.Close()
-		logrus.Info("closed chan")
+		logrus.Info("Stopped io.Copy(os.Stdout, tube)")
+		ex.tube.Close()
+		logrus.Info("closed tube")
 
 	}(ex)
 
-	go func(ex *ExecChan) {
+	go func(ex *ExecTube) {
 		p := make([]byte, 1)
 		for {
 			_, _ = os.Stdin.Read(p)
 			if ex.redir {
 				ex.w.Write(p)
 			} else {
-				ex.ch.Write(p)
+				ex.tube.Write(p)
 			}
 		}
 	}(&ex)
@@ -103,19 +103,6 @@ func (m *execInitMsg) ToBytes() []byte {
 	return r
 }
 
-//Parses raw bytes (not including length) of an execInitMsg
-// func fromBytes(b []byte) *execInitMsg {
-// 	m := execInitMsg{
-// 		cmdType: b[0],
-// 		cmdLen:  uint32(len(b) - 1),
-// 	}
-// 	m.cmd = ""
-// 	if m.cmdLen > 0 {
-// 		m.cmd = string(b[1:])
-// 	}
-// 	return &m
-// }
-
 //GetCmd reads execInitMsg from an EXEC_CHANNEL and returns the cmd to run
 func GetCmd(c net.Conn) (string, bool, error) {
 	t := make([]byte, 1)
@@ -133,8 +120,8 @@ func GetCmd(c net.Conn) (string, bool, error) {
 }
 
 //Server deals with serverside code exec channe details like pty size, copies ch -> pty and pty -> ch
-func Server(ch *channels.Reliable, f *os.File) {
-	defer ch.Close()
+func Server(tube *tubes.Reliable, f *os.File) {
+	defer tube.Close()
 	defer func() { _ = f.Close() }() // Best effort.
 	// Handle pty size.
 	//TODO(baumanl): Check that this is working properly
@@ -152,32 +139,32 @@ func Server(ch *channels.Reliable, f *os.File) {
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
-		_, e := io.Copy(f, ch)
-		logrus.Info("io.Copy(f, ch) stopped with error: ", e)
+		_, e := io.Copy(f, tube)
+		logrus.Info("io.Copy(f, tube) stopped with error: ", e)
 		wg.Done()
 	}()
-	_, e := io.Copy(ch, f)
-	logrus.Info("io.Copy(ch, f) stopped with error: ", e)
+	_, e := io.Copy(tube, f)
+	logrus.Info("io.Copy(tube, f) stopped with error: ", e)
 	wg.Wait()
 }
 
-//Resume makes sure the input is piped to the exec channel
-func (e *ExecChan) Resume() {
+//Resume makes sure the input is piped to the exec tube
+func (e *ExecTube) Resume() {
 	e.redir = false
 }
 
 //Redirect moves input to a pipe and returns the read end of the pipe
-func (e *ExecChan) Redirect() *io.PipeReader {
+func (e *ExecTube) Redirect() *io.PipeReader {
 	e.redir = true
 	return e.r
 }
 
 //Restore returns the terminal to regular state
-func (e *ExecChan) Restore() {
+func (e *ExecTube) Restore() {
 	term.Restore(int(os.Stdin.Fd()), e.state)
 }
 
 //Raw switches the terminal to raw mode
-func (e *ExecChan) Raw() {
+func (e *ExecTube) Raw() {
 	term.MakeRaw(int(os.Stdin.Fd()))
 }

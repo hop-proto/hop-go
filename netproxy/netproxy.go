@@ -1,12 +1,12 @@
-//Package npc provides utilities for network proxy channels
-package npc
+//Package npc provides utilities for network proxy tubes
+package netproxy
 
 import (
 	"encoding/binary"
 	"net"
 
 	"github.com/sirupsen/logrus"
-	"zmap.io/portal/channels"
+	"zmap.io/portal/tubes"
 )
 
 const npcConf = byte(1)
@@ -41,23 +41,23 @@ func fromBytes(b []byte) *npcInitMsg {
 }
 
 //Start sends an NPCInitMsg and waits for confirmation that the proxy connection is ready
-func Start(npcCh *channels.Reliable, addr string) error {
-	npcCh.Write(newNPCInitMsg(addr).toBytes()) //tell server to prepare to proxy to addr (start a UDP conn)
+func Start(npTube *tubes.Reliable, addr string) error {
+	npTube.Write(newNPCInitMsg(addr).toBytes()) //tell server to prepare to proxy to addr (start a UDP conn)
 	//TODO(baumanl): Make better conf/denial messages for NPC
 	//wait until server says it has a UDP conn to desired address
-	npcCh.Read(make([]byte, 1))
+	npTube.Read(make([]byte, 1))
 	logrus.Info("Receieved NPC Conf")
 	return nil
 }
 
 //Server starts a UDP Conn with remote addr and proxies traffic from ch -> udp and upd -> ch
-func Server(npch *channels.Reliable) {
+func Server(npTube *tubes.Reliable) {
 	b := make([]byte, 4)
-	npch.Read(b)
+	npTube.Read(b)
 	l := binary.BigEndian.Uint32(b[0:4])
 	logrus.Infof("Expecting %v bytes", l)
 	init := make([]byte, l)
-	npch.Read(init)
+	npTube.Read(init)
 	dest := fromBytes(init)
 	logrus.Infof("dialing dest: %v", dest.addr)
 	throwaway, _ := net.Dial("udp", dest.addr)
@@ -69,20 +69,20 @@ func Server(npch *channels.Reliable) {
 	}
 	defer tconn.Close()
 	logrus.Info("connected to: ", dest.addr)
-	npch.Write([]byte{npcConf})
+	npTube.Write([]byte{npcConf})
 	logrus.Infof("wrote confirmation that NPC ready")
 	//could net.Pipe() be useful here?
 	go func() {
 		//Handles all traffic from principal to server 2
 		for {
 			buf := make([]byte, 65500)
-			n, _, _, _, e := npch.ReadMsgUDP(buf, nil)
+			n, _, _, _, e := npTube.ReadMsgUDP(buf, nil)
 			if e != nil {
-				logrus.Info("Error Reading from Channel: ", e)
-				npch.Close()
+				logrus.Info("Error Reading from tube: ", e)
+				npTube.Close()
 				break
 			}
-			//logrus.Infof("Read: %v bytes from channel", n)
+			//logrus.Infof("Read: %v bytes from tube", n)
 			//logrus.Infof("buf[:n] -> %v", buf[:n])
 			_, _, e = tconn.WriteMsgUDP(buf[:n], nil, nil)
 			if e != nil {
@@ -102,10 +102,10 @@ func Server(npch *channels.Reliable) {
 		}
 		//logrus.Infof("Read: %v bytes from UDP Conn", n)
 		//logrus.Infof("buf[:n] -> %v", buf[:n])
-		_, _, e = npch.WriteMsgUDP(buf[:n], nil, nil)
+		_, _, e = npTube.WriteMsgUDP(buf[:n], nil, nil)
 		if e != nil {
-			logrus.Fatal("Error writing to channel, ", e)
+			logrus.Fatal("Error writing to tube, ", e)
 		}
-		//logrus.Infof("Wrote %v bytes to channel.", n)
+		//logrus.Infof("Wrote %v bytes to tube.", n)
 	}
 }

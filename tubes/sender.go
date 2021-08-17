@@ -1,4 +1,4 @@
-package channels
+package tubes
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// The largest channel frame data length field.
+// The largest tube frame data length field.
 const MAX_FRAME_DATA_LENGTH = 2000
 
 // The highest number of frames we will transmit per timeout period,
@@ -22,10 +22,10 @@ type Sender struct {
 	finSent bool
 	closed  bool
 	frameNo uint32
-	// The buffer of unacknowledged channel frames that will be retransmitted if necessary.
+	// The buffer of unacknowledged tube frames that will be retransmitted if necessary.
 	frames []*Frame
 
-	//TODO(baumanl): is it safe and good style to have this channel here?
+	//TODO(baumanl): is it safe and good style to have this tube here?
 	//First attempt at stopping laggy behavior due to retransmit previously always waiting for RTO.
 	ret chan int //signaled whenever frame added to frames so retransmit() starts
 
@@ -60,7 +60,7 @@ func (s *Sender) write(b []byte) (n int, err error) {
 		s.ret <- 1
 	}()
 	if s.closed {
-		return 0, errors.New("trying to write to closed channel")
+		return 0, errors.New("trying to write to closed tube")
 	}
 	s.buffer = append(s.buffer, b...)
 
@@ -161,7 +161,7 @@ func (s *Sender) sendFin() error {
 	s.l.Lock()
 	defer s.l.Unlock()
 	if s.closed || s.finSent {
-		return errors.New("channel is already closed")
+		return errors.New("tube is already closed")
 	}
 	s.finSent = true
 

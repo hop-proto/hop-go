@@ -23,11 +23,11 @@ import (
 	"golang.org/x/sys/unix"
 	"zmap.io/portal/authgrants"
 	"zmap.io/portal/certs"
-	"zmap.io/portal/channels"
 	"zmap.io/portal/codex"
 	"zmap.io/portal/keys"
-	"zmap.io/portal/npc"
+	"zmap.io/portal/netproxy"
 	"zmap.io/portal/transport"
+	"zmap.io/portal/tubes"
 	"zmap.io/portal/userauth"
 )
 
@@ -52,8 +52,8 @@ type hopServer struct {
 //TODO(bauman): figure out best way for these structs to be organized. Eliminate unnecessary member variables
 type hopSession struct {
 	transportConn *transport.Handle
-	channelMuxer  *channels.Muxer
-	channelQueue  chan *channels.Reliable
+	tubeMuxer     *tubes.Muxer
+	tubeQueue     chan *tubes.Reliable
 	done          chan int
 
 	server *hopServer
@@ -122,7 +122,7 @@ func (s *hopServer) proxyAuthGrantRequest(c net.Conn) {
 	if e != nil {
 		logrus.Fatalf("ERROR READING INTENT REQUEST: %v", e)
 	}
-	agc, err := principalSess.channelMuxer.CreateChannel(channels.AgcChannel)
+	agc, err := principalSess.tubeMuxer.CreateTube(tubes.AuthGrantTube)
 	if err != nil {
 		logrus.Fatalf("S: ERROR MAKING CHANNEL: %v", err)
 	}
@@ -310,7 +310,7 @@ func Serve(args []string) {
 }
 
 func (sess *hopSession) checkAuthorization() bool {
-	uaCh, _ := sess.channelMuxer.Accept()
+	uaCh, _ := sess.tubeMuxer.Accept()
 	defer uaCh.Close()
 	k, user := userauth.GetInitMsg(uaCh)
 	sess.user = user
@@ -356,12 +356,12 @@ func (sess *hopSession) checkAuthorization() bool {
 	return true
 }
 
-//Starts a session muxer and manages incoming channel requests
+//Starts a session muxer and manages incoming tube requests
 func (s *hopServer) newSession(serverConn *transport.Handle) {
 	sess := &hopSession{
 		transportConn: serverConn,
-		channelMuxer:  channels.NewMuxer(serverConn, serverConn),
-		channelQueue:  make(chan *channels.Reliable),
+		tubeMuxer:     tubes.NewMuxer(serverConn, serverConn),
+		tubeQueue:     make(chan *tubes.Reliable),
 		done:          make(chan int),
 		server:        s,
 	}
@@ -369,7 +369,7 @@ func (s *hopServer) newSession(serverConn *transport.Handle) {
 }
 
 func (sess *hopSession) start() {
-	go sess.channelMuxer.Start()
+	go sess.tubeMuxer.Start()
 	logrus.Info("S: STARTED CHANNEL MUXER")
 
 	//User Authorization Step
@@ -381,11 +381,11 @@ func (sess *hopSession) start() {
 	logrus.Info("STARTING CHANNEL LOOP")
 	go func() {
 		for {
-			serverChan, err := sess.channelMuxer.Accept()
+			serverChan, err := sess.tubeMuxer.Accept()
 			if err != nil {
 				logrus.Fatalf("S: ERROR ACCEPTING CHANNEL: %v", err)
 			}
-			sess.channelQueue <- serverChan
+			sess.tubeQueue <- serverChan
 		}
 	}()
 
@@ -393,22 +393,22 @@ func (sess *hopSession) start() {
 		select {
 		case <-sess.done:
 			logrus.Info("Closing everything")
-			sess.channelMuxer.Stop()
+			sess.tubeMuxer.Stop()
 			return
 			//TODO: serverside transport layer Close() not implemented yet
 			// e := sess.transportConn.Close()
 			// if e != nil {
 			// 	logrus.Error("stopped transport conn error: ", e)
 			// }
-		case serverChan := <-sess.channelQueue:
+		case serverChan := <-sess.tubeQueue:
 			logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", serverChan.Type())
 			switch serverChan.Type() {
-			case channels.ExecChannel:
+			case tubes.ExecTube:
 				go sess.startCodex(serverChan)
-			case channels.AgcChannel:
+			case tubes.AuthGrantTube:
 				go sess.handleAgc(serverChan)
-			case channels.NpcChannel:
-				go npc.Server(serverChan)
+			case tubes.NetProxyTube:
+				go netproxy.Server(serverChan)
 			default:
 				serverChan.Close()
 			}
@@ -417,7 +417,7 @@ func (sess *hopSession) start() {
 	}
 }
 
-func (sess *hopSession) handleAgc(ch *channels.Reliable) {
+func (sess *hopSession) handleAgc(ch *tubes.Reliable) {
 	k, t, user, action, e := authgrants.HandleIntentComm(ch)
 	if e != nil {
 		logrus.Info("Server denied authgrant")
@@ -438,7 +438,8 @@ func (sess *hopSession) handleAgc(ch *channels.Reliable) {
 	ch.Close()
 }
 
-func (sess *hopSession) startCodex(ch *channels.Reliable) {
+//TODO(baumanl): Add in better privilege separation? Right now hopd(root) directly starts commands through go routines. sshd uses like 3 levels of separation.
+func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 	cmd, shell, _ := codex.GetCmd(ch)
 	if !sess.isPrincipal {
 		if sess.authgrant.used {

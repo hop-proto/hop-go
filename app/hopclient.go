@@ -8,10 +8,10 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/authgrants"
-	"zmap.io/portal/channels"
 	"zmap.io/portal/codex"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/transport"
+	"zmap.io/portal/tubes"
 	"zmap.io/portal/userauth"
 )
 
@@ -102,8 +102,8 @@ func Client(args []string) {
 	if err != nil {
 		logrus.Fatalf("C: Issue with handshake: %v", err)
 	}
-	//TODO(baumanl): should these functions + things from Channels layer have errors?
-	mc := channels.NewMuxer(transportConn, transportConn)
+	//TODO(baumanl): should these functions + things from tubes layer have errors?
+	mc := tubes.NewMuxer(transportConn, transportConn)
 	go mc.Start()
 	defer func() {
 		mc.Stop()
@@ -114,7 +114,7 @@ func Client(args []string) {
 	}()
 
 	//*****PERFORM USER AUTHORIZATION******
-	uaCh, _ := mc.CreateChannel(channels.UserAuthChannel)
+	uaCh, _ := mc.CreateTube(tubes.UserAuthTube)
 	if ok := userauth.RequestAuthorization(uaCh, config.KeyPair.Public, user); !ok {
 		logrus.Fatal("Not authorized.")
 	}
@@ -122,34 +122,34 @@ func Client(args []string) {
 
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	logrus.Infof("Performing action: %v", cmd)
-	ch, _ := mc.CreateChannel(channels.ExecChannel)
+	ch, _ := mc.CreateTube(tubes.ExecTube)
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	execCh := codex.NewExecChan(cmd, ch, &wg)
+	execCh := codex.NewExecTube(cmd, ch, &wg)
 
-	//TODO(baumanl): figure out responses to different channel types/what all should be allowed
+	//TODO(baumanl): figure out responses to different tube types/what all should be allowed
 	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****
 	go func() {
 		for {
 			c, e := mc.Accept()
 			if e != nil {
-				logrus.Fatalf("Error accepting channel: %v", e)
+				logrus.Fatalf("Error accepting tube: %v", e)
 			}
 			logrus.Infof("ACCEPTED NEW CHANNEL of TYPE: %v", c.Type())
-			if c.Type() == channels.AgcChannel && principal {
+			if c.Type() == tubes.AuthGrantTube && principal {
 				go authgrants.Principal(c, mc, execCh, &config)
-			} else if c.Type() == channels.NpcChannel {
+			} else if c.Type() == tubes.NetProxyTube {
 				//go do something?
-			} else if c.Type() == channels.ExecChannel {
+			} else if c.Type() == tubes.ExecTube {
 				//go do something else?
 			} else {
-				//bad channel
+				//bad tube
 				c.Close()
 				continue
 			}
 		}
 	}()
-	wg.Wait() //client program ends when the code execution channel ends.
-	//TODO(baumanl): figure out definitive closing behavior --> multiple code exec channels?
+	wg.Wait() //client program ends when the code execution tube ends.
+	//TODO(baumanl): figure out definitive closing behavior --> multiple code exec tubes?
 	logrus.Info("Done waiting")
 }

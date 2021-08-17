@@ -31,23 +31,23 @@ const (
 
 //Intent Request and Communication constants
 const (
-	sha3Len        = 32
-	usernameLen    = 32
-	sniLen         = 256
-	portLen        = 2
-	channelTypeLen = 1
-	reservedLen    = 1
-	irHeaderLen    = sha3Len + 2*(usernameLen+sniLen) + portLen + channelTypeLen + reservedLen
+	sha3Len     = 32
+	usernameLen = 32
+	sniLen      = 256
+	portLen     = 2
+	tubeTypeLen = 1
+	reservedLen = 1
+	irHeaderLen = sha3Len + 2*(usernameLen+sniLen) + portLen + tubeTypeLen + reservedLen
 
-	sha3Offset   = 0
-	cUserOffset  = sha3Offset + sha3Len
-	cSNIOffset   = cUserOffset + usernameLen
-	sUserOffset  = cSNIOffset + sniLen
-	sSNIOffset   = sUserOffset + usernameLen
-	portOffset   = sSNIOffset + sniLen
-	chTypeOffset = portOffset + portLen
-	lenOffset    = chTypeOffset + channelTypeLen //Using the reserved byte to hold length of action (up to 256 bytes)
-	actOffset    = lenOffset + reservedLen
+	sha3Offset  = 0
+	cUserOffset = sha3Offset + sha3Len
+	cSNIOffset  = cUserOffset + usernameLen
+	sUserOffset = cSNIOffset + sniLen
+	sSNIOffset  = sUserOffset + usernameLen
+	portOffset  = sSNIOffset + sniLen
+	tTypeOffset = portOffset + portLen
+	lenOffset   = tTypeOffset + tubeTypeLen //Using the reserved byte to hold length of action (up to 256 bytes)
+	actOffset   = lenOffset + reservedLen
 )
 
 //Intent Confirmation constants
@@ -63,7 +63,7 @@ const (
 	reasonOffset = 1
 )
 
-type agcMessage struct {
+type agMessage struct {
 	msgType byte
 	d       data
 }
@@ -80,7 +80,7 @@ type intentRequestMsg struct {
 	serverUsername string
 	serverSNI      string
 	port           uint16
-	channelType    byte
+	tubeType       byte
 	action         string
 }
 
@@ -94,7 +94,7 @@ type intentCommunicationMsg struct {
 	serverUsername string
 	serverSNI      string
 	port           uint16
-	channelType    byte
+	tubeType       byte
 	action         []string
 }
 
@@ -109,7 +109,7 @@ type intentDeniedMsg struct {
 }
 
 //Constructors
-func newIntentRequest(digest [sha3Len]byte, sUser string, addr string, cmd string) *agcMessage {
+func newIntentRequest(digest [sha3Len]byte, sUser string, addr string, cmd string) *agMessage {
 	user, _ := user.Current()
 	cSNI, _ := os.Hostname()
 	sSNI, p := parseAddr(addr)
@@ -121,30 +121,30 @@ func newIntentRequest(digest [sha3Len]byte, sUser string, addr string, cmd strin
 		serverUsername: sUser,
 		serverSNI:      sSNI,
 		port:           p,
-		channelType:    byte(1), //TODO(baumanl): how should this be used/enforced?
+		tubeType:       byte(1), //TODO(baumanl): how should this be used/enforced?
 		action:         cmd,
 	}
-	return &agcMessage{
+	return &agMessage{
 		msgType: IntentRequest,
 		d:       r,
 	}
 }
 
-func newIntentConfirmation(t time.Time) *agcMessage {
+func newIntentConfirmation(t time.Time) *agMessage {
 	c := &intentConfirmationMsg{
 		Deadline: t.Unix(),
 	}
-	return &agcMessage{
+	return &agMessage{
 		msgType: IntentConfirmation,
 		d:       c,
 	}
 }
 
-func newIntentDenied(r string) *agcMessage {
+func newIntentDenied(r string) *agMessage {
 	c := &intentDeniedMsg{
 		reason: r,
 	}
-	return &agcMessage{
+	return &agMessage{
 		msgType: IntentDenied,
 		d:       c,
 	}
@@ -158,8 +158,8 @@ func (r *intentRequestMsg) toBytes() []byte {
 	copy(s[cSNIOffset:sUserOffset], []byte(r.clientSNI))
 	copy(s[sUserOffset:sSNIOffset], []byte(r.serverUsername))
 	copy(s[sSNIOffset:portOffset], []byte(r.serverSNI))
-	binary.BigEndian.PutUint16(s[portOffset:chTypeOffset], r.port)
-	s[chTypeOffset] = r.channelType
+	binary.BigEndian.PutUint16(s[portOffset:tTypeOffset], r.port)
+	s[tTypeOffset] = r.tubeType
 	s[lenOffset] = byte(len(r.action)) //TODO(baumanl): This only allows for actions up to 256 bytes (and no bounds checking atm)
 	return append(s[:], []byte(r.action)...)
 }
@@ -171,8 +171,8 @@ func (c *intentCommunicationMsg) toBytes() []byte { //TODO(baumanl): This is lit
 	copy(s[cSNIOffset:sUserOffset], []byte(c.clientSNI))
 	copy(s[sUserOffset:sSNIOffset], []byte(c.serverUsername))
 	copy(s[sSNIOffset:portOffset], []byte(c.serverSNI))
-	binary.BigEndian.PutUint16(s[portOffset:chTypeOffset], c.port)
-	s[chTypeOffset] = c.channelType
+	binary.BigEndian.PutUint16(s[portOffset:tTypeOffset], c.port)
+	s[tTypeOffset] = c.tubeType
 	action := []byte(strings.Join(c.action, " "))
 	s[lenOffset] = byte(len(action)) //TODO(baumanl): This only allows for actions up to 256 bytes (and no bounds checking atm)
 	return append(s[:], action...)
@@ -189,7 +189,7 @@ func (c *intentDeniedMsg) toBytes() []byte {
 	return append(s[:], []byte(c.reason)...)
 }
 
-func (a *agcMessage) toBytes() []byte {
+func (a *agMessage) toBytes() []byte {
 	return append([]byte{a.msgType}, a.d.toBytes()...)
 }
 
@@ -210,8 +210,8 @@ func fromIntentRequestBytes(b []byte) *intentRequestMsg {
 	r.clientSNI = trimNullBytes(b[cSNIOffset:sUserOffset])
 	r.serverUsername = trimNullBytes(b[sUserOffset:sSNIOffset])
 	r.serverSNI = trimNullBytes(b[sSNIOffset:portOffset])
-	r.port = binary.BigEndian.Uint16(b[portOffset:chTypeOffset])
-	r.channelType = b[chTypeOffset]
+	r.port = binary.BigEndian.Uint16(b[portOffset:tTypeOffset])
+	r.tubeType = b[tTypeOffset]
 	r.action = string(b[actOffset:])
 	return &r
 }
@@ -223,8 +223,8 @@ func fromIntentCommunicationBytes(b []byte) *intentCommunicationMsg {
 	r.clientSNI = trimNullBytes(b[cSNIOffset:sUserOffset])
 	r.serverUsername = trimNullBytes(b[sUserOffset:sSNIOffset])
 	r.serverSNI = trimNullBytes(b[sSNIOffset:portOffset])
-	r.port = binary.BigEndian.Uint16(b[portOffset:chTypeOffset])
-	r.channelType = b[lenOffset]
+	r.port = binary.BigEndian.Uint16(b[portOffset:tTypeOffset])
+	r.tubeType = b[lenOffset]
 	r.action = strings.Split(string(b[actOffset:]), " ")
 	return &r
 }

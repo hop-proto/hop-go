@@ -1,4 +1,4 @@
-package channels
+package tubes
 
 import (
 	"math/rand"
@@ -50,7 +50,7 @@ func TestMuxer(t *testing.T) {
 	mc := NewMuxer(transportConn, transportConn)
 	go mc.Start()
 
-	channel, err := mc.CreateChannel(1 << 6)
+	tube, err := mc.CreateTube(1 << 6)
 	assert.NilError(t, err)
 
 	ms := NewMuxer(serverConn, serverConn)
@@ -59,9 +59,9 @@ func TestMuxer(t *testing.T) {
 	testData := "hi i am some data"
 
 	go func() {
-		_, err = channel.Write([]byte(testData))
+		_, err = tube.Write([]byte(testData))
 		assert.NilError(t, err)
-		channel.Close()
+		tube.Close()
 	}()
 
 	serverChan, err := ms.Accept()
@@ -110,13 +110,13 @@ func TestClosingMuxer(t *testing.T) {
 	ms := NewMuxer(serverConn, serverConn)
 	go ms.Start()
 
-	agc, err := mc.CreateChannel(AgcChannel)
+	agc, err := mc.CreateTube(AuthGrantTube)
 	assert.NilError(t, err)
 
-	npc, err := mc.CreateChannel(NpcChannel)
+	npc, err := mc.CreateTube(NetProxyTube)
 	assert.NilError(t, err)
 
-	codex, err := mc.CreateChannel(ExecChannel)
+	codex, err := mc.CreateTube(ExecTube)
 	assert.NilError(t, err)
 
 	agcs, err := ms.Accept()
@@ -187,7 +187,7 @@ func TestSmallWindow(t *testing.T) {
 	ms := NewMuxer(serverConn, serverConn)
 	go ms.Start()
 
-	channel, err := mc.CreateChannel(1 << 7)
+	tube, err := mc.CreateTube(1 << 7)
 	assert.NilError(t, err)
 
 	testData := make([]byte, 5000)
@@ -196,9 +196,9 @@ func TestSmallWindow(t *testing.T) {
 	}
 
 	go func() {
-		_, err = channel.Write([]byte(testData))
+		_, err = tube.Write([]byte(testData))
 		assert.NilError(t, err)
-		err = channel.Close()
+		err = tube.Close()
 		assert.NilError(t, err)
 	}()
 
@@ -240,11 +240,11 @@ func TestMultipleChannels(t *testing.T) {
 	ms := NewMuxer(serverConn, serverConn)
 	go ms.Start()
 
-	c1, err := mc.CreateChannel(1 << 7)
+	c1, err := mc.CreateTube(1 << 7)
 	assert.NilError(t, err)
-	c2, err := ms.CreateChannel(1 << 7)
+	c2, err := ms.CreateTube(1 << 7)
 	assert.NilError(t, err)
-	c3, err := mc.CreateChannel(1 << 7)
+	c3, err := mc.CreateTube(1 << 7)
 	assert.NilError(t, err)
 
 	testData1 := make([]byte, 5000)

@@ -3,8 +3,8 @@ package userauth
 import (
 	"encoding/binary"
 
-	"zmap.io/portal/channels"
 	"zmap.io/portal/keys"
+	"zmap.io/portal/tubes"
 )
 
 const (
@@ -41,7 +41,7 @@ func (msg *userAuthInitMsg) toBytes() []byte {
 }
 
 //RequestAuthorization used by client to send username and key and get server confirmation or denial
-func RequestAuthorization(ch *channels.Reliable, key keys.PublicKey, username string) bool {
+func RequestAuthorization(ch *tubes.Reliable, key keys.PublicKey, username string) bool {
 	ch.Write(newUserAuthInitMsg(key, username).toBytes())
 	//add timeout
 	b := make([]byte, 1)
@@ -49,7 +49,7 @@ func RequestAuthorization(ch *channels.Reliable, key keys.PublicKey, username st
 	return b[0] == UserAuthConf
 }
 
-func GetInitMsg(ch *channels.Reliable) (keys.PublicKey, string) {
+func GetInitMsg(ch *tubes.Reliable) (keys.PublicKey, string) {
 	key := [32]byte{}
 	ch.Read(key[:])
 	lbuf := make([]byte, 4)

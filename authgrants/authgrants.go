@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"zmap.io/portal/channels"
 	"zmap.io/portal/codex"
 	"zmap.io/portal/keys"
-	"zmap.io/portal/npc"
+	"zmap.io/portal/netproxy"
 	"zmap.io/portal/transport"
+	"zmap.io/portal/tubes"
 	"zmap.io/portal/userauth"
 )
 
@@ -56,14 +56,14 @@ func GetAuthGrant(digest [sha3Len]byte, sUser string, addr string, cmd string) (
 }
 
 //Principal is used by the Principal to respond to INTENT_REQUESTS from a Client
-func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan, config *transport.ClientConfig) {
+func Principal(agt *tubes.Reliable, m *tubes.Muxer, execTube *codex.ExecTube, config *transport.ClientConfig) {
 	defer func() {
-		agc.Close()
+		agt.Close()
 		logrus.Info("Closed AGC")
 	}()
 	logrus.SetOutput(io.Discard)
-	execCh.Restore()
-	intent, err := ReadIntentRequest(agc)
+	execTube.Restore()
+	intent, err := ReadIntentRequest(agt)
 	if err != nil {
 		logrus.Fatalf("ERROR READING INTENT REQUEST: %v", err)
 	}
@@ -71,105 +71,105 @@ func Principal(agc *channels.Reliable, m *channels.Muxer, execCh *codex.ExecChan
 	logrus.Info("C: PRINCIPAL REC: INTENT_REQUEST")
 	req := fromIntentRequestBytes(intent[TypeLen:])
 
-	execCh.Restore()
+	execTube.Restore()
 	logrus.SetOutput(os.Stdout)
-	r := execCh.Redirect()
+	r := execTube.Redirect()
 
 	allow := req.prompt(r)
 
-	execCh.Raw()
-	execCh.Resume()
+	execTube.Raw()
+	execTube.Resume()
 	logrus.SetOutput(io.Discard)
 	if allow {
 		logrus.Info("C: USER CONFIRMED INTENT_REQUEST. CONTACTING S2...")
 
-		//create npc with server
-		npcCh, e := m.CreateChannel(channels.NpcChannel) //How do I close this on the principal side?
-		logrus.Info("started NPC from principal")
+		//create netproxy with server
+		npt, e := m.CreateTube(tubes.NetProxyTube) //How do I close this on the principal side?
+		logrus.Info("started netproxy tube from principal")
 		if e != nil {
-			logrus.Fatal("C: Error starting NPC")
+			logrus.Fatal("C: Error starting netproxy tube")
 		}
 
 		addr := req.serverSNI + ":" + strconv.Itoa(int(req.port))
-		e = npc.Start(npcCh, addr)
+		e = netproxy.Start(npt, addr)
 		if e != nil {
 			logrus.Fatal("Issue proxying connection")
 		}
 
 		//start hop session over NPC
-		tclient, e := transport.DialNPC("npc", addr, npcCh, config)
+		tclient, e := transport.DialNP("netproxy", addr, npt, config)
 		if e != nil {
-			logrus.Fatal("error dialing npc")
+			logrus.Fatal("error dialing netproxy")
 		}
 		e = tclient.Handshake()
 		if e != nil {
 			logrus.Fatal("Handshake failed: ", e)
 		}
 		logrus.Info("handshake successful")
-		npcMuxer := channels.NewMuxer(tclient, tclient)
-		go npcMuxer.Start()
+		netproxyMuxer := tubes.NewMuxer(tclient, tclient)
+		go netproxyMuxer.Start()
 
-		uaCh, _ := npcMuxer.CreateChannel(channels.UserAuthChannel)
+		uaCh, _ := netproxyMuxer.CreateTube(tubes.UserAuthTube)
 		if ok := userauth.RequestAuthorization(uaCh, config.KeyPair.Public, req.serverUsername); !ok {
 			logrus.Fatal("Not authorized.")
 		}
 		logrus.Info("User authorization complete")
 
 		//start AGC and send INTENT_COMMUNICATION
-		npcAgc, e := npcMuxer.CreateChannel(channels.AgcChannel)
+		netproxyAgc, e := netproxyMuxer.CreateTube(tubes.AuthGrantTube)
 		if e != nil {
 			logrus.Fatal("Error creating AGC: ", e)
 		}
 		logrus.Info("CREATED AGC")
-		_, e = npcAgc.Write(commFromReq(intent))
+		_, e = netproxyAgc.Write(commFromReq(intent))
 		if e != nil {
-			logrus.Info("Issue writing intent comm to npcAgc")
+			logrus.Info("Issue writing intent comm to netproxyAgc")
 		}
-		response, _, e := GetResponse(npcAgc)
+		response, _, e := GetResponse(netproxyAgc)
 		logrus.Info("got response")
 		if e != nil {
 			logrus.Fatalf("C: error reading from agc: %v", e)
 		}
 
 		//write response back to server asking for Authorization Grant
-		_, err = agc.Write(response)
+		_, err = agt.Write(response)
 		if err != nil {
 			logrus.Fatalf("C: error writing to agc: %v", err)
 		}
 		//TODO(baumanl): Add logic to deal with potential IntentDenied from server
 		logrus.Infof("C: WROTE IntentConfirmation")
-		npcAgc.Close()
+		netproxyAgc.Close()
 
 		// Want to keep this session open in case the "server 2" wants to continue chaining hop sessions together
-		// TODO(baumanl): Simplify this. Should only get authorization grant channels?
+		// TODO(baumanl): Simplify this. Should only get authorization grant tubes?
 		go func() {
 			for {
-				c, e := npcMuxer.Accept()
+				c, e := netproxyMuxer.Accept()
 				if e != nil {
-					logrus.Fatalf("Error accepting channel: %v", e)
+					logrus.Fatalf("Error accepting tube: %v", e)
 				}
-				logrus.Infof("Accepted channel of type: %v", c.Type())
-				if c.Type() == channels.AgcChannel {
-					go Principal(c, npcMuxer, execCh, config)
-				} else if c.Type() == channels.NpcChannel {
+				logrus.Infof("Accepted tube of type: %v", c.Type())
+				if c.Type() == tubes.AuthGrantTube {
+					go Principal(c, netproxyMuxer, execTube, config)
+				} else if c.Type() == tubes.NetProxyTube {
 					//go do something?
 					c.Close()
-				} else if c.Type() == channels.ExecChannel {
+				} else if c.Type() == tubes.ExecTube {
 					//go do something else?
 					c.Close()
 				} else {
-					//bad channel
+					//bad tube
 					c.Close()
 				}
 			}
 		}()
 	} else {
-		agc.Write(newIntentDenied("User denied.").toBytes())
+		agt.Write(newIntentDenied("User denied.").toBytes())
 	}
 }
 
 //HandleIntentComm is used by a Server to handle an INTENT_COMMUNICATION from a Principal
-func HandleIntentComm(agc *channels.Reliable) (keys.PublicKey, time.Time, string, string, error) {
+func HandleIntentComm(agc *tubes.Reliable) (keys.PublicKey, time.Time, string, string, error) {
 	msg, e := readIntentCommunication(agc)
 	if e != nil {
 		logrus.Fatalf("error reading intent communication")
@@ -184,13 +184,13 @@ func HandleIntentComm(agc *channels.Reliable) (keys.PublicKey, time.Time, string
 
 }
 
-//SendIntentDenied writes an intent denied message to provided channel
-func SendIntentDenied(agc *channels.Reliable, reason string) {
+//SendIntentDenied writes an intent denied message to provided tube
+func SendIntentDenied(agc *tubes.Reliable, reason string) {
 	agc.Write(newIntentDenied(reason).toBytes())
 }
 
-//SendIntentConf writes and intent conf message to provided channel
-func SendIntentConf(agc *channels.Reliable, t time.Time) {
+//SendIntentConf writes and intent conf message to provided tube
+func SendIntentConf(agc *tubes.Reliable, t time.Time) {
 	_, e := agc.Write(newIntentConfirmation(t).toBytes())
 	if e != nil {
 		logrus.Errorf("Issue writing intent conf")

@@ -1,4 +1,4 @@
-package channels
+package tubes
 
 import (
 	"bytes"

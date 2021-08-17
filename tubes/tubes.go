@@ -1,4 +1,4 @@
-package channels
+package tubes
 
 import (
 	"bytes"
@@ -20,7 +20,7 @@ import (
 //   3. Buffering
 //   4. Concurrency controls (locks)
 
-const RTO = time.Millisecond * 500 //Drew originally had this at 500ms but that made code_exec channels very laggy. (think the issue is actually in sender.go retransmission)
+const RTO = time.Millisecond * 500
 
 const WINDOW_SIZE = 128
 
@@ -33,26 +33,26 @@ const (
 	CLOSED      state = iota
 )
 
-//Channel Type constants
+//Tube Type constants
 const (
-	ExecChannel     = byte(1)
-	AgcChannel      = byte(2)
-	NpcChannel      = byte(3) //NPC should maybe be unreliable channel?
-	UserAuthChannel = byte(4)
+	ExecTube      = byte(1)
+	AuthGrantTube = byte(2)
+	NetProxyTube  = byte(3) //Net Proxy should maybe be unreliable tube?
+	UserAuthTube  = byte(4)
 )
 
-// Reliable implements a reliable and receiveWindow channel on top
+// Reliable implements a reliable and receiveWindow tube on top
 type Reliable struct {
-	closedCond   sync.Cond
-	cType        byte
-	id           byte
-	localAddr    net.Addr
-	m            sync.Mutex
-	recvWindow   Receiver
-	remoteAddr   net.Addr
-	sender       Sender
-	sendQueue    chan []byte
-	channelState state
+	closedCond sync.Cond
+	tType      byte
+	id         byte
+	localAddr  net.Addr
+	m          sync.Mutex
+	recvWindow Receiver
+	remoteAddr net.Addr
+	sender     Sender
+	sendQueue  chan []byte
+	tubeState  state
 }
 
 // Reliable implements net.Conn
@@ -61,13 +61,13 @@ var _ net.Conn = &Reliable{}
 func (r *Reliable) getState() state {
 	r.m.Lock()
 	defer r.m.Unlock()
-	return r.channelState
+	return r.tubeState
 }
 
 func (r *Reliable) send() {
 	for r.getState() == INITIATED || r.getState() == CLOSE_START {
 		pkt := <-r.sender.sendQueue
-		pkt.channelID = r.id
+		pkt.tubeID = r.id
 		pkt.ackNo = r.recvWindow.getAck()
 		pkt.flags.ACK = true
 		logrus.Debug("sending pkt ", pkt.frameNo, pkt.ackNo, pkt.flags.FIN, pkt.flags.ACK)
@@ -75,16 +75,16 @@ func (r *Reliable) send() {
 	}
 }
 
-func NewReliableChannelWithChannelId(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, channelType byte, channelId byte) *Reliable {
-	r := makeChannel(underlying, netConn, sendQueue, channelType, channelId)
+func NewReliableTubeWithTubeId(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType byte, tubeID byte) *Reliable {
+	r := makeTube(underlying, netConn, sendQueue, tubeType, tubeID)
 	go r.initiate(false)
 	return r
 }
 
-func makeChannel(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, cType byte, channelId byte) *Reliable {
+func makeTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType byte, tubeID byte) *Reliable {
 	r := &Reliable{
-		id:           channelId,
-		channelState: CREATED,
+		id:        tubeID,
+		tubeState: CREATED,
 		// TODO (dadrian): uncomment this when transport.Handle and transport.Client implement Local,RemoteAddr()
 		// localAddr:  netConn.LocalAddr(),
 		// remoteAddr: netConn.RemoteAddr(),
@@ -114,37 +114,37 @@ func makeChannel(underlying transport.MsgConn, netConn net.Conn, sendQueue chan 
 			ret:              make(chan int),
 		},
 		sendQueue: sendQueue,
-		cType:     cType,
+		tType:     tType,
 	}
 	r.recvWindow.closedCond = &r.closedCond
 	r.recvWindow.init()
 	return r
 }
 
-func NewReliableChannel(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, cType byte) (*Reliable, error) {
+func NewReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType byte) (*Reliable, error) {
 	cid := []byte{0}
 	n, err := rand.Read(cid)
 	if err != nil || n != 1 {
 		return nil, err
 	}
-	r := makeChannel(underlying, netConn, sendQueue, cType, cid[0])
+	r := makeTube(underlying, netConn, sendQueue, tType, cid[0])
 	go r.initiate(true)
 	return r, nil
 }
 
-/* req: whether the channel is requesting to initiate a channel (true), or whether is respondding to an initiation request (false).*/
+/* req: whether the tube is requesting to initiate a tube (true), or whether is respondding to an initiation request (false).*/
 func (r *Reliable) initiate(req bool) {
-	channelType := r.cType
+	tubeType := r.tType
 	not_init := true
 
 	for not_init {
 		p := InitiateFrame{
-			channelID:   r.id,
-			channelType: channelType,
-			data:        []byte{},
-			dataLength:  0,
-			frameNo:     0,
-			windowSize:  r.recvWindow.windowSize,
+			tubeID:     r.id,
+			tubeType:   tubeType,
+			data:       []byte{},
+			dataLength: 0,
+			frameNo:    0,
+			windowSize: r.recvWindow.windowSize,
 			flags: FrameFlags{
 				ACK:  true,
 				FIN:  false,
@@ -154,7 +154,7 @@ func (r *Reliable) initiate(req bool) {
 		}
 		r.sendQueue <- p.toBytes()
 		r.m.Lock()
-		not_init = r.channelState == CREATED
+		not_init = r.tubeState == CREATED
 		r.m.Unlock()
 		timer := time.NewTimer(RTO)
 		<-timer.C
@@ -164,9 +164,9 @@ func (r *Reliable) initiate(req bool) {
 }
 
 func (r *Reliable) receive(pkt *Frame) error {
-	if r.channelState != INITIATED {
-		//logrus.Error("receiving non-initiate channel frames when not initiated")
-		return errors.New("receiving non-initiate channel frames when not initiated")
+	if r.tubeState != INITIATED {
+		//logrus.Error("receiving non-initiate tube frames when not initiated")
+		return errors.New("receiving non-initiate tube frames when not initiated")
 	}
 	r.closedCond.L.Lock()
 	if pkt.flags.ACK {
@@ -183,12 +183,12 @@ func (r *Reliable) receiveInitiatePkt(pkt *InitiateFrame) error {
 	r.m.Lock()
 	defer r.m.Unlock()
 
-	if r.channelState == CREATED {
+	if r.tubeState == CREATED {
 		r.recvWindow.m.Lock()
 		r.recvWindow.ackNo = 1
 		r.recvWindow.m.Unlock()
 		//logrus.Debug("INITIATED! ", pkt.flags.REQ, " ", pkt.flags.RESP)
-		r.channelState = INITIATED
+		r.tubeState = INITIATED
 		r.sender.recvAck(1)
 	}
 
@@ -226,7 +226,7 @@ func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
 
 }
 
-//implement the "UDPLike" interface for transport layer NPC. Trying to make channels have the same funcs as net.UDPConn
+//implement the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
 	length := len(b)
 	h := make([]byte, 2)
@@ -235,7 +235,7 @@ func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, e
 	return length, 0, e
 }
 
-//implement the "UDPLike" interface for transport layer NPC. Trying to make channels have the same funcs as net.UDPConn
+//implement the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
 	h := make([]byte, 2)
 	_, e := r.Read(h)
@@ -252,9 +252,9 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 func (r *Reliable) Close() error {
 	r.m.Lock()
 	name := r.id
-	if r.channelState == CLOSED {
+	if r.tubeState == CLOSED {
 		r.m.Unlock()
-		return errors.New("channel already closed")
+		return errors.New("tube already closed")
 	}
 	r.m.Unlock()
 	err := r.sender.sendFin()
@@ -287,16 +287,16 @@ func (r *Reliable) Close() error {
 	}
 	r.closedCond.L.Unlock()
 	r.sender.close()
-	logrus.Debugf("closed channel: %v", name)
+	logrus.Debugf("closed tube: %v", name)
 	r.m.Lock()
-	r.channelState = CLOSED
+	r.tubeState = CLOSED
 	r.m.Unlock()
 
 	return nil
 }
 
 func (r *Reliable) Type() byte {
-	return r.cType
+	return r.tType
 }
 
 func (r *Reliable) LocalAddr() net.Addr {
