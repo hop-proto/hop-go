@@ -464,6 +464,7 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 			"SHELL=" + user.Shell(),
 			"LOGNAME=" + user.Username(),
 			"HOME=" + user.Homedir(),
+			"TERM=" + os.Getenv("TERM"),
 		}
 		if !shell {
 			//start the command as the requested user (hopd must be a root privileged process)
