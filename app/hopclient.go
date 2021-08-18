@@ -77,15 +77,15 @@ func Client(args []string) {
 			logrus.Fatalf("C: Error using key at path %v. Error: %v", keypath, e)
 		}
 	} else {
+		shell := false
 		if cmd == "" {
-			logrus.Error("Authgrant requires an explicit action")
-			return
+			shell = true
 		}
 		config.KeyPair = new(keys.X25519KeyPair)
 		config.KeyPair.Generate()
 		logrus.Infof("Client generated: %v", config.KeyPair.Public.String())
 		logrus.Infof("C: Initiating AGC Protocol.")
-		t, e := authgrants.GetAuthGrant(config.KeyPair.Public, user, addr, cmd)
+		t, e := authgrants.GetAuthGrant(config.KeyPair.Public, user, addr, shell, cmd)
 		if e != nil {
 			logrus.Fatalf("C: %v", e)
 		}

@@ -29,6 +29,11 @@ const (
 	TypeLen = 1
 )
 
+const (
+	shellTube   = byte(1)
+	commandTube = byte(2)
+)
+
 //Intent Request and Communication constants
 const (
 	sha3Len     = 32
@@ -80,7 +85,7 @@ type intentRequestMsg struct {
 	serverUsername string
 	serverSNI      string
 	port           uint16
-	tubeType       byte
+	tubeType       byte //default shell or specific command
 	action         string
 }
 
@@ -109,10 +114,14 @@ type intentDeniedMsg struct {
 }
 
 //Constructors
-func newIntentRequest(digest [sha3Len]byte, sUser string, addr string, cmd string) *agMessage {
+func newIntentRequest(digest [sha3Len]byte, sUser string, addr string, shell bool, cmd string) *agMessage {
 	user, _ := user.Current()
 	cSNI, _ := os.Hostname()
 	sSNI, p := parseAddr(addr)
+	tt := commandTube
+	if shell {
+		tt = shellTube
+	}
 
 	r := &intentRequestMsg{
 		sha3:           digest,
@@ -121,7 +130,7 @@ func newIntentRequest(digest [sha3Len]byte, sUser string, addr string, cmd strin
 		serverUsername: sUser,
 		serverSNI:      sSNI,
 		port:           p,
-		tubeType:       byte(1), //TODO(baumanl): how should this be used/enforced?
+		tubeType:       tt, //TODO(baumanl): Using to differentiate between asking for shell (run using login(1)) or a specific command
 		action:         cmd,
 	}
 	return &agMessage{

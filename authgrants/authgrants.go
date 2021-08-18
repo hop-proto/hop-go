@@ -22,8 +22,8 @@ import (
 )
 
 //GetAuthGrant is used by the Client to get an authorization grant from its Principal
-func GetAuthGrant(digest [sha3Len]byte, sUser string, addr string, cmd string) (int64, error) {
-	intent := newIntentRequest(digest, sUser, addr, cmd)
+func GetAuthGrant(digest [sha3Len]byte, sUser string, addr string, shell bool, cmd string) (int64, error) {
+	intent := newIntentRequest(digest, sUser, addr, shell, cmd)
 	sock := "@auth"                  //TODO(baumanl): make generalizeable
 	c, err := net.Dial("unix", sock) //TODO(baumanl): address of UDS (probably switch to abstract location)
 	if err != nil {
@@ -201,12 +201,21 @@ func SendIntentConf(agc *tubes.Reliable, t time.Time) {
 func (r *intentRequestMsg) prompt(reader *io.PipeReader) bool {
 	var ans string
 	for ans != "y" && ans != "n" {
-		fmt.Printf("\nAllow %v@%v to run %v on %v@%v? [y/n]: ",
-			r.clientUsername,
-			r.clientSNI,
-			r.action,
-			r.serverUsername,
-			r.serverSNI)
+		if r.tubeType == commandTube {
+			fmt.Printf("\nAllow %v@%v to run %v on %v@%v? [y/n]: ",
+				r.clientUsername,
+				r.clientSNI,
+				r.action,
+				r.serverUsername,
+				r.serverSNI)
+		} else {
+			fmt.Printf("\nAllow %v@%v to open a default shell as %v@%v? [y/n]: ",
+				r.clientUsername,
+				r.clientSNI,
+				r.serverUsername,
+				r.serverSNI,
+			)
+		}
 		scanner := bufio.NewScanner(reader)
 		scanner.Scan()
 		ans = scanner.Text()
