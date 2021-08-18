@@ -27,8 +27,8 @@ func Client(args []string) {
 	//logrus.SetOutput(io.Discard)
 	logrus.SetLevel(logrus.InfoLevel)
 	//******PROCESS CMD LINE ARGUMENTS******
-	if len(args) < 4 {
-		logrus.Fatal("C: Invalid arguments. Usage: hop user@host:port -k <pathtokey> or hop user@host:port -a <action>.")
+	if len(args) < 2 {
+		logrus.Fatal("C: Invalid arguments. Usage: hop user@host:port [-k path] [-c cmd]")
 	}
 	s := strings.SplitAfter(args[1], "@") //TODO(bauman): Add support for optional username
 	user := s[0][0 : len(s[0])-1]
