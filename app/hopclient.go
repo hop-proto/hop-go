@@ -2,8 +2,9 @@ package app
 
 import (
 	"flag"
+	"net/url"
 	"os"
-	"strings"
+	"os/user"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -24,22 +25,32 @@ var hostToIPAddr = map[string]string{
 
 //Client parses cmd line arguments and establishes hop session with remote hop server
 func Client(args []string) {
-	//logrus.SetOutput(io.Discard)
 	logrus.SetLevel(logrus.InfoLevel)
 	//******PROCESS CMD LINE ARGUMENTS******
 	if len(args) < 2 {
 		logrus.Fatal("C: Invalid arguments. Usage: hop user@host:port [-k path] [-c cmd]")
 	}
-	s := strings.SplitAfter(args[1], "@") //TODO(bauman): Add support for optional username
-	user := s[0][0 : len(s[0])-1]
-	addrParts := strings.SplitAfter(s[1], ":")
-	hostname := addrParts[0][0 : len(addrParts[0])-1]
-	port := addrParts[1]
-	addr := hostname + ":" + port
-	if ip, ok := hostToIPAddr[hostname]; ok {
+
+	url, err := url.Parse("//" + args[1]) //double slashes necessary since there is never a scheme
+	if err != nil {
+		logrus.Fatal("C: Destination should be of form: [user@]host[:port]", err)
+	}
+	addr := url.Host
+	hostname := url.Hostname()
+	port := url.Port()
+	if ip, ok := hostToIPAddr[hostname]; ok { //TODO(baumanl): actual DNS and .hop_config option
 		addr = ip + ":" + port
 	}
 	logrus.Infof("Using path: %v", addr)
+
+	username := url.User.Username()
+	if username == "" { //if no username is entered use local client username
+		u, e := user.Current()
+		if e != nil {
+			logrus.Error(e)
+		}
+		username = u.Username
+	}
 
 	var fs flag.FlagSet
 	var keypath string
@@ -85,7 +96,7 @@ func Client(args []string) {
 		config.KeyPair.Generate()
 		logrus.Infof("Client generated: %v", config.KeyPair.Public.String())
 		logrus.Infof("C: Initiating AGC Protocol.")
-		t, e := authgrants.GetAuthGrant(config.KeyPair.Public, user, addr, shell, cmd)
+		t, e := authgrants.GetAuthGrant(config.KeyPair.Public, username, addr, shell, cmd)
 		if e != nil {
 			logrus.Fatalf("C: %v", e)
 		}
@@ -115,12 +126,13 @@ func Client(args []string) {
 
 	//*****PERFORM USER AUTHORIZATION******
 	uaCh, _ := mc.CreateTube(tubes.UserAuthTube)
-	if ok := userauth.RequestAuthorization(uaCh, config.KeyPair.Public, user); !ok {
+	if ok := userauth.RequestAuthorization(uaCh, config.KeyPair.Public, username); !ok {
 		logrus.Fatal("Not authorized.")
 	}
 	logrus.Info("User authorization complete")
 
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
+	//Hop Session is tied to the life of this code execution tube.
 	logrus.Infof("Performing action: %v", cmd)
 	ch, _ := mc.CreateTube(tubes.ExecTube)
 	wg := sync.WaitGroup{}
@@ -138,12 +150,8 @@ func Client(args []string) {
 			logrus.Infof("ACCEPTED NEW CHANNEL of TYPE: %v", c.Type())
 			if c.Type() == tubes.AuthGrantTube && principal {
 				go authgrants.Principal(c, mc, execCh, &config)
-			} else if c.Type() == tubes.NetProxyTube {
-				//go do something?
-			} else if c.Type() == tubes.ExecTube {
-				//go do something else?
 			} else {
-				//bad tube
+				//Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
 				c.Close()
 				continue
 			}
