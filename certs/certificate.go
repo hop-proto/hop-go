@@ -1,9 +1,9 @@
-// Package certs defines the Hop certificates structure, including serialization and verification functions.
+// Package certs defines the Hop certificates structure, including serialization
+// and verification functions.
 package certs
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/binary"
 	"encoding/pem"
@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"golang.org/x/crypto/sha3"
 	"zmap.io/portal/keys"
 )
 
@@ -56,17 +57,17 @@ func CertificateTypeFromString(typeStr string) (CertificateType, error) {
 }
 
 const (
-	// SHA256Len is the length of a SHA256Fingerprint array
-	SHA256Len = 32
+	// SHA3Len is the length of a SHA256Fingerprint array
+	SHA3Len = 32
 
 	// Version is the protocol version
 	Version byte = 1
 )
 
-// SHA256Fingerprint is used to identify the parent of a Certificate.
-type SHA256Fingerprint = [SHA256Len]byte
+// SHA3Fingerprint is used to identify the parent of a Certificate.
+type SHA3Fingerprint = [SHA3Len]byte
 
-var zero SHA256Fingerprint
+var zero SHA3Fingerprint
 
 // Certificate represent a Hop certificate, and can be serialized to and from
 // bytes. A Certificate can optionally be associated with its corresponding
@@ -78,12 +79,12 @@ type Certificate struct {
 	ExpiresAt time.Time
 	IDChunk   IDChunk
 	PublicKey [KeyLen]byte
-	Parent    SHA256Fingerprint
+	Parent    SHA3Fingerprint
 	Signature [SignatureLen]byte
 
-	// Fingerprint is the SHA256Fingerprint of the certificate. It is populated
-	// when a certificate is read, or issued.
-	Fingerprint SHA256Fingerprint
+	// Fingerprint is the 256-bit SHA3 of the certificate. It is populated when
+	// a certificate is read, or issued.
+	Fingerprint SHA3Fingerprint
 
 	privateKey *[KeyLen]byte
 
@@ -172,7 +173,7 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 	tee := io.TeeReader(r, &c.raw)
 
 	// Calculate hash as we read
-	h := sha256.New()
+	h := sha3.New256()
 	r = io.TeeReader(tee, h)
 
 	err = binary.Read(r, binary.BigEndian, &c.Version)
@@ -229,7 +230,7 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 	if err != nil {
 		return bytesRead, err
 	}
-	if n != SHA256Len {
+	if n != SHA3Len {
 		return bytesRead, io.EOF
 	}
 
