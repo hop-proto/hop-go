@@ -19,7 +19,7 @@ const (
 // issue does the heavy lifting of issuing and signing
 func issue(parent *Certificate, child *Identity, certType CertificateType, duration time.Duration) (*Certificate, error) {
 	if parent.Fingerprint == zero {
-		return nil, errors.New("IssueLeaf requires the SHA256Fingeprint to be set")
+		return nil, errors.New("IssueLeaf requires SHA3Fingerprint to be set")
 	}
 	if parent.privateKey == nil {
 		return nil, errors.New("IssueLeaf requires a private key")
