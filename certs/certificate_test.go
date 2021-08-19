@@ -37,7 +37,7 @@ func TestWriteTo(t *testing.T) {
 		IDChunk: IDChunk{
 			Blocks: []Name{
 				{
-					Type:  DNSName,
+					Type:  TypeDNSName,
 					Label: "example.domain",
 				},
 			},
