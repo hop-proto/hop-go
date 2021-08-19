@@ -107,7 +107,8 @@ func (s *hopServer) proxyAuthGrantRequest(c net.Conn) {
 	//Verify that the client is a legit descendent
 	ancestor, e := s.checkCredentials(c)
 	if e != nil {
-		log.Fatalf("S: ISSUE CHECKING CREDENTIALS: %v", e)
+		logrus.Errorf("S: ISSUE CHECKING CREDENTIALS: %v", e)
+		return
 	}
 	s.m.Lock()
 	// find corresponding session muxer
@@ -244,17 +245,17 @@ func Serve(args []string) {
 	//logrus.SetOutput(io.Discard)
 	//TEMPORARY: Should take address from argument and socket should be abstract/same place or dependent on session?
 	hostname, _ := os.Hostname()
-	port := ":7777"
+	port := defaultHopPort
 	sockAddr := "@auth"
 	if len(args) > 1 && args[1] == "local" {
 		hostname = "localhost"
 		if len(args) > 2 {
-			port = ":" + args[2]
+			port = args[2]
 		}
 	} else if len(args) > 1 {
-		port = ":" + args[1]
+		port = args[1]
 	}
-	addr := hostname + port
+	addr := hostname + ":" + port
 
 	//*****TRANSPORT LAYER SET UP*****
 	pktConn, err := net.ListenPacket("udp", addr)

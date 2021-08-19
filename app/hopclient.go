@@ -16,31 +16,33 @@ import (
 	"zmap.io/portal/userauth"
 )
 
-var hostToIPAddr = map[string]string{
-	"scratch-01": "10.216.2.64",
-	"scratch-02": "10.216.2.128",
-	"scratch-07": "10.216.2.208",
-	"localhost":  "127.0.0.1",
-}
+// var hostToIPAddr = map[string]string{
+// 	"scratch-01": "10.216.2.64",
+// 	"scratch-02": "10.216.2.128",
+// 	"scratch-07": "10.216.2.208",
+// 	"localhost":  "127.0.0.1",
+// }
 
 //Client parses cmd line arguments and establishes hop session with remote hop server
 func Client(args []string) {
 	logrus.SetLevel(logrus.InfoLevel)
+	//TODO(baumanl): add .hop_config support
 	//******PROCESS CMD LINE ARGUMENTS******
 	if len(args) < 2 {
-		logrus.Fatal("C: Invalid arguments. Usage: hop user@host:port [-k path] [-c cmd]")
+		logrus.Fatal("C: Invalid arguments. Usage: ", clientUsage)
 	}
 
 	url, err := url.Parse("//" + args[1]) //double slashes necessary since there is never a scheme
 	if err != nil {
 		logrus.Fatal("C: Destination should be of form: [user@]host[:port]", err)
 	}
-	addr := url.Host
+
 	hostname := url.Hostname()
 	port := url.Port()
-	if ip, ok := hostToIPAddr[hostname]; ok { //TODO(baumanl): actual DNS and .hop_config option
-		addr = ip + ":" + port
+	if port == "" {
+		port = defaultHopPort
 	}
+	addr := hostname + ":" + port
 	logrus.Infof("Using path: %v", addr)
 
 	username := url.User.Username()
@@ -53,13 +55,17 @@ func Client(args []string) {
 	}
 
 	var fs flag.FlagSet
-	var keypath string
-	var principal bool
-	fs.Func("k", "indicates principal and key location", func(s string) error {
+	keypath, _ := os.UserHomeDir()
+	keypath += defaultKeyPath
+	principal := false
+
+	fs.Func("k", "indicates principal with specific key location", func(s string) error {
 		principal = true
 		keypath = s
 		return nil
 	})
+
+	fs.BoolVar(&principal, "K", principal, "indicates principal with default key location: $HOME/.hop/key")
 
 	//TODO: implement this option to allow for piping and expansion
 	//var runCmdInShell bool
@@ -68,21 +74,21 @@ func Client(args []string) {
 	var cmd string
 	fs.StringVar(&cmd, "c", "", "specific command to execute on remote server")
 
-	fs.Parse(os.Args[2:])
+	err = fs.Parse(os.Args[2:])
+	if err != nil {
+		logrus.Fatal(err)
+	}
+	if fs.NArg() > 0 {
+		logrus.Fatal("Unknown arguments provided. Usage: ", clientUsage)
+	}
 
 	config := transport.ClientConfig{}
 
 	//Check if this is a principal client process or one that needs to get an AG
 	//******GET AUTHORIZATION SOURCE******
-
 	if principal {
 		logrus.Infof("C: Using key-file at %v for auth.", keypath)
 		var e error
-		if keypath == "path" { //TODO(baumanl): fix default behavior for general program (i.e. Delete this)
-			logrus.Info("C: using default key at ~/.hop/key")
-			keypath, _ = os.UserHomeDir()
-			keypath += "/.hop/key"
-		}
 		config.KeyPair, e = keys.ReadDHKeyFromPEMFile(keypath)
 		if e != nil {
 			logrus.Fatalf("C: Error using key at path %v. Error: %v", keypath, e)
