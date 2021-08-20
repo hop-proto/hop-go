@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -179,7 +178,7 @@ func HandleIntentComm(agc *tubes.Reliable) (keys.PublicKey, time.Time, string, s
 	k := keys.PublicKey(intent.sha3)
 	t := time.Now().Add(time.Minute)
 	user := intent.serverUsername
-	action := strings.Join(intent.action, " ")
+	action := intent.action
 	return k, t, user, action, nil
 
 }

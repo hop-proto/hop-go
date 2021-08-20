@@ -100,7 +100,7 @@ type intentCommunicationMsg struct {
 	serverSNI      string
 	port           uint16
 	tubeType       byte
-	action         []string
+	action         string
 }
 
 //intentConfirmationMsg contains deadline for an approved auth grant
@@ -182,9 +182,8 @@ func (c *intentCommunicationMsg) toBytes() []byte { //TODO(baumanl): This is lit
 	copy(s[sSNIOffset:portOffset], []byte(c.serverSNI))
 	binary.BigEndian.PutUint16(s[portOffset:tTypeOffset], c.port)
 	s[tTypeOffset] = c.tubeType
-	action := []byte(strings.Join(c.action, " "))
-	s[lenOffset] = byte(len(action)) //TODO(baumanl): This only allows for actions up to 256 bytes (and no bounds checking atm)
-	return append(s[:], action...)
+	s[lenOffset] = byte(len(c.action)) //TODO(baumanl): This only allows for actions up to 256 bytes (and no bounds checking atm)
+	return append(s[:], []byte(c.action)...)
 }
 
 func (c *intentConfirmationMsg) toBytes() []byte {
@@ -234,7 +233,7 @@ func fromIntentCommunicationBytes(b []byte) *intentCommunicationMsg {
 	r.serverSNI = trimNullBytes(b[sSNIOffset:portOffset])
 	r.port = binary.BigEndian.Uint16(b[portOffset:tTypeOffset])
 	r.tubeType = b[lenOffset]
-	r.action = strings.Split(string(b[actOffset:]), " ")
+	r.action = string(b[actOffset:])
 	return &r
 }
 
