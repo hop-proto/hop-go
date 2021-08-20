@@ -7,9 +7,15 @@ import (
 	"zmap.io/portal/keys"
 )
 
+type VerifyConfiguration struct {
+	Store              certs.Store
+	InsecureSkipVerify bool
+	Name               certs.Name
+}
+
 // ClientConfig contains client-specific configuration settings.
 type ClientConfig struct {
-	Name certs.Name
+	Verify VerifyConfiguration
 }
 
 const (

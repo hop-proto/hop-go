@@ -62,6 +62,9 @@ type HandshakeState struct {
 	es []byte
 	se []byte
 
+	// Certificate Stuff
+	clientVerify *VerifyConfiguration
+
 	remoteAddr *net.UDPAddr
 }
 
@@ -263,7 +266,7 @@ func (hs *HandshakeState) EncryptSNI(dst []byte, name certs.Name) error {
 	return nil
 }
 
-func (hs *HandshakeState) writeClientAck(b []byte, name certs.Name) (int, error) {
+func (hs *HandshakeState) writeClientAck(b []byte) (int, error) {
 	length := HeaderLen + DHLen + CookieLen + SNILen + MacLen
 	if len(b) < length {
 		return 0, ErrBufOverflow
@@ -292,7 +295,7 @@ func (hs *HandshakeState) writeClientAck(b []byte, name certs.Name) (int, error)
 	b = b[CookieLen:]
 
 	// Encrypted SNI
-	err := hs.EncryptSNI(b, name)
+	err := hs.EncryptSNI(b, hs.clientVerify.Name)
 	if err != nil {
 		return HeaderLen + DHLen + CookieLen, ErrInvalidMessage
 	}
@@ -356,6 +359,9 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	b = b[MacLen:]
 
 	// Parse the certificate
+	opts := certs.VerifyOptions{
+		Name: hs.clientVerify.Name,
+	}
 	leaf := certs.Certificate{}
 	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
 	if err != nil {
@@ -365,8 +371,25 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 		return 0, errors.New("extra bytes after leaf certificate")
 	}
 
-	// TODO(dadrian): Handle the intermediate and do verification and
-	// name-checking.
+	intermediate := certs.Certificate{}
+	if len(rawIntermediate) > 0 {
+		intermediateLen, err := intermediate.ReadFrom(bytes.NewBuffer(rawIntermediate))
+		if err != nil {
+			return 0, err
+		}
+		if int(intermediateLen) != len(rawIntermediate) {
+			return 0, errors.New("extra bytes after intermediate certificate")
+		}
+		opts.PresentedIntermediate = &intermediate
+	}
+
+	if !hs.clientVerify.InsecureSkipVerify {
+		err := hs.clientVerify.Store.VerifyLeaf(&leaf, opts)
+		if err != nil {
+			logrus.Errorf("client: failed to verify certificate: %s", err)
+			return 0, err
+		}
+	}
 
 	// DH
 	hs.es, err = hs.ephemeral.DH(leaf.PublicKey[:])
