@@ -29,6 +29,14 @@ func newTestServerConfig(t *testing.T) *transport.ServerConfig {
 	}
 }
 
+func getInsecureClientConfig() transport.ClientConfig {
+	return transport.ClientConfig{
+		Verify: transport.VerifyConfig{
+			InsecureSkipVerify: true,
+		},
+	}
+}
+
 func TestMuxer(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	pktConn, err := net.ListenPacket("udp", "localhost:8890")
@@ -39,7 +47,7 @@ func TestMuxer(t *testing.T) {
 	assert.NilError(t, err)
 	go server.Serve()
 
-	transportConn, err := transport.Dial("udp", udpConn.LocalAddr().String(), nil)
+	transportConn, err := transport.Dial("udp", udpConn.LocalAddr().String(), getInsecureClientConfig())
 	assert.NilError(t, err)
 
 	assert.NilError(t, transportConn.Handshake())
@@ -96,7 +104,7 @@ func TestClosingMuxer(t *testing.T) {
 	assert.NilError(t, err)
 	go server.Serve()
 
-	transportConn, err := transport.Dial("udp", udpConn.LocalAddr().String(), nil)
+	transportConn, err := transport.Dial("udp", udpConn.LocalAddr().String(), getInsecureClientConfig())
 	assert.NilError(t, err)
 
 	assert.NilError(t, transportConn.Handshake())
@@ -173,7 +181,7 @@ func TestSmallWindow(t *testing.T) {
 	assert.NilError(t, err)
 	go server.Serve()
 
-	transportClient, err := transport.Dial("udp", udpConn.LocalAddr().String(), nil)
+	transportClient, err := transport.Dial("udp", udpConn.LocalAddr().String(), getInsecureClientConfig())
 	assert.NilError(t, err)
 
 	assert.NilError(t, transportClient.Handshake())
@@ -226,7 +234,7 @@ func TestMultipleChannels(t *testing.T) {
 	assert.NilError(t, err)
 	go server.Serve()
 
-	transportClient, err := transport.Dial("udp", udpConn.LocalAddr().String(), nil)
+	transportClient, err := transport.Dial("udp", udpConn.LocalAddr().String(), getInsecureClientConfig())
 	assert.NilError(t, err)
 
 	assert.NilError(t, transportClient.Handshake())

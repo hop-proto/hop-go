@@ -82,8 +82,8 @@ func Client(args []string) {
 	if fs.NArg() > 0 {
 		logrus.Fatal("Unknown arguments provided. Usage: ", clientUsage)
 	}
-
-	config := transport.ClientConfig{} //TODO(baumanl):  I modified ClientConfig to let static keys into the transport protocol. Is this a correct way to do this?
+	_, verify := newTestServerConfig()
+	config := transport.ClientConfig{Verify: *verify} //TODO(baumanl):  I modified ClientConfig to let static keys into the transport protocol. Is this a correct way to do this?
 
 	//Check if this is a principal client process or one that needs to get an AG
 	//******GET AUTHORIZATION SOURCE******
@@ -118,7 +118,7 @@ func Client(args []string) {
 			addr = ip + ":" + port
 		}
 	}
-	transportConn, err := transport.Dial("udp", addr, &config) //There seem to be limits on Dial() and addr format
+	transportConn, err := transport.Dial("udp", addr, config) //There seem to be limits on Dial() and addr format
 	if err != nil {
 		logrus.Fatalf("C: error dialing server: %v", err)
 	}

@@ -21,7 +21,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 	"zmap.io/portal/authgrants"
-	"zmap.io/portal/certs"
 	"zmap.io/portal/codex"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/netproxy"
@@ -60,26 +59,6 @@ type hopSession struct {
 
 	isPrincipal bool
 	authgrant   *authGrant
-}
-
-func newTestServerConfig() *transport.ServerConfig {
-	keyPair, err := keys.ReadDHKeyFromPEMFile("./testdata/leaf-key.pem")
-	if err != nil {
-		logrus.Fatalf("S: ERROR WITH KEYPAIR %v", err)
-	}
-	certificate, err := certs.ReadCertificatePEMFile("testdata/leaf.pem")
-	if err != nil {
-		logrus.Fatalf("S: WRROR WITH CERTS %v", err)
-	}
-	intermediate, err := certs.ReadCertificatePEMFile("testdata/intermediate.pem")
-	if err != nil {
-		logrus.Fatalf("S: ERROR WITH INT CERTS %v", err)
-	}
-	return &transport.ServerConfig{
-		KeyPair:      keyPair,
-		Certificate:  certificate,
-		Intermediate: intermediate,
-	}
 }
 
 //handles connections to the hop server UDS to allow hop client processes to get authorization grants from their principal
@@ -263,7 +242,8 @@ func Serve(args []string) {
 	}
 	// It's actually a UDP conn
 	udpConn := pktConn.(*net.UDPConn)
-	transportServer, err := transport.NewServer(udpConn, newTestServerConfig())
+	serverConfig, _ := newTestServerConfig()
+	transportServer, err := transport.NewServer(udpConn, serverConfig)
 	if err != nil {
 		logrus.Fatalf("S: ERROR STARTING TRANSPORT CONN: %v", err)
 	}

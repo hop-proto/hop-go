@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/hex"
 	"io"
 	"net"
 	"sync"
@@ -16,31 +17,42 @@ import (
 	"zmap.io/portal/keys"
 )
 
-func newTestServerConfig(t *testing.T) *ServerConfig {
+func newTestServerConfig(t *testing.T) (*ServerConfig, *VerifyConfig) {
 	keyPair, err := keys.ReadDHKeyFromPEMFile("testdata/leaf-key.pem")
 	assert.NilError(t, err)
 	certificate, err := certs.ReadCertificatePEMFile("testdata/leaf.pem")
 	assert.NilError(t, err)
 	intermediate, err := certs.ReadCertificatePEMFile("testdata/intermediate.pem")
 	assert.NilError(t, err)
-	return &ServerConfig{
+	root, err := certs.ReadCertificatePEMFile("testdata/root.pem")
+	assert.NilError(t, err)
+	assert.Equal(t, "087aa52c8c287f34fcf6b33b22d68b02489d7168edae696a8ce4ae5e825bd1e9", hex.EncodeToString(root.Fingerprint[:]))
+	server := ServerConfig{
 		KeyPair:      keyPair,
 		Certificate:  certificate,
 		Intermediate: intermediate,
 	}
+	verify := VerifyConfig{
+		Store: certs.Store{},
+	}
+	verify.Store.AddCertificate(root)
+	return &server, &verify
 }
 
 func TestMultipleHandshakes(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
-	s, err := NewServer(pc.(*net.UDPConn), newTestServerConfig(t))
+	serverConfig, verifyConfig := newTestServerConfig(t)
+	s, err := NewServer(pc.(*net.UDPConn), serverConfig)
 	assert.NilError(t, err)
 	wg := sync.WaitGroup{}
 	go func() {
 		s.Serve()
 	}()
-	clientConfig := ClientConfig{}
+	clientConfig := ClientConfig{
+		Verify: *verifyConfig,
+	}
 	wg.Add(3)
 	var zero [KeyLen]byte
 	now := time.Now()
@@ -52,7 +64,7 @@ func TestMultipleHandshakes(t *testing.T) {
 			if delay > 0 {
 				time.Sleep(delay)
 			}
-			c, err := Dial("udp", pc.LocalAddr().String(), &clientConfig)
+			c, err := Dial("udp", pc.LocalAddr().String(), clientConfig)
 			assert.NilError(t, err)
 			err = c.Handshake()
 
@@ -82,7 +94,7 @@ func TestServerRead(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
-	config := newTestServerConfig(t)
+	config, verify := newTestServerConfig(t)
 	config.StartingReadTimeout = 10 * time.Second
 	config.MaxPendingConnections = 1
 	config.MaxBufferedPacketsPerConnection = 5
@@ -93,7 +105,7 @@ func TestServerRead(t *testing.T) {
 	}()
 
 	t.Run("test client write", func(t *testing.T) {
-		c, err := Dial("udp", pc.LocalAddr().String(), nil)
+		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify})
 		assert.NilError(t, err)
 		err = c.Handshake()
 		assert.NilError(t, err)
@@ -107,7 +119,7 @@ func TestServerRead(t *testing.T) {
 	})
 
 	t.Run("test client write triggers handshake", func(t *testing.T) {
-		c, err := Dial("udp", pc.LocalAddr().String(), nil)
+		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify})
 		assert.NilError(t, err)
 		s := "Another splinter under the skin. Another season of loneliness."
 		n, err := c.Write([]byte(s))
@@ -119,7 +131,7 @@ func TestServerRead(t *testing.T) {
 	})
 
 	t.Run("test big client writes", func(t *testing.T) {
-		c, err := Dial("udp", pc.LocalAddr().String(), nil)
+		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify})
 		assert.NilError(t, err)
 		data := make([]byte, 3100)
 		n, err := rand.Read(data)
@@ -156,7 +168,7 @@ func TestServerWrite(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
-	config := newTestServerConfig(t)
+	config, verify := newTestServerConfig(t)
 	config.StartingReadTimeout = 10 * time.Second
 	config.MaxPendingConnections = 1
 	config.MaxBufferedPacketsPerConnection = 5
@@ -167,7 +179,7 @@ func TestServerWrite(t *testing.T) {
 	}()
 
 	t.Run("server echo", func(t *testing.T) {
-		c, err := Dial("udp", pc.LocalAddr().String(), nil)
+		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify})
 		assert.NilError(t, err)
 		c.Handshake()
 		h, err := server.AcceptTimeout(5 * time.Second)
@@ -202,7 +214,7 @@ func TestServerWrite(t *testing.T) {
 			"Just wanted to love everyone",
 		}
 
-		c, err := Dial("udp", pc.LocalAddr().String(), nil)
+		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify})
 		assert.NilError(t, err)
 
 		wg := sync.WaitGroup{}

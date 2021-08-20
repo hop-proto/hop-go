@@ -12,7 +12,7 @@ var _ net.Conn = &Client{}
 var ErrUDPOnly = errors.New("portal requires UDP transport")
 
 // Dial matches the interface of net.Dial
-func Dial(network, address string, config *ClientConfig) (*Client, error) {
+func Dial(network, address string, config ClientConfig) (*Client, error) {
 	if network != "udp" && network != "subspace" {
 		return nil, ErrUDPOnly
 	}
@@ -35,7 +35,7 @@ func Dial(network, address string, config *ClientConfig) (*Client, error) {
 }
 
 //DialNP is similar to Dial, but using a reliable tube as an underlying conn for the Client
-func DialNP(network, address string, tube UDPLike, config *ClientConfig) (*Client, error) {
+func DialNP(network, address string, tube UDPLike, config ClientConfig) (*Client, error) {
 	// Figure out what address we would use to dial
 	throwaway, err := net.Dial("udp", address)
 	if err != nil {
@@ -43,8 +43,5 @@ func DialNP(network, address string, tube UDPLike, config *ClientConfig) (*Clien
 	}
 	remoteAddr := throwaway.RemoteAddr()
 	throwaway.Close()
-	if config == nil { //TODO(baumanl): Why do I have this weird if/else here? necessary?
-		return NewClient(tube, remoteAddr.(*net.UDPAddr), nil), nil
-	}
 	return NewClient(tube, remoteAddr.(*net.UDPAddr), config), nil
 }

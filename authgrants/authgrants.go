@@ -96,7 +96,7 @@ func Principal(agt *tubes.Reliable, m *tubes.Muxer, execTube *codex.ExecTube, co
 		}
 
 		//start hop session over NPC
-		tclient, e := transport.DialNP("netproxy", addr, npt, config)
+		tclient, e := transport.DialNP("netproxy", addr, npt, *config)
 		if e != nil {
 			logrus.Fatal("error dialing netproxy")
 		}

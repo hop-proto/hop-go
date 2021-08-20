@@ -40,6 +40,20 @@ const (
 	Root         CertificateType = 3
 )
 
+// String implements Stringer for CertificateType.
+func (t CertificateType) String() string {
+	switch t {
+	case Leaf:
+		return "leaf"
+	case Intermediate:
+		return "intermediate"
+	case Root:
+		return "root"
+	default:
+		return "unknown"
+	}
+}
+
 // CertificateTypeFromString returns a CertificateType based on its name. It is
 // case-insensitive.
 func CertificateTypeFromString(typeStr string) (CertificateType, error) {
@@ -96,14 +110,22 @@ type IDType byte
 
 // Known IDType values
 const (
-	DNSName   IDType = 0x01
-	IPAddress IDType = 0x02
+	TypeDNSName   IDType = 0x01
+	TypeIPAddress IDType = 0x02
 )
 
 // Name is a UTF-8 label and an IDType. It can be encoded to an IDBlock.
 type Name struct {
 	Label string
 	Type  IDType
+}
+
+// DNSName returns a Name with Type set to TypeDNSName and the provided label.
+func DNSName(label string) Name {
+	return Name{
+		Label: label,
+		Type:  TypeDNSName,
+	}
 }
 
 // IsZero returns true if the label is empty and tye type is 0.

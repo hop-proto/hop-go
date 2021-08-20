@@ -37,7 +37,7 @@ func TestWriteTo(t *testing.T) {
 		IDChunk: IDChunk{
 			Blocks: []Name{
 				{
-					Type:  DNSName,
+					Type:  TypeDNSName,
 					Label: "example.domain",
 				},
 			},
@@ -148,46 +148,4 @@ func readFile(t *testing.T, f string) []byte {
 	b, err := ioutil.ReadAll(fd)
 	assert.NilError(t, err)
 	return b
-}
-
-func TestVerify(t *testing.T) {
-	root, err := ReadCertificatePEMFile("testdata/root.pem")
-	assert.NilError(t, err)
-	intermediate, err := ReadCertificatePEMFile("testdata/intermediate.pem")
-	assert.NilError(t, err)
-	leaf, err := ReadCertificatePEMFile("testdata/leaf.pem")
-	assert.NilError(t, err)
-
-	err = VerifyParent(leaf, leaf)
-	assert.Check(t, err != nil)
-	err = VerifyParent(leaf, intermediate)
-	assert.Check(t, err)
-	err = VerifyParent(leaf, root)
-	assert.Check(t, err != nil)
-
-	err = VerifyParent(intermediate, leaf)
-	assert.Check(t, err != nil)
-	err = VerifyParent(intermediate, intermediate)
-	assert.Check(t, err != nil)
-	err = VerifyParent(intermediate, root)
-	assert.Check(t, err)
-
-	err = VerifyParent(root, leaf)
-	assert.Check(t, err != nil)
-	err = VerifyParent(root, intermediate)
-	assert.Check(t, err != nil)
-	err = VerifyParent(root, root)
-	assert.Check(t, err)
-
-	leaf.Signature[0]++
-	err = VerifyParent(leaf, intermediate)
-	assert.Check(t, err != nil)
-
-	intermediate.Signature[1]++
-	err = VerifyParent(intermediate, root)
-	assert.Check(t, err != nil)
-
-	root.Signature[63]++
-	err = VerifyParent(root, root)
-	assert.Check(t, err != nil)
 }

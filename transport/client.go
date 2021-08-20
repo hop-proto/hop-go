@@ -96,6 +96,8 @@ func (c *Client) clientHandshakeLocked() error {
 		logrus.Infof("client static is: %v from config", c.hs.static.Public.String())
 	}
 
+	c.hs.clientVerify = &c.config.Verify
+
 	c.hs.duplex.Absorb([]byte(ProtocolName))
 
 	// TODO(dadrian): This should be allocated smaller
@@ -130,7 +132,7 @@ func (c *Client) clientHandshakeLocked() error {
 	c.hs.RekeyFromSqueeze()
 
 	// Client Ack
-	n, err = c.hs.writeClientAck(buf, c.config.Name)
+	n, err = c.hs.writeClientAck(buf)
 	if err != nil {
 		return err
 	}
@@ -388,13 +390,11 @@ func (c *Client) SetWriteDeadline(t time.Time) error {
 
 // NewClient returns a Client configured as specified, using the underlying UDP
 // connection. The Client has not yet completed a handshake.
-func NewClient(conn UDPLike, server *net.UDPAddr, conf *ClientConfig) *Client {
+func NewClient(conn UDPLike, server *net.UDPAddr, config ClientConfig) *Client {
 	c := &Client{
 		underlyingConn: conn,
 		dialAddr:       server,
-	}
-	if conf != nil {
-		c.config = *conf
+		config:         config,
 	}
 	return c
 }
