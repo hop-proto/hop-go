@@ -10,20 +10,21 @@ import (
 )
 
 // The largest tube frame data length field.
-const MAX_FRAME_DATA_LENGTH = 2000
+const maxFrameDataLength = 2000
 
 // The highest number of frames we will transmit per timeout period,
 // even if the window size is large enough.
-const MAX_FRAG_TRANS_PER_RTO = 50
+const maxFragTransPerRTO = 50
 
-type Sender struct {
+type sender struct {
 	// The acknowledgement number sent from the other end of the connection.
-	ackNo   uint64
-	finSent bool
-	closed  bool
-	frameNo uint32
+	ackNo      uint64
+	frameNo    uint32
+	windowSize uint16
+	finSent    bool
+	closed     bool
 	// The buffer of unacknowledged tube frames that will be retransmitted if necessary.
-	frames []*Frame
+	frames []*frame
 
 	//TODO(baumanl): is it safe and good style to have this tube here?
 	//First attempt at stopping laggy behavior due to retransmit previously always waiting for RTO.
@@ -34,7 +35,7 @@ type Sender struct {
 	frameDataLengths map[uint32]uint16
 	// The current buffer of unacknowledged bytes from the sender.
 	// A byte slice works well here because:
-	// 	(1) we need to accomodate resending fragments of potentially varying window sizes
+	// 	(1) we need to accommodate resending fragments of potentially varying window sizes
 	// 	based on the receiving end, so being able to arbitrarily index from the front is important.
 	//	(2) the append() function when write() is called will periodically clean up the unused
 	//	memory in the front of the slice by reallocating the buffer array.
@@ -42,18 +43,17 @@ type Sender struct {
 	// The lock controls all fields of the sender.
 	l sync.Mutex
 	// Retransmission TimeOut.
-	RTO        time.Duration
-	sendQueue  chan *Frame
-	windowSize uint16
+	RTO       time.Duration
+	sendQueue chan *frame
 }
 
-func (s *Sender) unsentFramesRemaining() bool {
+func (s *sender) unsentFramesRemaining() bool {
 	s.l.Lock()
 	defer s.l.Unlock()
 	return len(s.frames) > 0
 }
 
-func (s *Sender) write(b []byte) (n int, err error) {
+func (s *sender) write(b []byte) (n int, err error) {
 	s.l.Lock()
 	defer func() {
 		s.l.Unlock()
@@ -65,18 +65,18 @@ func (s *Sender) write(b []byte) (n int, err error) {
 	s.buffer = append(s.buffer, b...)
 
 	for len(s.buffer) > 0 {
-		dataLength := uint16(MAX_FRAME_DATA_LENGTH)
+		dataLength := uint16(maxFrameDataLength)
 		if uint16(len(s.buffer)) < dataLength {
 			dataLength = uint16(len(s.buffer))
 		}
-		pkt := Frame{
+		pkt := frame{
 			dataLength: dataLength,
 			frameNo:    s.frameNo,
 			data:       s.buffer[:dataLength],
 		}
 
 		s.frameDataLengths[pkt.frameNo] = dataLength
-		s.frameNo += 1
+		s.frameNo++
 		s.buffer = s.buffer[dataLength:]
 		s.frames = append(s.frames, &pkt)
 
@@ -85,7 +85,7 @@ func (s *Sender) write(b []byte) (n int, err error) {
 	return len(b), nil
 }
 
-func (s *Sender) recvAck(ackNo uint32) error {
+func (s *sender) recvAck(ackNo uint32) error {
 	logrus.Debug("GRABBING LOCK")
 	s.l.Lock()
 	defer s.l.Unlock()
@@ -102,21 +102,21 @@ func (s *Sender) recvAck(ackNo uint32) error {
 			return fmt.Errorf("data length missing for frame %d", s.ackNo)
 		}
 		delete(s.frameDataLengths, uint32(s.ackNo))
-		s.ackNo += 1
+		s.ackNo++
 		s.frames = s.frames[1:]
 	}
 
 	return nil
 }
 
-func (s *Sender) retransmit() {
+func (s *sender) retransmit() {
 	for !s.isClosed() { // TODO - decide how to shutdown this endless loop with an enum state
 		timer := time.NewTimer(s.RTO)
 		select {
 		case <-timer.C:
 			s.l.Lock()
 			if len(s.frames) == 0 {
-				pkt := Frame{
+				pkt := frame{
 					dataLength: 0,
 					frameNo:    s.frameNo,
 					data:       []byte{},
@@ -125,39 +125,39 @@ func (s *Sender) retransmit() {
 				s.sendQueue <- &pkt
 			}
 			i := 0
-			for i < len(s.frames) && i < int(s.windowSize) && i < MAX_FRAG_TRANS_PER_RTO {
+			for i < len(s.frames) && i < int(s.windowSize) && i < maxFragTransPerRTO {
 				s.sendQueue <- s.frames[i]
 				//logrus.Info("PUTTING PKT ON SEND QUEUE - FIN? ", s.frames[i].flags.FIN)
-				i += 1
+				i++
 			}
 			s.l.Unlock()
 		case <-s.ret: //case received new data
 			s.l.Lock()
 			i := 0
-			for i < len(s.frames) && i < int(s.windowSize) && i < MAX_FRAG_TRANS_PER_RTO {
+			for i < len(s.frames) && i < int(s.windowSize) && i < maxFragTransPerRTO {
 				s.sendQueue <- s.frames[i]
 				//logrus.Info("PUTTING PKT ON SEND QUEUE - FIN? ", s.frames[i].flags.FIN)
-				i += 1
+				i++
 			}
 			s.l.Unlock()
 		}
 
 	}
 }
-func (s *Sender) isClosed() bool {
+func (s *sender) isClosed() bool {
 	s.l.Lock()
 	defer s.l.Unlock()
 	return s.closed
 }
 
-func (s *Sender) close() {
+func (s *sender) close() {
 	s.l.Lock()
 	defer s.l.Unlock()
 	s.closed = true
 }
 
 /* */
-func (s *Sender) sendFin() error {
+func (s *sender) sendFin() error {
 	s.l.Lock()
 	defer s.l.Unlock()
 	if s.closed || s.finSent {
@@ -165,11 +165,11 @@ func (s *Sender) sendFin() error {
 	}
 	s.finSent = true
 
-	pkt := Frame{
+	pkt := frame{
 		dataLength: 0,
 		frameNo:    s.frameNo,
 		data:       []byte{},
-		flags: FrameFlags{
+		flags: frameFlags{
 			ACK:  true,
 			FIN:  true,
 			REQ:  false,
@@ -178,7 +178,7 @@ func (s *Sender) sendFin() error {
 	}
 
 	s.frameDataLengths[pkt.frameNo] = 0
-	s.frameNo += 1
+	s.frameNo++
 	s.frames = append(s.frames, &pkt)
 	//logrus.Info("ADDED FIN PACKET TO SEND QUEUE")
 	return nil

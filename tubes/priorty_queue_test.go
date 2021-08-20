@@ -18,7 +18,7 @@ func TestOrdering(t *testing.T) {
 	pq := make(PriorityQueue, len(items))
 	i := 0
 	for value, priority := range items {
-		pq[i] = &Item{
+		pq[i] = &pqItem{
 			value:    []byte(value),
 			priority: uint64(priority),
 			index:    i,
@@ -27,22 +27,22 @@ func TestOrdering(t *testing.T) {
 	}
 	heap.Init(&pq)
 
-	item := &Item{
+	item := &pqItem{
 		value:    []byte("orange"),
 		priority: 1,
 	}
 	heap.Push(&pq, item)
 
-	item = &Item{
+	item = &pqItem{
 		value:    []byte("zebra"),
 		priority: 10,
 	}
 	heap.Push(&pq, item)
 
 	// Take the items out; they arrive in decreasing priority order.
-	assert.Equal(t, string("orange"), string(heap.Pop(&pq).(*Item).value))
-	assert.Equal(t, string("apple"), string(heap.Pop(&pq).(*Item).value))
-	assert.Equal(t, string("banana"), string(heap.Pop(&pq).(*Item).value))
-	assert.Equal(t, string("pear"), string(heap.Pop(&pq).(*Item).value))
-	assert.Equal(t, string("zebra"), string(heap.Pop(&pq).(*Item).value))
+	assert.Equal(t, string("orange"), string(heap.Pop(&pq).(*pqItem).value))
+	assert.Equal(t, string("apple"), string(heap.Pop(&pq).(*pqItem).value))
+	assert.Equal(t, string("banana"), string(heap.Pop(&pq).(*pqItem).value))
+	assert.Equal(t, string("pear"), string(heap.Pop(&pq).(*pqItem).value))
+	assert.Equal(t, string("zebra"), string(heap.Pop(&pq).(*pqItem).value))
 }

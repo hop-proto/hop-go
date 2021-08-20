@@ -1,3 +1,4 @@
+//Package tubes implements the multiplexing of raw data into logical channels of a hop session
 package tubes
 
 import (
@@ -20,17 +21,17 @@ import (
 //   3. Buffering
 //   4. Concurrency controls (locks)
 
-const RTO = time.Millisecond * 500
+const retransmitOffset = time.Millisecond * 500
 
-const WINDOW_SIZE = 128
+const windowSize = 128
 
 type state int
 
 const (
-	CREATED     state = iota
-	INITIATED   state = iota
-	CLOSE_START state = iota
-	CLOSED      state = iota
+	created    state = iota
+	initiated  state = iota
+	closeStart state = iota
+	closed     state = iota
 )
 
 //Tube Type constants
@@ -48,9 +49,9 @@ type Reliable struct {
 	id         byte
 	localAddr  net.Addr
 	m          sync.Mutex
-	recvWindow Receiver
+	recvWindow receiver
 	remoteAddr net.Addr
-	sender     Sender
+	sender     sender
 	sendQueue  chan []byte
 	tubeState  state
 }
@@ -65,7 +66,7 @@ func (r *Reliable) getState() state {
 }
 
 func (r *Reliable) send() {
-	for r.getState() == INITIATED || r.getState() == CLOSE_START {
+	for r.getState() == initiated || r.getState() == closeStart {
 		pkt := <-r.sender.sendQueue
 		pkt.tubeID = r.id
 		pkt.ackNo = r.recvWindow.getAck()
@@ -75,7 +76,7 @@ func (r *Reliable) send() {
 	}
 }
 
-func NewReliableTubeWithTubeId(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType byte, tubeID byte) *Reliable {
+func newReliableTubeWithTubeID(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType byte, tubeID byte) *Reliable {
 	r := makeTube(underlying, netConn, sendQueue, tubeType, tubeID)
 	go r.initiate(false)
 	return r
@@ -84,7 +85,7 @@ func NewReliableTubeWithTubeId(underlying transport.MsgConn, netConn net.Conn, s
 func makeTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType byte, tubeID byte) *Reliable {
 	r := &Reliable{
 		id:        tubeID,
-		tubeState: CREATED,
+		tubeState: created,
 		// TODO (dadrian): uncomment this when transport.Handle and transport.Client implement Local,RemoteAddr()
 		// localAddr:  netConn.LocalAddr(),
 		// remoteAddr: netConn.RemoteAddr(),
@@ -92,25 +93,25 @@ func makeTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []b
 		closedCond: sync.Cond{
 			L: &sync.Mutex{},
 		},
-		recvWindow: Receiver{
+		recvWindow: receiver{
 			buffer: new(bytes.Buffer),
 			bufferCond: sync.Cond{
 				L: &sync.Mutex{},
 			},
 			fragments:   make(PriorityQueue, 0),
-			windowSize:  WINDOW_SIZE,
+			windowSize:  windowSize,
 			windowStart: 1,
 		},
-		sender: Sender{
+		sender: sender{
 			ackNo:            1,
 			buffer:           make([]byte, 0),
 			closed:           false,
 			finSent:          false,
 			frameDataLengths: make(map[uint32]uint16),
 			frameNo:          1,
-			RTO:              RTO,
-			sendQueue:        make(chan *Frame),
-			windowSize:       WINDOW_SIZE,
+			RTO:              retransmitOffset,
+			sendQueue:        make(chan *frame),
+			windowSize:       windowSize,
 			ret:              make(chan int),
 		},
 		sendQueue: sendQueue,
@@ -121,7 +122,7 @@ func makeTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []b
 	return r
 }
 
-func NewReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType byte) (*Reliable, error) {
+func newReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType byte) (*Reliable, error) {
 	cid := []byte{0}
 	n, err := rand.Read(cid)
 	if err != nil || n != 1 {
@@ -135,17 +136,17 @@ func NewReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue c
 /* req: whether the tube is requesting to initiate a tube (true), or whether is respondding to an initiation request (false).*/
 func (r *Reliable) initiate(req bool) {
 	tubeType := r.tType
-	not_init := true
+	notInit := true
 
-	for not_init {
-		p := InitiateFrame{
+	for notInit {
+		p := initiateFrame{
 			tubeID:     r.id,
 			tubeType:   tubeType,
 			data:       []byte{},
 			dataLength: 0,
 			frameNo:    0,
 			windowSize: r.recvWindow.windowSize,
-			flags: FrameFlags{
+			flags: frameFlags{
 				ACK:  true,
 				FIN:  false,
 				REQ:  req,
@@ -154,17 +155,17 @@ func (r *Reliable) initiate(req bool) {
 		}
 		r.sendQueue <- p.toBytes()
 		r.m.Lock()
-		not_init = r.tubeState == CREATED
+		notInit = r.tubeState == created
 		r.m.Unlock()
-		timer := time.NewTimer(RTO)
+		timer := time.NewTimer(retransmitOffset)
 		<-timer.C
 	}
 	go r.sender.retransmit()
 	go r.send()
 }
 
-func (r *Reliable) receive(pkt *Frame) error {
-	if r.tubeState != INITIATED {
+func (r *Reliable) receive(pkt *frame) error {
+	if r.tubeState != initiated {
 		//logrus.Error("receiving non-initiate tube frames when not initiated")
 		return errors.New("receiving non-initiate tube frames when not initiated")
 	}
@@ -179,16 +180,16 @@ func (r *Reliable) receive(pkt *Frame) error {
 	return err
 }
 
-func (r *Reliable) receiveInitiatePkt(pkt *InitiateFrame) error {
+func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 	r.m.Lock()
 	defer r.m.Unlock()
 
-	if r.tubeState == CREATED {
+	if r.tubeState == created {
 		r.recvWindow.m.Lock()
 		r.recvWindow.ackNo = 1
 		r.recvWindow.m.Unlock()
 		//logrus.Debug("INITIATED! ", pkt.flags.REQ, " ", pkt.flags.RESP)
-		r.tubeState = INITIATED
+		r.tubeState = initiated
 		r.sender.recvAck(1)
 	}
 
@@ -207,7 +208,7 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 	return r.sender.write(b)
 }
 
-//Need to implement WriteTo interface for io.Copy() to work
+//WriteTo interface for io.Copy() to work
 func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
 	var count int64
 	for {
@@ -226,7 +227,7 @@ func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
 
 }
 
-//implement the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
+//WriteMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
 	length := len(b)
 	h := make([]byte, 2)
@@ -235,7 +236,7 @@ func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, e
 	return length, 0, e
 }
 
-//implement the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
+//ReadMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
 	h := make([]byte, 2)
 	_, e := r.Read(h)
@@ -249,10 +250,11 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 	return n, 0, 0, nil, e
 }
 
+//Close handles closing reliable tubes
 func (r *Reliable) Close() error {
 	r.m.Lock()
 	name := r.id
-	if r.tubeState == CLOSED {
+	if r.tubeState == closed {
 		r.m.Unlock()
 		return errors.New("tube already closed")
 	}
@@ -289,34 +291,40 @@ func (r *Reliable) Close() error {
 	r.sender.close()
 	logrus.Debugf("closed tube: %v", name)
 	r.m.Lock()
-	r.tubeState = CLOSED
+	r.tubeState = closed
 	r.m.Unlock()
 
 	return nil
 }
 
+//Type returns tube type
 func (r *Reliable) Type() byte {
 	return r.tType
 }
 
+//LocalAddr returns tube local address
 func (r *Reliable) LocalAddr() net.Addr {
 	return r.localAddr
 }
 
+//RemoteAddr returns r.remoteAddr
 func (r *Reliable) RemoteAddr() net.Addr {
 	return r.remoteAddr
 }
 
+//SetDeadline (not implemented)
 func (r *Reliable) SetDeadline(t time.Time) error {
 	// TODO
 	panic("implement me")
 }
 
+//SetReadDeadline (not implemented)
 func (r *Reliable) SetReadDeadline(t time.Time) error {
 	// TODO
 	panic("implement me")
 }
 
+//SetWriteDeadline (not implemented)
 func (r *Reliable) SetWriteDeadline(t time.Time) error {
 	// TODO
 	panic("implement me")

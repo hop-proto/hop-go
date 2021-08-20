@@ -1,6 +1,6 @@
 package tubes
 
-type Item struct {
+type pqItem struct {
 	value    []byte
 	priority uint64
 	index    int
@@ -8,7 +8,7 @@ type Item struct {
 }
 
 // A PriorityQueue implements heap.Interface and holds Items.
-type PriorityQueue []*Item
+type PriorityQueue []*pqItem
 
 func (pq PriorityQueue) Len() int { return len(pq) }
 
@@ -22,13 +22,15 @@ func (pq PriorityQueue) Swap(i, j int) {
 	pq[j].index = j
 }
 
+//Push adds item to priority queue
 func (pq *PriorityQueue) Push(x interface{}) {
 	n := len(*pq)
-	item := x.(*Item)
+	item := x.(*pqItem)
 	item.index = n
 	*pq = append(*pq, item)
 }
 
+//Pop removes and returns element from priority queue
 func (pq *PriorityQueue) Pop() interface{} {
 	old := *pq
 	n := len(old)

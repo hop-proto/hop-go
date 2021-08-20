@@ -196,7 +196,7 @@ func TestSmallWindow(t *testing.T) {
 	}
 
 	go func() {
-		_, err = tube.Write([]byte(testData))
+		_, err = tube.Write(testData)
 		assert.NilError(t, err)
 		err = tube.Close()
 		assert.NilError(t, err)
@@ -262,13 +262,13 @@ func TestMultipleChannels(t *testing.T) {
 
 	go func() {
 		logrus.Debug("WRITE 1")
-		_, err = c1.Write([]byte(testData1))
+		_, err = c1.Write(testData1)
 		assert.NilError(t, err)
 		logrus.Debug("WRITE 2")
-		_, err = c2.Write([]byte(testData2))
+		_, err = c2.Write(testData2)
 		assert.NilError(t, err)
 		logrus.Debug("WRITE 3")
-		_, err = c3.Write([]byte(testData3))
+		_, err = c3.Write(testData3)
 		assert.NilError(t, err)
 		logrus.Debug("CLOSE 1")
 		err = c1.Close()

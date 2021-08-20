@@ -8,6 +8,7 @@ import (
 	"zmap.io/portal/transport"
 )
 
+//Muxer handles delivering and sending tube messages
 type Muxer struct {
 	tubes map[byte]*Reliable
 	// Channels waiting for an Accept() call.
@@ -20,6 +21,7 @@ type Muxer struct {
 	netConn    net.Conn
 }
 
+//NewMuxer starts a new tube muxer
 func NewMuxer(msgConn transport.MsgConn, netConn net.Conn) *Muxer {
 	return &Muxer{
 		tubes:      make(map[byte]*Reliable),
@@ -38,27 +40,29 @@ func (m *Muxer) addTube(c *Reliable) {
 	m.m.Unlock()
 }
 
-func (m *Muxer) GetTube(tubeID byte) (*Reliable, bool) {
+func (m *Muxer) getTube(tubeID byte) (*Reliable, bool) {
 	m.m.Lock()
 	defer m.m.Unlock()
 	c, ok := m.tubes[tubeID]
 	return c, ok
 }
 
+//CreateTube starts a new reliable tube
 func (m *Muxer) CreateTube(tType byte) (*Reliable, error) {
-	r, err := NewReliableTube(m.underlying, m.netConn, m.sendQueue, tType)
+	r, err := newReliableTube(m.underlying, m.netConn, m.sendQueue, tType)
 	m.addTube(r)
 	logrus.Infof("Created Tube: %v", r.id)
 	return r, err
 }
 
+//Accept blocks for and accepts a new reliable tube
 func (m *Muxer) Accept() (*Reliable, error) {
 	s := <-m.tubeQueue
 	logrus.Infof("Accepted Tube: %v", s.id)
 	return s, nil
 }
 
-func (m *Muxer) readMsg() (*Frame, error) {
+func (m *Muxer) readMsg() (*frame, error) {
 	pkt := make([]byte, 65535)
 	_, err := m.underlying.ReadMsg(pkt)
 	if err != nil {
@@ -75,6 +79,7 @@ func (m *Muxer) sender() {
 	}
 }
 
+//Start allows a muxer to start listening and handling incoming tube requests and messages
 func (m *Muxer) Start() {
 	go m.sender()
 	m.stopped = false
@@ -83,7 +88,7 @@ func (m *Muxer) Start() {
 		if err != nil {
 			continue
 		}
-		tube, ok := m.GetTube(frame.tubeID)
+		tube, ok := m.getTube(frame.tubeID)
 		if !ok {
 			//logrus.Info("NO CHANNEL")
 			initFrame, err := fromInitiateBytes(frame.toBytes())
@@ -94,7 +99,7 @@ func (m *Muxer) Start() {
 					logrus.Panic(err)
 					panic(err)
 				}
-				tube = NewReliableTubeWithTubeId(m.underlying, m.netConn, m.sendQueue, initFrame.tubeType, initFrame.tubeID)
+				tube = newReliableTubeWithTubeID(m.underlying, m.netConn, m.sendQueue, initFrame.tubeType, initFrame.tubeID)
 				m.addTube(tube)
 				m.tubeQueue <- tube
 			}

@@ -2,26 +2,26 @@ package tubes
 
 import "encoding/binary"
 
-type Frame struct {
+type frame struct {
 	ackNo      uint32
+	frameNo    uint32
+	dataLength uint16
+	flags      frameFlags
 	tubeID     byte
 	data       []byte
-	dataLength uint16
-	flags      FrameFlags
-	frameNo    uint32
 }
 
-type InitiateFrame struct {
+type initiateFrame struct {
+	frameNo    uint32
 	tubeID     byte
 	tubeType   byte
 	data       []byte
 	dataLength uint16
-	flags      FrameFlags
-	frameNo    uint32
+	flags      frameFlags
 	windowSize uint16
 }
 
-type FrameFlags struct {
+type frameFlags struct {
 	// Flag to update the acknowledgement number from the sender of the packet for the receiver of the packet.
 	ACK bool
 	// Flag to teardown tube.
@@ -40,7 +40,7 @@ const (
 	RESPIdx = 3
 )
 
-func flagsToMetaByte(p *FrameFlags) byte {
+func flagsToMetaByte(p *frameFlags) byte {
 	meta := byte(0)
 	if p.ACK {
 		meta = meta | (1 << ACKIdx)
@@ -57,8 +57,8 @@ func flagsToMetaByte(p *FrameFlags) byte {
 	return meta
 }
 
-func metaToFlags(b byte) FrameFlags {
-	flags := FrameFlags{
+func metaToFlags(b byte) frameFlags {
+	flags := frameFlags{
 		ACK:  b&(1<<ACKIdx) != 0,
 		FIN:  b&(1<<FINIdx) != 0,
 		REQ:  b&(1<<REQIdx) != 0,
@@ -67,7 +67,7 @@ func metaToFlags(b byte) FrameFlags {
 	return flags
 }
 
-func (p *InitiateFrame) toBytes() []byte {
+func (p *initiateFrame) toBytes() []byte {
 	frameNumBytes := []byte{0, 0, 0, 0}
 	binary.BigEndian.PutUint32(frameNumBytes, p.frameNo)
 	dataLength := []byte{0, 0}
@@ -86,7 +86,7 @@ func (p *InitiateFrame) toBytes() []byte {
 	)
 }
 
-func (p *Frame) toBytes() []byte {
+func (p *frame) toBytes() []byte {
 	frameNoBytes := []byte{0, 0, 0, 0}
 	binary.BigEndian.PutUint32(frameNoBytes, p.frameNo)
 	dataLength := []byte{0, 0}
@@ -103,9 +103,9 @@ func (p *Frame) toBytes() []byte {
 	)
 }
 
-func fromBytes(b []byte) (*Frame, error) {
+func fromBytes(b []byte) (*frame, error) {
 	dataLength := binary.BigEndian.Uint16(b[2:4])
-	return &Frame{
+	return &frame{
 		tubeID:     b[0],
 		flags:      metaToFlags(b[1]),
 		dataLength: dataLength,
@@ -115,9 +115,9 @@ func fromBytes(b []byte) (*Frame, error) {
 	}, nil
 }
 
-func fromInitiateBytes(b []byte) (*InitiateFrame, error) {
+func fromInitiateBytes(b []byte) (*initiateFrame, error) {
 	dataLength := binary.BigEndian.Uint16(b[2:4])
-	return &InitiateFrame{
+	return &initiateFrame{
 		tubeID:     b[0],
 		flags:      metaToFlags(b[1]),
 		dataLength: dataLength,
