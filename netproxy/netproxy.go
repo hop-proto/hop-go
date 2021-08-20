@@ -1,4 +1,4 @@
-//Package npc provides utilities for network proxy tubes
+//Package netproxy provides utilities for network proxy tubes
 package netproxy
 
 import (

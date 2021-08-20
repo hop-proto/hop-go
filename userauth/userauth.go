@@ -1,3 +1,4 @@
+//Package userauth allows servers/clients to determine user authorization
 package userauth
 
 import (
@@ -19,6 +20,7 @@ type userAuthInitMsg struct {
 	username string
 }
 
+//Server tells client whether user authorization confirmed or denied
 const (
 	UserAuthConf = byte(1)
 	UserAuthDen  = byte(2)
@@ -49,6 +51,7 @@ func RequestAuthorization(ch *tubes.Reliable, key keys.PublicKey, username strin
 	return b[0] == UserAuthConf
 }
 
+//GetInitMsg lets the hop server read a user auth request
 func GetInitMsg(ch *tubes.Reliable) (keys.PublicKey, string) {
 	key := [32]byte{}
 	ch.Read(key[:])
