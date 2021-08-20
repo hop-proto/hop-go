@@ -63,7 +63,7 @@ type HandshakeState struct {
 	se []byte
 
 	// Certificate Stuff
-	clientVerify *VerifyConfiguration
+	clientVerify *VerifyConfig
 
 	remoteAddr *net.UDPAddr
 }

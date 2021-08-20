@@ -31,8 +31,12 @@ func main() {
 
 	switch action {
 	case "connect":
-		config := transport.ClientConfig{}
-		c, err := transport.Dial("udp", address, &config)
+		config := transport.ClientConfig{
+			Verify: transport.VerifyConfig{
+				InsecureSkipVerify: true,
+			},
+		}
+		c, err := transport.Dial("udp", address, config)
 		if err != nil {
 			logrus.Fatalf("client dial failed: %s", err)
 		}

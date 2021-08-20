@@ -7,15 +7,21 @@ import (
 	"zmap.io/portal/keys"
 )
 
-type VerifyConfiguration struct {
-	Store              certs.Store
+// VerifyConfig defines how to verify a remote certificate.
+type VerifyConfig struct {
+	// Store contains the trusted root certificates
+	Store certs.Store
+
+	// When InsecureSkipVerify is true, all chain building and verification is skipped.
 	InsecureSkipVerify bool
-	Name               certs.Name
+
+	// Name is used for SNI and compared to the certificate when non-empty.
+	Name certs.Name
 }
 
 // ClientConfig contains client-specific configuration settings.
 type ClientConfig struct {
-	Verify VerifyConfiguration
+	Verify VerifyConfig
 }
 
 const (

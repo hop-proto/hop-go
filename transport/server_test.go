@@ -17,7 +17,7 @@ import (
 	"zmap.io/portal/keys"
 )
 
-func newTestServerConfig(t *testing.T) (*ServerConfig, *VerifyConfiguration) {
+func newTestServerConfig(t *testing.T) (*ServerConfig, *VerifyConfig) {
 	keyPair, err := keys.ReadDHKeyFromPEMFile("testdata/leaf-key.pem")
 	assert.NilError(t, err)
 	certificate, err := certs.ReadCertificatePEMFile("testdata/leaf.pem")
@@ -32,7 +32,7 @@ func newTestServerConfig(t *testing.T) (*ServerConfig, *VerifyConfiguration) {
 		Certificate:  certificate,
 		Intermediate: intermediate,
 	}
-	verify := VerifyConfiguration{
+	verify := VerifyConfig{
 		Store: certs.Store{},
 	}
 	verify.Store.AddCertificate(root)
