@@ -21,4 +21,4 @@ build:
 .PHONY: test
 test: ## test
 test:
-	go test ./... -timeout 30s
+	go test ./... -timeout 60s

@@ -194,24 +194,19 @@ mac = duplex.squeeze()
 
 ---
 
-- $K_r$ is a key that is rotated every N minutes
+- $K_r$ is a key that is rotated every N minutes or M connections
 
 ```python
 # Continuing from duplex prior
 duplex.absorb(type + reserved)
 duplex.absorb(e_s)
 duplex.absorb(DH(ee))
-# AEAD Construction (Planned)
-# H = SHA3
-# aead = SANE_init(K_r)
-# data = aead_enc(e_s, H(e_c, clientIP, clientPort))
-# tag = aead.squeeze()
-# cookie = data || tag
-# AEAD Construction (Current)
-# H = SHA256
-# nonce = readRandomBytes(12)
-# aead = aes_gcm(K_r, nonce_size=12)
-cookie = aead.seal(K_r, nonce=nonce, plaintext=e_s.private, ad=H(e_c, clientIP, clientPort))
+
+# AEAD Construction
+H = SHA3.256
+aead = SANE_init(K_r)
+data, tag = aead.seal(plaintext=e_s.private, ad=H(e_c, clientIP, clientPort))
+cookie = data + tag
 duplex.absorb(cookie)
 mac = duplex.squeeze()
 ```

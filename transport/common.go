@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"golang.org/x/crypto/curve25519"
+	"zmap.io/portal/kravatte"
 )
 
 // ProtocolName is the string representation of the parameters used in this version
@@ -20,7 +21,7 @@ const (
 	TagLen       = 32
 	KeyLen       = 16
 	DHLen        = curve25519.PointSize
-	CookieLen    = 32 + 12 + 16 // 32 bytes of secret, 12 bytes of nonce, 16 bytes of GCM tag
+	CookieLen    = DHLen + kravatte.TagSize
 	SNILen       = 256
 	SessionIDLen = 4
 	CounterLen   = 8

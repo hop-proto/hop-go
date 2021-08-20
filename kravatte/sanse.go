@@ -83,7 +83,7 @@ func (s *sanse) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, err
 }
 
 // NewSANSE returns a SANSE implementation of cipher.AEAD. It has a NonceSize of
-// 0 and an Overhead of KravatteSANSETagSize.
+// 0 and an Overhead of TagSize.
 func NewSANSE(key []byte) (cipher.AEAD, error) {
 	s := sanse{
 		kravatte: Kravatte{},

@@ -2,14 +2,12 @@ package transport
 
 import (
 	"bytes"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
 	"errors"
 	"net"
 
 	"zmap.io/portal/certs"
 	"zmap.io/portal/keys"
+	"zmap.io/portal/kravatte"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/cyclist"
@@ -68,49 +66,31 @@ type HandshakeState struct {
 }
 
 func (hs *HandshakeState) writeCookie(b []byte) (int, error) {
-	// TODO(dadrian): Avoid allocating memory. Store a cipher on HandshakeState,
-	// but only if cipher.Block is thread-safe. But not sure how we'd avoid
-	// allocating memory for the NewGCM call. Hopefully this can be avoided when
-	// we switch to Kravatte.
-	cookieCipher, err := aes.NewCipher(hs.cookieKey[:])
+	// TODO(dadrian): Avoid allocating memory.
+	aead, err := kravatte.NewSANSE(hs.cookieKey[:])
 	if err != nil {
 		return 0, err
 	}
-	aead, err := cipher.NewGCMWithTagSize(cookieCipher, 16)
-	if err != nil {
-		return 0, err
-	}
-
-	// Until we sort out Deck-SANE, just shove a nonce here
-	if n, err := rand.Read(b[0:12]); err != nil || n != 12 {
-		panic("could not read random for cookie")
-	}
-	nonce := b[0:12]
 	plaintextCookie := hs.ephemeral.Private[:]
 	ad := CookieAD(&hs.remoteEphemeral, hs.remoteAddr)
-	logrus.Debugf("encrypt: cookie ad: %x", ad)
-	enc := aead.Seal(b[12:12], nonce, plaintextCookie, ad)
-	return len(enc) + 12, nil // CookieLen
+	enc := aead.Seal(b[:0], nil, plaintextCookie, ad)
+	if len(enc) != CookieLen {
+		logrus.Panicf("len(enc) != CookieLen: %d != %d. Not possible", len(enc), CookieLen)
+	}
+	return len(enc), nil // CookieLen
 }
 
 func (hs *HandshakeState) decryptCookie(b []byte) (int, error) {
 	if len(b) < CookieLen {
 		return 0, ErrBufUnderflow
 	}
-	cookieCipher, err := aes.NewCipher(hs.cookieKey[:])
+	aead, err := kravatte.NewSANSE(hs.cookieKey[:])
 	if err != nil {
 		return 0, err
 	}
-	aead, err := cipher.NewGCMWithTagSize(cookieCipher, 16)
-	if err != nil {
-		return 0, err
-	}
-	nonce := b[0:12]
-	encryptedCookie := b[12:CookieLen]
+	encryptedCookie := b[:CookieLen]
 	ad := CookieAD(&hs.remoteEphemeral, hs.remoteAddr)
-	logrus.Debugf("decrypt: cookie ad: %x", ad)
-	// TODO(dadrian): Avoid allocation?
-	out, err := aead.Open(hs.ephemeral.Private[:0], nonce, encryptedCookie, ad)
+	out, err := aead.Open(hs.ephemeral.Private[:0], nil, encryptedCookie, ad)
 	if err != nil {
 		return 0, ErrInvalidMessage
 	}
