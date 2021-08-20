@@ -68,7 +68,7 @@ func Client(args []string) {
 
 	fs.BoolVar(&principal, "K", principal, "indicates principal with default key location: $HOME/.hop/key")
 
-	//TODO: implement this option to allow for piping and expansion
+	//TODO(baumanl): implement this option to allow for piping and expansion
 	//var runCmdInShell bool
 	// fs.BoolVar(&runCmdInShell, "s", false, "run specified command within a shell")
 
@@ -83,7 +83,7 @@ func Client(args []string) {
 		logrus.Fatal("Unknown arguments provided. Usage: ", clientUsage)
 	}
 
-	config := transport.ClientConfig{}
+	config := transport.ClientConfig{} //TODO(baumanl):  I modified ClientConfig to let static keys into the transport protocol. Is this a correct way to do this?
 
 	//Check if this is a principal client process or one that needs to get an AG
 	//******GET AUTHORIZATION SOURCE******

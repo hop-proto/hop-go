@@ -87,7 +87,7 @@ func (c *Client) clientHandshakeLocked() error {
 	logrus.SetLevel(logrus.InfoLevel)
 
 	// TODO(dadrian): This should actually be, well, static
-	if c.config.KeyPair == nil {
+	if c.config.KeyPair == nil { //This shouldn't happen if there is actually a key provided
 		c.hs.static = new(keys.X25519KeyPair)
 		c.hs.static.Generate()
 		logrus.Infof("client static is: %v from rand", c.hs.static.Public.String())
