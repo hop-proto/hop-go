@@ -75,7 +75,7 @@ func main() {
 			PublicKey: *pubKey,
 			Names: []certs.Name{
 				{
-					Type:  certs.DNSName,
+					Type:  certs.TypeDNSName,
 					Label: dnsName,
 				},
 			},
@@ -114,7 +114,7 @@ func main() {
 			PublicKey: *pubKey,
 			Names: []certs.Name{
 				{
-					Type:  certs.DNSName,
+					Type:  certs.TypeDNSName,
 					Label: dnsName,
 				},
 			},
@@ -133,7 +133,7 @@ func main() {
 			PublicKey: signingKeyPair.Public,
 			Names: []certs.Name{
 				{
-					Type:  certs.DNSName,
+					Type:  certs.TypeDNSName,
 					Label: dnsName,
 				},
 			},

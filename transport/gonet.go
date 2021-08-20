@@ -12,7 +12,7 @@ var _ net.Conn = &Client{}
 var ErrUDPOnly = errors.New("portal requires UDP transport")
 
 // Dial matches the interface of net.Dial
-func Dial(network, address string, config *ClientConfig) (*Client, error) {
+func Dial(network, address string, config ClientConfig) (*Client, error) {
 	if network != "udp" && network != "subspace" {
 		return nil, ErrUDPOnly
 	}
