@@ -3,6 +3,7 @@ package codex
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -31,6 +32,39 @@ const (
 	specificCmd  = byte(2)
 )
 
+const (
+	execConf = byte(1)
+	execFail = byte(2)
+)
+
+//SendFailure lets the client know that executing the command failed and the error
+func SendFailure(t *tubes.Reliable, err error) {
+	msg := make([]byte, 5+len(err.Error()))
+	msg[0] = execFail
+	binary.BigEndian.PutUint16(msg[1:], uint16(len(err.Error())))
+	copy(msg[5:], []byte(err.Error()))
+	t.Write(msg)
+}
+
+//SendSuccess lets the client know that the server successful started the command
+func SendSuccess(t *tubes.Reliable) {
+	t.Write([]byte{execConf})
+}
+
+//GetStatus lets client waits for confirmation that cmd started or error if it failed
+func getStatus(t *tubes.Reliable) error {
+	resp := make([]byte, 1)
+	t.Read(resp)
+	if resp[0] == execConf {
+		return nil
+	}
+	elen := make([]byte, 4)
+	t.Read(elen)
+	buf := make([]byte, binary.BigEndian.Uint16(elen))
+	t.Read(buf)
+	return errors.New(string(buf))
+}
+
 //NewExecTube sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
 //Stores state in an ExecChan struct so stdin can be manipulated during authgrant process
 func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) *ExecTube {
@@ -44,6 +78,13 @@ func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) *ExecTube
 		msg = newExecInitMsg(defaultShell, cmd)
 	}
 	tube.Write(msg.ToBytes())
+
+	//get confirmation that cmd started successfully before piping IO
+	err := getStatus(tube)
+	if err != nil {
+		term.Restore(int(os.Stdin.Fd()), oldState)
+		logrus.Fatal("C: server failed to start cmd with error: ", err)
+	}
 
 	r, w := io.Pipe()
 	ex := ExecTube{

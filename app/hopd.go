@@ -2,6 +2,7 @@
 package app
 
 import (
+	"C"
 	"bufio"
 	"context"
 	"errors"
@@ -10,7 +11,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -441,21 +441,41 @@ func (sess *hopSession) handleAgc(ch *tubes.Reliable) {
 
 //TODO(baumanl): Add in better privilege separation? Right now hopd(root) directly starts commands through go routines. sshd uses like 3 levels of separation.
 func (sess *hopSession) startCodex(ch *tubes.Reliable) {
+	logrus.Info("Started session codex with TID: ", syscall.Gettid())
+	u := os.Getuid()
+	euid := os.Geteuid()
+	gid := os.Getgid()
+	wd, _ := os.Getwd()
+	logrus.Info("Start: Current UID: ", u, " EUID: ", euid, " GID: ", gid, " wd: ", wd)
+	defer func() {
+		u := os.Getuid()
+		euid := os.Geteuid()
+		gid := os.Getgid()
+		wd, _ := os.Getwd()
+		logrus.Info("End: Current UID: ", u, " EUID: ", euid, " GID: ", gid, " wd: ", wd)
+	}()
 	cmd, shell, _ := codex.GetCmd(ch)
 	if !sess.isPrincipal {
 		if sess.authgrant.used {
-			logrus.Error("Already performed approved action")
+			err := errors.New("already performed approved action")
+			logrus.Error(err)
+			codex.SendFailure(ch, err)
 			return
 		}
 		sess.authgrant.used = true
 		if cmd != sess.authgrant.action {
-			logrus.Error("CMD does not match Authgrant approved action")
+			err := errors.New("CMD does not match Authgrant approved action")
+			logrus.Error(err)
+			codex.SendFailure(ch, err)
 			return
 		}
 	}
 	cache, err := etcpwdparse.NewLoadedEtcPasswdCache() //Best way to do this? should I load this only once and then just reload on misses? What if /etc/passwd modified between accesses?
 	if err != nil {
-		logrus.Error("issue loading /etc/passwd")
+		err := errors.New("issue loading /etc/passwd")
+		logrus.Error(err)
+		codex.SendFailure(ch, err)
+		return
 	}
 	if user, ok := cache.LookupUserByName(sess.user); ok {
 		//Default behavior is for command.Env to inherit parents environment unless given and explicit alternative.
@@ -467,26 +487,29 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 			"HOME=" + user.Homedir(),
 			"TERM=" + os.Getenv("TERM"),
 		}
-		if !shell {
-			//start the command as the requested user (hopd must be a root privileged process)
-			runtime.LockOSThread()
-			defer runtime.UnlockOSThread() //TODO(baumanl): should this be deferred or called after starting command?
-			syscall.Chdir(user.Homedir())
-			syscall.Setgroups([]int{user.Gid()}) //TODO(baumanl): Check that: These permissions changes should only affect this thread
-			syscall.Setgid(user.Gid())
-			syscall.Setuid(user.Uid())
-		} else {
+		if shell {
 			cmd = "login -f " + sess.user //login(1) starts default shell for user and changes all privileges and environment variables
 		}
-
 		args := strings.Split(cmd, " ")
 		c := exec.Command(args[0], args[1:]...)
+		if !shell {
+			c.Dir = user.Homedir()
+			c.SysProcAttr = &syscall.SysProcAttr{}
+			c.SysProcAttr.Credential = &syscall.Credential{
+				Uid:    uint32(user.Uid()),
+				Gid:    uint32(user.Gid()),
+				Groups: []uint32{uint32(user.Gid())},
+			}
+		}
 		c.Env = env
 		logrus.Infof("Executing: %v", cmd)
 		f, err := pty.Start(c)
 		if err != nil {
-			logrus.Fatalf("S: error starting pty %v", err)
+			logrus.Errorf("S: error starting pty %v", err)
+			codex.SendFailure(ch, err)
+			return
 		}
+		codex.SendSuccess(ch)
 		go func() {
 			c.Wait()
 			ch.Close()
@@ -507,6 +530,9 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 			sess.done <- 1
 		}()
 	} else {
-		logrus.Error("could not find entry for user ", sess.user)
+		err := errors.New("could not find entry for user " + sess.user)
+		logrus.Error(err)
+		codex.SendFailure(ch, err)
+		return
 	}
 }
