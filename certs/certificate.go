@@ -40,6 +40,7 @@ const (
 	Root         CertificateType = 3
 )
 
+// String implements Stringer for CertificateType.
 func (t CertificateType) String() string {
 	switch t {
 	case Leaf:
