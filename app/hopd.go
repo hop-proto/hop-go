@@ -2,7 +2,6 @@
 package app
 
 import (
-	"C"
 	"bufio"
 	"context"
 	"errors"

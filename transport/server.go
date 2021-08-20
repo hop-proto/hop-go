@@ -15,14 +15,6 @@ import (
 	"zmap.io/portal/keys"
 )
 
-//AuthGrant contains deadline, user, action
-// type AuthGrant struct {
-// 	Deadline         time.Time
-// 	User             string
-// 	Action           string
-// 	PrincipalSession *Handle
-// }
-
 type outgoing struct {
 	pkt []byte
 	dst *net.UDPAddr
@@ -48,8 +40,6 @@ type Server struct {
 	handshakes map[string]*HandshakeState
 	sessions   map[SessionID]*SessionState
 
-	//authgrants map[keys.PublicKey]*AuthGrant //static key -> authgrant
-
 	pendingConnections chan *Handle
 	outgoing           chan outgoing
 
@@ -61,19 +51,6 @@ type Server struct {
 	certificate  []byte
 	intermediate []byte
 }
-
-//AddAuthgrant adds auth grant to server map
-// func (s *Server) AddAuthgrant(k keys.PublicKey, t time.Time, user string, action string, handle *Handle) {
-// 	ag := &AuthGrant{
-// 		Deadline:         t,
-// 		User:             user,
-// 		Action:           action,
-// 		PrincipalSession: handle,
-// 	}
-// 	s.m.Lock()
-// 	s.authgrants[k] = ag
-// 	s.m.Unlock()
-// }
 
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
 	s.m.Lock()
@@ -377,40 +354,6 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		return pos, nil, ErrInvalidMessage
 	}
 
-	//if the client static key is in authorized keys continue, otherwise abandon all state
-	//Check if the client is authorized permanently
-	// path, _ := os.UserHomeDir()
-	// path += "/.hop/authorized_keys"
-	// f, e := os.Open(path) //TODO: fix to actual address
-	// if e != nil {
-	// 	return pos, nil, k, ErrOpeningAuthKeys
-	// }
-	// defer f.Close()
-	// scanner := bufio.NewScanner(f)
-	// authorized := false
-	// k = keys.PublicKey(hs.clientStatic)
-	// for scanner.Scan() {
-	// 	if scanner.Text() == k.String() {
-	// 		authorized = true
-	// 		logrus.Debugf("USER AUTHORIZED")
-	// 		break
-	// 	}
-	// }
-	// if !authorized {
-	// 	//Check for a matching authgrant
-	// 	val, ok := s.authgrants[k]
-	// 	if !ok {
-	// 		//TODO: handle this gracefully (i.e. abandon all state)
-	// 		logrus.Info("KEY NOT AUTHORIZED")
-	// 	}
-	// 	if val.Deadline.Before(time.Now()) {
-	// 		delete(s.authgrants, k)
-	// 		//TODO: handle this gracefully (i.e. abandon all state)
-	// 		logrus.Info("AUTHGRANT DEADLINE EXCEEDED")
-	// 	}
-	// 	delete(s.authgrants, k)
-	// 	logrus.Info("USER AUTHORIZED")
-	// }
 	x = x[MacLen:]
 	pos += MacLen
 	var err error
@@ -623,8 +566,6 @@ func NewServer(conn *net.UDPConn, config *ServerConfig) (*Server, error) {
 
 		handshakes: make(map[string]*HandshakeState),
 		sessions:   make(map[SessionID]*SessionState),
-
-		//authgrants: make(map[keys.PublicKey]*AuthGrant),
 
 		pendingConnections: make(chan *Handle, config.maxPendingConnections()),
 		outgoing:           make(chan outgoing), // TODO(dadrian): Is this the appropriate size?
