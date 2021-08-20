@@ -9,6 +9,13 @@ import (
 	"zmap.io/portal/tubes"
 )
 
+var hostToIPAddr = map[string]string{ //TODO(baumanl): this should be dealt with in some user hop config file
+	"scratch-01": "10.216.2.64",
+	"scratch-02": "10.216.2.128",
+	"scratch-07": "10.216.2.208",
+	"localhost":  "127.0.0.1",
+}
+
 const npcConf = byte(1)
 
 type npcInitMsg struct {
@@ -59,6 +66,17 @@ func Server(npTube *tubes.Reliable) {
 	init := make([]byte, l)
 	npTube.Read(init)
 	dest := fromBytes(init)
+	if _, err := net.LookupAddr(dest.addr); err != nil {
+		//Couldn't resolve address with local resolver
+		h, p, e := net.SplitHostPort(dest.addr)
+		if e != nil {
+			logrus.Error(e)
+			return
+		}
+		if ip, ok := hostToIPAddr[h]; ok {
+			dest.addr = ip + ":" + p
+		}
+	}
 	logrus.Infof("dialing dest: %v", dest.addr)
 	throwaway, _ := net.Dial("udp", dest.addr)
 	remoteAddr := throwaway.RemoteAddr()

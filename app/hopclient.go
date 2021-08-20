@@ -2,6 +2,7 @@ package app
 
 import (
 	"flag"
+	"net"
 	"net/url"
 	"os"
 	"os/user"
@@ -16,12 +17,12 @@ import (
 	"zmap.io/portal/userauth"
 )
 
-// var hostToIPAddr = map[string]string{
-// 	"scratch-01": "10.216.2.64",
-// 	"scratch-02": "10.216.2.128",
-// 	"scratch-07": "10.216.2.208",
-// 	"localhost":  "127.0.0.1",
-// }
+var hostToIPAddr = map[string]string{ //TODO(baumanl): this should be dealt with in some user hop config file
+	"scratch-01": "10.216.2.64",
+	"scratch-02": "10.216.2.128",
+	"scratch-07": "10.216.2.208",
+	"localhost":  "127.0.0.1",
+}
 
 //Client parses cmd line arguments and establishes hop session with remote hop server
 func Client(args []string) {
@@ -111,6 +112,12 @@ func Client(args []string) {
 
 	//******ESTABLISH HOP SESSION******
 	//TODO(baumanl): figure out addr format requirements + check for them above
+	if _, err = net.LookupAddr(addr); err != nil {
+		//Couldn't resolve address with local resolver
+		if ip, ok := hostToIPAddr[hostname]; ok {
+			addr = ip + ":" + port
+		}
+	}
 	transportConn, err := transport.Dial("udp", addr, &config) //There seem to be limits on Dial() and addr format
 	if err != nil {
 		logrus.Fatalf("C: error dialing server: %v", err)
