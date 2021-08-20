@@ -2,3 +2,5 @@
 .idea
 .vscode
 app/authorized_keys
+cmd/hop/hop
+cmd/hop/hopd
