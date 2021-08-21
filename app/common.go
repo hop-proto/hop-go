@@ -33,7 +33,7 @@ func newTestServerConfig() (*transport.ServerConfig, *transport.VerifyConfig) {
 	if err != nil {
 		logrus.Fatalf("S: ERROR WITH ROOT CERT %v", err)
 	}
-	if "087aa52c8c287f34fcf6b33b22d68b02489d7168edae696a8ce4ae5e825bd1e9" != hex.EncodeToString(root.Fingerprint[:]) {
+	if hex.EncodeToString(root.Fingerprint[:]) != "087aa52c8c287f34fcf6b33b22d68b02489d7168edae696a8ce4ae5e825bd1e9" {
 		logrus.Fatal("S: ROOT FINGERPRINT DOES NOT MATCH")
 	}
 	server := transport.ServerConfig{
