@@ -185,6 +185,7 @@ func (sess *session) userAuthorization(username string) {
 		logrus.Fatal("Not authorized.")
 	}
 	logrus.Info("User authorization complete")
+	uaCh.Close()
 }
 
 func (sess *session) startExecTube(cmd string) {
@@ -236,7 +237,7 @@ func (sess *session) principal(tube *tubes.Reliable) {
 
 	sess.execTube.Raw()
 	sess.execTube.Resume()
-	logrus.SetOutput(io.Discard)
+	//logrus.SetOutput(io.Discard)
 	if !allow {
 		agt.SendIntentDenied("User denied")
 		return
@@ -282,6 +283,7 @@ func (sess *session) confirmWithRemote(req *authgrants.Intent, agt *authgrants.A
 	if e != nil {
 		logrus.Info("Issue writing intent comm to netproxyAgc")
 	}
+	logrus.Info("sent intent comm")
 	responseType, response, e := npAgc.ReadResponse()
 	logrus.Info("got response")
 	if e != nil {

@@ -126,7 +126,7 @@ func newIntentRequest(digest [sha3Len]byte, sUser string, hostname string, port 
 
 //Makes an Intent Communication from an Intent Request (just change msg type)
 func commFromReq(b []byte) []byte {
-	return append([]byte{IntentCommunication}, b[TypeLen:]...)
+	return append([]byte{IntentCommunication}, b[:]...)
 }
 
 func newIntentConfirmation(t time.Time) *agMessage {
@@ -301,11 +301,13 @@ func (c *AuthGrantConn) SendIntentCommunication(intentData *Intent) error {
 	return err
 }
 
+//WriteRawBytes writes bytes to underlying conn without regard for msg type
 func (c *AuthGrantConn) WriteRawBytes(data []byte) error {
 	_, err := c.conn.Write(data)
 	return err
 }
 
+//GetIntentRequest reads IntentRequest bytes and parses them into an Intent object
 func (c *AuthGrantConn) GetIntentRequest() (*Intent, error) {
 	intentBytes, err := c.ReadIntentRequest()
 	if err != nil {
@@ -314,10 +316,12 @@ func (c *AuthGrantConn) GetIntentRequest() (*Intent, error) {
 	return fromIntentRequestBytes(intentBytes), nil
 }
 
-func (i *Intent) Address() (string, string) {
-	return i.serverSNI, strconv.Itoa(int(i.port))
+//Address returns the serverSNI and port from the intent
+func (r *Intent) Address() (string, string) {
+	return r.serverSNI, strconv.Itoa(int(r.port))
 }
 
-func (i *Intent) Username() string {
-	return i.serverUsername
+//Username returns the serverUsername from the intent
+func (r *Intent) Username() string {
+	return r.serverUsername
 }

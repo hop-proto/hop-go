@@ -2,7 +2,10 @@
 package authgrants
 
 import (
+	"bufio"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"time"
 
@@ -11,10 +14,12 @@ import (
 	"zmap.io/portal/tubes"
 )
 
+//AuthGrantConn wraps a net.Conn (either tube or UDS conn) for authorization grant protocol messages
 type AuthGrantConn struct {
 	conn net.Conn
 }
 
+//NewAuthGrantConnFromMux starts a new Tube using provided muxer and uses it for an AuthGrantConn
 func NewAuthGrantConnFromMux(m *tubes.Muxer) (*AuthGrantConn, error) {
 	t, e := m.CreateTube(tubes.AuthGrantTube)
 	if e != nil {
@@ -23,10 +28,12 @@ func NewAuthGrantConnFromMux(m *tubes.Muxer) (*AuthGrantConn, error) {
 	return &AuthGrantConn{conn: t}, nil
 }
 
+//NewAuthGrantConn returns a new AuthGrantConn using c
 func NewAuthGrantConn(c net.Conn) *AuthGrantConn {
 	return &AuthGrantConn{conn: c}
 }
 
+//Close calls close on underlying conn
 func (c *AuthGrantConn) Close() error {
 	return c.conn.Close()
 }
@@ -89,4 +96,30 @@ func (c *AuthGrantConn) ReadResponse() (byte, []byte, error) {
 	default:
 		return responseType[0], nil, errors.New("bad msg type")
 	}
+}
+
+//Prompt prints the authgrant approval prompt to terminal and continues prompting until user enters "y" or "n"
+func (r *Intent) Prompt(reader *io.PipeReader) bool {
+	var ans string
+	for ans != "y" && ans != "n" {
+		if r.tubeType == commandTube {
+			fmt.Printf("\nAllow %v@%v to run %v on %v@%v? [y/n]: ",
+				r.clientUsername,
+				r.clientSNI,
+				r.action,
+				r.serverUsername,
+				r.serverSNI)
+		} else {
+			fmt.Printf("\nAllow %v@%v to open a default shell as %v@%v? [y/n]: ",
+				r.clientUsername,
+				r.clientSNI,
+				r.serverUsername,
+				r.serverSNI,
+			)
+		}
+		scanner := bufio.NewScanner(reader)
+		scanner.Scan()
+		ans = scanner.Text()
+	}
+	return ans == "y"
 }

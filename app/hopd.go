@@ -291,8 +291,10 @@ func Serve(args []string) {
 
 func (sess *hopSession) checkAuthorization() bool {
 	uaTube, _ := sess.tubeMuxer.Accept()
+	logrus.Info("S: Accepted USER AUTH tube")
 	defer uaTube.Close()
 	k, user := userauth.GetInitMsg(uaTube)
+	logrus.Info("got us init message")
 	sess.user = user
 	//check /user/.hop/authorized_keys first
 	path := "/home/" + user + "/.hop/authorized_keys"
@@ -304,7 +306,7 @@ func (sess *hopSession) checkAuthorization() bool {
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
 			if scanner.Text() == k.String() {
-				logrus.Debugf("USER AUTHORIZED")
+				logrus.Info("USER AUTHORIZED")
 				sess.isPrincipal = true
 				uaTube.Write([]byte{userauth.UserAuthConf})
 				return true
@@ -400,6 +402,7 @@ func (sess *hopSession) start() {
 func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 	agc := authgrants.NewAuthGrantConn(tube)
 	k, t, user, action, e := agc.HandleIntentComm()
+	logrus.Info("got intent comm")
 	if e != nil {
 		logrus.Info("Server denied authgrant")
 		agc.SendIntentDenied("Server denied")
