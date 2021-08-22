@@ -97,26 +97,27 @@ func (s *hopServer) proxyAuthGrantRequest(c net.Conn) {
 		return
 	}
 	logrus.Infof("S: CLIENT CONNECTED [%s]", c.RemoteAddr().Network())
-	intent, e := authgrants.ReadIntentRequest(c)
+	agc := authgrants.NewAuthGrantConn(c)
+	req, e := agc.ReadIntentRequest()
 	if e != nil {
 		logrus.Fatalf("ERROR READING INTENT REQUEST: %v", e)
 	}
-	agc, err := principalSess.tubeMuxer.CreateTube(tubes.AuthGrantTube)
+	principalAgc, err := authgrants.NewAuthGrantConnFromMux(principalSess.tubeMuxer)
 	if err != nil {
 		logrus.Fatalf("S: ERROR MAKING CHANNEL: %v", err)
 	}
-	defer agc.Close()
+	defer principalAgc.Close()
 	logrus.Infof("S: CREATED CHANNEL (AGC)")
-	_, err = agc.Write(intent)
+	err = principalAgc.WriteRawBytes(req)
 	if err != nil {
 		logrus.Fatalf("S: ERROR WRITING TO CHANNEL: %v", err)
 	}
 	logrus.Infof("S: WROTE INTENT_REQUEST TO AGC")
-	response, _, err := authgrants.GetResponse(agc)
+	_, response, err := principalAgc.ReadResponse()
 	if err != nil {
 		logrus.Fatalf("S: ERROR GETTING RESPONSE: %v, %v", err, response)
 	}
-	_, err = c.Write(response)
+	err = agc.WriteRawBytes(response)
 	if err != nil {
 		logrus.Fatalf("S: ERROR WRITING TO CHANNEL: %v", err)
 	}
@@ -139,7 +140,6 @@ func (s *hopServer) checkCredentials(c net.Conn) (int32, error) {
 	var ancestor int32 = -1
 	//get a picture of the entire system process tree
 	tree, err := pstree.New()
-	//display(os.Getppid(), tree, 1) //displays all pstree
 	if err != nil {
 		return 0, err
 	}
@@ -290,9 +290,9 @@ func Serve(args []string) {
 }
 
 func (sess *hopSession) checkAuthorization() bool {
-	uaCh, _ := sess.tubeMuxer.Accept()
-	defer uaCh.Close()
-	k, user := userauth.GetInitMsg(uaCh)
+	uaTube, _ := sess.tubeMuxer.Accept()
+	defer uaTube.Close()
+	k, user := userauth.GetInitMsg(uaTube)
 	sess.user = user
 	//check /user/.hop/authorized_keys first
 	path := "/home/" + user + "/.hop/authorized_keys"
@@ -306,7 +306,7 @@ func (sess *hopSession) checkAuthorization() bool {
 			if scanner.Text() == k.String() {
 				logrus.Debugf("USER AUTHORIZED")
 				sess.isPrincipal = true
-				uaCh.Write([]byte{userauth.UserAuthConf})
+				uaTube.Write([]byte{userauth.UserAuthConf})
 				return true
 			}
 		}
@@ -318,13 +318,13 @@ func (sess *hopSession) checkAuthorization() bool {
 	val, ok := sess.server.authgrants[k]
 	if !ok {
 		logrus.Info("USER NOT AUTHORIZED")
-		uaCh.Write([]byte{userauth.UserAuthDen})
+		uaTube.Write([]byte{userauth.UserAuthDen})
 		return false
 	}
 	if val.deadline.Before(time.Now()) {
 		delete(sess.server.authgrants, k)
 		logrus.Info("AUTHGRANT DEADLINE EXCEEDED")
-		uaCh.Write([]byte{userauth.UserAuthDen})
+		uaTube.Write([]byte{userauth.UserAuthDen})
 		return false
 	}
 	sess.authgrant = val
@@ -332,7 +332,7 @@ func (sess *hopSession) checkAuthorization() bool {
 	sess.user = sess.authgrant.user //these should always match anyways
 	delete(sess.server.authgrants, k)
 	logrus.Info("USER AUTHORIZED")
-	uaCh.Write([]byte{userauth.UserAuthConf})
+	uaTube.Write([]byte{userauth.UserAuthConf})
 	return true
 }
 
@@ -397,11 +397,12 @@ func (sess *hopSession) start() {
 	}
 }
 
-func (sess *hopSession) handleAgc(ch *tubes.Reliable) {
-	k, t, user, action, e := authgrants.HandleIntentComm(ch)
+func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
+	agc := authgrants.NewAuthGrantConn(tube)
+	k, t, user, action, e := agc.HandleIntentComm()
 	if e != nil {
 		logrus.Info("Server denied authgrant")
-		authgrants.SendIntentDenied(ch, "Server denied")
+		agc.SendIntentDenied("Server denied")
 		return
 	}
 	sess.server.m.Lock()
@@ -413,9 +414,9 @@ func (sess *hopSession) handleAgc(ch *tubes.Reliable) {
 		used:             false,
 	}
 	sess.server.m.Unlock()
-	authgrants.SendIntentConf(ch, t)
+	agc.SendIntentConf(t)
 	logrus.Info("Sent intent conf")
-	ch.Close()
+	tube.Close()
 }
 
 //TODO(baumanl): Add in better privilege separation? Right now hopd(root) directly starts commands through go routines. sshd uses like 3 levels of separation.

@@ -4,23 +4,16 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"net"
 	"os"
 	"os/user"
 	"strconv"
-	"strings"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
-//TODO(baumanl): Some of this may be over complex. Figure out best way to standardize/simplify.
+//TODO(baumanl): Some of this may be overly complex. Figure out best way to standardize/simplify.
 
 //General Constants
 const (
-	MaxPortNumber  = 65535
-	DefaultHopPort = 8888 //TODO(baumanl): default port? 8888 for now
-
 	IntentRequest       = byte(1)
 	IntentCommunication = byte(2)
 	IntentConfirmation  = byte(3)
@@ -29,6 +22,7 @@ const (
 	TypeLen = 1
 )
 
+//Action Type Constants
 const (
 	shellTube   = byte(1)
 	commandTube = byte(2)
@@ -77,8 +71,8 @@ type data interface {
 	toBytes() []byte
 }
 
-//intentRequestMsg contains all data fields of an intent request msg
-type intentRequestMsg struct {
+//Intent contains all data fields of an Intent request or Intent communication
+type Intent struct {
 	sha3           [sha3Len]byte
 	clientUsername string
 	clientSNI      string
@@ -89,23 +83,9 @@ type intentRequestMsg struct {
 	action         string
 }
 
-//intentCommunicationMsg contains all data fields of an intent comm msg
-//Actually necessary to have different struct?
-//TODO(baumanl): figure out best way to restructure to min. duplicate code
-type intentCommunicationMsg struct {
-	sha3           [sha3Len]byte
-	clientUsername string
-	clientSNI      string
-	serverUsername string
-	serverSNI      string
-	port           uint16
-	tubeType       byte
-	action         string
-}
-
 //intentConfirmationMsg contains deadline for an approved auth grant
 type intentConfirmationMsg struct {
-	Deadline int64 //Unix time
+	deadline int64 //Unix time
 }
 
 //intentDeniedMsg contains reason for a denied auth grant
@@ -114,34 +94,44 @@ type intentDeniedMsg struct {
 }
 
 //Constructors
-func newIntentRequest(digest [sha3Len]byte, sUser string, addr string, shell bool, cmd string) *agMessage {
+func newIntent(digest [sha3Len]byte, sUser string, hostname string, port string, shell bool, cmd string) *Intent {
 	user, _ := user.Current()
 	cSNI, _ := os.Hostname()
-	sSNI, p := parseAddr(addr)
+	p, _ := strconv.Atoi(port)
+
 	tt := commandTube
 	if shell {
 		tt = shellTube
 	}
 
-	r := &intentRequestMsg{
+	r := &Intent{
 		sha3:           digest,
 		clientUsername: user.Username,
 		clientSNI:      cSNI,
 		serverUsername: sUser,
-		serverSNI:      sSNI,
-		port:           p,
+		serverSNI:      hostname,
+		port:           uint16(p),
 		tubeType:       tt, //TODO(baumanl): Using to differentiate between asking for shell (run using login(1)) or a specific command
 		action:         cmd,
 	}
+	return r
+}
+
+func newIntentRequest(digest [sha3Len]byte, sUser string, hostname string, port string, shell bool, cmd string) *agMessage {
 	return &agMessage{
 		msgType: IntentRequest,
-		d:       r,
+		d:       newIntent(digest, sUser, hostname, port, shell, cmd),
 	}
+}
+
+//Makes an Intent Communication from an Intent Request (just change msg type)
+func commFromReq(b []byte) []byte {
+	return append([]byte{IntentCommunication}, b[TypeLen:]...)
 }
 
 func newIntentConfirmation(t time.Time) *agMessage {
 	c := &intentConfirmationMsg{
-		Deadline: t.Unix(),
+		deadline: t.Unix(),
 	}
 	return &agMessage{
 		msgType: IntentConfirmation,
@@ -160,7 +150,7 @@ func newIntentDenied(r string) *agMessage {
 }
 
 //toBytes()
-func (r *intentRequestMsg) toBytes() []byte {
+func (r *Intent) toBytes() []byte {
 	s := [irHeaderLen]byte{}
 	copy(s[sha3Offset:cUserOffset], r.sha3[:])
 	copy(s[cUserOffset:cSNIOffset], []byte(r.clientUsername))
@@ -173,22 +163,9 @@ func (r *intentRequestMsg) toBytes() []byte {
 	return append(s[:], []byte(r.action)...)
 }
 
-func (c *intentCommunicationMsg) toBytes() []byte { //TODO(baumanl): This is literally identical to the above function.
-	s := [irHeaderLen]byte{}
-	copy(s[sha3Offset:cUserOffset], c.sha3[:])
-	copy(s[cUserOffset:cSNIOffset], []byte(c.clientUsername))
-	copy(s[cSNIOffset:sUserOffset], []byte(c.clientSNI))
-	copy(s[sUserOffset:sSNIOffset], []byte(c.serverUsername))
-	copy(s[sSNIOffset:portOffset], []byte(c.serverSNI))
-	binary.BigEndian.PutUint16(s[portOffset:tTypeOffset], c.port)
-	s[tTypeOffset] = c.tubeType
-	s[lenOffset] = byte(len(c.action)) //TODO(baumanl): This only allows for actions up to 256 bytes (and no bounds checking atm)
-	return append(s[:], []byte(c.action)...)
-}
-
 func (c *intentConfirmationMsg) toBytes() []byte {
 	s := [intentConfSize]byte{}
-	binary.BigEndian.PutUint64(s[deadlineOffset:], uint64(c.Deadline))
+	binary.BigEndian.PutUint64(s[deadlineOffset:], uint64(c.deadline))
 	return s[:]
 }
 
@@ -211,8 +188,8 @@ func trimNullBytes(b []byte) string {
 }
 
 //fromBytes()
-func fromIntentRequestBytes(b []byte) *intentRequestMsg {
-	r := intentRequestMsg{}
+func fromIntentBytes(b []byte) *Intent {
+	r := Intent{}
 	copy(r.sha3[:], b[sha3Offset:cUserOffset])
 	r.clientUsername = trimNullBytes(b[cUserOffset:cSNIOffset])
 	r.clientSNI = trimNullBytes(b[cSNIOffset:sUserOffset])
@@ -224,22 +201,17 @@ func fromIntentRequestBytes(b []byte) *intentRequestMsg {
 	return &r
 }
 
-func fromIntentCommunicationBytes(b []byte) *intentCommunicationMsg {
-	r := intentCommunicationMsg{}
-	copy(r.sha3[:], b[sha3Offset:cUserOffset])
-	r.clientUsername = trimNullBytes(b[cSNIOffset:cSNIOffset])
-	r.clientSNI = trimNullBytes(b[cSNIOffset:sUserOffset])
-	r.serverUsername = trimNullBytes(b[sUserOffset:sSNIOffset])
-	r.serverSNI = trimNullBytes(b[sSNIOffset:portOffset])
-	r.port = binary.BigEndian.Uint16(b[portOffset:tTypeOffset])
-	r.tubeType = b[lenOffset]
-	r.action = string(b[actOffset:])
-	return &r
+func fromIntentRequestBytes(b []byte) *Intent {
+	return fromIntentBytes(b[1:])
+}
+
+func fromIntentCommunicationBytes(b []byte) *Intent {
+	return fromIntentBytes(b[1:])
 }
 
 func fromIntentConfirmationBytes(b []byte) *intentConfirmationMsg {
 	n := intentConfirmationMsg{}
-	n.Deadline = int64(binary.BigEndian.Uint64(b[deadlineOffset:]))
+	n.deadline = int64(binary.BigEndian.Uint64(b[deadlineOffset:]))
 	return &n
 }
 
@@ -249,99 +221,103 @@ func fromIntentDeniedBytes(b []byte) *intentDeniedMsg {
 	return &d
 }
 
-//Other helper functions
-func parseAddr(addr string) (string, uint16) { //addr of format host:port or host
-	host := addr
-	port := DefaultHopPort
-	if strings.Contains(addr, ":") {
-		i := strings.Index(addr, ":")
-		port, _ = strconv.Atoi(addr[i+1:])
-		host = addr[:i]
+func (c *AuthGrantConn) readIntent(msgType byte) ([]byte, error) {
+	t := make([]byte, 1)
+	_, err := c.conn.Read(t)
+	if err != nil {
+		return nil, err
 	}
-	if port > MaxPortNumber {
-		logrus.Fatal("port number out of range")
+	if t[0] == msgType {
+		irh := make([]byte, irHeaderLen)
+		_, err = c.conn.Read(irh)
+		if err != nil {
+			return nil, err
+		}
+		actionLen := int8(irh[irHeaderLen-1])
+		action := make([]byte, actionLen)
+		_, err = c.conn.Read(action)
+		if err != nil {
+			return nil, err
+		}
+		return append(t, append(irh, action...)...), nil
 	}
-	return host, uint16(port)
+	return nil, errors.New("bad msg type")
+}
+
+//ReadIntentDenied gets the reason for denial
+func (c *AuthGrantConn) readIntentDenied() ([]byte, error) {
+	buf := make([]byte, 2)
+	buf[0] = IntentDenied
+	_, err := c.conn.Read(buf[1:])
+	if err != nil {
+		return nil, err
+	}
+	buf = append(buf, make([]byte, int(buf[1]))...)
+	_, err = c.conn.Read(buf[2:])
+	if err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+//ReadIntentConf
+func (c *AuthGrantConn) readIntentConf() ([]byte, error) {
+	buf := make([]byte, intentConfSize+1)
+	buf[0] = IntentConfirmation
+	_, err := c.conn.Read(buf[1:])
+	return buf, err
 }
 
 //ReadIntentRequest gets Intent Request bytes
-func ReadIntentRequest(c net.Conn) ([]byte, error) {
-	msgType := make([]byte, 1)
-	c.Read(msgType)
-	if msgType[0] == IntentRequest {
-		irh := make([]byte, irHeaderLen)
-		_, err := c.Read(irh)
-		if err != nil {
-			return nil, err
-		}
-		actionLen := int8(irh[irHeaderLen-1])
-		action := make([]byte, actionLen)
-		_, err = c.Read(action)
-		if err != nil {
-			return nil, err
-		}
-		return append(msgType, append(irh, action...)...), nil
-	}
-	return nil, errors.New("bad msg type")
+func (c *AuthGrantConn) ReadIntentRequest() ([]byte, error) {
+	return c.readIntent(IntentRequest)
 }
 
-//Gets Intent Communication bytes
-func readIntentCommunication(c net.Conn) ([]byte, error) {
-	msgType := make([]byte, 1)
-	c.Read(msgType)
-	if msgType[0] == IntentCommunication {
-		irh := make([]byte, irHeaderLen)
-		_, err := c.Read(irh)
-		if err != nil {
-			return nil, err
-		}
-		actionLen := int8(irh[irHeaderLen-1])
-		action := make([]byte, actionLen)
-		_, err = c.Read(action)
-		if err != nil {
-			return nil, err
-		}
-		return append(msgType, append(irh, action...)...), nil
-	}
-	return nil, errors.New("bad msg type")
+func (c *AuthGrantConn) readIntentCommunication() ([]byte, error) {
+	return c.readIntent(IntentCommunication)
 }
 
-//GetResponse Waits and reads IntentConfirmation or IntentDenied from net.Conn
-func GetResponse(c net.Conn) ([]byte, byte, error) {
-	responseType := make([]byte, 1)
-	_, err := c.Read(responseType)
+//SendIntentDenied writes an intent denied message to provided tube
+func (c *AuthGrantConn) SendIntentDenied(reason string) error {
+	_, err := c.conn.Write(newIntentDenied(reason).toBytes())
+	return err
+}
+
+//SendIntentConf writes an intent conf message to provided tube
+func (c *AuthGrantConn) SendIntentConf(t time.Time) error {
+	_, err := c.conn.Write(newIntentConfirmation(t).toBytes())
+	return err
+}
+
+//SendIntentRequest writes an intent request msg
+func (c *AuthGrantConn) sendIntentRequest(digest [sha3Len]byte, sUser string, hostname string, port string, shell bool, cmd string) error {
+	_, err := c.conn.Write(newIntentRequest(digest, sUser, hostname, port, shell, cmd).toBytes())
+	return err
+}
+
+//SendIntentCommunication writes an intent communication msg
+func (c *AuthGrantConn) SendIntentCommunication(intentData *Intent) error {
+	_, err := c.conn.Write(commFromReq(intentData.toBytes()))
+	return err
+}
+
+func (c *AuthGrantConn) WriteRawBytes(data []byte) error {
+	_, err := c.conn.Write(data)
+	return err
+}
+
+func (c *AuthGrantConn) GetIntentRequest() (*Intent, error) {
+	intentBytes, err := c.ReadIntentRequest()
 	if err != nil {
-		return nil, responseType[0], err
+		return nil, err
 	}
-	logrus.Infof("Got response type: %v", responseType)
-	//TODO(baumanl): SET TIMEOUT STUFF + BETTER ERROR CHECKING
-	switch responseType[0] {
-	case IntentConfirmation:
-		conf := make([]byte, intentConfSize)
-		_, err := c.Read(conf)
-		if err != nil {
-			return nil, responseType[0], err
-		}
-		return append(responseType, conf...), responseType[0], nil
-	case IntentDenied:
-		reasonLength := make([]byte, 1)
-		_, err := c.Read(reasonLength)
-		if err != nil {
-			return nil, responseType[0], err
-		}
-		logrus.Infof("C: EXPECTING %v BYTES OF REASON", reasonLength)
-		reason := make([]byte, int(reasonLength[0]))
-		_, err = c.Read(reason)
-		if err != nil {
-			return nil, responseType[0], err
-		}
-		return append(append(responseType, reasonLength...), reason...), responseType[0], nil
-	default:
-		return nil, responseType[0], errors.New("bad msg type")
-	}
+	return fromIntentRequestBytes(intentBytes), nil
 }
 
-//Makes an Intent Communication from an Intent Request (just change msg type)
-func commFromReq(b []byte) []byte {
-	return append([]byte{IntentCommunication}, b[TypeLen:]...)
+func (i *Intent) Address() (string, string) {
+	return i.serverSNI, strconv.Itoa(int(i.port))
+}
+
+func (i *Intent) Username() string {
+	return i.serverUsername
 }

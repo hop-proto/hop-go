@@ -2,6 +2,7 @@ package app
 
 import (
 	"flag"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"zmap.io/portal/authgrants"
 	"zmap.io/portal/codex"
 	"zmap.io/portal/keys"
+	"zmap.io/portal/netproxy"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
 	"zmap.io/portal/userauth"
@@ -22,6 +24,18 @@ var hostToIPAddr = map[string]string{ //TODO(baumanl): this should be dealt with
 	"scratch-02": "10.216.2.128",
 	"scratch-07": "10.216.2.208",
 	"localhost":  "127.0.0.1",
+}
+
+type session struct {
+	transportConn *transport.Client
+	proxyConn     *tubes.Reliable
+	tubeMuxer     *tubes.Muxer
+	execTube      *codex.ExecTube
+	isPrincipal   bool
+	proxied       bool
+
+	wg     sync.WaitGroup
+	config transport.ClientConfig
 }
 
 //Client parses cmd line arguments and establishes hop session with remote hop server
@@ -43,8 +57,6 @@ func Client(args []string) {
 	if port == "" {
 		port = defaultHopPort
 	}
-	addr := hostname + ":" + port
-	logrus.Infof("Using path: %v", addr)
 
 	username := url.User.Username()
 	if username == "" { //if no username is entered use local client username
@@ -58,15 +70,16 @@ func Client(args []string) {
 	var fs flag.FlagSet
 	keypath, _ := os.UserHomeDir()
 	keypath += defaultKeyPath
-	principal := false
+
+	sess := &session{isPrincipal: false}
 
 	fs.Func("k", "indicates principal with specific key location", func(s string) error {
-		principal = true
+		sess.isPrincipal = true
 		keypath = s
 		return nil
 	})
 
-	fs.BoolVar(&principal, "K", principal, "indicates principal with default key location: $HOME/.hop/key")
+	fs.BoolVar(&sess.isPrincipal, "K", sess.isPrincipal, "indicates principal with default key location: $HOME/.hop/key")
 
 	//TODO(baumanl): implement this option to allow for piping and expansion
 	//var runCmdInShell bool
@@ -82,15 +95,36 @@ func Client(args []string) {
 	if fs.NArg() > 0 {
 		logrus.Fatal("Unknown arguments provided. Usage: ", clientUsage)
 	}
-	_, verify := newTestServerConfig()
-	config := transport.ClientConfig{Verify: *verify} //TODO(baumanl):  I modified ClientConfig to let static keys into the transport protocol. Is this a correct way to do this?
 
+	_, verify := newTestServerConfig()
+	sess.config = transport.ClientConfig{Verify: *verify}
+	sess.getAuthorization(keypath, username, hostname, port, cmd)
+
+	sess.startUnderlying(hostname, port)
+	sess.tubeMuxer = tubes.NewMuxer(sess.transportConn, sess.transportConn)
+	go sess.tubeMuxer.Start()
+	defer func() {
+		sess.tubeMuxer.Stop()
+		logrus.Info("muxer stopped")
+		//TODO: finish closing behavior
+		// e := transportConn.Close()
+		// logrus.Error("closing transport: ", e)
+	}()
+
+	sess.userAuthorization(username)
+	sess.startExecTube(cmd)
+	go sess.handleTubes()
+	sess.wg.Wait() //client program ends when the code execution tube ends.
+	//TODO(baumanl): figure out definitive closing behavior --> multiple code exec tubes?
+}
+
+func (sess *session) getAuthorization(keypath string, username string, hostname string, port string, cmd string) {
 	//Check if this is a principal client process or one that needs to get an AG
 	//******GET AUTHORIZATION SOURCE******
-	if principal {
+	if sess.isPrincipal {
 		logrus.Infof("C: Using key-file at %v for auth.", keypath)
 		var e error
-		config.KeyPair, e = keys.ReadDHKeyFromPEMFile(keypath)
+		sess.config.KeyPair, e = keys.ReadDHKeyFromPEMFile(keypath)
 		if e != nil {
 			logrus.Fatalf("C: Error using key at path %v. Error: %v", keypath, e)
 		}
@@ -99,78 +133,177 @@ func Client(args []string) {
 		if cmd == "" {
 			shell = true
 		}
-		config.KeyPair = new(keys.X25519KeyPair)
-		config.KeyPair.Generate()
-		logrus.Infof("Client generated: %v", config.KeyPair.Public.String())
+		sess.config.KeyPair = new(keys.X25519KeyPair)
+		sess.config.KeyPair.Generate()
+		logrus.Infof("Client generated: %v", sess.config.KeyPair.Public.String())
 		logrus.Infof("C: Initiating AGC Protocol.")
-		t, e := authgrants.GetAuthGrant(config.KeyPair.Public, username, addr, shell, cmd)
+		sock := "@auth"                  //TODO(baumanl): make generalizeable
+		c, err := net.Dial("unix", sock) //TODO(baumanl): address of UDS (probably switch to abstract location)
+		if err != nil {
+			logrus.Fatal(err)
+		}
+		logrus.Infof("C: CONNECTED TO UDS: [%v]", c.RemoteAddr().String())
+		agc := authgrants.NewAuthGrantConn(c)
+		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, shell, cmd)
+		c.Close()
 		if e != nil {
 			logrus.Fatalf("C: %v", e)
 		}
 		logrus.Infof("C: Principal approved request. Deadline: %v", t)
 	}
+}
 
+func (sess *session) startUnderlying(hostname string, port string) {
 	//******ESTABLISH HOP SESSION******
 	//TODO(baumanl): figure out addr format requirements + check for them above
-	if _, err = net.LookupAddr(addr); err != nil {
+	addr := hostname + ":" + port
+	if _, err := net.LookupAddr(addr); err != nil {
 		//Couldn't resolve address with local resolver
 		if ip, ok := hostToIPAddr[hostname]; ok {
 			addr = ip + ":" + port
 		}
 	}
-	transportConn, err := transport.Dial("udp", addr, config) //There seem to be limits on Dial() and addr format
+	var err error
+	if !sess.proxied {
+		sess.transportConn, err = transport.Dial("udp", addr, sess.config) //There seem to be limits on Dial() and addr format
+	} else {
+		sess.transportConn, err = transport.DialNP("netproxy", addr, sess.proxyConn, sess.config)
+	}
 	if err != nil {
 		logrus.Fatalf("C: error dialing server: %v", err)
 	}
-	err = transportConn.Handshake() //This hangs if the server is not available when it starts. Add retry or timeout?
+	err = sess.transportConn.Handshake() //This hangs if the server is not available when it starts. Add retry or timeout?
 	if err != nil {
 		logrus.Fatalf("C: Issue with handshake: %v", err)
 	}
-	//TODO(baumanl): should these functions + things from tubes layer have errors?
-	mc := tubes.NewMuxer(transportConn, transportConn)
-	go mc.Start()
-	defer func() {
-		mc.Stop()
-		logrus.Info("muxer stopped")
-		//TODO: finish closing behavior
-		// e := transportConn.Close()
-		// logrus.Error("closing transport: ", e)
-	}()
+}
 
+func (sess *session) userAuthorization(username string) {
 	//*****PERFORM USER AUTHORIZATION******
-	uaCh, _ := mc.CreateTube(tubes.UserAuthTube)
-	if ok := userauth.RequestAuthorization(uaCh, config.KeyPair.Public, username); !ok {
+	uaCh, _ := sess.tubeMuxer.CreateTube(tubes.UserAuthTube)
+	if ok := userauth.RequestAuthorization(uaCh, sess.config.KeyPair.Public, username); !ok {
 		logrus.Fatal("Not authorized.")
 	}
 	logrus.Info("User authorization complete")
+}
 
+func (sess *session) startExecTube(cmd string) {
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	//Hop Session is tied to the life of this code execution tube.
 	logrus.Infof("Performing action: %v", cmd)
-	ch, _ := mc.CreateTube(tubes.ExecTube)
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	execCh := codex.NewExecTube(cmd, ch, &wg)
+	ch, _ := sess.tubeMuxer.CreateTube(tubes.ExecTube)
+	sess.wg = sync.WaitGroup{}
+	sess.wg.Add(1)
+	sess.execTube = codex.NewExecTube(cmd, ch, &sess.wg)
+}
 
+func (sess *session) handleTubes() {
 	//TODO(baumanl): figure out responses to different tube types/what all should be allowed
 	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****
-	go func() {
-		for {
-			c, e := mc.Accept()
-			if e != nil {
-				logrus.Fatalf("Error accepting tube: %v", e)
-			}
-			logrus.Infof("ACCEPTED NEW CHANNEL of TYPE: %v", c.Type())
-			if c.Type() == tubes.AuthGrantTube && principal {
-				go authgrants.Principal(c, mc, execCh, &config)
-			} else {
-				//Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
-				c.Close()
-				continue
-			}
+	for {
+		c, e := sess.tubeMuxer.Accept()
+		if e != nil {
+			logrus.Fatalf("Error accepting tube: %v", e)
 		}
+		logrus.Infof("ACCEPTED NEW CHANNEL of TYPE: %v", c.Type())
+		if c.Type() == tubes.AuthGrantTube && sess.isPrincipal {
+			go sess.principal(c)
+		} else {
+			//Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
+			c.Close()
+			continue
+		}
+	}
+}
+
+func (sess *session) principal(tube *tubes.Reliable) {
+	defer func() {
+		tube.Close()
+		logrus.Info("Closed AGC")
 	}()
-	wg.Wait() //client program ends when the code execution tube ends.
-	//TODO(baumanl): figure out definitive closing behavior --> multiple code exec tubes?
-	logrus.Info("Done waiting")
+	logrus.SetOutput(io.Discard)
+	agt := authgrants.NewAuthGrantConn(tube)
+	intent, err := agt.GetIntentRequest()
+	if err != nil {
+		logrus.Error("error getting intent request")
+		return
+	}
+	logrus.SetOutput(os.Stdout)
+	sess.execTube.Restore()
+	r := sess.execTube.Redirect()
+
+	allow := intent.Prompt(r)
+
+	sess.execTube.Raw()
+	sess.execTube.Resume()
+	logrus.SetOutput(io.Discard)
+	if !allow {
+		agt.SendIntentDenied("User denied")
+		return
+	}
+	sess.confirmWithRemote(intent, agt)
+}
+
+func (sess *session) confirmWithRemote(req *authgrants.Intent, agt *authgrants.AuthGrantConn) {
+	logrus.Debug("C: USER CONFIRMED INTENT_REQUEST. CONTACTING S2...")
+
+	//create netproxy with server
+	npt, e := sess.tubeMuxer.CreateTube(tubes.NetProxyTube)
+	logrus.Info("started netproxy tube from principal")
+	if e != nil {
+		logrus.Fatal("C: Error starting netproxy tube")
+	}
+
+	hostname, port := req.Address()
+	addr := hostname + ":" + port
+	e = netproxy.Start(npt, addr)
+	if e != nil {
+		logrus.Fatal("Issue proxying connection")
+	}
+	subsess := &session{
+		isPrincipal: true,
+		config:      sess.config,
+		proxyConn:   npt,
+	}
+
+	subsess.startUnderlying(hostname, port)
+	subsess.tubeMuxer = tubes.NewMuxer(subsess.transportConn, subsess.transportConn)
+	go subsess.tubeMuxer.Start()
+
+	subsess.userAuthorization(req.Username())
+
+	//start AGC and send INTENT_COMMUNICATION
+	npAgc, e := authgrants.NewAuthGrantConnFromMux(subsess.tubeMuxer)
+	if e != nil {
+		logrus.Fatal("Error creating AGC: ", e)
+	}
+	logrus.Info("CREATED AGC")
+	e = npAgc.SendIntentCommunication(req)
+	if e != nil {
+		logrus.Info("Issue writing intent comm to netproxyAgc")
+	}
+	responseType, response, e := npAgc.ReadResponse()
+	logrus.Info("got response")
+	if e != nil {
+		logrus.Fatalf("C: error reading from agc: %v", e)
+	}
+	npAgc.Close()
+
+	//write response back to server asking for Authorization Grant
+	err := agt.WriteRawBytes(response)
+	if err != nil {
+		logrus.Fatalf("C: error writing to agt: %v", err)
+	}
+
+	switch responseType {
+	case authgrants.IntentDenied:
+		logrus.Infof("C: WROTE IntentDenied")
+		return
+	case authgrants.IntentConfirmation:
+		logrus.Infof("C: WROTE IntentConfirmation")
+	}
+
+	// Want to keep this session open in case the "server 2" wants to continue chaining hop sessions together
+	// TODO(baumanl): Simplify this. Should only get authorization grant tubes?
+	go subsess.handleTubes()
 }

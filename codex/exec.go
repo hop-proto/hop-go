@@ -69,7 +69,6 @@ func getStatus(t *tubes.Reliable) error {
 //Stores state in an ExecChan struct so stdin can be manipulated during authgrant process
 func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) *ExecTube {
 	oldState, e := term.MakeRaw(int(os.Stdin.Fd()))
-	// defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
 	if e != nil {
 		logrus.Fatalf("C: error with terminal state: %v", e)
 	}
@@ -194,7 +193,7 @@ func (e *ExecTube) Resume() {
 	e.redir = false
 }
 
-//Redirect moves input to a pipe and returns the read end of the pipe
+//Redirect redirects os.Stdin to a pipe and returns the read end
 func (e *ExecTube) Redirect() *io.PipeReader {
 	e.redir = true
 	return e.r
