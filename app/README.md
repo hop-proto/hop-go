@@ -1,35 +1,36 @@
 ## New Folders:
 
-- app: Contains files to run hop client and hop server along with sample keys/certs.
+- app: Contains main logic for hop client and hop server.
 - authgrants: provides data structures and functions necessary for the authorization grant protocol
-- codex: provides data structures and functions necessary for code execution channels
-- npc: provides data structures and functions necessary for network proxy channels
+- codex: provides data structures and functions necessary for code execution tubes
+- netproxy: provides data structures and functions necessary for network proxy tubes
+- userauth: provides data structures and functions necessary for user authorization tubes
+- cmd/hop: build hop executable
+- cmd/hopd: build hopd executable
+- cmd/hop-keygen: program to generate keypair and store in default location
 
 ## Also Modified:
 
-- channels: 
-    - added methods to Reliable channels + modified frame retransmission to fix laggy terminal echo
+- tubes: 
+    - added methods to Reliable tubes + modified frame retransmission to fix laggy terminal echo
 - transport: 
     - added capability to use a Reliable channel as underlying connection
-    - introduced authorized key logic
 
 ## Miscellaneous Issues/TODOs:
-
-- reorganize user authentication (separate from transport layer client authentication) (!!!!)
-- start hop client as specified user (!!!)
 - add timeouts/deadlines (!!!)
-- needs to check userhomedir/.hop/authorized_keys
-- keys default location (.hop/<key_name>) (still have to specify path?)
-
+- set authgrant budget (how many outstanding authgrants should a server allowed)
+- add server/client config files
 - parse cmd intelligently (have to move away from exec.Cmd?) (!!)
 - check codex.Server() for issues relating to pty/terminal display crap (!!)
 
-- change all "channels" -> "tubes"
-- fine tune constants in channels/muxer code
+- fine tune constants in tubes/muxer code
 - should server 2 somehow check a security policy or something before adding authgrant? (Like make sure that the principal is allowed to give authgrants?)
 
 ## Done: 
-
+- needs to check userhomedir/.hop/authorized_keys
+- keys default location (.hop/<key_name>) (still have to specify path?)
+- start hop client as specified user (!!!)
+- reorganize user authentication (separate from transport layer client authentication) (!!!!)
 - store authorization grants in memory instead of authorized_keys file (!!!!)
 - Principal needs to get user input as a background process (!!!) --> semi-fixed, still have one weird line. Don't know how to make a GUI cmd line app but could work if exec.CMD? Another process?
 - Server checks cmd against auth grant before running (maybe made this unnecessarily complex)

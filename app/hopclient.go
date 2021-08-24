@@ -237,7 +237,7 @@ func (sess *session) principal(tube *tubes.Reliable) {
 
 	sess.execTube.Raw()
 	sess.execTube.Resume()
-	//logrus.SetOutput(io.Discard)
+	logrus.SetOutput(io.Discard)
 	if !allow {
 		agt.SendIntentDenied("User denied")
 		return
