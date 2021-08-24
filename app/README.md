@@ -21,7 +21,6 @@
 - add timeouts/deadlines (!!!)
 - add option to run specified command in a shell instead of directly with exec.Command (allows for intelligent parsing + piping and stuff) (!!)
 - update Intent struct
-- set authgrant budget (how many outstanding authgrants should a server allowed)
 - add unreliable tubes
 - switch Netproxy to use unreliable tube as underlying conn
 - add server/client config files
@@ -30,6 +29,7 @@
 - should server 2 somehow check a security policy or something before adding authgrant? (Like make sure that the principal is allowed to give authgrants?)
 
 ## Done: 
+- set authgrant budget (how many outstanding authgrants should a server allowed)
 - needs to check userhomedir/.hop/authorized_keys
 - keys default location (.hop/<key_name>) (still have to specify path?)
 - start hop client as specified user (!!!)

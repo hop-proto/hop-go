@@ -29,6 +29,8 @@ import (
 	"zmap.io/portal/userauth"
 )
 
+const maxOutstandingAuthgrants = 50
+
 //AuthGrant contains deadline, user, action
 type authGrant struct {
 	deadline         time.Time
@@ -39,9 +41,10 @@ type authGrant struct {
 }
 
 type hopServer struct {
-	m          sync.Mutex
-	principals map[int32]*hopSession
-	authgrants map[keys.PublicKey]*authGrant //static key -> authgrant
+	m                     sync.Mutex
+	principals            map[int32]*hopSession
+	authgrants            map[keys.PublicKey]*authGrant //static key -> authgrant
+	outstandingAuthgrants int
 
 	server   *transport.Server
 	authsock net.Listener
@@ -267,9 +270,10 @@ func Serve(args []string) {
 	authgrants := make(map[keys.PublicKey]*authGrant) //static key -> authgrant
 
 	server := &hopServer{
-		m:          sync.Mutex{},
-		principals: principals,
-		authgrants: authgrants,
+		m:                     sync.Mutex{},
+		principals:            principals,
+		authgrants:            authgrants,
+		outstandingAuthgrants: 0,
 
 		server:   transportServer,
 		authsock: l,
@@ -409,6 +413,13 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 		return
 	}
 	sess.server.m.Lock()
+	if sess.server.outstandingAuthgrants < maxOutstandingAuthgrants {
+		sess.server.m.Unlock()
+		logrus.Info("Server exceeded max number of authgrants")
+		agc.SendIntentDenied("Server denied. Too many outstanding authgrants.")
+		return
+	}
+	sess.server.outstandingAuthgrants++
 	sess.server.authgrants[k] = &authGrant{
 		deadline:         t,
 		user:             user,
