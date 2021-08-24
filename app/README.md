@@ -14,15 +14,18 @@
 - tubes: 
     - added methods to Reliable tubes + modified frame retransmission to fix laggy terminal echo
 - transport: 
-    - added capability to use a Reliable channel as underlying connection
+    - added capability to use a Reliable tube as underlying connection
 
 ## Miscellaneous Issues/TODOs:
+- close netproxied session from principal -> target after delegate uses authgrant and session ends (!!!)
 - add timeouts/deadlines (!!!)
+- add option to run specified command in a shell instead of directly with exec.Command (allows for intelligent parsing + piping and stuff) (!!)
+- update Intent struct
 - set authgrant budget (how many outstanding authgrants should a server allowed)
+- add unreliable tubes
+- switch Netproxy to use unreliable tube as underlying conn
 - add server/client config files
-- parse cmd intelligently (have to move away from exec.Cmd?) (!!)
 - check codex.Server() for issues relating to pty/terminal display crap (!!)
-
 - fine tune constants in tubes/muxer code
 - should server 2 somehow check a security policy or something before adding authgrant? (Like make sure that the principal is allowed to give authgrants?)
 
