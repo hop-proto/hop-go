@@ -13,7 +13,7 @@ const (
 // SlidingWindow implements the replay detection algorithm from RFC 6479 using a
 // receive window of 448, and 512 bits of state, with a 64-bit block.
 type SlidingWindow struct {
-	blocks [blockSize]uint64
+	blocks [numBlocks]uint64
 	wt     uint64
 }
 
