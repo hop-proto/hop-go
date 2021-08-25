@@ -71,3 +71,7 @@ var ErrWouldBlock = errors.New("operation would block")
 
 // ErrTimeout is returned for operations that timed out
 var ErrTimeout = errors.New("operation timed out")
+
+// ErrReplay is returned when a message is a duplicate. This should not
+// percolate outside of the internal APIs.
+var ErrReplay = errors.New("packet is a replay")
