@@ -16,6 +16,7 @@ type SessionID [4]byte
 // after the successful completion of a handshake.
 type SessionState struct {
 	sessionID SessionID
+	window    SlidingWindow
 
 	count             uint64
 	clientToServerKey [KeyLen]byte
@@ -157,6 +158,10 @@ func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (in
 	// Counter
 	count := ss.readCounter(b)
 	logrus.Debugf("ss: read packet with count %d", count)
+	if !ss.window.Check(count) {
+		logrus.Debugf("ss: rejecting replayed packet")
+		return 0, ErrReplay
+	}
 	b = b[CounterLen:]
 
 	aead, err := kravatte.NewSANSE(key[:])
@@ -176,6 +181,7 @@ func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (in
 	if len(out) != plaintextLen {
 		logrus.Panicf("len(out) = %d, expected plaintextLen = %d", len(out), plaintextLen)
 	}
+	ss.window.Mark(count)
 
 	return plaintextLen, nil
 }
