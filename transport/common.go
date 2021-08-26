@@ -72,6 +72,6 @@ var ErrWouldBlock = errors.New("operation would block")
 // ErrTimeout is returned for operations that timed out
 var ErrTimeout = errors.New("operation timed out")
 
-//ErrOpeningAuthKeys is returned when the server is unable to open the authorized keys file
-//when processing the client authentication message during handshake.
-var ErrOpeningAuthKeys = errors.New("unable to open authorized keys file")
+// ErrReplay is returned when a message is a duplicate. This should not
+// percolate outside of the internal APIs.
+var ErrReplay = errors.New("packet is a replay")
