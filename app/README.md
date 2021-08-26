@@ -22,6 +22,7 @@
 - add option to run specified command in a shell instead of directly with exec.Command (allows for intelligent parsing + piping and stuff) (!!)
 - update Intent struct
 - add unreliable tubes
+- standardize error handling and closing behavior
 - switch Netproxy to use unreliable tube as underlying conn
 - add server/client config files
 - check codex.Server() for issues relating to pty/terminal display crap (!!)
