@@ -413,7 +413,7 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 		return
 	}
 	sess.server.m.Lock()
-	if sess.server.outstandingAuthgrants < maxOutstandingAuthgrants {
+	if sess.server.outstandingAuthgrants >= maxOutstandingAuthgrants {
 		sess.server.m.Unlock()
 		logrus.Info("Server exceeded max number of authgrants")
 		agc.SendIntentDenied("Server denied. Too many outstanding authgrants.")
