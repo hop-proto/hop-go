@@ -13,7 +13,7 @@ const (
 	defaultHopPort     = "7777"
 	defaultKeyPath     = "/.hop/key"
 	clientUsage        = "hop [user@]host[:port] [-K or -k path] [-c cmd]"
-	testDataPathPrefix = "../"
+	testDataPathPrefix = "/home/baumanl/.hop/"
 )
 
 func newTestServerConfig() (*transport.ServerConfig, *transport.VerifyConfig) {
