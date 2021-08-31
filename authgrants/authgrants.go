@@ -73,7 +73,11 @@ func (c *AuthGrantConn) HandleIntentComm() (keys.PublicKey, time.Time, string, s
 	k := keys.PublicKey(intent.sha3)
 	t := time.Now().Add(time.Minute)
 	user := intent.serverUsername
-	action := intent.action
+	var action string
+	if intent.grantType == execGrant {
+		eg := fromExecGrantBytes(intent.associatedData)
+		action = eg.action
+	}
 	return k, t, user, action, nil
 }
 
@@ -102,21 +106,25 @@ func (c *AuthGrantConn) ReadResponse() (byte, []byte, error) {
 func (r *Intent) Prompt(reader *io.PipeReader) bool {
 	var ans string
 	for ans != "y" && ans != "n" {
-		if r.tubeType == commandTube {
-			fmt.Printf("\nAllow %v@%v to run %v on %v@%v? [y/n]: ",
-				r.clientUsername,
-				r.clientSNI,
-				r.action,
-				r.serverUsername,
-				r.serverSNI)
-		} else {
-			fmt.Printf("\nAllow %v@%v to open a default shell as %v@%v? [y/n]: ",
-				r.clientUsername,
-				r.clientSNI,
-				r.serverUsername,
-				r.serverSNI,
-			)
+		if r.grantType == execGrant {
+			eg := fromExecGrantBytes(r.associatedData)
+			if eg.actionType == commandTube {
+				fmt.Printf("\nAllow %v@%v to run %v on %v@%v? [y/n]: ",
+					r.clientUsername,
+					r.clientSNI,
+					eg.action,
+					r.serverUsername,
+					r.serverSNI)
+			} else {
+				fmt.Printf("\nAllow %v@%v to open a default shell as %v@%v? [y/n]: ",
+					r.clientUsername,
+					r.clientSNI,
+					r.serverUsername,
+					r.serverSNI,
+				)
+			}
 		}
+
 		scanner := bufio.NewScanner(reader)
 		scanner.Scan()
 		ans = scanner.Text()

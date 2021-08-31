@@ -78,9 +78,6 @@ func TestIntentRequest(t *testing.T) {
 	mc := tubes.NewMuxer(transportConn, transportConn)
 	go mc.Start()
 
-	ctube, err := mc.CreateTube(tubes.AuthGrantTube)
-	assert.NilError(t, err)
-
 	agc, err := NewAuthGrantConnFromMux(mc)
 	assert.NilError(t, err)
 
@@ -92,19 +89,18 @@ func TestIntentRequest(t *testing.T) {
 	sagc := &AuthGrantConn{conn: stube}
 
 	go func() {
-
 		ir := newIntent([32]byte{}, "user", "host", "port", true, "myCmd")
 		logrus.Info("C: Made req: \n",
-			"action: ", ir.action, " ",
 			"clientsni: ", ir.clientSNI, " ",
 			"client user: ", ir.clientUsername, " ",
 			"port: ", ir.port, " ",
 			"serversni: ", ir.serverSNI, " ",
 			"serverUser: ", ir.serverUsername, " ",
-			"tubetype: ", ir.tubeType, " ",
+			"grantType: ", ir.grantType, " ",
 			"sha3: ", ir.sha3)
 		err := agc.sendIntentRequest([32]byte{}, "user", "host", "port", true, "myCmd")
 		assert.NilError(t, err)
+		logrus.Info("Sent req ok")
 		rtype, response, err := agc.ReadResponse()
 		assert.NilError(t, err)
 		switch rtype {
@@ -113,20 +109,19 @@ func TestIntentRequest(t *testing.T) {
 		case IntentDenied:
 			logrus.Info("C: Got den with reason: ", fromIntentDeniedBytes(response).reason)
 		}
-		ctube.Close()
+		agc.Close()
 	}()
 
 	req, err := sagc.ReadIntentRequest()
 	assert.NilError(t, err)
 	ir := fromIntentRequestBytes(req)
 	logrus.Info("S: Got req: \n",
-		"action: ", ir.action, " ",
 		"clientsni: ", ir.clientSNI, " ",
 		"client user: ", ir.clientUsername, " ",
 		"port: ", ir.port, " ",
 		"serversni: ", ir.serverSNI, " ",
 		"serverUser: ", ir.serverUsername, " ",
-		"tubetype: ", ir.tubeType, " ",
+		"grantType: ", ir.grantType, " ",
 		"sha3: ", ir.sha3)
 	//err = SendIntentConf(stube, time.Now())
 	err = sagc.SendIntentDenied("because I say so")

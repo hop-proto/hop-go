@@ -30,35 +30,32 @@ const (
 
 //Intent Request and Communication constants
 const (
-	sha3Len     = 32
-	usernameLen = 32
-	sniLen      = 256
-	portLen     = 2
-	tubeTypeLen = 1
-	reservedLen = 1
-	irHeaderLen = sha3Len + 2*(usernameLen+sniLen) + portLen + tubeTypeLen + reservedLen
+	sha3Len      = 32
+	usernameLen  = 32
+	sniLen       = 256
+	portLen      = 2
+	grantTypeLen = 1
+	reservedLen  = 1
+	irHeaderLen  = sha3Len + 2*(usernameLen+sniLen) + portLen + grantTypeLen + reservedLen
 
-	sha3Offset  = 0
-	cUserOffset = sha3Offset + sha3Len
-	cSNIOffset  = cUserOffset + usernameLen
-	sUserOffset = cSNIOffset + sniLen
-	sSNIOffset  = sUserOffset + usernameLen
-	portOffset  = sSNIOffset + sniLen
-	tTypeOffset = portOffset + portLen
-	lenOffset   = tTypeOffset + tubeTypeLen //Using the reserved byte to hold length of action (up to 256 bytes)
-	actOffset   = lenOffset + reservedLen
+	sha3Offset      = 0
+	cUserOffset     = sha3Offset + sha3Len
+	cSNIOffset      = cUserOffset + usernameLen
+	sUserOffset     = cSNIOffset + sniLen
+	sSNIOffset      = sUserOffset + usernameLen
+	portOffset      = sSNIOffset + sniLen
+	grantTypeOffset = portOffset + portLen
+	grantDataOffset = grantTypeOffset + grantTypeLen + reservedLen
 )
 
 //Intent Confirmation constants
 const (
 	deadlineOffset = 0
 	deadlineLen    = 8
-	intentConfSize = deadlineLen
 )
 
 //Intent Denied constants
 const (
-	//reasonLenOffset = 0 //1 byte to record length of reason
 	reasonOffset = 1
 )
 
@@ -71,6 +68,14 @@ type data interface {
 	toBytes() []byte
 }
 
+//grant types
+const (
+	execGrant = byte(1)
+	//proxyGrant = byte(2) //not supported yet
+)
+
+const execGrantDataHeaderLen = 3
+
 //Intent contains all data fields of an Intent request or Intent communication
 type Intent struct {
 	sha3           [sha3Len]byte
@@ -79,8 +84,14 @@ type Intent struct {
 	serverUsername string
 	serverSNI      string
 	port           uint16
-	tubeType       byte //default shell or specific command
-	action         string
+	grantType      byte
+	associatedData []byte
+}
+
+type execGrantData struct {
+	actionType byte
+	actionLen  uint16
+	action     string
 }
 
 //intentConfirmationMsg contains deadline for an approved auth grant
@@ -104,6 +115,12 @@ func newIntent(digest [sha3Len]byte, sUser string, hostname string, port string,
 		tt = shellTube
 	}
 
+	eg := execGrantData{
+		actionType: tt,
+		actionLen:  uint16(len(cmd)),
+		action:     cmd,
+	}
+
 	r := &Intent{
 		sha3:           digest,
 		clientUsername: user.Username,
@@ -111,8 +128,8 @@ func newIntent(digest [sha3Len]byte, sUser string, hostname string, port string,
 		serverUsername: sUser,
 		serverSNI:      hostname,
 		port:           uint16(p),
-		tubeType:       tt, //TODO(baumanl): Using to differentiate between asking for shell (run using login(1)) or a specific command
-		action:         cmd,
+		grantType:      execGrant, //TODO(baumanl): support other grant types
+		associatedData: eg.toBytes(),
 	}
 	return r
 }
@@ -149,6 +166,13 @@ func newIntentDenied(r string) *agMessage {
 	}
 }
 
+func (d *execGrantData) toBytes() []byte {
+	s := [execGrantDataHeaderLen]byte{}
+	s[0] = d.actionType
+	binary.BigEndian.PutUint16(s[1:execGrantDataHeaderLen], d.actionLen)
+	return append(s[:], d.action...)
+}
+
 //toBytes()
 func (r *Intent) toBytes() []byte {
 	s := [irHeaderLen]byte{}
@@ -157,14 +181,13 @@ func (r *Intent) toBytes() []byte {
 	copy(s[cSNIOffset:sUserOffset], []byte(r.clientSNI))
 	copy(s[sUserOffset:sSNIOffset], []byte(r.serverUsername))
 	copy(s[sSNIOffset:portOffset], []byte(r.serverSNI))
-	binary.BigEndian.PutUint16(s[portOffset:tTypeOffset], r.port)
-	s[tTypeOffset] = r.tubeType
-	s[lenOffset] = byte(len(r.action)) //TODO(baumanl): This only allows for actions up to 256 bytes (and no bounds checking atm)
-	return append(s[:], []byte(r.action)...)
+	binary.BigEndian.PutUint16(s[portOffset:grantTypeOffset], r.port)
+	s[grantTypeOffset] = r.grantType
+	return append(s[:], r.associatedData...)
 }
 
 func (c *intentConfirmationMsg) toBytes() []byte {
-	s := [intentConfSize]byte{}
+	s := [deadlineLen]byte{}
 	binary.BigEndian.PutUint64(s[deadlineOffset:], uint64(c.deadline))
 	return s[:]
 }
@@ -187,6 +210,14 @@ func trimNullBytes(b []byte) string {
 	return string(b)
 }
 
+func fromExecGrantBytes(b []byte) *execGrantData {
+	return &execGrantData{
+		actionType: b[0],
+		actionLen:  binary.BigEndian.Uint16(b[1:execGrantDataHeaderLen]),
+		action:     string(b[execGrantDataHeaderLen:]),
+	}
+}
+
 //fromBytes()
 func fromIntentBytes(b []byte) *Intent {
 	r := Intent{}
@@ -195,9 +226,9 @@ func fromIntentBytes(b []byte) *Intent {
 	r.clientSNI = trimNullBytes(b[cSNIOffset:sUserOffset])
 	r.serverUsername = trimNullBytes(b[sUserOffset:sSNIOffset])
 	r.serverSNI = trimNullBytes(b[sSNIOffset:portOffset])
-	r.port = binary.BigEndian.Uint16(b[portOffset:tTypeOffset])
-	r.tubeType = b[tTypeOffset]
-	r.action = string(b[actOffset:])
+	r.port = binary.BigEndian.Uint16(b[portOffset:grantTypeOffset])
+	r.grantType = b[grantTypeOffset]
+	r.associatedData = b[grantDataOffset:]
 	return &r
 }
 
@@ -262,7 +293,7 @@ func (c *AuthGrantConn) readIntentDenied() ([]byte, error) {
 
 //ReadIntentConf
 func (c *AuthGrantConn) readIntentConf() ([]byte, error) {
-	buf := make([]byte, intentConfSize+1)
+	buf := make([]byte, deadlineLen+1)
 	buf[0] = IntentConfirmation
 	_, err := c.conn.Read(buf[1:])
 	return buf, err
