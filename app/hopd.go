@@ -91,7 +91,7 @@ func (s *hopServer) proxyAuthGrantRequest(c net.Conn) {
 		return
 	}
 	s.m.Lock()
-	// find corresponding session muxer
+	// find corresponding session
 	principalSess := s.principals[ancestor]
 	s.m.Unlock()
 	if principalSess.transportConn.IsClosed() {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -100,7 +101,10 @@ func Client(args []string) {
 
 	_, verify := newTestServerConfig()
 	sess.config = transport.ClientConfig{Verify: *verify}
-	sess.getAuthorization(keypath, username, hostname, port, cmd)
+	err = sess.getAuthorization(keypath, username, hostname, port, cmd)
+	if err != nil {
+		logrus.Fatalf("C: Error getting authorization: %v", err)
+	}
 
 	sess.startUnderlying(hostname, port)
 	sess.tubeMuxer = tubes.NewMuxer(sess.transportConn, sess.transportConn)
@@ -120,7 +124,7 @@ func Client(args []string) {
 	//TODO(baumanl): figure out definitive closing behavior --> multiple code exec tubes?
 }
 
-func (sess *session) getAuthorization(keypath string, username string, hostname string, port string, cmd string) {
+func (sess *session) getAuthorization(keypath string, username string, hostname string, port string, cmd string) error {
 	//Check if this is a principal client process or one that needs to get an AG
 	//******GET AUTHORIZATION SOURCE******
 	if sess.isPrincipal {
@@ -128,7 +132,7 @@ func (sess *session) getAuthorization(keypath string, username string, hostname 
 		var e error
 		sess.config.KeyPair, e = keys.ReadDHKeyFromPEMFile(keypath)
 		if e != nil {
-			logrus.Fatalf("C: Error using key at path %v. Error: %v", keypath, e)
+			return e
 		}
 	} else {
 		shell := false
@@ -139,20 +143,20 @@ func (sess *session) getAuthorization(keypath string, username string, hostname 
 		sess.config.KeyPair.Generate()
 		logrus.Infof("Client generated: %v", sess.config.KeyPair.Public.String())
 		logrus.Infof("C: Initiating AGC Protocol.")
-		sock := "@auth"                  //TODO(baumanl): make generalizeable
-		c, err := net.Dial("unix", sock) //TODO(baumanl): address of UDS (probably switch to abstract location)
+		c, err := net.Dial("unix", defaultHopAuthSocket)
 		if err != nil {
-			logrus.Fatal(err)
+			return err
 		}
 		logrus.Infof("C: CONNECTED TO UDS: [%v]", c.RemoteAddr().String())
 		agc := authgrants.NewAuthGrantConn(c)
+		defer agc.Close()
 		for {
 			t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, shell, cmd)
 			if e == nil {
 				logrus.Infof("C: Principal approved request. Deadline: %v", t)
 				break
 			} else if e != authgrants.ErrIntentDenied {
-				logrus.Fatalf("C: %v", e)
+				return e
 			}
 			var ans string
 			for ans != "y" && ans != "n" {
@@ -161,9 +165,12 @@ func (sess *session) getAuthorization(keypath string, username string, hostname 
 				scanner.Scan()
 				ans = scanner.Text()
 			}
+			if ans == "n" {
+				return errors.New("not authorized")
+			}
 		}
-		c.Close()
 	}
+	return nil
 }
 
 func (sess *session) startUnderlying(hostname string, port string) {
