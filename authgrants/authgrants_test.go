@@ -112,9 +112,8 @@ func TestIntentRequest(t *testing.T) {
 		agc.Close()
 	}()
 
-	req, err := sagc.ReadIntentRequest()
+	ir, err := sagc.GetIntentRequest()
 	assert.NilError(t, err)
-	ir := fromIntentRequestBytes(req)
 	logrus.Info("S: Got req: \n",
 		"clientsni: ", ir.clientSNI, " ",
 		"client user: ", ir.clientUsername, " ",

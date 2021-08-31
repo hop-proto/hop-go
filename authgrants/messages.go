@@ -8,6 +8,8 @@ import (
 	"os/user"
 	"strconv"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 //TODO(baumanl): Some of this may be overly complex. Figure out best way to standardize/simplify.
@@ -44,14 +46,14 @@ const (
 	reservedLen  = 1
 	irHeaderLen  = sha3Len + 2*(usernameLen+sniLen) + portLen + grantTypeLen + reservedLen
 
-	sha3Offset      = 0
-	cUserOffset     = sha3Offset + sha3Len
-	cSNIOffset      = cUserOffset + usernameLen
-	sUserOffset     = cSNIOffset + sniLen
-	sSNIOffset      = sUserOffset + usernameLen
-	portOffset      = sSNIOffset + sniLen
-	grantTypeOffset = portOffset + portLen
-	grantDataOffset = grantTypeOffset + grantTypeLen + reservedLen
+	sha3Offset           = 0
+	cUserOffset          = sha3Offset + sha3Len
+	cSNIOffset           = cUserOffset + usernameLen
+	sUserOffset          = cSNIOffset + sniLen
+	sSNIOffset           = sUserOffset + usernameLen
+	portOffset           = sSNIOffset + sniLen
+	grantTypeOffset      = portOffset + portLen
+	associatedDataOffset = grantTypeOffset + grantTypeLen + reservedLen
 )
 
 //Intent Confirmation constants
@@ -234,7 +236,7 @@ func fromIntentBytes(b []byte) *Intent {
 	r.serverSNI = trimNullBytes(b[sSNIOffset:portOffset])
 	r.port = binary.BigEndian.Uint16(b[portOffset:grantTypeOffset])
 	r.grantType = b[grantTypeOffset]
-	r.associatedData = b[grantDataOffset:]
+	r.associatedData = b[associatedDataOffset:]
 	return &r
 }
 
@@ -265,13 +267,16 @@ func (c *AuthGrantConn) readExecGrantData() []byte {
 		return nil
 	}
 	if header[0] == commandTube {
-		actionLen := binary.BigEndian.Uint16(header[1:3])
-		action := make([]byte, actionLen)
-		_, err = c.conn.Read(action)
-		if err != nil {
-			return nil
+		actionLen := binary.BigEndian.Uint16(header[1:])
+		logrus.Info("actionLen: ", actionLen)
+		if actionLen != 0 {
+			action := make([]byte, actionLen)
+			_, err = c.conn.Read(action)
+			if err != nil {
+				return nil
+			}
+			header = append(header, action...)
 		}
-		return append(header, action...)
 	}
 	return header
 }
@@ -288,10 +293,10 @@ func (c *AuthGrantConn) readIntent(msgType byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if irh[irHeaderLen-2] == execGrant {
+		t = append(t, irh...)
+		if irh[grantTypeOffset] == execGrant {
 			return append(t, c.readExecGrantData()...), nil
 		}
-
 	}
 	return nil, errors.New("bad msg type")
 }

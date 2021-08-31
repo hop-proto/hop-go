@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"net/url"
 	"os"
@@ -235,7 +234,7 @@ func (sess *session) principal(tube *tubes.Reliable) {
 		tube.Close()
 		logrus.Info("Closed AGC")
 	}()
-	logrus.SetOutput(io.Discard)
+	//logrus.SetOutput(io.Discard)
 	agt := authgrants.NewAuthGrantConn(tube)
 	intent, err := agt.GetIntentRequest()
 	if err != nil {
@@ -250,7 +249,7 @@ func (sess *session) principal(tube *tubes.Reliable) {
 
 	sess.execTube.Raw()
 	sess.execTube.Resume()
-	logrus.SetOutput(io.Discard)
+	//logrus.SetOutput(io.Discard)
 	if !allow {
 		agt.SendIntentDenied("User denied")
 		return
