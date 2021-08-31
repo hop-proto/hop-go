@@ -29,7 +29,7 @@ import (
 	"zmap.io/portal/userauth"
 )
 
-const maxOutstandingAuthgrants = 50
+const maxOutstandingAuthgrants = 50 //TODO(baumanl): calibrate/allow being set from config file
 
 //AuthGrant contains deadline, user, action
 type authGrant struct {
@@ -50,7 +50,6 @@ type hopServer struct {
 	authsock net.Listener
 }
 
-//TODO(bauman): figure out best way for these structs to be organized. Eliminate unnecessary member variables
 type hopSession struct {
 	transportConn *transport.Handle
 	tubeMuxer     *tubes.Muxer
@@ -72,17 +71,17 @@ func (s *hopServer) authGrantServer() {
 	for {
 		c, err := s.authsock.Accept()
 		if err != nil {
-			logrus.Fatal("accept error:", err)
+			logrus.Error("accept error:", err)
+			continue
 		}
 
 		go s.proxyAuthGrantRequest(c)
 	}
 }
 
-//ProxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
+//proxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
 //Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
 func (s *hopServer) proxyAuthGrantRequest(c net.Conn) {
-	//TODO(baumanl): check threadsafety
 	logrus.Info("S: ACCEPTED NEW UDS CONNECTION")
 	defer c.Close()
 	//Verify that the client is a legit descendent
@@ -96,39 +95,41 @@ func (s *hopServer) proxyAuthGrantRequest(c net.Conn) {
 	principalSess := s.principals[ancestor]
 	s.m.Unlock()
 	if principalSess.transportConn.IsClosed() {
-		logrus.Info("Connection with Principal is closed")
+		logrus.Error("S: Connection with Principal is closed")
 		return
 	}
 	logrus.Infof("S: CLIENT CONNECTED [%s]", c.RemoteAddr().Network())
 	agc := authgrants.NewAuthGrantConn(c)
-	req, e := agc.ReadIntentRequest()
-	if e != nil {
-		logrus.Fatalf("ERROR READING INTENT REQUEST: %v", e)
-	}
 	principalAgc, err := authgrants.NewAuthGrantConnFromMux(principalSess.tubeMuxer)
 	if err != nil {
-		logrus.Fatalf("S: ERROR MAKING CHANNEL: %v", err)
+		logrus.Errorf("S: ERROR MAKING AGT WITH PRINCIPAL: %v", err)
+		return
 	}
 	defer principalAgc.Close()
-	logrus.Infof("S: CREATED CHANNEL (AGC)")
-	err = principalAgc.WriteRawBytes(req)
-	if err != nil {
-		logrus.Fatalf("S: ERROR WRITING TO CHANNEL: %v", err)
+	logrus.Infof("S: CREATED AGC")
+	for {
+		req, e := agc.ReadIntentRequest()
+		if e != nil { //if client closes agc this will error out and the loop will end
+			logrus.Errorf("ERROR READING INTENT REQUEST: %v", e)
+			return
+		}
+		err = principalAgc.WriteRawBytes(req)
+		if err != nil {
+			logrus.Errorf("S: ERROR WRITING TO CHANNEL: %v", err)
+			return
+		}
+		logrus.Infof("S: WROTE INTENT_REQUEST TO AGC")
+		_, response, err := principalAgc.ReadResponse()
+		if err != nil {
+			logrus.Errorf("S: ERROR GETTING RESPONSE: %v, %v", err, response)
+			return
+		}
+		err = agc.WriteRawBytes(response)
+		if err != nil {
+			logrus.Errorf("S: ERROR WRITING TO CHANNEL: %v", err)
+			return
+		}
 	}
-	logrus.Infof("S: WROTE INTENT_REQUEST TO AGC")
-	_, response, err := principalAgc.ReadResponse()
-	if err != nil {
-		logrus.Fatalf("S: ERROR GETTING RESPONSE: %v, %v", err, response)
-	}
-	err = agc.WriteRawBytes(response)
-	if err != nil {
-		logrus.Fatalf("S: ERROR WRITING TO CHANNEL: %v", err)
-	}
-
-	//TODO(baumanl): Add retry logic if IntentDenied
-	// if response[0] == IntentDenied {
-	// 	//ASK USER IF THEY WANT TO TRY AGAIN BEFORE CLOSING AGC
-	// }
 }
 
 //verifies that client is a descendent of a process started by the principal and returns its ancestor process PID if found

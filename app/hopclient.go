@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -230,31 +231,31 @@ func (sess *session) handleTubes() {
 }
 
 func (sess *session) principal(tube *tubes.Reliable) {
-	defer func() {
-		tube.Close()
-		logrus.Info("Closed AGC")
-	}()
-	//logrus.SetOutput(io.Discard)
+	defer tube.Close()
+	logrus.SetOutput(io.Discard)
 	agt := authgrants.NewAuthGrantConn(tube)
-	intent, err := agt.GetIntentRequest()
-	if err != nil {
-		logrus.Error("error getting intent request")
-		return
-	}
-	logrus.SetOutput(os.Stdout)
-	sess.execTube.Restore()
-	r := sess.execTube.Redirect()
+	for {
+		intent, err := agt.GetIntentRequest()
+		if err != nil { //when the agt is closed this will error out
+			logrus.Error("error getting intent request")
+			return
+		}
+		logrus.SetOutput(os.Stdout)
+		sess.execTube.Restore()
+		r := sess.execTube.Redirect()
 
-	allow := intent.Prompt(r)
+		allow := intent.Prompt(r)
 
-	sess.execTube.Raw()
-	sess.execTube.Resume()
-	//logrus.SetOutput(io.Discard)
-	if !allow {
-		agt.SendIntentDenied("User denied")
-		return
+		sess.execTube.Raw()
+		sess.execTube.Resume()
+		logrus.SetOutput(io.Discard)
+		if !allow {
+			agt.SendIntentDenied("User denied")
+			return
+		}
+		sess.confirmWithRemote(intent, agt)
 	}
-	sess.confirmWithRemote(intent, agt)
+
 }
 
 func (sess *session) confirmWithRemote(req *authgrants.Intent, agt *authgrants.AuthGrantConn) {
