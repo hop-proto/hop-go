@@ -1,7 +1,9 @@
 package app
 
 import (
+	"bufio"
 	"flag"
+	"fmt"
 	"io"
 	"net"
 	"net/url"
@@ -144,12 +146,23 @@ func (sess *session) getAuthorization(keypath string, username string, hostname 
 		}
 		logrus.Infof("C: CONNECTED TO UDS: [%v]", c.RemoteAddr().String())
 		agc := authgrants.NewAuthGrantConn(c)
-		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, shell, cmd)
-		c.Close()
-		if e != nil {
-			logrus.Fatalf("C: %v", e)
+		for {
+			t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, shell, cmd)
+			if e == nil {
+				logrus.Infof("C: Principal approved request. Deadline: %v", t)
+				break
+			} else if e != authgrants.ErrIntentDenied {
+				logrus.Fatalf("C: %v", e)
+			}
+			var ans string
+			for ans != "y" && ans != "n" {
+				fmt.Println("Send intent request again? [y/n]: ")
+				scanner := bufio.NewScanner(os.Stdin)
+				scanner.Scan()
+				ans = scanner.Text()
+			}
 		}
-		logrus.Infof("C: Principal approved request. Deadline: %v", t)
+		c.Close()
 	}
 }
 

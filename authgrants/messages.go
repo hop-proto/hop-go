@@ -22,6 +22,12 @@ const (
 	TypeLen = 1
 )
 
+//ErrUnknownMessage used when msgtype does not match any of the authorization grant protocol defined messages.
+var ErrUnknownMessage = errors.New("received message with unknown message type")
+
+//ErrIntentDenied indicates an intent request was denied
+var ErrIntentDenied = errors.New("received intent denied message")
+
 //Action Type Constants
 const (
 	shellTube   = byte(1)
@@ -252,6 +258,24 @@ func fromIntentDeniedBytes(b []byte) *intentDeniedMsg {
 	return &d
 }
 
+func (c *AuthGrantConn) readExecGrantData() []byte {
+	header := make([]byte, 3)
+	_, err := c.conn.Read(header)
+	if err != nil {
+		return nil
+	}
+	if header[0] == commandTube {
+		actionLen := binary.BigEndian.Uint16(header[1:3])
+		action := make([]byte, actionLen)
+		_, err = c.conn.Read(action)
+		if err != nil {
+			return nil
+		}
+		return append(header, action...)
+	}
+	return header
+}
+
 func (c *AuthGrantConn) readIntent(msgType byte) ([]byte, error) {
 	t := make([]byte, 1)
 	_, err := c.conn.Read(t)
@@ -264,13 +288,10 @@ func (c *AuthGrantConn) readIntent(msgType byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		actionLen := int8(irh[irHeaderLen-1])
-		action := make([]byte, actionLen)
-		_, err = c.conn.Read(action)
-		if err != nil {
-			return nil, err
+		if irh[irHeaderLen-2] == execGrant {
+			return append(t, c.readExecGrantData()...), nil
 		}
-		return append(t, append(irh, action...)...), nil
+
 	}
 	return nil, errors.New("bad msg type")
 }

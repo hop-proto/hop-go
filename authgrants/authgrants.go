@@ -55,10 +55,10 @@ func (c *AuthGrantConn) GetAuthGrant(digest [sha3Len]byte, sUser string, hostnam
 		return fromIntentConfirmationBytes(response[TypeLen:]).deadline, nil
 	case IntentDenied:
 		reason := fromIntentDeniedBytes(response[TypeLen:]).reason
-		logrus.Infof("Reason for denial: %v", reason)
-		return 0, errors.New("principal denied Intent Request with reason: " + reason)
+		fmt.Println("Intent Request Denied with reason: ", reason)
+		return 0, ErrIntentDenied
 	default:
-		return 0, errors.New("received message with unknown message type")
+		return 0, ErrUnknownMessage
 	}
 }
 

@@ -22,6 +22,7 @@
 - add option to run specified command in a shell instead of directly with exec.Command (allows for intelligent parsing + piping and stuff) (!!)
 - add unreliable tubes
 - add support for network proxy authorization grants
+- add client side predictive echo (like MOSH) / better terminal interaction generally
 - standardize error handling and closing behavior
 - switch Netproxy to use unreliable tube as underlying conn
 - add server/client config files
