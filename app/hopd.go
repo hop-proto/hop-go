@@ -228,7 +228,7 @@ func Serve(args []string) {
 	//TEMPORARY: Should take address from argument and socket should be abstract/same place or dependent on session?
 	hostname, _ := os.Hostname()
 	port := defaultHopPort
-	sockAddr := "@auth"
+	sockAddr := defaultHopAuthSocket
 	if len(args) > 1 && args[1] == "local" {
 		hostname = "localhost"
 		if len(args) > 2 {
@@ -299,7 +299,7 @@ func (sess *hopSession) checkAuthorization() bool {
 	logrus.Info("S: Accepted USER AUTH tube")
 	defer uaTube.Close()
 	k, user := userauth.GetInitMsg(uaTube)
-	logrus.Info("got us init message")
+	logrus.Info("got userauth init message")
 	sess.user = user
 	//check /user/.hop/authorized_keys first
 	path := "/home/" + user + "/.hop/authorized_keys"
@@ -334,9 +334,13 @@ func (sess *hopSession) checkAuthorization() bool {
 		uaTube.Write([]byte{userauth.UserAuthDen})
 		return false
 	}
+	if sess.user != sess.authgrant.user {
+		logrus.Info("AUTHGRANT USER DOES NOT MATCH")
+		uaTube.Write([]byte{userauth.UserAuthDen})
+		return false
+	}
 	sess.authgrant = val
 	sess.isPrincipal = false
-	sess.user = sess.authgrant.user //these should always match anyways
 	delete(sess.server.authgrants, k)
 	logrus.Info("USER AUTHORIZED")
 	uaTube.Write([]byte{userauth.UserAuthConf})
