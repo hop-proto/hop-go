@@ -334,7 +334,7 @@ func (sess *hopSession) checkAuthorization() bool {
 		uaTube.Write([]byte{userauth.UserAuthDen})
 		return false
 	}
-	if sess.user != sess.authgrant.user {
+	if sess.user != val.user {
 		logrus.Info("AUTHGRANT USER DOES NOT MATCH")
 		uaTube.Write([]byte{userauth.UserAuthDen})
 		return false

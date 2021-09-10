@@ -241,7 +241,7 @@ func (sess *session) principal(tube *tubes.Reliable) {
 	defer tube.Close()
 	logrus.SetOutput(io.Discard)
 	agt := authgrants.NewAuthGrantConn(tube)
-	for {
+	for { //allows for user to retry sending intent request if denied
 		intent, err := agt.GetIntentRequest()
 		if err != nil { //when the agt is closed this will error out
 			logrus.Error("error getting intent request")
@@ -258,7 +258,7 @@ func (sess *session) principal(tube *tubes.Reliable) {
 		logrus.SetOutput(io.Discard)
 		if !allow {
 			agt.SendIntentDenied("User denied")
-			return
+			continue
 		}
 		sess.confirmWithRemote(intent, agt)
 	}
