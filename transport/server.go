@@ -52,6 +52,14 @@ type Server struct {
 	intermediate []byte
 }
 
+//FetchClientStatic returns the client static key used in handshake with associated handle's sessionID
+func (s *Server) FetchClientStatic(h *Handle) keys.PublicKey {
+	s.m.RLock()
+	defer s.m.RUnlock()
+	ss := s.sessions[h.sessionID]
+	return ss.clientStatic
+}
+
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
 	s.m.Lock()
 	defer s.m.Unlock()
@@ -468,6 +476,7 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	if err != nil {
 		return err
 	}
+	ss.clientStatic = hs.clientStatic
 	// TODO(dadrian): Create this earlier on so that the handshake fails earlier
 	// if the queue is full.
 	h := s.createHandleLocked(ss)

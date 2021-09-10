@@ -9,14 +9,12 @@ import (
 )
 
 const (
-	headerLen         = 36
-	keyOffset         = 0
-	usernameLenOffset = 32
-	usernameOffset    = 36
+	headerLen         = 4
+	usernameLenOffset = 0
+	usernameOffset    = 4
 )
 
 type userAuthInitMsg struct {
-	key      keys.PublicKey
 	username string
 }
 
@@ -28,7 +26,6 @@ const (
 
 func newUserAuthInitMsg(key keys.PublicKey, user string) *userAuthInitMsg {
 	return &userAuthInitMsg{
-		key:      key,
 		username: user,
 	}
 }
@@ -36,7 +33,6 @@ func newUserAuthInitMsg(key keys.PublicKey, user string) *userAuthInitMsg {
 func (msg *userAuthInitMsg) toBytes() []byte {
 	length := headerLen + len(msg.username)
 	s := make([]byte, length)
-	copy(s[keyOffset:usernameLenOffset], msg.key[:])
 	binary.BigEndian.PutUint16(s[usernameLenOffset:usernameOffset], uint16(len(msg.username)))
 	copy(s[usernameOffset:], []byte(msg.username))
 	return s
@@ -52,13 +48,11 @@ func RequestAuthorization(ch *tubes.Reliable, key keys.PublicKey, username strin
 }
 
 //GetInitMsg lets the hop server read a user auth request
-func GetInitMsg(ch *tubes.Reliable) (keys.PublicKey, string) {
-	key := [32]byte{}
-	ch.Read(key[:])
+func GetInitMsg(ch *tubes.Reliable) string {
 	lbuf := make([]byte, 4)
 	ch.Read(lbuf)
 	length := binary.BigEndian.Uint16(lbuf[:])
 	buf := make([]byte, length)
 	ch.Read(buf)
-	return key, string(buf)
+	return string(buf)
 }

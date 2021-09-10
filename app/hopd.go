@@ -298,8 +298,14 @@ func (sess *hopSession) checkAuthorization() bool {
 	uaTube, _ := sess.tubeMuxer.Accept()
 	logrus.Info("S: Accepted USER AUTH tube")
 	defer uaTube.Close()
-	k, user := userauth.GetInitMsg(uaTube)
-	logrus.Info("got userauth init message")
+	user := userauth.GetInitMsg(uaTube) //client sends desired username
+	//TODO(baumanl): verify that this is the best way to get client static key.
+	/*I originally had the client just send the key over along with the username, but it
+	seemed strange to rely on the client to send the same key that it used during the handshake.
+	Instead I modified the transport layer code so that the client static is stored in the session state.
+	This way the server directly grabs the key that was used in the handshake.*/
+	k := sess.server.server.FetchClientStatic(sess.transportConn) //server fetches client static key that was used in handshake
+	logrus.Info("got userauth init message: ", k.String())
 	sess.user = user
 	//check /user/.hop/authorized_keys first
 	path := "/home/" + user + "/.hop/authorized_keys"
