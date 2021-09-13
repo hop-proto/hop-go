@@ -446,20 +446,8 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 
 //TODO(baumanl): Add in better privilege separation? Right now hopd(root) directly starts commands through go routines. sshd uses like 3 levels of separation.
 func (sess *hopSession) startCodex(ch *tubes.Reliable) {
-	logrus.Info("Started session codex with TID: ", syscall.Gettid())
-	u := os.Getuid()
-	euid := os.Geteuid()
-	gid := os.Getgid()
-	wd, _ := os.Getwd()
-	logrus.Info("Start: Current UID: ", u, " EUID: ", euid, " GID: ", gid, " wd: ", wd)
-	defer func() {
-		u := os.Getuid()
-		euid := os.Geteuid()
-		gid := os.Getgid()
-		wd, _ := os.Getwd()
-		logrus.Info("End: Current UID: ", u, " EUID: ", euid, " GID: ", gid, " wd: ", wd)
-	}()
 	cmd, shell, _ := codex.GetCmd(ch)
+	logrus.Info("CMD: ", cmd)
 	if !sess.isPrincipal {
 		if sess.authgrant.used {
 			err := errors.New("already performed approved action")
@@ -492,11 +480,16 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 			"HOME=" + user.Homedir(),
 			"TERM=" + os.Getenv("TERM"),
 		}
+		var args []string
+		var c *exec.Cmd
 		if shell {
 			cmd = "login -f " + sess.user //login(1) starts default shell for user and changes all privileges and environment variables
+			args = strings.Split(cmd, " ")
+			c = exec.Command(args[0], args[1:]...)
+		} else {
+			args = []string{user.Shell(), "-c", cmd}
+			c = exec.Command(args[0], args[1], args[2])
 		}
-		args := strings.Split(cmd, " ")
-		c := exec.Command(args[0], args[1:]...)
 		if !shell {
 			c.Dir = user.Homedir()
 			c.SysProcAttr = &syscall.SysProcAttr{}

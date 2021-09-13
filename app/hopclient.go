@@ -44,6 +44,7 @@ type session struct {
 //Client parses cmd line arguments and establishes hop session with remote hop server
 func Client(args []string) {
 	logrus.SetLevel(logrus.InfoLevel)
+	logrus.Info("args: ", args)
 	//TODO(baumanl): add .hop_config support
 	//******PROCESS CMD LINE ARGUMENTS******
 	if len(args) < 2 {
@@ -84,9 +85,14 @@ func Client(args []string) {
 
 	fs.BoolVar(&sess.isPrincipal, "K", sess.isPrincipal, "indicates principal with default key location: $HOME/.hop/key")
 
-	//TODO(baumanl): implement this option to allow for piping and expansion
+	/*TODO(baumanl): Right now all explicit commands are run within the context of a shell using "$SHELL -c <cmd>"
+	(this allows for expanding env variables, piping, etc.) However, there may be instances where this is undesirable.
+	Add an option to resort to running the command without this feature.
+	Decide which is the better default.
+	Add config/enforcement on what clients/auth grants are allowed to do.
+	How should this be communicated within Intent and in Authgrant?*/
 	//var runCmdInShell bool
-	// fs.BoolVar(&runCmdInShell, "s", false, "run specified command within a shell")
+	// fs.BoolVar(&runCmdInShell, "s", false, "run specified command...")
 
 	var cmd string
 	fs.StringVar(&cmd, "c", "", "specific command to execute on remote server")

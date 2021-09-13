@@ -155,7 +155,6 @@ func GetCmd(c net.Conn) (string, bool, error) {
 		return "", true, nil
 	}
 	cmd := string(buf)
-	cmd = os.ExpandEnv(cmd)
 	return cmd, false, nil
 }
 
