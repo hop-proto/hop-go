@@ -67,22 +67,28 @@ func getStatus(t *tubes.Reliable) error {
 
 //NewExecTube sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
 //Stores state in an ExecChan struct so stdin can be manipulated during authgrant process
-func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) *ExecTube {
+func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTube, error) {
 	oldState, e := term.MakeRaw(int(os.Stdin.Fd()))
 	if e != nil {
-		logrus.Fatalf("C: error with terminal state: %v", e)
+		logrus.Errorf("C: error with terminal state: %v", e)
+		return nil, e
 	}
 	msg := newExecInitMsg(specificCmd, cmd)
 	if cmd == "" {
 		msg = newExecInitMsg(defaultShell, cmd)
 	}
-	tube.Write(msg.ToBytes())
+	_, e = tube.Write(msg.ToBytes())
+	if e != nil {
+		logrus.Error(e)
+		return nil, e
+	}
 
 	//get confirmation that cmd started successfully before piping IO
 	err := getStatus(tube)
 	if err != nil {
 		term.Restore(int(os.Stdin.Fd()), oldState)
-		logrus.Fatal("C: server failed to start cmd with error: ", err)
+		logrus.Error("C: server failed to start cmd with error: ", err)
+		return nil, err
 	}
 
 	r, w := io.Pipe()
@@ -94,15 +100,15 @@ func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) *ExecTube
 		w:     w,
 	}
 
-	go func(ex ExecTube) {
+	go func(ex *ExecTube) {
 		defer wg.Done()
-		io.Copy(os.Stdout, ex.tube) //read bytes from ch to os.Stdout
+		io.Copy(os.Stdout, ex.tube) //read bytes from tube to os.Stdout
 		term.Restore(int(os.Stdin.Fd()), ex.state)
 		logrus.Info("Stopped io.Copy(os.Stdout, tube)")
 		ex.tube.Close()
 		logrus.Info("closed tube")
 
-	}(ex)
+	}(&ex)
 
 	go func(ex *ExecTube) {
 		p := make([]byte, 1)
@@ -116,7 +122,7 @@ func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) *ExecTube
 		}
 	}(&ex)
 
-	return &ex
+	return &ex, nil
 }
 
 type execInitMsg struct {
@@ -154,8 +160,7 @@ func GetCmd(c net.Conn) (string, bool, error) {
 	if t[0] == defaultShell {
 		return "", true, nil
 	}
-	cmd := string(buf)
-	return cmd, false, nil
+	return string(buf), false, nil
 }
 
 //Server deals with serverside code exec channe details like pty size, copies ch -> pty and pty -> ch

@@ -208,6 +208,9 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 	return r.sender.write(b)
 }
 
+//TODO(baumanl): if Reliable tubes implement io.Reader() (with Read behaving as specified) then
+//this function is not needed because io.Copy() will use dst.ReadFrom(src *Reliable) instead of src.WriteTo(dst)
+
 //WriteTo interface for io.Copy() to work
 func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
 	var count int64
@@ -218,13 +221,12 @@ func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
 		if e != nil {
 			return count, e
 		}
-		w.Write(b)
+		_, e = w.Write(b)
 		//TODO(baumanl): finalize that this function closes correctly according to WriteTo interface
-		// if e != nil {
-		// 	return count, e
-		// }
+		if e != nil {
+			return count, e
+		}
 	}
-
 }
 
 //WriteMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn

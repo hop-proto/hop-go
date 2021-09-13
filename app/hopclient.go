@@ -2,7 +2,6 @@ package app
 
 import (
 	"bufio"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -42,18 +41,18 @@ type session struct {
 }
 
 //Client parses cmd line arguments and establishes hop session with remote hop server
-func Client(args []string) {
+func Client(args []string) error {
 	logrus.SetLevel(logrus.InfoLevel)
-	logrus.Info("args: ", args)
 	//TODO(baumanl): add .hop_config support
 	//******PROCESS CMD LINE ARGUMENTS******
 	if len(args) < 2 {
-		logrus.Fatal("C: Invalid arguments. Usage: ", clientUsage)
+		return ErrClientInvalidUsage
 	}
 
 	url, err := url.Parse("//" + args[1]) //double slashes necessary since there is never a scheme
 	if err != nil {
-		logrus.Fatal("C: Destination should be of form: [user@]host[:port]", err)
+		logrus.Error(err)
+		return ErrClientInvalidUsage
 	}
 
 	hostname := url.Hostname()
@@ -66,7 +65,7 @@ func Client(args []string) {
 	if username == "" { //if no username is entered use local client username
 		u, e := user.Current()
 		if e != nil {
-			logrus.Error(e)
+			return e
 		}
 		username = u.Username
 	}
@@ -99,20 +98,32 @@ func Client(args []string) {
 
 	err = fs.Parse(os.Args[2:])
 	if err != nil {
-		logrus.Fatal(err)
+		logrus.Error(err)
+		return ErrClientInvalidUsage
 	}
 	if fs.NArg() > 0 {
-		logrus.Fatal("Unknown arguments provided. Usage: ", clientUsage)
+		return ErrClientInvalidUsage
 	}
 
 	_, verify := newTestServerConfig()
 	sess.config = transport.ClientConfig{Verify: *verify}
-	err = sess.getAuthorization(keypath, username, hostname, port, cmd)
-	if err != nil {
-		logrus.Fatalf("C: Error getting authorization: %v", err)
+	if sess.isPrincipal {
+		err = sess.loadKeys(keypath)
+		if err != nil {
+			logrus.Error(err)
+			return ErrClientLoadingKeys
+		}
+	} else {
+		err = sess.getAuthorization(username, hostname, port, cmd)
+		if err != nil {
+			logrus.Error(err)
+			return ErrClientGettingAuthorization
+		}
 	}
-
-	sess.startUnderlying(hostname, port)
+	err = sess.startUnderlying(hostname, port)
+	if err != nil {
+		return ErrClientStartingUnderlying
+	}
 	sess.tubeMuxer = tubes.NewMuxer(sess.transportConn, sess.transportConn)
 	go sess.tubeMuxer.Start()
 	defer func() {
@@ -123,63 +134,66 @@ func Client(args []string) {
 		// logrus.Error("closing transport: ", e)
 	}()
 
-	sess.userAuthorization(username)
-	sess.startExecTube(cmd)
+	err = sess.userAuthorization(username)
+	if err != nil {
+		return err
+	}
+	err = sess.startExecTube(cmd)
+	if err != nil {
+		logrus.Error(err)
+		return ErrClientStartingExecTube
+	}
 	go sess.handleTubes()
 	sess.wg.Wait() //client program ends when the code execution tube ends.
 	//TODO(baumanl): figure out definitive closing behavior --> multiple code exec tubes?
+	return nil
 }
 
-func (sess *session) getAuthorization(keypath string, username string, hostname string, port string, cmd string) error {
-	//Check if this is a principal client process or one that needs to get an AG
-	//******GET AUTHORIZATION SOURCE******
-	if sess.isPrincipal {
-		logrus.Infof("C: Using key-file at %v for auth.", keypath)
-		var e error
-		sess.config.KeyPair, e = keys.ReadDHKeyFromPEMFile(keypath)
-		if e != nil {
+func (sess *session) loadKeys(keypath string) error {
+	logrus.Infof("C: Using key-file at %v for auth.", keypath)
+	pair, e := keys.ReadDHKeyFromPEMFile(keypath)
+	if e != nil {
+		return e
+	}
+	sess.config.KeyPair = pair
+	return nil
+}
+
+func (sess *session) getAuthorization(username string, hostname string, port string, cmd string) error {
+	sess.config.KeyPair = new(keys.X25519KeyPair)
+	sess.config.KeyPair.Generate()
+	logrus.Infof("Client generated: %v", sess.config.KeyPair.Public.String())
+	logrus.Infof("C: Initiating AGC Protocol.")
+	c, err := net.Dial("unix", defaultHopAuthSocket)
+	if err != nil {
+		return err
+	}
+	logrus.Infof("C: CONNECTED TO UDS: [%v]", c.RemoteAddr().String())
+	agc := authgrants.NewAuthGrantConn(c)
+	defer agc.Close()
+	for {
+		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, cmd == "", cmd)
+		if e == nil {
+			logrus.Infof("C: Principal approved request. Deadline: %v", t)
+			break
+		} else if e != authgrants.ErrIntentDenied {
 			return e
 		}
-	} else {
-		shell := false
-		if cmd == "" {
-			shell = true
+		var ans string
+		for ans != "y" && ans != "n" {
+			fmt.Println("Send intent request again? [y/n]: ")
+			scanner := bufio.NewScanner(os.Stdin)
+			scanner.Scan()
+			ans = scanner.Text()
 		}
-		sess.config.KeyPair = new(keys.X25519KeyPair)
-		sess.config.KeyPair.Generate()
-		logrus.Infof("Client generated: %v", sess.config.KeyPair.Public.String())
-		logrus.Infof("C: Initiating AGC Protocol.")
-		c, err := net.Dial("unix", defaultHopAuthSocket)
-		if err != nil {
-			return err
-		}
-		logrus.Infof("C: CONNECTED TO UDS: [%v]", c.RemoteAddr().String())
-		agc := authgrants.NewAuthGrantConn(c)
-		defer agc.Close()
-		for {
-			t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, shell, cmd)
-			if e == nil {
-				logrus.Infof("C: Principal approved request. Deadline: %v", t)
-				break
-			} else if e != authgrants.ErrIntentDenied {
-				return e
-			}
-			var ans string
-			for ans != "y" && ans != "n" {
-				fmt.Println("Send intent request again? [y/n]: ")
-				scanner := bufio.NewScanner(os.Stdin)
-				scanner.Scan()
-				ans = scanner.Text()
-			}
-			if ans == "n" {
-				return errors.New("not authorized")
-			}
+		if ans == "n" {
+			return e
 		}
 	}
 	return nil
 }
 
-func (sess *session) startUnderlying(hostname string, port string) {
+func (sess *session) startUnderlying(hostname string, port string) error {
 	//******ESTABLISH HOP SESSION******
 	//TODO(baumanl): figure out addr format requirements + check for them above
 	addr := hostname + ":" + port
@@ -196,32 +210,41 @@ func (sess *session) startUnderlying(hostname string, port string) {
 		sess.transportConn, err = transport.DialNP("netproxy", addr, sess.proxyConn, sess.config)
 	}
 	if err != nil {
-		logrus.Fatalf("C: error dialing server: %v", err)
+		logrus.Errorf("C: error dialing server: %v", err)
+		return err
 	}
 	err = sess.transportConn.Handshake() //This hangs if the server is not available when it starts. Add retry or timeout?
 	if err != nil {
-		logrus.Fatalf("C: Issue with handshake: %v", err)
+		logrus.Errorf("C: Issue with handshake: %v", err)
+		return err
 	}
+	return nil
 }
 
-func (sess *session) userAuthorization(username string) {
+func (sess *session) userAuthorization(username string) error {
 	//*****PERFORM USER AUTHORIZATION******
 	uaCh, _ := sess.tubeMuxer.CreateTube(tubes.UserAuthTube)
+	defer uaCh.Close()
 	if ok := userauth.RequestAuthorization(uaCh, sess.config.KeyPair.Public, username); !ok {
-		logrus.Fatal("Not authorized.")
+		return ErrClientUnauthorized
 	}
 	logrus.Info("User authorization complete")
-	uaCh.Close()
+	return nil
 }
 
-func (sess *session) startExecTube(cmd string) {
+func (sess *session) startExecTube(cmd string) error {
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	//Hop Session is tied to the life of this code execution tube.
 	logrus.Infof("Performing action: %v", cmd)
-	ch, _ := sess.tubeMuxer.CreateTube(tubes.ExecTube)
+	ch, err := sess.tubeMuxer.CreateTube(tubes.ExecTube)
+	if err != nil {
+		logrus.Error(err)
+		return err
+	}
 	sess.wg = sync.WaitGroup{}
 	sess.wg.Add(1)
-	sess.execTube = codex.NewExecTube(cmd, ch, &sess.wg)
+	sess.execTube, err = codex.NewExecTube(cmd, ch, &sess.wg)
+	return err
 }
 
 func (sess *session) handleTubes() {
@@ -230,14 +253,18 @@ func (sess *session) handleTubes() {
 	for {
 		c, e := sess.tubeMuxer.Accept()
 		if e != nil {
-			logrus.Fatalf("Error accepting tube: %v", e)
+			logrus.Errorf("Error accepting tube: %v", e)
+			continue
 		}
 		logrus.Infof("ACCEPTED NEW CHANNEL of TYPE: %v", c.Type())
 		if c.Type() == tubes.AuthGrantTube && sess.isPrincipal {
 			go sess.principal(c)
 		} else {
 			//Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
-			c.Close()
+			e := c.Close()
+			if e != nil {
+				logrus.Errorf("Error closing tube: %v", e)
+			}
 			continue
 		}
 	}
@@ -268,7 +295,6 @@ func (sess *session) principal(tube *tubes.Reliable) {
 		}
 		sess.confirmWithRemote(intent, agt)
 	}
-
 }
 
 func (sess *session) confirmWithRemote(req *authgrants.Intent, agt *authgrants.AuthGrantConn) {

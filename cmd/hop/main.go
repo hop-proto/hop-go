@@ -7,10 +7,12 @@ import (
 	"zmap.io/portal/app"
 )
 
-// ./hop <username>@<host>:<port> -k path (for principal)
-// ./hop <username>@<host>:<port> -a action (for auth grant)
+//Usage: hop [user@]host[:port] [-K or -k path] [-c cmd]
 
 func main() {
 	logrus.Infof("Starting hop client")
-	app.Client(os.Args)
+	err := app.Client(os.Args)
+	if err != nil {
+		logrus.Error(err)
+	}
 }
