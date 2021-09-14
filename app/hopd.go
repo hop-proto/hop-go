@@ -246,7 +246,7 @@ func Serve(args []string) {
 	}
 	// It's actually a UDP conn
 	udpConn := pktConn.(*net.UDPConn)
-	serverConfig, _ := newTestServerConfig()
+	serverConfig, _ := newTestServerConfig() //TEMPORARY
 	transportServer, err := transport.NewServer(udpConn, serverConfig)
 	if err != nil {
 		logrus.Fatalf("S: ERROR STARTING TRANSPORT CONN: %v", err)
@@ -298,7 +298,7 @@ func (sess *hopSession) checkAuthorization() bool {
 	uaTube, _ := sess.tubeMuxer.Accept()
 	logrus.Info("S: Accepted USER AUTH tube")
 	defer uaTube.Close()
-	user := userauth.GetInitMsg(uaTube) //client sends desired username
+	username := userauth.GetInitMsg(uaTube) //client sends desired username
 	//TODO(baumanl): verify that this is the best way to get client static key.
 	/*I originally had the client just send the key over along with the username, but it
 	seemed strange to rely on the client to send the same key that it used during the handshake.
@@ -306,9 +306,23 @@ func (sess *hopSession) checkAuthorization() bool {
 	This way the server directly grabs the key that was used in the handshake.*/
 	k := sess.server.server.FetchClientStatic(sess.transportConn) //server fetches client static key that was used in handshake
 	logrus.Info("got userauth init message: ", k.String())
-	sess.user = user
+	sess.user = username
+
+	cache, err := etcpwdparse.NewLoadedEtcPasswdCache() //Best way to do this? should I load this only once and then just reload on misses? What if /etc/passwd modified between accesses?
+	if err != nil {
+		err := errors.New("issue loading /etc/passwd")
+		logrus.Error(err)
+	}
+	path := "/home/" + username + "/.hop/authorized_keys"
+	if user, ok := cache.LookupUserByName(sess.user); ok {
+		path = user.Homedir() + "/.hop/authorized_keys"
+	}
+
 	//check /user/.hop/authorized_keys first
-	path := "/home/" + user + "/.hop/authorized_keys"
+	//
+	// if user == "root" {
+	// 	path = "/root/" + "/.hop/authorized_keys"
+	// }
 	f, e := os.Open(path)
 	if e != nil {
 		logrus.Error("Could not open file at path: ", path)
