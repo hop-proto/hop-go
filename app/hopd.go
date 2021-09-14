@@ -404,13 +404,8 @@ func (sess *hopSession) start() {
 		select {
 		case <-sess.done:
 			logrus.Info("Closing everything")
-			sess.tubeMuxer.Stop()
+			sess.close()
 			return
-			//TODO: serverside transport layer Close() not implemented yet
-			// e := sess.transportConn.Close()
-			// if e != nil {
-			// 	logrus.Error("stopped transport conn error: ", e)
-			// }
 		case serverChan := <-sess.tubeQueue:
 			logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", serverChan.Type())
 			switch serverChan.Type() {
@@ -426,6 +421,19 @@ func (sess *hopSession) start() {
 		}
 
 	}
+}
+
+func (sess *hopSession) close() error {
+	var err, err2 error
+	if !sess.isPrincipal {
+		err = sess.authgrant.principalSession.close()
+	}
+	sess.tubeMuxer.Stop()
+	//err2 = sess.transportConn.Close() (not implemented yet)
+	if err != nil {
+		return err
+	}
+	return err2
 }
 
 func (sess *hopSession) handleAgc(tube *tubes.Reliable) {

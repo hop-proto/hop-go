@@ -268,6 +268,12 @@ func (sess *session) handleTubes() {
 			continue
 		}
 	}
+	/*
+		switch {
+		case <- mux.Stop()
+		case <- mux.Accept()
+		}
+	*/
 }
 
 func (sess *session) principal(tube *tubes.Reliable) {
@@ -356,7 +362,6 @@ func (sess *session) confirmWithRemote(req *authgrants.Intent, agt *authgrants.A
 	case authgrants.IntentConfirmation:
 		logrus.Infof("C: WROTE IntentConfirmation")
 	}
-
 	// Want to keep this session open in case the "server 2" wants to continue chaining hop sessions together
 	// TODO(baumanl): Simplify this. Should only get authorization grant tubes?
 	go subsess.handleTubes()
