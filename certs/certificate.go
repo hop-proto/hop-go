@@ -3,8 +3,8 @@
 package certs
 
 import (
+	"bufio"
 	"bytes"
-	"crypto/subtle"
 	"encoding/binary"
 	"encoding/pem"
 	"errors"
@@ -110,8 +110,9 @@ type IDType byte
 
 // Known IDType values
 const (
-	TypeDNSName   IDType = 0x01
-	TypeIPAddress IDType = 0x02
+	TypeDNSName     IDType = 0x01
+	TypeIPv4Address IDType = 0x02
+	TypeIPv6Address IDType = 0x03
 )
 
 // Name is a UTF-8 label and an IDType. It can be encoded to an IDBlock.
@@ -277,21 +278,12 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 	return bytesRead, nil
 }
 
-// RoundUpToWord round i up to the nearest multiple of 4.
-func RoundUpToWord(i int) int {
-	r := i % 4
-	if r == 0 {
-		return i
-	}
-	return i + (4 - r)
-}
-
 // SerializedLen returns the length of this IDChunk if it were to be serialized.
 // It does not serialize the IDChunk.
 func (chunk *IDChunk) SerializedLen() int {
-	outputLen := 4
+	outputLen := 2
 	for i := range chunk.Blocks {
-		blockSize, _ := chunk.Blocks[i].BlockSize()
+		blockSize := chunk.Blocks[i].BlockSize()
 		outputLen += blockSize
 	}
 	return outputLen
@@ -300,20 +292,18 @@ func (chunk *IDChunk) SerializedLen() int {
 // BlockSize returns the length of this block when serialized, and how many
 // bytes of the serialization are padding. The padding is included in the block
 // size.
-func (name *Name) BlockSize() (blockSize int, padding int) {
-	base := len(name.Label) + 3
-	total := RoundUpToWord(base)
-	return total, total - base
+func (name *Name) BlockSize() int {
+	return len(name.Label) + 3
 }
 
 // WriteTo serializes the IDBlock to w.
 func (name *Name) WriteTo(w io.Writer) (int64, error) {
-	blockSize, paddingLen := name.BlockSize()
+	blockSize := name.BlockSize()
 	if blockSize > 256 {
 		return 0, ErrNameTooLong
 	}
 	idLen := len(name.Label)
-	if idLen > 256 {
+	if idLen > 256-3 {
 		return 0, ErrNameTooLong
 	}
 	written := int64(0)
@@ -327,13 +317,6 @@ func (name *Name) WriteTo(w io.Writer) (int64, error) {
 	if err != nil {
 		return written, err
 	}
-	for i := 0; i < paddingLen; i++ {
-		n, err = w.Write([]byte{0})
-		written += int64(n)
-		if err != nil {
-			return written, err
-		}
-	}
 	return written, nil
 }
 
@@ -341,12 +324,13 @@ func (name *Name) WriteTo(w io.Writer) (int64, error) {
 func (name *Name) ReadFrom(r io.Reader) (int64, error) {
 	var bytesRead int64
 
-	var blockSize byte
-	err := binary.Read(r, binary.BigEndian, &blockSize)
+	var encodedBlockSize byte
+	err := binary.Read(r, binary.BigEndian, &encodedBlockSize)
 	if err != nil {
 		return bytesRead, err
 	}
 	bytesRead++
+	blockSize := int(encodedBlockSize)
 	if blockSize < 3 {
 		return bytesRead, fmt.Errorf("minium block size is 3, got %d", blockSize)
 	}
@@ -364,7 +348,7 @@ func (name *Name) ReadFrom(r io.Reader) (int64, error) {
 	}
 	bytesRead++
 
-	if serverIDLen > blockSize-3 {
+	if int(serverIDLen) > blockSize-3 {
 		return bytesRead, fmt.Errorf("invalid server ID len %d (max for block size %d is %d)", serverIDLen, blockSize, blockSize-3)
 	}
 
@@ -378,20 +362,6 @@ func (name *Name) ReadFrom(r io.Reader) (int64, error) {
 	}
 	name.Label = builder.String()
 
-	paddingLen := int(blockSize - 3 - serverIDLen)
-	expectedPadding := make([]byte, paddingLen)
-	padding := make([]byte, paddingLen)
-	n, err := r.Read(padding)
-	bytesRead += int64(n)
-	if err != nil {
-		return bytesRead, err
-	}
-	if n != paddingLen {
-		return bytesRead, io.EOF
-	}
-	if subtle.ConstantTimeCompare(expectedPadding, padding) != 1 {
-		return bytesRead, errors.New("invalid padding")
-	}
 	return bytesRead, nil
 }
 
@@ -405,21 +375,11 @@ func (chunk *IDChunk) ReadFrom(r io.Reader) (int64, error) {
 	}
 	bytesRead += 2
 
-	var paddingLen uint16
-	err = binary.Read(r, binary.BigEndian, &paddingLen)
-	if err != nil {
-		return bytesRead, err
-	}
-	bytesRead += 2
-
-	if chunkLen > 512 || chunkLen < 4 {
+	if chunkLen > 512 || chunkLen < 2 {
 		return bytesRead, fmt.Errorf("invalid IDChunk length %d", chunkLen)
 	}
-	if paddingLen > chunkLen-4 {
-		return bytesRead, fmt.Errorf("invalid IDChunk padding length %d (IDChunk only %d)", paddingLen, chunkLen)
-	}
 
-	blockLen := chunkLen - paddingLen - 4
+	blockLen := chunkLen - 2
 	var blockBytesRead int64
 	for blockBytesRead < int64(blockLen) {
 		name := Name{}
@@ -432,16 +392,6 @@ func (chunk *IDChunk) ReadFrom(r io.Reader) (int64, error) {
 		chunk.Blocks = append(chunk.Blocks, name)
 	}
 
-	padding := make([]byte, paddingLen)
-	expectedPadding := make([]byte, paddingLen)
-	n, err := r.Read(padding)
-	bytesRead += int64(n)
-	if err != nil {
-		return bytesRead, err
-	}
-	if subtle.ConstantTimeCompare(expectedPadding, padding) != 1 {
-		return bytesRead, errors.New("invalid padding")
-	}
 	return bytesRead, nil
 }
 
@@ -453,13 +403,6 @@ func (chunk *IDChunk) WriteTo(w io.Writer) (int64, error) {
 		return 0, fmt.Errorf("invalid chunk len %d (max is 512)", serializedLen)
 	}
 	err := binary.Write(w, binary.BigEndian, uint16(serializedLen))
-	if err != nil {
-		return written, err
-	}
-	written += 2
-
-	// TODO(dadrian): Add in non-zero padding
-	err = binary.Write(w, binary.BigEndian, uint16(0))
 	if err != nil {
 		return written, err
 	}
@@ -549,4 +492,43 @@ func (c *Certificate) ProvideKey(private *[KeyLen]byte) error {
 	}
 	c.privateKey = private
 	return nil
+}
+
+// ScannerSplitPEM is a bufio.SplitFunc that breaks input into chunks that can be handled by pem.Decode()
+func ScannerSplitPEM(data []byte, atEOF bool) (int, []byte, error) {
+	block, rest := pem.Decode(data)
+	if block != nil {
+		size := len(data) - len(rest)
+		return size, data[:size], nil
+	}
+	return 0, nil, nil
+}
+
+// ReadManyCertificatesPEM reads a stream of concatenated PEM-encoded Hop
+// certificates. PEMs that are not Hop certificates are ignored, as is non-PEM
+// data.
+func ReadManyCertificatesPEM(r io.Reader) ([]Certificate, error) {
+	scanner := bufio.NewScanner(r)
+	scanner.Split(ScannerSplitPEM)
+	scanner.Buffer(nil, 1024*64)
+	var out []Certificate
+	for scanner.Scan() {
+		p, _ := pem.Decode(scanner.Bytes())
+		if p == nil {
+			continue
+		}
+		if p.Type != PEMTypeHopCertificate {
+			continue
+		}
+		c := Certificate{}
+		n, err := c.ReadFrom(bytes.NewBuffer(p.Bytes))
+		if err != nil {
+			return nil, err
+		}
+		if int(n) != len(p.Bytes) {
+			return nil, errors.New("extra bytes after certificate")
+		}
+		out = append(out, c)
+	}
+	return out, nil
 }
