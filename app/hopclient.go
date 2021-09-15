@@ -43,6 +43,7 @@ type session struct {
 //Client parses cmd line arguments and establishes hop session with remote hop server
 func Client(args []string) error {
 	logrus.SetLevel(logrus.InfoLevel)
+
 	//TODO(baumanl): add .hop_config support
 	//******PROCESS CMD LINE ARGUMENTS******
 	if len(args) < 2 {
@@ -96,6 +97,9 @@ func Client(args []string) error {
 	var cmd string
 	fs.StringVar(&cmd, "c", "", "specific command to execute on remote server")
 
+	var quiet bool
+	fs.BoolVar(&quiet, "q", false, "turn off logging")
+
 	err = fs.Parse(os.Args[2:])
 	if err != nil {
 		logrus.Error(err)
@@ -103,6 +107,9 @@ func Client(args []string) error {
 	}
 	if fs.NArg() > 0 {
 		return ErrClientInvalidUsage
+	}
+	if quiet {
+		logrus.SetOutput(io.Discard)
 	}
 
 	_, verify := newTestServerConfig()
@@ -286,7 +293,7 @@ func (sess *session) principal(tube *tubes.Reliable) {
 			logrus.Error("error getting intent request")
 			return
 		}
-		logrus.SetOutput(os.Stdout)
+		//logrus.SetOutput(os.Stdout)
 		sess.execTube.Restore()
 		r := sess.execTube.Redirect()
 
@@ -294,7 +301,7 @@ func (sess *session) principal(tube *tubes.Reliable) {
 
 		sess.execTube.Raw()
 		sess.execTube.Resume()
-		logrus.SetOutput(io.Discard)
+		//logrus.SetOutput(io.Discard)
 		if !allow {
 			agt.SendIntentDenied("User denied")
 			continue

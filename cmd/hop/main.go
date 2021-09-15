@@ -10,7 +10,6 @@ import (
 //Usage: hop [user@]host[:port] [-K or -k path] [-c cmd]
 
 func main() {
-	logrus.Infof("Starting hop client")
 	err := app.Client(os.Args)
 	if err != nil {
 		logrus.Error(err)
