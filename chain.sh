@@ -3,18 +3,19 @@ set -e
 set -o pipefail
 
 HOP_CERT_DNS_NAME=${HOP_CERT_DNS_NAME:='domain.example'}
+HOP_CERT_OUTPUT_DIR=${HOP_CERT_OUTPUT_DIR:='.'}
 
 # Private Keys
-go run ./cmd/hop-gen -signing | tee root-key.pem
-go run ./cmd/hop-gen -signing | tee intermediate-key.pem
-go run ./cmd/hop-gen | tee leaf-key.pem
+go run ./cmd/hop-gen -signing | tee $HOP_CERT_OUTPUT_DIR/root-key.pem
+go run ./cmd/hop-gen -signing | tee $HOP_CERT_OUTPUT_DIR/intermediate-key.pem
+go run ./cmd/hop-gen | tee $HOP_CERT_OUTPUT_DIR/leaf-key.pem
 
 # Public Keys
-go run ./cmd/hop-gen -signing -private root-key.pem | tee root.pub
-go run ./cmd/hop-gen -signing -private intermediate-key.pem | tee intermediate.pub
-go run ./cmd/hop-gen -private leaf-key.pem | tee leaf.pub
+go run ./cmd/hop-gen -signing -private $HOP_CERT_OUTPUT_DIR/root-key.pem | tee $HOP_CERT_OUTPUT_DIR/root.pub
+go run ./cmd/hop-gen -signing -private $HOP_CERT_OUTPUT_DIR/intermediate-key.pem | tee $HOP_CERT_OUTPUT_DIR/intermediate.pub
+go run ./cmd/hop-gen -private $HOP_CERT_OUTPUT_DIR/leaf-key.pem | tee $HOP_CERT_OUTPUT_DIR/leaf.pub
 
 # Certs
-go run ./cmd/hop-issue -type root -key-file root-key.pem -dns-name $HOP_CERT_DNS_NAME | tee root.pem
-go run ./cmd/hop-issue -type intermediate -key-file root-key.pem -cert-file root.pem -public-key intermediate.pub -dns-name $HOP_CERT_DNS_NAME | tee intermediate.pem
-go run ./cmd/hop-issue -type leaf -key-file intermediate-key.pem -cert-file intermediate.pem -public-key leaf.pub -dns-name $HOP_CERT_DNS_NAME | tee leaf.pem
+go run ./cmd/hop-issue -type root -key-file $HOP_CERT_OUTPUT_DIR/root-key.pem -dns-name $HOP_CERT_DNS_NAME | tee $HOP_CERT_OUTPUT_DIR/root.pem
+go run ./cmd/hop-issue -type intermediate -key-file $HOP_CERT_OUTPUT_DIR/root-key.pem -cert-file $HOP_CERT_OUTPUT_DIR/root.pem -public-key $HOP_CERT_OUTPUT_DIR/intermediate.pub -dns-name $HOP_CERT_DNS_NAME | tee $HOP_CERT_OUTPUT_DIR/intermediate.pem
+go run ./cmd/hop-issue -type leaf -key-file $HOP_CERT_OUTPUT_DIR/intermediate-key.pem -cert-file $HOP_CERT_OUTPUT_DIR/intermediate.pem -public-key $HOP_CERT_OUTPUT_DIR/leaf.pub -dns-name $HOP_CERT_DNS_NAME | tee $HOP_CERT_OUTPUT_DIR/leaf.pem

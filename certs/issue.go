@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"golang.org/x/crypto/sha3"
 	"zmap.io/portal/keys"
 )
 
@@ -19,10 +20,10 @@ const (
 // issue does the heavy lifting of issuing and signing
 func issue(parent *Certificate, child *Identity, certType CertificateType, duration time.Duration) (*Certificate, error) {
 	if parent.Fingerprint == zero {
-		return nil, errors.New("IssueLeaf requires SHA3Fingerprint to be set")
+		return nil, errors.New("issue requires SHA3Fingerprint to be set")
 	}
 	if parent.privateKey == nil {
-		return nil, errors.New("IssueLeaf requires a private key")
+		return nil, errors.New("issue requires a private key")
 	}
 	now := time.Now()
 	out := &Certificate{
@@ -57,6 +58,10 @@ func issue(parent *Certificate, child *Identity, certType CertificateType, durat
 		logrus.Panicf("unexpected signature len %d (expected %d)", len(signature), SignatureLen)
 	}
 	copy(out.Signature[:], signature)
+	h := sha3.New256()
+	h.Write(b[:tbsLen])
+	h.Write(out.Signature[:])
+	h.Sum(out.Fingerprint[:0])
 	return out, nil
 }
 
@@ -120,6 +125,10 @@ func selfSign(self *Identity, certificateType CertificateType, keyPair *keys.Sig
 		}
 		copy(out.Signature[:], signature)
 	}
+	h := sha3.New256()
+	h.Write(b[:tbsLen])
+	h.Write(out.Signature[:])
+	h.Sum(out.Fingerprint[:0])
 	return out, nil
 }
 
@@ -139,12 +148,4 @@ func IssueIntermediate(root *Certificate, intermediate *Identity) (*Certificate,
 		return nil, errors.New("IssueIntermediate requires the parent to be a root")
 	}
 	return issue(root, intermediate, Intermediate, time.Hour*24*366)
-}
-
-// SelfSignLeaf returns a leaf self-signed by the provided key pair.
-//
-// TODO(dadrian): Actually make it self-signed, instead of zero signature. This
-// requires implementing XEdDSA.
-func SelfSignLeaf(leaf *Identity, keyPair *keys.X25519KeyPair) (*Certificate, error) {
-	return selfSign(leaf, Leaf, nil)
 }

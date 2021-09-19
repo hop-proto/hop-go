@@ -52,28 +52,26 @@ func TestWriteTo(t *testing.T) {
 	b := &bytes.Buffer{}
 	n, err := c.WriteTo(b)
 	assert.NilError(t, err)
-	assert.Check(t, cmp.Equal(int64(172), n))
+	assert.Check(t, cmp.Equal(int64(167), n))
 
 	serialized := b.Bytes()
-	assert.Check(t, cmp.Len(serialized, 172))
+	assert.Check(t, cmp.Len(serialized, int(n)))
 
 	expected := []byte{
 		0x01, 0x01, 0x00, 0x00, // Version, Type, Reserved
 		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, // Issued
 		0x0F, 0xED, 0xCB, 0xA0, 0x98, 0x76, 0x54, 0x32, // Expires
 	}
+	assert.Check(t, cmp.Len(expected, 20))
 	expectedIDChunk := []byte{
-		0x0, 0x18, // ID Chunk Len
-		0x00, 0x00, // ID Chunk Padding Len
-		0x14, // IDBlock Len
+		0x0, 0x13, // ID Chunk Len
+		0x11, // IDBlock Len
 		0x01, // DNSName
 		0x0e, // ServerID length
 		// example.domain
 		0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x64, 0x6f, 0x6d, 0x61, 0x69, 0x6e,
-		0x00, 0x00, 0x00, // IDBlock padding
-		// No IDChunk padding
-
 	}
+	assert.Check(t, cmp.Len(expectedIDChunk, 19))
 	assert.Assert(t, len(expected) < b.Len())
 	front := serialized[:len(expected)]
 	assert.Check(t, cmp.DeepEqual(expected, front))
