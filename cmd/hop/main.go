@@ -12,6 +12,6 @@ import (
 func main() {
 	err := app.Client(os.Args)
 	if err != nil {
-		logrus.Error(err)
+		logrus.Error("Main: ", err)
 	}
 }

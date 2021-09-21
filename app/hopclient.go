@@ -46,31 +46,6 @@ func Client(args []string) error {
 
 	//TODO(baumanl): add .hop_config support
 	//******PROCESS CMD LINE ARGUMENTS******
-	if len(args) < 2 {
-		return ErrClientInvalidUsage
-	}
-
-	url, err := url.Parse("//" + args[1]) //double slashes necessary since there is never a scheme
-	if err != nil {
-		logrus.Error(err)
-		return ErrClientInvalidUsage
-	}
-
-	hostname := url.Hostname()
-	port := url.Port()
-	if port == "" {
-		port = defaultHopPort
-	}
-
-	username := url.User.Username()
-	if username == "" { //if no username is entered use local client username
-		u, e := user.Current()
-		if e != nil {
-			return e
-		}
-		username = u.Username
-	}
-
 	var fs flag.FlagSet
 	keypath, _ := os.UserHomeDir()
 	keypath += defaultKeyPath
@@ -100,16 +75,50 @@ func Client(args []string) error {
 	var quiet bool
 	fs.BoolVar(&quiet, "q", false, "turn off logging")
 
-	err = fs.Parse(os.Args[2:])
+	err := fs.Parse(os.Args[1:])
+	if err != nil {
+		if err == flag.ErrHelp {
+			return nil
+		}
+		return ErrClientInvalidUsage
+	}
+	if fs.NArg() < 1 { //the only argument that is not a flag is of the form [user@]host[:port]
+		return ErrClientInvalidUsage
+	}
+	hoststring := fs.Arg(0)
+	if fs.NArg() > 1 { //still flags after the hoststring that need to be parsed
+		err = fs.Parse(fs.Args()[1:])
+		if err != nil || fs.NArg() > 0 {
+			if err == flag.ErrHelp {
+				return nil
+			}
+			return ErrClientInvalidUsage
+		}
+	}
+
+	if quiet {
+		logrus.SetOutput(io.Discard)
+	}
+
+	url, err := url.Parse("//" + hoststring) //double slashes necessary since there is never a scheme
 	if err != nil {
 		logrus.Error(err)
 		return ErrClientInvalidUsage
 	}
-	if fs.NArg() > 0 {
-		return ErrClientInvalidUsage
+
+	hostname := url.Hostname()
+	port := url.Port()
+	if port == "" {
+		port = defaultHopPort
 	}
-	if quiet {
-		logrus.SetOutput(io.Discard)
+
+	username := url.User.Username()
+	if username == "" { //if no username is entered use local client username
+		u, e := user.Current()
+		if e != nil {
+			return e
+		}
+		username = u.Username
 	}
 
 	_, verify := newTestServerConfig()
