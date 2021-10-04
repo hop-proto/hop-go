@@ -92,38 +92,31 @@ func Server(npTube *tubes.Reliable) {
 	//could net.Pipe() be useful here?
 	go func() {
 		//Handles all traffic from principal to server 2
+		buf := make([]byte, 65535)
 		for {
-			buf := make([]byte, 65500)
 			n, _, _, _, e := npTube.ReadMsgUDP(buf, nil)
 			if e != nil {
 				logrus.Info("Error Reading from tube: ", e)
 				npTube.Close()
 				break
 			}
-			//logrus.Infof("Read: %v bytes from tube", n)
-			//logrus.Infof("buf[:n] -> %v", buf[:n])
 			_, _, e = tconn.WriteMsgUDP(buf[:n], nil, nil)
 			if e != nil {
 				logrus.Fatal("Error sending packet: ", e)
 			}
-			//logrus.Infof("Wrote %v bytes to UDP", n)
 		}
 	}()
 	//handles all traffic from server 2 back to principal
+	buf := make([]byte, 65535)
 	for {
-		buf := make([]byte, 65500)
 		n, _, _, _, e := tconn.ReadMsgUDP(buf, nil)
 		if e != nil {
 			logrus.Errorf("Err reading from UDP: %v", e)
 			continue
-
 		}
-		//logrus.Infof("Read: %v bytes from UDP Conn", n)
-		//logrus.Infof("buf[:n] -> %v", buf[:n])
 		_, _, e = npTube.WriteMsgUDP(buf[:n], nil, nil)
 		if e != nil {
 			logrus.Fatal("Error writing to tube, ", e)
 		}
-		//logrus.Infof("Wrote %v bytes to tube.", n)
 	}
 }

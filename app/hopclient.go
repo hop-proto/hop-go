@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/user"
+	"strings"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -60,6 +61,22 @@ func Client(args []string) error {
 
 	fs.BoolVar(&sess.isPrincipal, "K", sess.isPrincipal, "indicates principal with default key location: $HOME/.hop/key")
 
+	remoteForward := false
+	remoteArg := ""
+	fs.Func("R", "perform remote port forwarding", func(s string) error {
+		remoteForward = true
+		remoteArg = s
+		return nil
+	})
+
+	localForward := false
+	localArg := ""
+	fs.Func("L", "perform local port forwarding", func(s string) error {
+		localForward = true
+		localArg = s
+		return nil
+	})
+
 	/*TODO(baumanl): Right now all explicit commands are run within the context of a shell using "$SHELL -c <cmd>"
 	(this allows for expanding env variables, piping, etc.) However, there may be instances where this is undesirable.
 	Add an option to resort to running the command without this feature.
@@ -74,6 +91,9 @@ func Client(args []string) error {
 
 	var quiet bool
 	fs.BoolVar(&quiet, "q", false, "turn off logging")
+
+	var noCmd bool
+	fs.BoolVar(&noCmd, "N", false, "don't execute a remote command. Useful for just port forwarding.")
 
 	err := fs.Parse(os.Args[1:])
 	if err != nil {
@@ -154,10 +174,28 @@ func Client(args []string) error {
 	if err != nil {
 		return err
 	}
-	err = sess.startExecTube(cmd)
-	if err != nil {
-		logrus.Error(err)
-		return ErrClientStartingExecTube
+	if remoteForward {
+		logrus.Info("Doing remote with: ", remoteArg)
+		//do remote port forwarding
+	}
+	if localForward {
+		logrus.Info("Doing local with: ", localArg)
+		//parse string
+		parts := strings.Split(localArg, ":")
+		if len(parts) != 3 {
+			logrus.Error("local port forwarding currently only supported with port:host:hostport format")
+		} else {
+			sess.wg.Add(1)
+			go sess.localForward(parts)
+		}
+	}
+
+	if !noCmd {
+		err = sess.startExecTube(cmd)
+		if err != nil {
+			logrus.Error(err)
+			return ErrClientStartingExecTube
+		}
 	}
 	go sess.handleTubes()
 	sess.wg.Wait() //client program ends when the code execution tube ends.
@@ -245,6 +283,38 @@ func (sess *session) userAuthorization(username string) error {
 		return ErrClientUnauthorized
 	}
 	logrus.Info("User authorization complete")
+	return nil
+}
+
+func (sess *session) localForward(parts []string) error {
+	defer sess.wg.Done()
+	remoteAddr := net.JoinHostPort(parts[1], parts[2])
+	npt, e := sess.tubeMuxer.CreateTube(tubes.NetProxyTube)
+	if e != nil {
+		return e
+	}
+	e = netproxy.Start(npt, remoteAddr)
+	if e != nil {
+		return e
+	}
+	sess.wg.Add(1)
+	//do local port forwarding
+	go func() {
+		defer sess.wg.Done()
+		local, e := net.Listen("tcp", ":"+strings.Trim(parts[0], ":"))
+		if e != nil {
+
+			logrus.Error(e)
+		}
+		for {
+			localConn, e := local.Accept()
+			if e != nil {
+				logrus.Error(e)
+				break
+			}
+			go io.Copy(npt, localConn)
+		}
+	}()
 	return nil
 }
 
@@ -345,7 +415,7 @@ func (sess *session) confirmWithRemote(req *authgrants.Intent, agt *authgrants.A
 	subsess.tubeMuxer = tubes.NewMuxer(subsess.transportConn, subsess.transportConn)
 	go subsess.tubeMuxer.Start()
 
-	subsess.userAuthorization(req.Username())
+	subsess.userAuthorization(req.Username()) //TODO: what if this fails?
 
 	//start AGC and send INTENT_COMMUNICATION
 	npAgc, e := authgrants.NewAuthGrantConnFromMux(subsess.tubeMuxer)
