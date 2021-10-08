@@ -16,6 +16,7 @@ var hostToIPAddr = map[string]string{ //TODO(baumanl): this should be dealt with
 	"localhost":  "127.0.0.1",
 }
 
+//Constants related to netproxy channels
 const (
 	npcConf = byte(1)
 	Local   = byte(2)
