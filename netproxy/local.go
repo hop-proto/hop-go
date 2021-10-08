@@ -11,7 +11,7 @@ import (
 
 //StartLocal sends an NPCInitMsg and waits for confirmation that the proxy connection is ready
 func StartLocal(npTube *tubes.Reliable, addr string) error {
-	npTube.Write(newNPCInitMsg(addr).toBytes()) //tell server to prepare to proxy to addr (start a UDP conn)
+	npTube.Write(newNPCInitMsg(addr, Local).toBytes()) //tell server to prepare to proxy to addr (start a UDP conn)
 	//TODO(baumanl): Make better conf/denial messages for NPC
 	//wait until server says it has a UDP conn to desired address
 	npTube.Read(make([]byte, 1))
@@ -19,7 +19,7 @@ func StartLocal(npTube *tubes.Reliable, addr string) error {
 	return nil
 }
 
-//LocalServer starts a UDP Conn with remote addr and proxies traffic from ch -> udp and upd -> ch
+//LocalServer starts a TCP Conn with remote addr and proxies traffic from ch -> tcp and tcp -> ch
 func LocalServer(npTube *tubes.Reliable) {
 	b := make([]byte, 4)
 	npTube.Read(b)
@@ -28,27 +28,24 @@ func LocalServer(npTube *tubes.Reliable) {
 	init := make([]byte, l)
 	npTube.Read(init)
 	dest := fromBytes(init)
-	if _, err := net.LookupAddr(dest.addr); err != nil {
+	if _, err := net.LookupAddr(dest.info); err != nil {
 		//Couldn't resolve address with local resolver
-		h, p, e := net.SplitHostPort(dest.addr)
+		h, p, e := net.SplitHostPort(dest.info)
 		if e != nil {
 			logrus.Error(e)
 			return
 		}
 		if ip, ok := hostToIPAddr[h]; ok {
-			dest.addr = ip + ":" + p
+			dest.info = ip + ":" + p
 		}
 	}
-	logrus.Infof("dialing dest: %v", dest.addr)
-	// throwaway, _ := net.Dial("tcp", dest.addr)
-	// remoteAddr := throwaway.RemoteAddr()
-	//throwaway.Close()
-	tconn, err := net.Dial("tcp", dest.addr)
+	logrus.Infof("dialing dest: %v", dest.info)
+	tconn, err := net.Dial("tcp", dest.info)
 	if err != nil {
 		logrus.Fatalf("C: error dialing server: %v", err)
 	}
 	defer tconn.Close()
-	logrus.Info("connected to: ", dest.addr)
+	logrus.Info("connected to: ", dest.info)
 	npTube.Write([]byte{npcConf})
 	logrus.Infof("wrote confirmation that NPC ready")
 	//could net.Pipe() be useful here?

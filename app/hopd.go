@@ -414,8 +414,9 @@ func (sess *hopSession) start() {
 			case tubes.AuthGrantTube:
 				go sess.handleAgc(serverChan)
 			case tubes.NetProxyTube:
+				go netproxy.Handle(serverChan)
 				//go netproxy.Server(serverChan)
-				go netproxy.LocalServer(serverChan) //TODO (baumanl): figure out way to differentiate between diff netproxy tube use cases
+				//go netproxy.LocalServer(serverChan) //TODO (baumanl): figure out way to differentiate between diff netproxy tube use cases
 			default:
 				serverChan.Close()
 			}

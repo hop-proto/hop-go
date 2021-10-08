@@ -177,6 +177,13 @@ func Client(args []string) error {
 	if remoteForward {
 		logrus.Info("Doing remote with: ", remoteArg)
 		//do remote port forwarding
+		parts := strings.Split(remoteArg, ":")
+		if len(parts) != 3 {
+			logrus.Error("remote port forwarding currently only supported with port:host:hostport format")
+		} else {
+			sess.wg.Add(1)
+			go sess.remoteForward(parts)
+		}
 	}
 	if localForward {
 		logrus.Info("Doing local with: ", localArg)
@@ -286,6 +293,32 @@ func (sess *session) userAuthorization(username string) error {
 	return nil
 }
 
+func (sess *session) remoteForward(parts []string) error {
+	defer sess.wg.Done()
+	localPort := parts[2]
+	remotePort := parts[0]
+	npt, e := sess.tubeMuxer.CreateTube(tubes.NetProxyTube)
+	if e != nil {
+		return e
+	}
+	e = netproxy.Start(npt, remotePort, netproxy.Remote)
+	if e != nil {
+		return e
+	}
+	sess.wg.Add(1)
+	tconn, e := net.Dial("tcp", "localhost:"+localPort)
+	if e != nil {
+		logrus.Error(e)
+		return e
+	}
+	//do remote port forwarding
+	go func() {
+		io.Copy(tconn, npt)
+	}()
+	io.Copy(npt, tconn)
+	return nil
+}
+
 func (sess *session) localForward(parts []string) error {
 	defer sess.wg.Done()
 	remoteAddr := net.JoinHostPort(parts[1], parts[2])
@@ -293,7 +326,7 @@ func (sess *session) localForward(parts []string) error {
 	if e != nil {
 		return e
 	}
-	e = netproxy.Start(npt, remoteAddr)
+	e = netproxy.Start(npt, remoteAddr, netproxy.Local)
 	if e != nil {
 		return e
 	}
@@ -401,7 +434,7 @@ func (sess *session) confirmWithRemote(req *authgrants.Intent, agt *authgrants.A
 
 	hostname, port := req.Address()
 	addr := hostname + ":" + port
-	e = netproxy.Start(npt, addr)
+	e = netproxy.Start(npt, addr, netproxy.AG)
 	if e != nil {
 		logrus.Fatal("Issue proxying connection")
 	}
