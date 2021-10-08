@@ -13,10 +13,13 @@ import (
 const (
 	defaultHopPort       = "7777"
 	defaultKeyPath       = "/.hop/key"
-	clientUsage          = "hop [user@]host[:port] [-K or -k path] [-c cmd] [-q] [-h]"
+	clientUsage          = "hop [user@]host[:port] [-K or -k path] [-L port:host:hostport] [-R port:host:hostport] [-c cmd] [-q] [-h]"
 	testDataPathPrefix   = "/home/baumanl/.hop/"
 	defaultHopAuthSocket = "@hopauth"
 )
+
+//ErrInvalidPortForwardingArgs returned when client receives unsupported -L or -R options
+var ErrInvalidPortForwardingArgs = errors.New("port forwarding currently only supported with port:host:hostport format")
 
 //ErrClientInvalidUsage returned by client when unable to parse command line arguments
 var ErrClientInvalidUsage = errors.New("usage: " + clientUsage)
