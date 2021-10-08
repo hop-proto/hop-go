@@ -37,7 +37,7 @@ func RemoteServer(npTube *tubes.Reliable) {
 		logrus.Error("Issue accepting conn on remote port")
 		return
 	}
-
+	npTube.Write([]byte{npcConf})
 	//could net.Pipe() be useful here?
 	go func() {
 		//Handles all traffic from principal to server 2
