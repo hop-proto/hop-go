@@ -89,7 +89,7 @@ func TestIntentRequest(t *testing.T) {
 	sagc := &AuthGrantConn{conn: stube}
 
 	go func() {
-		ir := newIntent([32]byte{}, "user", "host", "port", true, "myCmd")
+		ir := newIntent([32]byte{}, "user", "host", "port", 2, "myCmd")
 		logrus.Info("C: Made req: \n",
 			"clientsni: ", ir.clientSNI, " ",
 			"client user: ", ir.clientUsername, " ",
@@ -98,7 +98,7 @@ func TestIntentRequest(t *testing.T) {
 			"serverUser: ", ir.serverUsername, " ",
 			"grantType: ", ir.grantType, " ",
 			"sha3: ", ir.sha3)
-		err := agc.sendIntentRequest([32]byte{}, "user", "host", "port", true, "myCmd")
+		err := agc.sendIntentRequest([32]byte{}, "user", "host", "port", 2, "myCmd")
 		assert.NilError(t, err)
 		logrus.Info("Sent req ok")
 		rtype, response, err := agc.ReadResponse()

@@ -143,7 +143,7 @@ func Client(args []string) error {
 			return ErrClientLoadingKeys
 		}
 	} else {
-		err = sess.getAuthorization(username, hostname, port, cmd)
+		err = sess.getAuthorization(username, hostname, port, noCmd, cmd, localForward, localArg, remoteForward, remoteArg)
 		if err != nil {
 			logrus.Error(err)
 			return ErrClientGettingAuthorization

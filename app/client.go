@@ -1,11 +1,8 @@
 package app
 
 import (
-	"bufio"
-	"fmt"
 	"io"
 	"net"
-	"os"
 	"strings"
 	"sync"
 
@@ -29,34 +26,49 @@ func (sess *session) loadKeys(keypath string) error {
 	return nil
 }
 
-func (sess *session) getAuthorization(username string, hostname string, port string, cmd string) error {
+func (sess *session) getAuthorization(username string, hostname string, port string,
+	headless bool, cmd string, local bool, localArg string, remote bool, remoteArg string) error {
 	sess.config.KeyPair = new(keys.X25519KeyPair)
 	sess.config.KeyPair.Generate()
+
 	logrus.Infof("Client generated: %v", sess.config.KeyPair.Public.String())
 	logrus.Infof("C: Initiating AGC Protocol.")
+
 	c, err := net.Dial("unix", defaultHopAuthSocket)
 	if err != nil {
 		return err
 	}
 	logrus.Infof("C: CONNECTED TO UDS: [%v]", c.RemoteAddr().String())
 	agc := authgrants.NewAuthGrantConn(c)
-	defer agc.Close()
-	for {
-		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, cmd == "", cmd)
+	if !headless && cmd == "" { //shell
+		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.ShellGrant, "")
 		if e == nil {
-			logrus.Infof("C: Principal approved request. Deadline: %v", t)
-			break
+			logrus.Infof("C: Principal approved request to open a shell. Deadline: %v", t)
 		} else if e != authgrants.ErrIntentDenied {
 			return e
 		}
-		var ans string
-		for ans != "y" && ans != "n" {
-			fmt.Println("Send intent request again? [y/n]: ")
-			scanner := bufio.NewScanner(os.Stdin)
-			scanner.Scan()
-			ans = scanner.Text()
+	}
+	if !headless && cmd != "" { //cmd
+		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.CommandGrant, cmd)
+		if e == nil {
+			logrus.Infof("C: Principal approved request to run cmd: %v. Deadline: %v", cmd, t)
+		} else if e != authgrants.ErrIntentDenied {
+			return e
 		}
-		if ans == "n" {
+	}
+	if local { //local forwarding
+		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.LocalGrant, localArg)
+		if e == nil {
+			logrus.Infof("C: Principal approved request to do local forwarding. Deadline: %v", t)
+		} else if e != authgrants.ErrIntentDenied {
+			return e
+		}
+	}
+	if remote { //remote forwarding
+		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.RemoteGrant, remoteArg)
+		if e == nil {
+			logrus.Infof("C: Principal approved request to do remote forwarding. Deadline: %v", t)
+		} else if e != authgrants.ErrIntentDenied {
 			return e
 		}
 	}
@@ -115,6 +127,8 @@ func (sess *session) remoteForward(parts []string) error {
 		return e
 	}
 	sess.wg.Add(1)
+	//TODO: fix address (not just local host)
+	//TODO: add bind address options
 	tconn, e := net.Dial("tcp", "localhost:"+localPort)
 	if e != nil {
 		logrus.Error(e)

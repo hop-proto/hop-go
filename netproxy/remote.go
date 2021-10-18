@@ -27,7 +27,7 @@ func RemoteServer(npTube *tubes.Reliable) {
 	init := make([]byte, l)
 	npTube.Read(init)
 	remotePort := fromBytes(init).info
-	tcpListener, e := net.Listen("tcp", ":"+remotePort)
+	tcpListener, e := net.Listen("tcp", ":"+remotePort) //TODO(baumanl): this runs with root privileges which is bad because unprivileged users can forward privileged ports on the server
 	if e != nil {
 		logrus.Error("Issue listening on requested port")
 		return

@@ -8,8 +8,6 @@ import (
 	"os/user"
 	"strconv"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 //TODO(baumanl): Some of this may be overly complex. Figure out best way to standardize/simplify.
@@ -20,8 +18,6 @@ const (
 	IntentCommunication = byte(2)
 	IntentConfirmation  = byte(3)
 	IntentDenied        = byte(4)
-
-	TypeLen = 1
 )
 
 //ErrUnknownMessage used when msgtype does not match any of the authorization grant protocol defined messages.
@@ -30,10 +26,12 @@ var ErrUnknownMessage = errors.New("received message with unknown message type")
 //ErrIntentDenied indicates an intent request was denied
 var ErrIntentDenied = errors.New("received intent denied message")
 
-//Action Type Constants
+//Grant Type Constants
 const (
-	shellTube   = byte(1)
-	commandTube = byte(2)
+	ShellGrant   = byte(1)
+	CommandGrant = byte(2)
+	LocalGrant   = byte(3)
+	RemoteGrant  = byte(4)
 )
 
 //Intent Request and Communication constants
@@ -72,17 +70,13 @@ type agMessage struct {
 	d       data
 }
 
+const (
+	dataOffset = 1
+)
+
 type data interface {
 	toBytes() []byte
 }
-
-//grant types
-const (
-	execGrant = byte(1)
-	//proxyGrant = byte(2) //not supported yet
-)
-
-const execGrantDataHeaderLen = 3
 
 //Intent contains all data fields of an Intent request or Intent communication
 type Intent struct {
@@ -93,13 +87,7 @@ type Intent struct {
 	serverSNI      string
 	port           uint16
 	grantType      byte
-	associatedData []byte
-}
-
-type execGrantData struct {
-	actionType byte
-	actionLen  uint16
-	action     string
+	associatedData string
 }
 
 //intentConfirmationMsg contains deadline for an approved auth grant
@@ -113,21 +101,10 @@ type intentDeniedMsg struct {
 }
 
 //Constructors
-func newIntent(digest [sha3Len]byte, sUser string, hostname string, port string, shell bool, cmd string) *Intent {
+func newIntent(digest [sha3Len]byte, sUser string, hostname string, port string, grantType byte, associatedData string) *Intent {
 	user, _ := user.Current()
 	cSNI, _ := os.Hostname()
 	p, _ := strconv.Atoi(port)
-
-	tt := commandTube
-	if shell {
-		tt = shellTube
-	}
-
-	eg := execGrantData{
-		actionType: tt,
-		actionLen:  uint16(len(cmd)),
-		action:     cmd,
-	}
 
 	r := &Intent{
 		sha3:           digest,
@@ -136,16 +113,16 @@ func newIntent(digest [sha3Len]byte, sUser string, hostname string, port string,
 		serverUsername: sUser,
 		serverSNI:      hostname,
 		port:           uint16(p),
-		grantType:      execGrant, //TODO(baumanl): support other grant types
-		associatedData: eg.toBytes(),
+		grantType:      grantType,
+		associatedData: associatedData,
 	}
 	return r
 }
 
-func newIntentRequest(digest [sha3Len]byte, sUser string, hostname string, port string, shell bool, cmd string) *agMessage {
+func newIntentRequest(digest [sha3Len]byte, sUser string, hostname string, port string, grantType byte, arg string) *agMessage {
 	return &agMessage{
 		msgType: IntentRequest,
-		d:       newIntent(digest, sUser, hostname, port, shell, cmd),
+		d:       newIntent(digest, sUser, hostname, port, grantType, arg),
 	}
 }
 
@@ -174,13 +151,6 @@ func newIntentDenied(r string) *agMessage {
 	}
 }
 
-func (d *execGrantData) toBytes() []byte {
-	s := [execGrantDataHeaderLen]byte{}
-	s[0] = d.actionType
-	binary.BigEndian.PutUint16(s[1:execGrantDataHeaderLen], d.actionLen)
-	return append(s[:], d.action...)
-}
-
 //toBytes()
 func (r *Intent) toBytes() []byte {
 	s := [irHeaderLen]byte{}
@@ -191,7 +161,13 @@ func (r *Intent) toBytes() []byte {
 	copy(s[sSNIOffset:portOffset], []byte(r.serverSNI))
 	binary.BigEndian.PutUint16(s[portOffset:grantTypeOffset], r.port)
 	s[grantTypeOffset] = r.grantType
-	return append(s[:], r.associatedData...)
+	if r.grantType == ShellGrant {
+		return s[:]
+	}
+	assoc := make([]byte, 2+len(r.associatedData))
+	binary.BigEndian.PutUint16(assoc[:2], uint16(len(r.associatedData)))
+	copy(assoc[2:], r.associatedData)
+	return append(s[:], assoc...)
 }
 
 func (c *intentConfirmationMsg) toBytes() []byte {
@@ -218,13 +194,13 @@ func trimNullBytes(b []byte) string {
 	return string(b)
 }
 
-func fromExecGrantBytes(b []byte) *execGrantData {
-	return &execGrantData{
-		actionType: b[0],
-		actionLen:  binary.BigEndian.Uint16(b[1:execGrantDataHeaderLen]),
-		action:     string(b[execGrantDataHeaderLen:]),
-	}
-}
+// func fromExecGrantBytes(b []byte) *commandGrantData {
+// 	return &commandGrantData{
+// 		actionType: b[0],
+// 		actionLen:  binary.BigEndian.Uint16(b[1:execGrantDataHeaderLen]),
+// 		action:     string(b[execGrantDataHeaderLen:]),
+// 	}
+// }
 
 //fromBytes()
 func fromIntentBytes(b []byte) *Intent {
@@ -236,7 +212,7 @@ func fromIntentBytes(b []byte) *Intent {
 	r.serverSNI = trimNullBytes(b[sSNIOffset:portOffset])
 	r.port = binary.BigEndian.Uint16(b[portOffset:grantTypeOffset])
 	r.grantType = b[grantTypeOffset]
-	r.associatedData = b[associatedDataOffset:]
+	r.associatedData = string(b[associatedDataOffset:])
 	return &r
 }
 
@@ -260,23 +236,20 @@ func fromIntentDeniedBytes(b []byte) *intentDeniedMsg {
 	return &d
 }
 
-func (c *AuthGrantConn) readExecGrantData() []byte {
-	header := make([]byte, 3)
+func (c *AuthGrantConn) readAssociatedData() []byte {
+	header := make([]byte, 2)
 	_, err := c.conn.Read(header)
 	if err != nil {
 		return nil
 	}
-	if header[0] == commandTube {
-		actionLen := binary.BigEndian.Uint16(header[1:])
-		logrus.Info("actionLen: ", actionLen)
-		if actionLen != 0 {
-			action := make([]byte, actionLen)
-			_, err = c.conn.Read(action)
-			if err != nil {
-				return nil
-			}
-			header = append(header, action...)
+	actionLen := binary.BigEndian.Uint16(header[:])
+	if actionLen != 0 {
+		action := make([]byte, actionLen)
+		_, err = c.conn.Read(action)
+		if err != nil {
+			return nil
 		}
+		header = append(header, action...)
 	}
 	return header
 }
@@ -294,8 +267,8 @@ func (c *AuthGrantConn) readIntent(msgType byte) ([]byte, error) {
 			return nil, err
 		}
 		t = append(t, irh...)
-		if irh[grantTypeOffset] == execGrant {
-			return append(t, c.readExecGrantData()...), nil
+		if irh[grantTypeOffset] != ShellGrant {
+			return append(t, c.readAssociatedData()...), nil
 		}
 	}
 	return nil, errors.New("bad msg type")
@@ -347,8 +320,8 @@ func (c *AuthGrantConn) SendIntentConf(t time.Time) error {
 }
 
 //SendIntentRequest writes an intent request msg
-func (c *AuthGrantConn) sendIntentRequest(digest [sha3Len]byte, sUser string, hostname string, port string, shell bool, cmd string) error {
-	_, err := c.conn.Write(newIntentRequest(digest, sUser, hostname, port, shell, cmd).toBytes())
+func (c *AuthGrantConn) sendIntentRequest(digest [sha3Len]byte, sUser string, hostname string, port string, grantType byte, cmd string) error {
+	_, err := c.conn.Write(newIntentRequest(digest, sUser, hostname, port, grantType, cmd).toBytes())
 	return err
 }
 

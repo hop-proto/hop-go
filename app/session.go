@@ -56,7 +56,6 @@ func (sess *hopSession) checkAuthorization() bool {
 	if user, ok := cache.LookupUserByName(sess.user); ok {
 		path = user.Homedir() + "/.hop/authorized_keys"
 	}
-
 	f, e := os.Open(path)
 	if e != nil {
 		logrus.Error("Could not open file at path: ", path)
