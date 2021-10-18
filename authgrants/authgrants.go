@@ -66,7 +66,7 @@ func (c *AuthGrantConn) GetAuthGrant(digest [sha3Len]byte, sUser string, hostnam
 }
 
 //HandleIntentComm is used by a Server to handle an INTENT_COMMUNICATION from a Principal
-func (c *AuthGrantConn) HandleIntentComm() (keys.PublicKey, time.Time, string, string, error) {
+func (c *AuthGrantConn) HandleIntentComm() (keys.PublicKey, time.Time, string, string, byte, error) {
 	msg, e := c.readIntentCommunication()
 	if e != nil {
 		logrus.Fatalf("error reading intent communication")
@@ -75,9 +75,7 @@ func (c *AuthGrantConn) HandleIntentComm() (keys.PublicKey, time.Time, string, s
 	logrus.Infof("Pretending s2 approved intent request") //TODO(baumanl): check policy or something?
 	k := keys.PublicKey(intent.sha3)
 	t := time.Now().Add(time.Minute)
-	user := intent.serverUsername
-	arg := intent.associatedData
-	return k, t, user, arg, nil
+	return k, t, intent.serverUsername, intent.associatedData, intent.grantType, nil
 }
 
 //ReadResponse gets either an intent confirmation or intent denied message

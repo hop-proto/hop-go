@@ -159,7 +159,7 @@ func (sess *hopSession) close() error {
 
 func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 	agc := authgrants.NewAuthGrantConn(tube)
-	k, t, user, arg, e := agc.HandleIntentComm()
+	k, t, user, arg, grantType, e := agc.HandleIntentComm()
 	logrus.Info("got intent comm")
 	if e != nil {
 		logrus.Info("Server denied authgrant")
@@ -179,6 +179,7 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 		user:             user,
 		arg:              arg,
 		principalSession: sess,
+		grantType:        grantType,
 		used:             false,
 	})
 
