@@ -76,19 +76,8 @@ func (c *AuthGrantConn) HandleIntentComm() (keys.PublicKey, time.Time, string, s
 	k := keys.PublicKey(intent.sha3)
 	t := time.Now().Add(time.Minute)
 	user := intent.serverUsername
-	var action string
-	switch intent.grantType {
-	case ShellGrant:
-		//TODO: do something for shell
-	case CommandGrant:
-		//command
-		action = intent.associatedData
-	case LocalGrant:
-		//TODO: local
-	case RemoteGrant:
-		//TODO: remote
-	}
-	return k, t, user, action, nil
+	arg := intent.associatedData
+	return k, t, user, arg, nil
 }
 
 //ReadResponse gets either an intent confirmation or intent denied message

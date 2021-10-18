@@ -19,7 +19,7 @@ import (
 type hopServer struct {
 	m                     sync.Mutex
 	principals            map[int32]*hopSession
-	authgrants            map[keys.PublicKey]*authGrant //static key -> authgrant
+	authgrants            map[keys.PublicKey][]*authGrant //static key -> slice of authgrants associated with that key
 	outstandingAuthgrants int
 
 	server   *transport.Server

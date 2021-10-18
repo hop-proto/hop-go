@@ -30,7 +30,7 @@ type hopSession struct {
 	user   string
 
 	isPrincipal bool
-	authgrant   *authGrant
+	authgrants  []*authGrant
 }
 
 func (sess *hopSession) checkAuthorization() bool {
@@ -75,24 +75,24 @@ func (sess *hopSession) checkAuthorization() bool {
 	//Check for a matching authgrant
 	sess.server.m.Lock()
 	defer sess.server.m.Unlock()
-	val, ok := sess.server.authgrants[k]
+	authgrants, ok := sess.server.authgrants[k]
 	if !ok {
 		logrus.Info("USER NOT AUTHORIZED")
 		uaTube.Write([]byte{userauth.UserAuthDen})
 		return false
 	}
-	if val.deadline.Before(time.Now()) {
+	if authgrants[0].deadline.Before(time.Now()) {
 		delete(sess.server.authgrants, k)
 		logrus.Info("AUTHGRANT DEADLINE EXCEEDED")
 		uaTube.Write([]byte{userauth.UserAuthDen})
 		return false
 	}
-	if sess.user != val.user {
+	if sess.user != authgrants[0].user {
 		logrus.Info("AUTHGRANT USER DOES NOT MATCH")
 		uaTube.Write([]byte{userauth.UserAuthDen})
 		return false
 	}
-	sess.authgrant = val
+	sess.authgrants = authgrants
 	sess.isPrincipal = false
 	delete(sess.server.authgrants, k)
 	logrus.Info("USER AUTHORIZED")
@@ -147,7 +147,7 @@ func (sess *hopSession) start() {
 func (sess *hopSession) close() error {
 	var err, err2 error
 	if !sess.isPrincipal {
-		err = sess.authgrant.principalSession.close()
+		err = sess.authgrants[0].principalSession.close() //TODO: move where principalSession stored?
 	}
 	sess.tubeMuxer.Stop()
 	//err2 = sess.transportConn.Close() (not implemented yet)
@@ -159,7 +159,7 @@ func (sess *hopSession) close() error {
 
 func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 	agc := authgrants.NewAuthGrantConn(tube)
-	k, t, user, action, e := agc.HandleIntentComm()
+	k, t, user, arg, e := agc.HandleIntentComm()
 	logrus.Info("got intent comm")
 	if e != nil {
 		logrus.Info("Server denied authgrant")
@@ -174,13 +174,14 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 		return
 	}
 	sess.server.outstandingAuthgrants++
-	sess.server.authgrants[k] = &authGrant{
+	sess.server.authgrants[k] = append(sess.server.authgrants[k], &authGrant{
 		deadline:         t,
 		user:             user,
-		action:           action,
+		arg:              arg,
 		principalSession: sess,
 		used:             false,
-	}
+	})
+
 	sess.server.m.Unlock()
 	agc.SendIntentConf(t)
 	logrus.Info("Sent intent conf")
@@ -194,14 +195,26 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 	cmd, shell, _ := codex.GetCmd(ch)
 	logrus.Info("CMD: ", cmd)
 	if !sess.isPrincipal {
-		if sess.authgrant.used {
+		var ag *authGrant = nil
+		for _, v := range sess.authgrants {
+			if v.grantType == authgrants.CommandGrant || v.grantType == authgrants.ShellGrant {
+				ag = v
+			}
+		}
+		if ag == nil {
+			err := errors.New("no CommandGrant or ShellGrant authgrant found")
+			logrus.Error(err)
+			codex.SendFailure(ch, err)
+			return
+		}
+		if ag.used {
 			err := errors.New("already performed approved action")
 			logrus.Error(err)
 			codex.SendFailure(ch, err)
 			return
 		}
-		sess.authgrant.used = true
-		if cmd != sess.authgrant.action {
+		ag.used = true
+		if cmd != ag.arg {
 			err := errors.New("CMD does not match Authgrant approved action")
 			logrus.Error(err)
 			codex.SendFailure(ch, err)
@@ -261,7 +274,7 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 
 		sess.server.m.Lock()
 		if !sess.isPrincipal {
-			sess.server.principals[int32(c.Process.Pid)] = sess.authgrant.principalSession
+			sess.server.principals[int32(c.Process.Pid)] = sess.authgrants[0].principalSession
 		} else {
 			logrus.Infof("S: using standard muxer")
 			sess.server.principals[int32(c.Process.Pid)] = sess

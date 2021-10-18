@@ -20,9 +20,10 @@ const maxOutstandingAuthgrants = 50 //TODO(baumanl): calibrate/allow being set f
 type authGrant struct {
 	deadline         time.Time
 	user             string
-	action           string
+	arg              string
 	principalSession *hopSession
 	used             bool
+	grantType        byte
 }
 
 //Serve listens for incoming hop connection requests and start corresponding authGrantServer on a Unix Domain socket
@@ -71,8 +72,8 @@ func Serve(args []string) {
 		log.Fatal("S: UDS LISTEN ERROR:", err)
 	}
 
-	principals := make(map[int32]*hopSession)         //PID -> principal hop session
-	authgrants := make(map[keys.PublicKey]*authGrant) //static key -> authgrant
+	principals := make(map[int32]*hopSession)           //PID -> principal hop session
+	authgrants := make(map[keys.PublicKey][]*authGrant) //static key -> authgrant
 
 	server := &hopServer{
 		m:                     sync.Mutex{},
