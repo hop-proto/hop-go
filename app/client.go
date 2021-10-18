@@ -40,6 +40,7 @@ func (sess *session) getAuthorization(username string, hostname string, port str
 	}
 	logrus.Infof("C: CONNECTED TO UDS: [%v]", c.RemoteAddr().String())
 	agc := authgrants.NewAuthGrantConn(c)
+	defer agc.Close()
 	if !headless && cmd == "" { //shell
 		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.ShellGrant, "")
 		if e == nil {

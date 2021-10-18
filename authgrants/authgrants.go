@@ -139,9 +139,9 @@ func (r *Intent) Prompt(reader *io.PipeReader) bool {
 				r.serverSNI,
 			)
 		}
+		scanner := bufio.NewScanner(reader)
+		scanner.Scan()
+		ans = scanner.Text()
 	}
-	scanner := bufio.NewScanner(reader)
-	scanner.Scan()
-	ans = scanner.Text()
 	return ans == "y"
 }
