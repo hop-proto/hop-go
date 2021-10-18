@@ -3,6 +3,7 @@ package authgrants
 
 import (
 	"bufio"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -109,6 +110,102 @@ func (c *AuthGrantConn) ReadResponse() (byte, []byte, error) {
 	default:
 		return responseType[0], nil, errors.New("bad msg type")
 	}
+}
+
+func (c *AuthGrantConn) readIntent(msgType byte) ([]byte, error) {
+	t := make([]byte, 1)
+	_, err := c.conn.Read(t)
+	if err != nil {
+		return nil, err
+	}
+	if t[0] == msgType {
+		irh := make([]byte, irHeaderLen)
+		_, err = c.conn.Read(irh)
+		if err != nil {
+			return nil, err
+		}
+		len := binary.BigEndian.Uint16(irh[associatedDataLenOffset:])
+		data := make([]byte, len)
+		_, err = c.conn.Read(data)
+		if err != nil {
+			return nil, err
+		}
+		return append(t, append(irh, data...)...), nil
+
+	}
+	return nil, errors.New("bad msg type")
+}
+
+//ReadIntentDenied gets the reason for denial
+func (c *AuthGrantConn) readIntentDenied() ([]byte, error) {
+	buf := make([]byte, 2)
+	buf[0] = IntentDenied
+	_, err := c.conn.Read(buf[1:])
+	if err != nil {
+		return nil, err
+	}
+	buf = append(buf, make([]byte, int(buf[1]))...)
+	_, err = c.conn.Read(buf[2:])
+	if err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+//ReadIntentConf
+func (c *AuthGrantConn) readIntentConf() ([]byte, error) {
+	buf := make([]byte, deadlineLen+1)
+	buf[0] = IntentConfirmation
+	_, err := c.conn.Read(buf[1:])
+	return buf, err
+}
+
+//ReadIntentRequest gets Intent Request bytes
+func (c *AuthGrantConn) ReadIntentRequest() ([]byte, error) {
+	return c.readIntent(IntentRequest)
+}
+
+func (c *AuthGrantConn) readIntentCommunication() ([]byte, error) {
+	return c.readIntent(IntentCommunication)
+}
+
+//SendIntentDenied writes an intent denied message to provided tube
+func (c *AuthGrantConn) SendIntentDenied(reason string) error {
+	_, err := c.conn.Write(newIntentDenied(reason).toBytes())
+	return err
+}
+
+//SendIntentConf writes an intent conf message to provided tube
+func (c *AuthGrantConn) SendIntentConf(t time.Time) error {
+	_, err := c.conn.Write(newIntentConfirmation(t).toBytes())
+	return err
+}
+
+//SendIntentRequest writes an intent request msg
+func (c *AuthGrantConn) sendIntentRequest(digest [sha3Len]byte, sUser string, hostname string, port string, grantType byte, cmd string) error {
+	_, err := c.conn.Write(newIntentRequest(digest, sUser, hostname, port, grantType, cmd).toBytes())
+	return err
+}
+
+//SendIntentCommunication writes an intent communication msg
+func (c *AuthGrantConn) SendIntentCommunication(intentData *Intent) error {
+	_, err := c.conn.Write(commFromReq(intentData.toBytes()))
+	return err
+}
+
+//WriteRawBytes writes bytes to underlying conn without regard for msg type
+func (c *AuthGrantConn) WriteRawBytes(data []byte) error {
+	_, err := c.conn.Write(data)
+	return err
+}
+
+//GetIntentRequest reads IntentRequest bytes and parses them into an Intent object
+func (c *AuthGrantConn) GetIntentRequest() (*Intent, error) {
+	intentBytes, err := c.ReadIntentRequest()
+	if err != nil {
+		return nil, err
+	}
+	return fromIntentRequestBytes(intentBytes), nil
 }
 
 //Prompt prints the authgrant approval prompt to terminal and continues prompting until user enters "y" or "n"

@@ -85,7 +85,7 @@ func (s *hopServer) proxyAuthGrantRequest(c net.Conn) {
 	for {
 		req, e := agc.ReadIntentRequest()
 		if e != nil { //if client closes agc this will error out and the loop will end
-			logrus.Errorf("ERROR READING INTENT REQUEST: %v", e)
+			logrus.Info("Delegate client closed IPC AGC with delegate server.")
 			return
 		}
 		err = principalAgc.WriteRawBytes(req)

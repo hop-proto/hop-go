@@ -36,22 +36,24 @@ const (
 
 //Intent Request and Communication constants
 const (
-	sha3Len      = 32
-	usernameLen  = 32
-	sniLen       = 256
-	portLen      = 2
-	grantTypeLen = 1
-	reservedLen  = 1
-	irHeaderLen  = sha3Len + 2*(usernameLen+sniLen) + portLen + grantTypeLen + reservedLen
+	sha3Len              = 32
+	usernameLen          = 32
+	sniLen               = 256
+	portLen              = 2
+	grantTypeLen         = 1
+	reservedLen          = 1
+	associatedDataLenLen = 2
+	irHeaderLen          = sha3Len + 2*(usernameLen+sniLen) + portLen + grantTypeLen + reservedLen + associatedDataLenLen
 
-	sha3Offset           = 0
-	cUserOffset          = sha3Offset + sha3Len
-	cSNIOffset           = cUserOffset + usernameLen
-	sUserOffset          = cSNIOffset + sniLen
-	sSNIOffset           = sUserOffset + usernameLen
-	portOffset           = sSNIOffset + sniLen
-	grantTypeOffset      = portOffset + portLen
-	associatedDataOffset = grantTypeOffset + grantTypeLen + reservedLen
+	sha3Offset              = 0
+	cUserOffset             = sha3Offset + sha3Len
+	cSNIOffset              = cUserOffset + usernameLen
+	sUserOffset             = cSNIOffset + sniLen
+	sSNIOffset              = sUserOffset + usernameLen
+	portOffset              = sSNIOffset + sniLen
+	grantTypeOffset         = portOffset + portLen
+	associatedDataLenOffset = grantTypeOffset + grantTypeLen + reservedLen
+	associatedDataOffset    = grantTypeOffset + grantTypeLen + reservedLen + associatedDataLenLen //2 bytes for length of associated data
 )
 
 //Intent Confirmation constants
@@ -161,13 +163,8 @@ func (r *Intent) toBytes() []byte {
 	copy(s[sSNIOffset:portOffset], []byte(r.serverSNI))
 	binary.BigEndian.PutUint16(s[portOffset:grantTypeOffset], r.port)
 	s[grantTypeOffset] = r.grantType
-	if r.grantType == ShellGrant {
-		return s[:]
-	}
-	assoc := make([]byte, 2+len(r.associatedData))
-	binary.BigEndian.PutUint16(assoc[:2], uint16(len(r.associatedData)))
-	copy(assoc[2:], r.associatedData)
-	return append(s[:], assoc...)
+	binary.BigEndian.PutUint16(s[associatedDataLenOffset:associatedDataOffset], uint16(len(r.associatedData)))
+	return append(s[:], []byte(r.associatedData)...)
 }
 
 func (c *intentConfirmationMsg) toBytes() []byte {
@@ -193,14 +190,6 @@ func trimNullBytes(b []byte) string {
 	}
 	return string(b)
 }
-
-// func fromExecGrantBytes(b []byte) *commandGrantData {
-// 	return &commandGrantData{
-// 		actionType: b[0],
-// 		actionLen:  binary.BigEndian.Uint16(b[1:execGrantDataHeaderLen]),
-// 		action:     string(b[execGrantDataHeaderLen:]),
-// 	}
-// }
 
 //fromBytes()
 func fromIntentBytes(b []byte) *Intent {
@@ -234,116 +223,6 @@ func fromIntentDeniedBytes(b []byte) *intentDeniedMsg {
 	d := intentDeniedMsg{}
 	d.reason = string(b[reasonOffset:])
 	return &d
-}
-
-func (c *AuthGrantConn) readAssociatedData() []byte {
-	header := make([]byte, 2)
-	_, err := c.conn.Read(header)
-	if err != nil {
-		return nil
-	}
-	actionLen := binary.BigEndian.Uint16(header[:])
-	if actionLen != 0 {
-		action := make([]byte, actionLen)
-		_, err = c.conn.Read(action)
-		if err != nil {
-			return nil
-		}
-		header = append(header, action...)
-	}
-	return header
-}
-
-func (c *AuthGrantConn) readIntent(msgType byte) ([]byte, error) {
-	t := make([]byte, 1)
-	_, err := c.conn.Read(t)
-	if err != nil {
-		return nil, err
-	}
-	if t[0] == msgType {
-		irh := make([]byte, irHeaderLen)
-		_, err = c.conn.Read(irh)
-		if err != nil {
-			return nil, err
-		}
-		t = append(t, irh...)
-		if irh[grantTypeOffset] != ShellGrant {
-			return append(t, c.readAssociatedData()...), nil
-		}
-	}
-	return nil, errors.New("bad msg type")
-}
-
-//ReadIntentDenied gets the reason for denial
-func (c *AuthGrantConn) readIntentDenied() ([]byte, error) {
-	buf := make([]byte, 2)
-	buf[0] = IntentDenied
-	_, err := c.conn.Read(buf[1:])
-	if err != nil {
-		return nil, err
-	}
-	buf = append(buf, make([]byte, int(buf[1]))...)
-	_, err = c.conn.Read(buf[2:])
-	if err != nil {
-		return nil, err
-	}
-	return buf, nil
-}
-
-//ReadIntentConf
-func (c *AuthGrantConn) readIntentConf() ([]byte, error) {
-	buf := make([]byte, deadlineLen+1)
-	buf[0] = IntentConfirmation
-	_, err := c.conn.Read(buf[1:])
-	return buf, err
-}
-
-//ReadIntentRequest gets Intent Request bytes
-func (c *AuthGrantConn) ReadIntentRequest() ([]byte, error) {
-	return c.readIntent(IntentRequest)
-}
-
-func (c *AuthGrantConn) readIntentCommunication() ([]byte, error) {
-	return c.readIntent(IntentCommunication)
-}
-
-//SendIntentDenied writes an intent denied message to provided tube
-func (c *AuthGrantConn) SendIntentDenied(reason string) error {
-	_, err := c.conn.Write(newIntentDenied(reason).toBytes())
-	return err
-}
-
-//SendIntentConf writes an intent conf message to provided tube
-func (c *AuthGrantConn) SendIntentConf(t time.Time) error {
-	_, err := c.conn.Write(newIntentConfirmation(t).toBytes())
-	return err
-}
-
-//SendIntentRequest writes an intent request msg
-func (c *AuthGrantConn) sendIntentRequest(digest [sha3Len]byte, sUser string, hostname string, port string, grantType byte, cmd string) error {
-	_, err := c.conn.Write(newIntentRequest(digest, sUser, hostname, port, grantType, cmd).toBytes())
-	return err
-}
-
-//SendIntentCommunication writes an intent communication msg
-func (c *AuthGrantConn) SendIntentCommunication(intentData *Intent) error {
-	_, err := c.conn.Write(commFromReq(intentData.toBytes()))
-	return err
-}
-
-//WriteRawBytes writes bytes to underlying conn without regard for msg type
-func (c *AuthGrantConn) WriteRawBytes(data []byte) error {
-	_, err := c.conn.Write(data)
-	return err
-}
-
-//GetIntentRequest reads IntentRequest bytes and parses them into an Intent object
-func (c *AuthGrantConn) GetIntentRequest() (*Intent, error) {
-	intentBytes, err := c.ReadIntentRequest()
-	if err != nil {
-		return nil, err
-	}
-	return fromIntentRequestBytes(intentBytes), nil
 }
 
 //Address returns the serverSNI and port from the intent
