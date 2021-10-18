@@ -16,6 +16,18 @@ import (
 	"zmap.io/portal/userauth"
 )
 
+type session struct {
+	transportConn *transport.Client
+	proxyConn     *tubes.Reliable
+	tubeMuxer     *tubes.Muxer
+	execTube      *codex.ExecTube
+	isPrincipal   bool
+	proxied       bool
+
+	wg     sync.WaitGroup
+	config transport.ClientConfig
+}
+
 func (sess *session) loadKeys(keypath string) error {
 	logrus.Infof("C: Using key-file at %v for auth.", keypath)
 	pair, e := keys.ReadDHKeyFromPEMFile(keypath)

@@ -59,6 +59,9 @@ func Serve(args []string) {
 	go transportServer.Serve()
 
 	//*****AUTHGRANT SERVER ON UNIX DOMAIN SOCKET SET UP*****
+	principals := make(map[int32]*hopSession)           //PID -> principal hop session
+	authgrants := make(map[keys.PublicKey][]*authGrant) //static key -> authgrant
+
 	//Start UDS socket
 	//make sure the socket does not already exist.
 	if err := os.RemoveAll(sockAddr); err != nil {
@@ -71,9 +74,6 @@ func Serve(args []string) {
 	if err != nil {
 		log.Fatal("S: UDS LISTEN ERROR:", err)
 	}
-
-	principals := make(map[int32]*hopSession)           //PID -> principal hop session
-	authgrants := make(map[keys.PublicKey][]*authGrant) //static key -> authgrant
 
 	server := &hopServer{
 		m:                     sync.Mutex{},

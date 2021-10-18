@@ -32,7 +32,7 @@ func RemoteServer(npTube *tubes.Reliable) {
 		logrus.Error("Issue listening on requested port")
 		return
 	}
-	tconn, e := tcpListener.Accept()
+	tconn, e := tcpListener.Accept() //TODO(baumanl): should this be in a loop? how does SSH do it?
 	if e != nil {
 		logrus.Error("Issue accepting conn on remote port")
 		return

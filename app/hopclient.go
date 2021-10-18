@@ -7,10 +7,8 @@ import (
 	"os"
 	"os/user"
 	"strings"
-	"sync"
 
 	"github.com/sirupsen/logrus"
-	"zmap.io/portal/codex"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
 )
@@ -20,18 +18,6 @@ var hostToIPAddr = map[string]string{ //TODO(baumanl): this should be dealt with
 	"scratch-02": "10.216.2.128",
 	"scratch-07": "10.216.2.208",
 	"localhost":  "127.0.0.1",
-}
-
-type session struct {
-	transportConn *transport.Client
-	proxyConn     *tubes.Reliable
-	tubeMuxer     *tubes.Muxer
-	execTube      *codex.ExecTube
-	isPrincipal   bool
-	proxied       bool
-
-	wg     sync.WaitGroup
-	config transport.ClientConfig
 }
 
 //Client parses cmd line arguments and establishes hop session with remote hop server
@@ -95,7 +81,7 @@ func Client(args []string) error {
 		}
 		return ErrClientInvalidUsage
 	}
-	if fs.NArg() < 1 { //the only argument that is not a flag is of the form [user@]host[:port]
+	if fs.NArg() < 1 { //there needs to be an argument that is not a flag of the form [user@]host[:port]
 		return ErrClientInvalidUsage
 	}
 	hoststring := fs.Arg(0)
@@ -149,10 +135,12 @@ func Client(args []string) error {
 			return ErrClientGettingAuthorization
 		}
 	}
+
 	err = sess.startUnderlying(hostname, port)
 	if err != nil {
 		return ErrClientStartingUnderlying
 	}
+
 	sess.tubeMuxer = tubes.NewMuxer(sess.transportConn, sess.transportConn)
 	go sess.tubeMuxer.Start()
 	defer func() {
@@ -167,6 +155,8 @@ func Client(args []string) error {
 	if err != nil {
 		return err
 	}
+
+	//TODO(baumanl): fix how session duration tied to cmd duration or port forwarding duration depending on options
 	if remoteForward {
 		logrus.Info("Doing remote with: ", remoteArg)
 		parts := strings.Split(remoteArg, ":")
@@ -190,7 +180,6 @@ func Client(args []string) error {
 		go sess.localForward(parts)
 
 	}
-
 	if !noCmd {
 		err = sess.startExecTube(cmd)
 		if err != nil {

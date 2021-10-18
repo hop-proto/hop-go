@@ -100,6 +100,9 @@ func (sess *hopSession) checkAuthorization() bool {
 	return true
 }
 
+//start() sets up a session's muxer and handles incoming tube requests.
+//calls close when it receives a signal from the code execution tube that it is finished
+//TODO(baumanl): change closing behavior for sessions without cmd/shell --> integrate port forwarding duration
 func (sess *hopSession) start() {
 	go sess.tubeMuxer.Start()
 	logrus.Info("S: STARTED CHANNEL MUXER")
@@ -157,6 +160,7 @@ func (sess *hopSession) close() error {
 	return err2
 }
 
+//handleAgc handles Intent Communications from principals and updates the outstanding authgrants maps appropriately
 func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 	agc := authgrants.NewAuthGrantConn(tube)
 	k, t, user, arg, grantType, e := agc.HandleIntentComm()

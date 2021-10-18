@@ -21,8 +21,6 @@
 - add timeouts/deadlines (!!!)
 - add option to run specified command in a shell instead of directly with exec.Command (allows for intelligent parsing + piping and stuff) (!!)
 - add unreliable tubes
-- add support for network proxy authorization grants
-- add client side predictive echo (like MOSH) / better terminal interaction generally
 - standardize error handling and closing behavior
 - switch Netproxy to use unreliable tube as underlying conn
 - add server/client config files
@@ -30,7 +28,9 @@
 - fine tune constants in tubes/muxer code
 - should server 2 somehow check a security policy or something before adding authgrant? (Like make sure that the principal is allowed to give authgrants?)
 
+
 ## Done: 
+- add support for network proxy authorization grants
 - update Intent struct
 - set authgrant budget (how many outstanding authgrants should a server allowed)
 - needs to check userhomedir/.hop/authorized_keys
