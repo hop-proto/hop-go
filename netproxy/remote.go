@@ -9,16 +9,6 @@ import (
 	"zmap.io/portal/tubes"
 )
 
-//StartRemote sends an NPCInitMsg and waits for confirmation that the proxy connection is ready
-func StartRemote(npTube *tubes.Reliable, addr string) error {
-	npTube.Write(newNPCInitMsg(addr, Remote).toBytes()) //tell server to prepare to proxy to addr (start a UDP conn)
-	//TODO(baumanl): Make better conf/denial messages for NPC
-	//wait until server says it has a UDP conn to desired address
-	npTube.Read(make([]byte, 1))
-	logrus.Info("Receieved NPC Conf")
-	return nil
-}
-
 //RemoteServer starts listening on given port and pipes the traffic back over the tube
 func RemoteServer(npTube *tubes.Reliable) {
 	b := make([]byte, 4)
@@ -30,11 +20,13 @@ func RemoteServer(npTube *tubes.Reliable) {
 	tcpListener, e := net.Listen("tcp", ":"+remotePort) //TODO(baumanl): this runs with root privileges which is bad because unprivileged users can forward privileged ports on the server
 	if e != nil {
 		logrus.Error("Issue listening on requested port")
+		npTube.Write([]byte{npcDen})
 		return
 	}
 	tconn, e := tcpListener.Accept() //TODO(baumanl): should this be in a loop? how does SSH do it?
 	if e != nil {
 		logrus.Error("Issue accepting conn on remote port")
+		npTube.Write([]byte{npcDen})
 		return
 	}
 	npTube.Write([]byte{npcConf})

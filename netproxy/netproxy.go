@@ -3,6 +3,7 @@ package netproxy
 
 import (
 	"encoding/binary"
+	"errors"
 	"net"
 
 	"github.com/sirupsen/logrus"
@@ -19,6 +20,7 @@ var hostToIPAddr = map[string]string{ //TODO(baumanl): this should be dealt with
 //Constants related to netproxy channels
 const (
 	npcConf = byte(1)
+	npcDen  = byte(2)
 	Local   = byte(2)
 	Remote  = byte(3)
 	AG      = byte(4)
@@ -61,7 +63,14 @@ func Start(npTube *tubes.Reliable, addr string, t byte) error {
 	npTube.Write(newNPCInitMsg(addr, t).toBytes()) //tell server to prepare to proxy to addr (start a UDP conn)
 	//TODO(baumanl): Make better conf/denial messages for NPC
 	//wait until server says it has a UDP conn to desired address
-	npTube.Read(make([]byte, 1))
+	res := make([]byte, 1)
+	_, err := npTube.Read(res)
+	if err != nil {
+		return err
+	}
+	if res[0] != npcConf {
+		return errors.New("denied")
+	}
 	logrus.Info("Receieved NPC Conf")
 	return nil
 }
