@@ -120,7 +120,7 @@ func (sess *session) userAuthorization(username string) error {
 	//*****PERFORM USER AUTHORIZATION******
 	uaCh, _ := sess.tubeMuxer.CreateTube(tubes.UserAuthTube)
 	defer uaCh.Close()
-	if ok := userauth.RequestAuthorization(uaCh, sess.config.KeyPair.Public, username); !ok {
+	if ok := userauth.RequestAuthorization(uaCh, username); !ok {
 		return ErrClientUnauthorized
 	}
 	logrus.Info("User authorization complete")
@@ -235,6 +235,8 @@ func (sess *session) principal(tube *tubes.Reliable) {
 	defer tube.Close()
 	logrus.SetOutput(io.Discard)
 	agt := authgrants.NewAuthGrantConn(tube)
+	var remoteSession *session = nil
+
 	for { //allows for user to retry sending intent request if denied
 		intent, err := agt.GetIntentRequest()
 		if err != nil { //when the agt is closed this will error out
@@ -254,12 +256,32 @@ func (sess *session) principal(tube *tubes.Reliable) {
 			agt.SendIntentDenied("User denied")
 			continue
 		}
-		sess.confirmWithRemote(intent, agt)
+		if remoteSession == nil {
+			remoteSession, err = sess.setupRemoteSession(intent)
+			if err != nil {
+				logrus.Errorf("error getting remote session from principal: %v", err)
+				agt.SendIntentDenied("Unable to connect to remote server")
+				break
+			}
+		}
+		response, err := remoteSession.confirmWithRemote(intent, agt)
+		if err != nil {
+			logrus.Error("error getting confirmation from remote server")
+			agt.SendIntentDenied("Unable to connect to remote server")
+			break
+		}
+		//write response back to server asking for Authorization Grant
+		err = agt.WriteRawBytes(response)
+		if err != nil {
+			logrus.Errorf("C: error writing to agt: %v", err)
+			break
+		}
 	}
 }
 
-func (sess *session) confirmWithRemote(req *authgrants.Intent, agt *authgrants.AuthGrantConn) {
-	logrus.Debug("C: USER CONFIRMED INTENT_REQUEST. CONTACTING S2...")
+//start session between principal and target proxied through the delegate
+func (sess *session) setupRemoteSession(req *authgrants.Intent) (*session, error) {
+	logrus.Debug("C: USER CONFIRMED FIRST INTENT_REQUEST. CONTACTING S2...")
 
 	//create netproxy with server
 	npt, e := sess.tubeMuxer.CreateTube(tubes.NetProxyTube)
@@ -272,7 +294,8 @@ func (sess *session) confirmWithRemote(req *authgrants.Intent, agt *authgrants.A
 	addr := hostname + ":" + port
 	e = netproxy.Start(npt, addr, netproxy.AG)
 	if e != nil {
-		logrus.Fatal("Issue proxying connection")
+		logrus.Error("Issue proxying connection")
+		return nil, e
 	}
 	subsess := &session{
 		isPrincipal: true,
@@ -280,44 +303,45 @@ func (sess *session) confirmWithRemote(req *authgrants.Intent, agt *authgrants.A
 		proxyConn:   npt,
 	}
 
-	subsess.startUnderlying(hostname, port)
+	e = subsess.startUnderlying(hostname, port)
+	if e != nil {
+		logrus.Error("Issue starting underlying connection")
+		return nil, e
+	}
 	subsess.tubeMuxer = tubes.NewMuxer(subsess.transportConn, subsess.transportConn)
 	go subsess.tubeMuxer.Start()
 
-	subsess.userAuthorization(req.Username()) //TODO: what if this fails?
+	e = subsess.userAuthorization(req.Username())
+	if e != nil {
+		logrus.Error("Failed user authorization")
+		return nil, e
+	}
+	// Want to keep this session open in case the "server 2" wants to continue chaining hop sessions together
+	// TODO(baumanl): Simplify this. Should only get authorization grant tubes?
+	go subsess.handleTubes()
 
+	return subsess, nil
+}
+
+//start an authorization grant connection with the remote server and send intent request. return response.
+func (sess *session) confirmWithRemote(req *authgrants.Intent, agt *authgrants.AuthGrantConn) ([]byte, error) {
 	//start AGC and send INTENT_COMMUNICATION
-	npAgc, e := authgrants.NewAuthGrantConnFromMux(subsess.tubeMuxer)
+	npAgc, e := authgrants.NewAuthGrantConnFromMux(sess.tubeMuxer)
 	if e != nil {
 		logrus.Fatal("Error creating AGC: ", e)
 	}
+	defer npAgc.Close()
 	logrus.Info("CREATED AGC")
 	e = npAgc.SendIntentCommunication(req)
 	if e != nil {
 		logrus.Info("Issue writing intent comm to netproxyAgc")
 	}
 	logrus.Info("sent intent comm")
-	responseType, response, e := npAgc.ReadResponse()
-	logrus.Info("got response")
+	_, response, e := npAgc.ReadResponse()
 	if e != nil {
-		logrus.Fatalf("C: error reading from agc: %v", e)
+		logrus.Errorf("C: error reading from agc: %v", e)
+		return nil, e
 	}
-	npAgc.Close()
-
-	//write response back to server asking for Authorization Grant
-	err := agt.WriteRawBytes(response)
-	if err != nil {
-		logrus.Fatalf("C: error writing to agt: %v", err)
-	}
-
-	switch responseType {
-	case authgrants.IntentDenied:
-		logrus.Infof("C: WROTE IntentDenied")
-		return
-	case authgrants.IntentConfirmation:
-		logrus.Infof("C: WROTE IntentConfirmation")
-	}
-	// Want to keep this session open in case the "server 2" wants to continue chaining hop sessions together
-	// TODO(baumanl): Simplify this. Should only get authorization grant tubes?
-	go subsess.handleTubes()
+	logrus.Info("got response")
+	return response, nil
 }

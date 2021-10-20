@@ -13,7 +13,7 @@ import (
 const (
 	defaultHopPort       = "7777"
 	defaultKeyPath       = "/.hop/key"
-	clientUsage          = "hop [user@]host[:port] [-K or -k path] [-L port:host:hostport] [-R port:host:hostport] [-c cmd] [-q] [-h]"
+	clientUsage          = "hop [user@]host[:port] [-K or -k path] [-L port:host:hostport] [-R port:host:hostport] [-N] [-c cmd] [-q] [-h]"
 	testDataPathPrefix   = "/home/baumanl/.hop/"
 	defaultHopAuthSocket = "@hopauth"
 )

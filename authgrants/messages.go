@@ -1,9 +1,12 @@
 package authgrants
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/user"
 	"strconv"
@@ -233,4 +236,39 @@ func (r *Intent) Address() (string, string) {
 //Username returns the serverUsername from the intent
 func (r *Intent) Username() string {
 	return r.serverUsername
+}
+
+//Prompt prints the authgrant approval prompt to terminal and continues prompting until user enters "y" or "n"
+func (r *Intent) Prompt(reader *io.PipeReader) bool {
+	var ans string
+	for ans != "y" && ans != "n" {
+		if r.grantType == CommandGrant {
+			fmt.Printf("\nAllow %v@%v to run %v on %v@%v? [y/n]: ",
+				r.clientUsername,
+				r.clientSNI,
+				r.associatedData,
+				r.serverUsername,
+				r.serverSNI,
+			)
+		} else if r.grantType == ShellGrant {
+			fmt.Printf("\nAllow %v@%v to open a default shell on %v@%v? [y/n]: ",
+				r.clientUsername,
+				r.clientSNI,
+				r.serverUsername,
+				r.serverSNI,
+			)
+		} else {
+			//TODO: actually parse out details
+			fmt.Printf("(\nAllow %v@%v to do local or remote port forwarding with %v@%v? [y/n]: ",
+				r.clientUsername,
+				r.clientSNI,
+				r.serverUsername,
+				r.serverSNI,
+			)
+		}
+		scanner := bufio.NewScanner(reader)
+		scanner.Scan()
+		ans = scanner.Text()
+	}
+	return ans == "y"
 }
