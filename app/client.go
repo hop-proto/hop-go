@@ -22,10 +22,11 @@ type session struct {
 	tubeMuxer     *tubes.Muxer
 	execTube      *codex.ExecTube
 	isPrincipal   bool
+	headless      bool
 	proxied       bool
 
-	wg     sync.WaitGroup
-	config transport.ClientConfig
+	primarywg sync.WaitGroup
+	config    transport.ClientConfig
 }
 
 func (sess *session) loadKeys(keypath string) error {
@@ -128,7 +129,6 @@ func (sess *session) userAuthorization(username string) error {
 }
 
 func (sess *session) remoteForward(parts []string) error {
-	defer sess.wg.Done()
 	localPort := parts[2]
 	remotePort := parts[0]
 	npt, e := sess.tubeMuxer.CreateTube(tubes.NetProxyTube)
@@ -139,7 +139,7 @@ func (sess *session) remoteForward(parts []string) error {
 	if e != nil {
 		return e
 	}
-	sess.wg.Add(1)
+
 	//TODO: fix address (not just local host)
 	//TODO: add bind address options
 	tconn, e := net.Dial("tcp", "localhost:"+localPort)
@@ -156,7 +156,6 @@ func (sess *session) remoteForward(parts []string) error {
 }
 
 func (sess *session) localForward(parts []string) error {
-	defer sess.wg.Done()
 	remoteAddr := net.JoinHostPort(parts[1], parts[2])
 	npt, e := sess.tubeMuxer.CreateTube(tubes.NetProxyTube)
 	if e != nil {
@@ -166,14 +165,19 @@ func (sess *session) localForward(parts []string) error {
 	if e != nil {
 		return e
 	}
-	sess.wg.Add(1)
+	if sess.headless {
+		sess.primarywg.Add(1)
+	}
 	//do local port forwarding
 	go func() {
-		defer sess.wg.Done()
+		if sess.headless {
+			defer sess.primarywg.Done()
+		}
+
 		local, e := net.Listen("tcp", ":"+strings.Trim(parts[0], ":"))
 		if e != nil {
-
 			logrus.Error(e)
+			return
 		}
 		for {
 			localConn, e := local.Accept()
@@ -196,9 +200,8 @@ func (sess *session) startExecTube(cmd string) error {
 		logrus.Error(err)
 		return err
 	}
-	sess.wg = sync.WaitGroup{}
-	sess.wg.Add(1)
-	sess.execTube, err = codex.NewExecTube(cmd, ch, &sess.wg)
+	sess.primarywg.Add(1)
+	sess.execTube, err = codex.NewExecTube(cmd, ch, &sess.primarywg)
 	return err
 }
 

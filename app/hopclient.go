@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/user"
 	"strings"
+	"sync"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/transport"
@@ -30,7 +31,7 @@ func Client(args []string) error {
 	keypath, _ := os.UserHomeDir()
 	keypath += defaultKeyPath
 
-	sess := &session{isPrincipal: false}
+	sess := &session{isPrincipal: false, primarywg: sync.WaitGroup{}}
 
 	fs.Func("k", "indicates principal with specific key location", func(s string) error {
 		sess.isPrincipal = true
@@ -71,8 +72,7 @@ func Client(args []string) error {
 	var quiet bool
 	fs.BoolVar(&quiet, "q", false, "turn off logging")
 
-	var noCmd bool
-	fs.BoolVar(&noCmd, "N", false, "don't execute a remote command. Useful for just port forwarding.")
+	fs.BoolVar(&sess.headless, "N", false, "don't execute a remote command. Useful for just port forwarding.")
 
 	err := fs.Parse(os.Args[1:])
 	if err != nil {
@@ -129,7 +129,7 @@ func Client(args []string) error {
 			return ErrClientLoadingKeys
 		}
 	} else {
-		err = sess.getAuthorization(username, hostname, port, noCmd, cmd, localForward, localArg, remoteForward, remoteArg)
+		err = sess.getAuthorization(username, hostname, port, sess.headless, cmd, localForward, localArg, remoteForward, remoteArg)
 		if err != nil {
 			logrus.Error(err)
 			return ErrClientGettingAuthorization
@@ -165,8 +165,16 @@ func Client(args []string) error {
 			return ErrInvalidPortForwardingArgs
 		}
 		logrus.Info("Forwarding traffic from remote port ", parts[0], " to localhost port ", parts[2])
-		sess.wg.Add(1)
-		go sess.remoteForward(parts)
+		if sess.headless {
+			sess.primarywg.Add(1)
+		}
+		go func() {
+			if sess.headless {
+				defer sess.primarywg.Done()
+			}
+			e := sess.remoteForward(parts)
+			logrus.Error(e)
+		}()
 	}
 	if localForward {
 		logrus.Info("Doing local with: ", localArg)
@@ -176,11 +184,19 @@ func Client(args []string) error {
 			return ErrInvalidPortForwardingArgs
 		}
 		logrus.Info("Forwarding traffic from local port ", parts[0], " to remote port ", parts[2], " on host ", parts[1])
-		sess.wg.Add(1)
-		go sess.localForward(parts)
+		if sess.headless {
+			sess.primarywg.Add(1)
+		}
+		go func() {
+			if sess.headless {
+				defer sess.primarywg.Done()
+			}
+			e := sess.localForward(parts)
+			logrus.Error(e)
+		}()
 
 	}
-	if !noCmd {
+	if !sess.headless {
 		err = sess.startExecTube(cmd)
 		if err != nil {
 			logrus.Error(err)
@@ -188,7 +204,8 @@ func Client(args []string) error {
 		}
 	}
 	go sess.handleTubes()
-	sess.wg.Wait() //client program ends when the code execution tube ends.
+
+	sess.primarywg.Wait() //client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
 	//TODO(baumanl): figure out definitive closing behavior --> multiple code exec tubes?
 	return nil
 }
