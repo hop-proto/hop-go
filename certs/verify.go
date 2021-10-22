@@ -3,6 +3,7 @@ package certs
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"zmap.io/portal/keys"
 )
@@ -250,4 +251,22 @@ func (s Store) VerifyLeaf(leaf *Certificate, opts VerifyOptions) error {
 	}
 
 	return nil
+}
+
+// LoadRootStoreFromPEMFile allocates a new Store from a set of certificates
+// encoded in PEM format in a single file.
+func LoadRootStoreFromPEMFile(path string) (*Store, error) {
+	fd, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	certs, err := ReadManyCertificatesPEM(fd)
+	if err != nil {
+		return nil, err
+	}
+	out := new(Store)
+	for i := range certs {
+		out.AddCertificate(&certs[i])
+	}
+	return out, nil
 }

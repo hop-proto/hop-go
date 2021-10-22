@@ -18,7 +18,68 @@ import (
 
 const forever = time.Duration(math.MaxInt64)
 
+var leafPath, intermediatePath, rootsPath string
+var keyPath string
+
+func openCerts() (leaf, intermediate *certs.Certificate, keyPair *keys.X25519KeyPair) {
+	var err error
+	logrus.Infof("using key %q", keyPath)
+	keyPair, err = keys.ReadDHKeyFromPEMFile(keyPath)
+	if err != nil {
+		logrus.Fatalf("unable to open key pair %q: %s", keyPath, err)
+	}
+	logrus.Infof("using leaf %q", leafPath)
+	leaf, err = certs.ReadCertificatePEMFile(leafPath)
+	if err != nil {
+		logrus.Fatalf("unable to open leaf %q: %s", leafPath, err)
+	}
+	logrus.Infof("using intermediate %q", intermediatePath)
+	intermediate, err = certs.ReadCertificatePEMFile(intermediatePath)
+	if err != nil {
+		logrus.Fatalf("unable to open intermediate %q: %s", intermediatePath, err)
+	}
+	return
+}
+
+func issueCerts() (leaf, intermediate *certs.Certificate, keyPair *keys.X25519KeyPair) {
+	rootKeyPair := keys.GenerateNewSigningKeyPair()
+	rootIdentity := certs.Identity{
+		Names:     []certs.Name{},
+		PublicKey: rootKeyPair.Public,
+	}
+	root, err := certs.SelfSignRoot(&rootIdentity, rootKeyPair)
+	if err != nil {
+		logrus.Fatalf("error issuing root: %s", err)
+	}
+	root.ProvideKey((*[32]byte)(&rootKeyPair.Private))
+
+	intermediateKeyPair := keys.GenerateNewSigningKeyPair()
+	intermediateIdentity := certs.Identity{
+		Names:     []certs.Name{},
+		PublicKey: intermediateKeyPair.Public,
+	}
+	intermediate, err = certs.IssueIntermediate(root, &intermediateIdentity)
+	if err != nil {
+		logrus.Fatalf("error issuing intermediate: %s", err)
+	}
+	intermediate.ProvideKey((*[32]byte)(&intermediateKeyPair.Private))
+	keyPair = keys.GenerateNewX25519KeyPair()
+	identity := certs.Identity{
+		Names:     []certs.Name{certs.DNSName("hop.local")},
+		PublicKey: keyPair.Public,
+	}
+	leaf, err = certs.IssueLeaf(intermediate, &identity)
+	if err != nil {
+		logrus.Fatalf("unable to issue leaf certificate: %s", err)
+	}
+	return leaf, intermediate, keyPair
+}
+
 func main() {
+	flag.StringVar(&leafPath, "leaf", "", "path to leaf certificate pem")
+	flag.StringVar(&intermediatePath, "intermediate", "", "path to intermediate certificate pem")
+	flag.StringVar(&rootsPath, "roots", "", "path to root store pem")
+	flag.StringVar(&keyPath, "key", "", "path to key for leaf certificate")
 	flag.Parse()
 	action := flag.Arg(0)
 	address := flag.Arg(1)
@@ -31,10 +92,15 @@ func main() {
 
 	switch action {
 	case "connect":
-		config := transport.ClientConfig{
-			Verify: transport.VerifyConfig{
-				InsecureSkipVerify: true,
-			},
+		config := transport.ClientConfig{}
+		if rootsPath != "" {
+			store, err := certs.LoadRootStoreFromPEMFile(rootsPath)
+			if err != nil {
+				logrus.Fatalf("unable to open root store: %s", err)
+			}
+			config.Verify = transport.VerifyConfig{
+				Store: *store,
+			}
 		}
 		c, err := transport.Dial("udp", address, config)
 		if err != nil {
@@ -43,18 +109,20 @@ func main() {
 		go io.Copy(c, os.Stdin)
 		go io.Copy(os.Stdout, c)
 	case "listen":
+		var leaf, intermediate *certs.Certificate
+		var keyPair *keys.X25519KeyPair
+		if leafPath != "" || intermediatePath != "" {
+			leaf, intermediate, keyPair = openCerts()
+		} else {
+			leaf, intermediate, keyPair = issueCerts()
+		}
+
 		config := transport.ServerConfig{}
 		config.StartingReadTimeout = forever
-		config.KeyPair = keys.GenerateNewX25519KeyPair()
-		identity := certs.Identity{
-			Names:     []certs.Name{},
-			PublicKey: config.KeyPair.Public,
-		}
-		config.Certificate, err = certs.SelfSignLeaf(&identity, config.KeyPair)
-		if err != nil {
-			logrus.Fatalf("unable to issue self-signed certificate: %s", err)
-		}
-		config.Intermediate = nil
+		config.KeyPair = keyPair
+		config.Certificate = leaf
+		config.Intermediate = intermediate
+
 		pktConn, err := net.ListenPacket("udp", address)
 		if err != nil {
 			logrus.Fatalf("unable to listen on %q: %s", address, err)

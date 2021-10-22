@@ -3,7 +3,6 @@ package transport
 import (
 	"bytes"
 	"crypto/rand"
-	"encoding/hex"
 	"io"
 	"net"
 	"sync"
@@ -26,7 +25,6 @@ func newTestServerConfig(t *testing.T) (*ServerConfig, *VerifyConfig) {
 	assert.NilError(t, err)
 	root, err := certs.ReadCertificatePEMFile("testdata/root.pem")
 	assert.NilError(t, err)
-	assert.Equal(t, "087aa52c8c287f34fcf6b33b22d68b02489d7168edae696a8ce4ae5e825bd1e9", hex.EncodeToString(root.Fingerprint[:]))
 	server := ServerConfig{
 		KeyPair:      keyPair,
 		Certificate:  certificate,
