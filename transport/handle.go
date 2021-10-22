@@ -26,8 +26,9 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	writeTimeout atomicTimeout
 
 	sessionID SessionID
-	recv      chan []byte
-	send      chan []byte
+
+	recv chan []byte
+	send chan []byte
 
 	closed atomicBool
 
@@ -39,6 +40,11 @@ var _ MsgWriter = &Handle{}
 var _ MsgConn = &Handle{}
 
 var _ net.Conn = &Handle{}
+
+//IsClosed returns closed member variable value
+func (c *Handle) IsClosed() bool {
+	return c.closed.isSet()
+}
 
 // ReadMsg implements the MsgReader interface. If b is too short to hold the
 // message, it returns ErrBufOverflow.

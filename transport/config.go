@@ -21,7 +21,8 @@ type VerifyConfig struct {
 
 // ClientConfig contains client-specific configuration settings.
 type ClientConfig struct {
-	Verify VerifyConfig
+	KeyPair *keys.X25519KeyPair
+	Verify  VerifyConfig
 }
 
 const (

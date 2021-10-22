@@ -1,34 +1,34 @@
-package channels
+package tubes
 
 import "encoding/binary"
 
-type Frame struct {
+type frame struct {
 	ackNo      uint32
-	channelID  byte
+	frameNo    uint32
+	dataLength uint16
+	flags      frameFlags
+	tubeID     byte
+	data       []byte
+}
+
+type initiateFrame struct {
+	frameNo    uint32
+	tubeID     byte
+	tubeType   byte
 	data       []byte
 	dataLength uint16
-	flags      FrameFlags
-	frameNo    uint32
+	flags      frameFlags
+	windowSize uint16
 }
 
-type InitiateFrame struct {
-	channelID   byte
-	channelType byte
-	data        []byte
-	dataLength  uint16
-	flags       FrameFlags
-	frameNo     uint32
-	windowSize  uint16
-}
-
-type FrameFlags struct {
+type frameFlags struct {
 	// Flag to update the acknowledgement number from the sender of the packet for the receiver of the packet.
 	ACK bool
-	// Flag to teardown channel.
+	// Flag to teardown tube.
 	FIN bool
-	// Flag to initiate a channel.
+	// Flag to initiate a tube.
 	REQ bool
-	// Flag to accept channel initiation.
+	// Flag to accept tube initiation.
 	RESP bool
 }
 
@@ -40,7 +40,7 @@ const (
 	RESPIdx = 3
 )
 
-func flagsToMetaByte(p *FrameFlags) byte {
+func flagsToMetaByte(p *frameFlags) byte {
 	meta := byte(0)
 	if p.ACK {
 		meta = meta | (1 << ACKIdx)
@@ -57,8 +57,8 @@ func flagsToMetaByte(p *FrameFlags) byte {
 	return meta
 }
 
-func metaToFlags(b byte) FrameFlags {
-	flags := FrameFlags{
+func metaToFlags(b byte) frameFlags {
+	flags := frameFlags{
 		ACK:  b&(1<<ACKIdx) != 0,
 		FIN:  b&(1<<FINIdx) != 0,
 		REQ:  b&(1<<REQIdx) != 0,
@@ -67,7 +67,7 @@ func metaToFlags(b byte) FrameFlags {
 	return flags
 }
 
-func (p *InitiateFrame) toBytes() []byte {
+func (p *initiateFrame) toBytes() []byte {
 	frameNumBytes := []byte{0, 0, 0, 0}
 	binary.BigEndian.PutUint32(frameNumBytes, p.frameNo)
 	dataLength := []byte{0, 0}
@@ -76,17 +76,17 @@ func (p *InitiateFrame) toBytes() []byte {
 	binary.BigEndian.PutUint16(windowSize, p.windowSize)
 	return append(
 		[]byte{
-			p.channelID, flagsToMetaByte(&p.flags),
+			p.tubeID, flagsToMetaByte(&p.flags),
 			dataLength[0], dataLength[1],
 			windowSize[0], windowSize[1],
-			p.channelType, byte(0),
+			p.tubeType, byte(0),
 			frameNumBytes[0], frameNumBytes[1], frameNumBytes[2], frameNumBytes[3],
 		},
 		p.data...,
 	)
 }
 
-func (p *Frame) toBytes() []byte {
+func (p *frame) toBytes() []byte {
 	frameNoBytes := []byte{0, 0, 0, 0}
 	binary.BigEndian.PutUint32(frameNoBytes, p.frameNo)
 	dataLength := []byte{0, 0}
@@ -95,7 +95,7 @@ func (p *Frame) toBytes() []byte {
 	binary.BigEndian.PutUint32(ackNoBytes, p.ackNo)
 	return append(
 		[]byte{
-			p.channelID, flagsToMetaByte(&p.flags), dataLength[0], dataLength[1],
+			p.tubeID, flagsToMetaByte(&p.flags), dataLength[0], dataLength[1],
 			ackNoBytes[0], ackNoBytes[1], ackNoBytes[2], ackNoBytes[3],
 			frameNoBytes[0], frameNoBytes[1], frameNoBytes[2], frameNoBytes[3],
 		},
@@ -103,10 +103,10 @@ func (p *Frame) toBytes() []byte {
 	)
 }
 
-func fromBytes(b []byte) (*Frame, error) {
+func fromBytes(b []byte) (*frame, error) {
 	dataLength := binary.BigEndian.Uint16(b[2:4])
-	return &Frame{
-		channelID:  b[0],
+	return &frame{
+		tubeID:     b[0],
 		flags:      metaToFlags(b[1]),
 		dataLength: dataLength,
 		data:       b[12 : 12+dataLength],
@@ -115,15 +115,15 @@ func fromBytes(b []byte) (*Frame, error) {
 	}, nil
 }
 
-func fromInitiateBytes(b []byte) (*InitiateFrame, error) {
+func fromInitiateBytes(b []byte) (*initiateFrame, error) {
 	dataLength := binary.BigEndian.Uint16(b[2:4])
-	return &InitiateFrame{
-		channelID:   b[0],
-		flags:       metaToFlags(b[1]),
-		dataLength:  dataLength,
-		windowSize:  binary.BigEndian.Uint16(b[4:6]),
-		channelType: b[6],
-		frameNo:     binary.BigEndian.Uint32(b[8:12]),
-		data:        b[12 : 12+dataLength],
+	return &initiateFrame{
+		tubeID:     b[0],
+		flags:      metaToFlags(b[1]),
+		dataLength: dataLength,
+		windowSize: binary.BigEndian.Uint16(b[4:6]),
+		tubeType:   b[6],
+		frameNo:    binary.BigEndian.Uint32(b[8:12]),
+		data:       b[12 : 12+dataLength],
 	}, nil
 }

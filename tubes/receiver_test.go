@@ -1,4 +1,4 @@
-package channels
+package tubes
 
 import (
 	"bytes"
@@ -9,12 +9,12 @@ import (
 	"gotest.tools/assert"
 )
 
-func makePacket(frameNo uint32, b []byte) *Frame {
-	pkt := Frame{
+func makePacket(frameNo uint32, b []byte) *frame {
+	pkt := frame{
 		dataLength: uint16(len(b)),
 		frameNo:    frameNo,
 		data:       b,
-		flags: FrameFlags{
+		flags: frameFlags{
 			ACK:  false,
 			FIN:  false,
 			REQ:  false,
@@ -26,7 +26,7 @@ func makePacket(frameNo uint32, b []byte) *Frame {
 
 /* Tests that the receive window can handle highly concurrent and out of order packet receipts */
 func TestReceiveWindow(t *testing.T) {
-	recvWindow := Receiver{
+	recvWindow := receiver{
 		buffer: new(bytes.Buffer),
 		bufferCond: sync.Cond{
 			L: &sync.Mutex{},
@@ -37,28 +37,28 @@ func TestReceiveWindow(t *testing.T) {
 	}
 	recvWindow.init()
 
-	DATA_LENGTH := 1000
-	PACKET_LENGTH := 5
-	testData := make([]byte, DATA_LENGTH)
+	dataLength := 1000
+	packetLength := 5
+	testData := make([]byte, dataLength)
 	for i := range testData {
 		testData[i] = []byte{'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r'}[rand.Intn(6)]
 	}
 
-	packets := make([]*Frame, DATA_LENGTH/PACKET_LENGTH)
+	packets := make([]*frame, dataLength/packetLength)
 	i := 0
 	frameNo := 1
-	for i < DATA_LENGTH/PACKET_LENGTH {
-		packets[i] = makePacket(uint32(frameNo), testData[i*PACKET_LENGTH:i*PACKET_LENGTH+PACKET_LENGTH])
+	for i < dataLength/packetLength {
+		packets[i] = makePacket(uint32(frameNo), testData[i*packetLength:i*packetLength+packetLength])
 		go recvWindow.receive(packets[i])
 		// See if receiver can handle retransmits
 		go recvWindow.receive(packets[i])
-		i += 1
-		frameNo += 1
+		i++
+		frameNo++
 	}
 
-	readData := make([]byte, DATA_LENGTH)
+	readData := make([]byte, dataLength)
 	n, err := recvWindow.read(readData)
-	assert.Equal(t, n, DATA_LENGTH)
+	assert.Equal(t, n, dataLength)
 	assert.NilError(t, err)
 	assert.Equal(t, string(testData), string(readData))
 

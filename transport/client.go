@@ -8,10 +8,17 @@ import (
 	"sync"
 	"time"
 
-	"zmap.io/portal/keys"
-
 	"github.com/sirupsen/logrus"
+	"zmap.io/portal/keys"
 )
+
+//UDPLike interface standardizes Reliable channels and UDPConn.
+//Reliable channels implement this interface so they can be used as the underlying conn for Clients
+type UDPLike interface {
+	net.Conn
+	WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error)
+	ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error)
+}
 
 // Enforce ClientConn implements net.Conn
 var _ net.Conn = &Client{}
@@ -27,7 +34,7 @@ type Client struct {
 	handshakeComplete atomicBool
 	closed            atomicBool
 
-	underlyingConn *net.UDPConn
+	underlyingConn UDPLike
 	dialAddr       *net.UDPAddr
 
 	hs *HandshakeState
@@ -54,10 +61,11 @@ func (c *Client) unlockUser() {
 // must already be open. It is an error to call Handshake on a connection that
 // has already performed the portal handshake.
 func (c *Client) Handshake() error {
+	logrus.Info("Initiating Handshake")
 	if c.handshakeComplete.isSet() {
 		return nil
 	}
-
+	logrus.Debug("Handshake not complete. Locking user...")
 	c.lockUser()
 	defer c.unlockUser()
 
@@ -66,19 +74,27 @@ func (c *Client) Handshake() error {
 	if c.handshakeComplete.isSet() {
 		return nil
 	}
-
+	logrus.Debug("got lock and checked again. Completeting handshake...")
 	return c.clientHandshakeLocked()
 }
 
 func (c *Client) clientHandshakeLocked() error {
+	//logrus.SetLevel(logrus.DebugLevel)
 	c.hs = new(HandshakeState)
 	c.hs.remoteAddr = c.dialAddr
 	c.hs.duplex.InitializeEmpty()
 	c.hs.ephemeral.Generate()
+	logrus.SetLevel(logrus.InfoLevel)
 
 	// TODO(dadrian): This should actually be, well, static
-	c.hs.static = new(keys.X25519KeyPair)
-	c.hs.static.Generate()
+	if c.config.KeyPair == nil { //This shouldn't happen if there is actually a key provided
+		c.hs.static = new(keys.X25519KeyPair)
+		c.hs.static.Generate()
+		logrus.Infof("client static is: %v from rand", c.hs.static.Public.String())
+	} else {
+		c.hs.static = c.config.KeyPair
+		logrus.Infof("client static is: %v from config", c.hs.static.Public.String())
+	}
 
 	c.hs.clientVerify = &c.config.Verify
 
@@ -374,7 +390,7 @@ func (c *Client) SetWriteDeadline(t time.Time) error {
 
 // NewClient returns a Client configured as specified, using the underlying UDP
 // connection. The Client has not yet completed a handshake.
-func NewClient(conn *net.UDPConn, server *net.UDPAddr, config ClientConfig) *Client {
+func NewClient(conn UDPLike, server *net.UDPAddr, config ClientConfig) *Client {
 	c := &Client{
 		underlyingConn: conn,
 		dialAddr:       server,

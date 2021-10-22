@@ -1,4 +1,4 @@
-package channels
+package tubes
 
 import (
 	"bytes"
@@ -9,14 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type Receiver struct {
-	buffer     *bytes.Buffer
-	bufferCond sync.Cond
-	closed     bool
-	closedCond *sync.Cond
-	fragments  PriorityQueue
-	m          sync.Mutex
-	windowSize uint16
+type receiver struct {
 	/*
 		We treat the sequence numbers as uint64 so we can avoid wraparounds
 		and not have to update our priority queue orderings in the case of a
@@ -24,13 +17,21 @@ type Receiver struct {
 	*/
 	ackNo       uint64
 	windowStart uint64
+	windowSize  uint16
+	closed      bool
+	closedCond  *sync.Cond
+	bufferCond  sync.Cond
+	m           sync.Mutex
+	fragments   PriorityQueue
+
+	buffer *bytes.Buffer
 }
 
-func (r *Receiver) init() {
+func (r *receiver) init() {
 	heap.Init(&r.fragments)
 }
 
-func (r *Receiver) getAck() uint32 {
+func (r *receiver) getAck() uint32 {
 	r.m.Lock()
 	defer r.m.Unlock()
 	return uint32(r.ackNo)
@@ -38,9 +39,9 @@ func (r *Receiver) getAck() uint32 {
 
 /* Processes window into buffer stream if the ordered fragments are ready (in order).
 Precondition: r.m mutex is held. */
-func (r *Receiver) processIntoBuffer() {
+func (r *receiver) processIntoBuffer() {
 	for r.fragments.Len() > 0 {
-		frag := heap.Pop(&(r.fragments)).(*Item)
+		frag := heap.Pop(&(r.fragments)).(*pqItem)
 
 		if r.windowStart != frag.priority {
 			// This packet cannot be added to the buffer yet.
@@ -50,24 +51,24 @@ func (r *Receiver) processIntoBuffer() {
 				break
 			}
 		} else if frag.FIN {
-			r.windowStart += 1
-			r.ackNo += 1
+			r.windowStart++
+			r.ackNo++
 			r.closedCond.L.Lock()
-			logrus.Debug("RECIEVING FIN PACKET")
+			logrus.Debug("RECEIVING FIN PACKET")
 			r.closed = true
 			r.closedCond.Signal()
 			r.closedCond.L.Unlock()
 			break
 		} else {
 			r.buffer.Write(frag.value)
-			r.windowStart += 1
-			r.ackNo += 1
+			r.windowStart++
+			r.ackNo++
 		}
 	}
 	r.bufferCond.Signal()
 }
 
-func (r *Receiver) read(buf []byte) (int, error) {
+func (r *receiver) read(buf []byte) (int, error) {
 	r.bufferCond.L.Lock()
 	for {
 		r.m.Lock()
@@ -99,9 +100,9 @@ func frameInBounds(wS uint64, wE uint64, f uint64) bool {
 	return true
 }
 
-/* Utiltiy function to add offsets so that we eliminate wraparounds.
+/* Utility function to add offsets so that we eliminate wraparounds.
    Precondition: must be holding frame number */
-func (r *Receiver) unwrapFrameNo(frameNo uint32) uint64 {
+func (r *receiver) unwrapFrameNo(frameNo uint32) uint64 {
 	// The previous, offsets are represented by the 32 least significant bytes of the window start.
 	windowStart := r.windowStart
 	newNo := uint64(frameNo) + windowStart - uint64(uint32(windowStart))
@@ -114,7 +115,7 @@ func (r *Receiver) unwrapFrameNo(frameNo uint32) uint64 {
 }
 
 /* Precondition: receive window lock is held. */
-func (r *Receiver) receive(p *Frame) error {
+func (r *receiver) receive(p *frame) error {
 	r.m.Lock()
 	defer r.m.Unlock()
 	windowStart := r.windowStart
@@ -128,7 +129,7 @@ func (r *Receiver) receive(p *Frame) error {
 	}
 
 	if (p.dataLength > 0 || p.flags.FIN) && (frameNo >= r.windowStart) {
-		heap.Push(&r.fragments, &Item{
+		heap.Push(&r.fragments, &pqItem{
 			value:    p.data,
 			priority: frameNo,
 			FIN:      p.flags.FIN,

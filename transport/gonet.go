@@ -33,3 +33,15 @@ func Dial(network, address string, config ClientConfig) (*Client, error) {
 	}
 	return NewClient(inner, remoteAddr.(*net.UDPAddr), config), nil
 }
+
+//DialNP is similar to Dial, but using a reliable tube as an underlying conn for the Client
+func DialNP(network, address string, tube UDPLike, config ClientConfig) (*Client, error) {
+	// Figure out what address we would use to dial
+	throwaway, err := net.Dial("udp", address)
+	if err != nil {
+		return nil, err
+	}
+	remoteAddr := throwaway.RemoteAddr()
+	throwaway.Close()
+	return NewClient(tube, remoteAddr.(*net.UDPAddr), config), nil
+}

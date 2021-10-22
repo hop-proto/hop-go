@@ -1,8 +1,9 @@
-package channels
+package tubes
 
 import (
 	"math/rand"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -57,7 +58,7 @@ func TestMuxer(t *testing.T) {
 	mc := NewMuxer(transportConn, transportConn)
 	go mc.Start()
 
-	channel, err := mc.CreateChannel(1 << 6)
+	tube, err := mc.CreateTube(1 << 6)
 	assert.NilError(t, err)
 
 	ms := NewMuxer(serverConn, serverConn)
@@ -66,9 +67,9 @@ func TestMuxer(t *testing.T) {
 	testData := "hi i am some data"
 
 	go func() {
-		_, err = channel.Write([]byte(testData))
+		_, err = tube.Write([]byte(testData))
 		assert.NilError(t, err)
-		channel.Close()
+		tube.Close()
 	}()
 
 	serverChan, err := ms.Accept()
@@ -91,6 +92,83 @@ func TestMuxer(t *testing.T) {
 	assert.Check(t, cmp.Len(testData, bytesRead))
 	assert.Equal(t, testData, string(buf))
 
+}
+
+func TestClosingMuxer(t *testing.T) {
+	logrus.SetLevel(logrus.DebugLevel)
+	pktConn, err := net.ListenPacket("udp", "localhost:8891")
+	assert.NilError(t, err)
+	// It's actually a UDP conn
+	udpConn := pktConn.(*net.UDPConn)
+	server, err := transport.NewServer(udpConn, newTestServerConfig(t))
+	assert.NilError(t, err)
+	go server.Serve()
+
+	transportConn, err := transport.Dial("udp", udpConn.LocalAddr().String(), getInsecureClientConfig())
+	assert.NilError(t, err)
+
+	assert.NilError(t, transportConn.Handshake())
+
+	serverConn, err := server.AcceptTimeout(time.Minute)
+	assert.NilError(t, err)
+
+	mc := NewMuxer(transportConn, transportConn)
+	go mc.Start()
+
+	ms := NewMuxer(serverConn, serverConn)
+	go ms.Start()
+
+	agc, err := mc.CreateTube(AuthGrantTube)
+	assert.NilError(t, err)
+
+	npc, err := mc.CreateTube(NetProxyTube)
+	assert.NilError(t, err)
+
+	codex, err := mc.CreateTube(ExecTube)
+	assert.NilError(t, err)
+
+	agcs, err := ms.Accept()
+	assert.NilError(t, err)
+
+	npcs, err := ms.Accept()
+	assert.NilError(t, err)
+
+	codexs, err := ms.Accept()
+	assert.NilError(t, err)
+
+	n, e := agc.Write([]byte("sent over agc"))
+	assert.NilError(t, e)
+	logrus.Infof("Wrote %v bytes", n)
+	n, e = npc.Write([]byte("sent over npc"))
+	assert.NilError(t, e)
+	logrus.Infof("Wrote %v bytes", n)
+	n, e = codex.Write([]byte("sent over cod"))
+	assert.NilError(t, e)
+	logrus.Infof("Wrote %v bytes", n)
+
+	buf1 := make([]byte, 13)
+	buf2 := make([]byte, 13)
+	buf3 := make([]byte, 13)
+
+	agcs.Read(buf1)
+	logrus.Info("agcs recvd: ", string(buf1))
+	npcs.Read(buf2)
+	logrus.Info("npcs recvd: ", string(buf2))
+	codexs.Read(buf3)
+	logrus.Info("codexs recvd: ", string(buf3))
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		mc.Stop()
+	}()
+
+	ms.Stop()
+
+	wg.Wait()
+	logrus.Info("All done!")
 }
 
 func TestSmallWindow(t *testing.T) {
@@ -117,7 +195,7 @@ func TestSmallWindow(t *testing.T) {
 	ms := NewMuxer(serverConn, serverConn)
 	go ms.Start()
 
-	channel, err := mc.CreateChannel(1 << 7)
+	tube, err := mc.CreateTube(1 << 7)
 	assert.NilError(t, err)
 
 	testData := make([]byte, 5000)
@@ -126,9 +204,9 @@ func TestSmallWindow(t *testing.T) {
 	}
 
 	go func() {
-		_, err = channel.Write([]byte(testData))
+		_, err = tube.Write(testData)
 		assert.NilError(t, err)
-		err = channel.Close()
+		err = tube.Close()
 		assert.NilError(t, err)
 	}()
 
@@ -170,11 +248,11 @@ func TestMultipleChannels(t *testing.T) {
 	ms := NewMuxer(serverConn, serverConn)
 	go ms.Start()
 
-	c1, err := mc.CreateChannel(1 << 7)
+	c1, err := mc.CreateTube(1 << 7)
 	assert.NilError(t, err)
-	c2, err := ms.CreateChannel(1 << 7)
+	c2, err := ms.CreateTube(1 << 7)
 	assert.NilError(t, err)
-	c3, err := mc.CreateChannel(1 << 7)
+	c3, err := mc.CreateTube(1 << 7)
 	assert.NilError(t, err)
 
 	testData1 := make([]byte, 5000)
@@ -192,13 +270,13 @@ func TestMultipleChannels(t *testing.T) {
 
 	go func() {
 		logrus.Debug("WRITE 1")
-		_, err = c1.Write([]byte(testData1))
+		_, err = c1.Write(testData1)
 		assert.NilError(t, err)
 		logrus.Debug("WRITE 2")
-		_, err = c2.Write([]byte(testData2))
+		_, err = c2.Write(testData2)
 		assert.NilError(t, err)
 		logrus.Debug("WRITE 3")
-		_, err = c3.Write([]byte(testData3))
+		_, err = c3.Write(testData3)
 		assert.NilError(t, err)
 		logrus.Debug("CLOSE 1")
 		err = c1.Close()

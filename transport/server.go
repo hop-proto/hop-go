@@ -10,10 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/keys"
-
-	"github.com/sirupsen/logrus"
 )
 
 type outgoing struct {
@@ -51,6 +50,14 @@ type Server struct {
 	staticKey    *keys.X25519KeyPair
 	certificate  []byte
 	intermediate []byte
+}
+
+//FetchClientStatic returns the client static key used in handshake with associated handle's sessionID
+func (s *Server) FetchClientStatic(h *Handle) keys.PublicKey {
+	s.m.RLock()
+	defer s.m.RUnlock()
+	ss := s.sessions[h.sessionID]
+	return ss.clientStatic
 }
 
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
@@ -316,6 +323,7 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		logrus.Debug("server: client auth too short")
 		return 0, nil, ErrBufUnderflow
 	}
+
 	if mt := MessageType(b[0]); mt != MessageTypeClientAuth {
 		return 0, nil, ErrUnexpectedMessage
 	}
@@ -353,6 +361,7 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		logrus.Debugf("server: mismatched tag in client auth: expected %x, got %x", hs.macBuf, clientTag)
 		return pos, nil, ErrInvalidMessage
 	}
+
 	x = x[MacLen:]
 	pos += MacLen
 	var err error
@@ -467,6 +476,7 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	if err != nil {
 		return err
 	}
+	ss.clientStatic = hs.clientStatic
 	// TODO(dadrian): Create this earlier on so that the handshake fails earlier
 	// if the queue is full.
 	h := s.createHandleLocked(ss)
@@ -563,8 +573,9 @@ func NewServer(conn *net.UDPConn, config *ServerConfig) (*Server, error) {
 		udpConn: conn,
 		config:  config,
 
-		handshakes:         make(map[string]*HandshakeState),
-		sessions:           make(map[SessionID]*SessionState),
+		handshakes: make(map[string]*HandshakeState),
+		sessions:   make(map[SessionID]*SessionState),
+
 		pendingConnections: make(chan *Handle, config.maxPendingConnections()),
 		outgoing:           make(chan outgoing), // TODO(dadrian): Is this the appropriate size?
 
