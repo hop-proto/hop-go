@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/hex"
 	"errors"
 
 	"github.com/sirupsen/logrus"
@@ -14,7 +13,7 @@ const (
 	defaultHopPort       = "7777"
 	defaultKeyPath       = "/.hop/key"
 	clientUsage          = "hop [user@]host[:port] [-K or -k path] [-L port:host:hostport] [-R port:host:hostport] [-N] [-c cmd] [-q] [-h]"
-	testDataPathPrefix   = "/home/baumanl/.hop/"
+	testDataPathPrefix   = "../../certs/"
 	defaultHopAuthSocket = "@hopauth"
 )
 
@@ -56,9 +55,19 @@ func newTestServerConfig() (*transport.ServerConfig, *transport.VerifyConfig) {
 	if err != nil {
 		logrus.Fatalf("S: ERROR WITH ROOT CERT %v", err)
 	}
-	if hex.EncodeToString(root.Fingerprint[:]) != "087aa52c8c287f34fcf6b33b22d68b02489d7168edae696a8ce4ae5e825bd1e9" {
-		logrus.Fatal("S: ROOT FINGERPRINT DOES NOT MATCH")
+	err = certs.VerifyParent(certificate, intermediate)
+	if err != nil {
+		logrus.Fatal("Verify Parent Issue: ", err)
 	}
+	err = certs.VerifyParent(intermediate, root)
+	if err != nil {
+		logrus.Fatal("Verify Parent Issue: ", err)
+	}
+	err = certs.VerifyParent(root, root)
+	if err != nil {
+		logrus.Fatal("Verify Parent Issue: ", err)
+	}
+
 	server := transport.ServerConfig{
 		KeyPair:      keyPair,
 		Certificate:  certificate,
