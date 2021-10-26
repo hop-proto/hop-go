@@ -19,8 +19,8 @@ var hostToIPAddr = map[string]string{ //TODO(baumanl): this should be dealt with
 
 //Constants related to netproxy channels
 const (
-	npcConf = byte(1)
-	npcDen  = byte(2)
+	NpcConf = byte(1)
+	NpcDen  = byte(2)
 	Local   = byte(2)
 	Remote  = byte(3)
 	AG      = byte(4)
@@ -68,7 +68,7 @@ func Start(npTube *tubes.Reliable, addr string, t byte) error {
 	if err != nil {
 		return err
 	}
-	if res[0] != npcConf {
+	if res[0] != NpcConf {
 		return errors.New("denied")
 	}
 	logrus.Info("Receieved NPC Conf")
@@ -76,18 +76,18 @@ func Start(npTube *tubes.Reliable, addr string, t byte) error {
 }
 
 //Handle starts appropriate hop server handling of port/proxy functionality
-func Handle(npTube *tubes.Reliable) {
-	b := make([]byte, 1)
-	npTube.Read(b)
-	switch b[0] {
-	case Local:
-		LocalServer(npTube)
-	case Remote:
-		RemoteServer(npTube)
-	case AG:
-		Server(npTube)
-	}
-}
+// func Handle(npTube *tubes.Reliable) {
+// 	b := make([]byte, 1)
+// 	npTube.Read(b)
+// 	switch b[0] {
+// 	case Local:
+// 		LocalServer(npTube)
+// 	case Remote:
+// 		RemoteServer(npTube)
+// 	case AG:
+// 		Server(npTube)
+// 	}
+// }
 
 //Server starts a UDP Conn with remote addr and proxies traffic from ch -> udp and upd -> ch
 func Server(npTube *tubes.Reliable) {
@@ -119,7 +119,7 @@ func Server(npTube *tubes.Reliable) {
 	}
 	defer tconn.Close()
 	logrus.Info("connected to: ", dest.info)
-	npTube.Write([]byte{npcConf})
+	npTube.Write([]byte{NpcConf})
 	logrus.Infof("wrote confirmation that NPC ready")
 	//could net.Pipe() be useful here?
 	go func() {
