@@ -29,7 +29,7 @@ type data struct {
 
 type authGrant struct {
 	deadline         time.Time
-	actions          map[*data]bool //apparently golang doesn't have sets...?
+	actions          map[*data]bool //apparently golang doesn't have sets...? Found this on StackOverflow. too hacky???
 	user             string
 	principalSession *hopSession
 }
@@ -178,13 +178,13 @@ func (sess *hopSession) close() error {
 
 //handleAgc handles Intent Communications from principals and updates the outstanding authgrants maps appropriately
 func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
-	defer tube.Close()
 	agc := authgrants.NewAuthGrantConn(tube)
+	defer agc.Close()
 	for {
 		k, t, user, arg, grantType, e := agc.HandleIntentComm()
 		if e != nil {
 			//better error handling
-			logrus.Info("Server denied authgrant")
+			logrus.Infof("agc closed: %v", e)
 			return
 		}
 		logrus.Info("got intent comm")
@@ -201,6 +201,7 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 				deadline:         t,
 				user:             user,
 				principalSession: sess,
+				actions:          make(map[*data]bool),
 			}
 		}
 		sess.server.authgrants[k].actions[&data{
@@ -320,7 +321,7 @@ func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
 	if b[0] == netproxy.Local || b[0] == netproxy.Remote {
 		buf := make([]byte, 4)
 		ch.Read(buf)
-		l := binary.BigEndian.Uint32(b[0:4])
+		l := binary.BigEndian.Uint32(buf[0:4])
 		init := make([]byte, l)
 		ch.Read(init)
 		//Check authorization
@@ -345,7 +346,9 @@ func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
 				return
 			}
 			if string(init) != ag.associatedData {
-				err := errors.New("CMD does not match Authgrant approved action")
+				err := errors.New("intit does not match Authgrant approved action")
+				logrus.Info("init: ", string(init))
+				logrus.Info("assoc data: ", ag.associatedData)
 				logrus.Error(err)
 				ch.Write([]byte{netproxy.NpcDen})
 				return

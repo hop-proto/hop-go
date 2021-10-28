@@ -239,6 +239,7 @@ func (sess *session) principal(tube *tubes.Reliable) {
 	logrus.SetOutput(io.Discard)
 	agt := authgrants.NewAuthGrantConn(tube)
 	var remoteSession *session = nil
+	var targetAgt *authgrants.AuthGrantConn = nil
 
 	for { //allows for user to retry sending intent request if denied
 		intent, err := agt.GetIntentRequest()
@@ -266,8 +267,14 @@ func (sess *session) principal(tube *tubes.Reliable) {
 				agt.SendIntentDenied("Unable to connect to remote server")
 				break
 			}
+			targetAgt, err = authgrants.NewAuthGrantConnFromMux(remoteSession.tubeMuxer)
+			if err != nil {
+				logrus.Fatal("Error creating AGC: ", err)
+			}
+			defer targetAgt.Close()
+			logrus.Info("CREATED AGC")
 		}
-		response, err := remoteSession.confirmWithRemote(intent, agt)
+		response, err := remoteSession.confirmWithRemote(intent, targetAgt, agt)
 		if err != nil {
 			logrus.Error("error getting confirmation from remote server")
 			agt.SendIntentDenied("Unable to connect to remote server")
@@ -327,15 +334,9 @@ func (sess *session) setupRemoteSession(req *authgrants.Intent) (*session, error
 }
 
 //start an authorization grant connection with the remote server and send intent request. return response.
-func (sess *session) confirmWithRemote(req *authgrants.Intent, agt *authgrants.AuthGrantConn) ([]byte, error) {
-	//start AGC and send INTENT_COMMUNICATION
-	npAgc, e := authgrants.NewAuthGrantConnFromMux(sess.tubeMuxer)
-	if e != nil {
-		logrus.Fatal("Error creating AGC: ", e)
-	}
-	defer npAgc.Close()
-	logrus.Info("CREATED AGC")
-	e = npAgc.SendIntentCommunication(req)
+func (sess *session) confirmWithRemote(req *authgrants.Intent, npAgc *authgrants.AuthGrantConn, agt *authgrants.AuthGrantConn) ([]byte, error) {
+	//send INTENT_COMMUNICATION
+	e := npAgc.SendIntentCommunication(req)
 	if e != nil {
 		logrus.Info("Issue writing intent comm to netproxyAgc")
 	}
