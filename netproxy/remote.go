@@ -3,15 +3,16 @@ package netproxy
 import (
 	"io"
 	"net"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/tubes"
 )
 
 //RemoteServer starts listening on given port and pipes the traffic back over the tube
-func RemoteServer(npTube *tubes.Reliable, port string) {
-	//remotePort := fromBytes(init).info
-	tcpListener, e := net.Listen("tcp", ":"+port) //TODO(baumanl): this runs with root privileges which is bad because unprivileged users can forward privileged ports on the server
+func RemoteServer(npTube *tubes.Reliable, arg string) {
+	parts := strings.Split(arg, ":")                  //assuming port:host:hostport
+	tcpListener, e := net.Listen("tcp", ":"+parts[0]) //TODO(baumanl): this runs with root privileges which is bad because unprivileged users can forward privileged ports on the server
 	if e != nil {
 		logrus.Error("Issue listening on requested port")
 		npTube.Write([]byte{NpcDen})

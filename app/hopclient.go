@@ -172,7 +172,7 @@ func Client(args []string) error {
 			if sess.headless {
 				defer sess.primarywg.Done()
 			}
-			e := sess.remoteForward(parts)
+			e := sess.remoteForward(remoteArg)
 			logrus.Error(e)
 		}()
 	}
@@ -191,7 +191,7 @@ func Client(args []string) error {
 			if sess.headless {
 				defer sess.primarywg.Done()
 			}
-			e := sess.localForward(parts)
+			e := sess.localForward(localArg)
 			logrus.Error(e)
 		}()
 

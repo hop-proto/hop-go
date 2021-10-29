@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -208,32 +209,36 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 			actionType:     grantType,
 			associatedData: arg,
 		}] = true
-
+		logrus.Infof("Added AG: action %v, type %v", arg, grantType)
 		sess.server.m.Unlock()
 		agc.SendIntentConf(t)
 		logrus.Info("Sent intent conf")
 	}
 }
 
+//server enforces that delegates only execute approved actions
+func (sess *hopSession) checkAction(action string, actionType byte) error {
+	logrus.Info("CHECKING ACTION IS AUTHORIZED")
+	for elem := range sess.authgrant.actions {
+		if elem.actionType == actionType && elem.associatedData == action {
+			delete(sess.authgrant.actions, elem)
+			return nil
+		}
+	}
+	err := fmt.Errorf("no authgrant of action: %v and type: %v, found", action, actionType)
+	return err
+
+}
+
 func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 	cmd, shell, _ := codex.GetCmd(ch)
 	logrus.Info("CMD: ", cmd)
 	if !sess.isPrincipal {
-		var ag *data = nil
-		for action := range sess.authgrant.actions {
-			if action.actionType == authgrants.CommandGrant || action.actionType == authgrants.ShellGrant {
-				ag = action
-				delete(sess.authgrant.actions, action)
-			}
+		err := sess.checkAction(cmd, authgrants.CommandGrant)
+		if err != nil {
+			err = sess.checkAction(cmd, authgrants.ShellGrant)
 		}
-		if ag == nil {
-			err := errors.New("no CommandGrant or ShellGrant authgrant found")
-			logrus.Error(err)
-			codex.SendFailure(ch, err)
-			return
-		}
-		if cmd != ag.associatedData {
-			err := errors.New("CMD does not match Authgrant approved action")
+		if err != nil {
 			logrus.Error(err)
 			codex.SendFailure(ch, err)
 			return
@@ -319,36 +324,19 @@ func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
 		return
 	}
 	if b[0] == netproxy.Local || b[0] == netproxy.Remote {
+		actionType := authgrants.LocalGrant
+		if b[0] == netproxy.Remote {
+			actionType = authgrants.RemoteGrant
+		}
 		buf := make([]byte, 4)
 		ch.Read(buf)
 		l := binary.BigEndian.Uint32(buf[0:4])
-		init := make([]byte, l)
-		ch.Read(init)
+		arg := make([]byte, l)
+		ch.Read(arg)
 		//Check authorization
 		if !sess.isPrincipal {
-			var ag *data = nil
-			for action := range sess.authgrant.actions {
-				if b[0] == netproxy.Local && action.actionType == authgrants.LocalGrant {
-					ag = action
-					delete(sess.authgrant.actions, action)
-					break
-				}
-				if b[0] == netproxy.Remote && action.actionType == authgrants.RemoteGrant {
-					ag = action
-					delete(sess.authgrant.actions, action)
-					break
-				}
-			}
-			if ag == nil {
-				err := errors.New("action unauthorized")
-				logrus.Error(err)
-				ch.Write([]byte{netproxy.NpcDen})
-				return
-			}
-			if string(init) != ag.associatedData {
-				err := errors.New("intit does not match Authgrant approved action")
-				logrus.Info("init: ", string(init))
-				logrus.Info("assoc data: ", ag.associatedData)
+			err := sess.checkAction(string(arg), actionType)
+			if err != nil {
 				logrus.Error(err)
 				ch.Write([]byte{netproxy.NpcDen})
 				return
@@ -356,14 +344,13 @@ func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
 		}
 		switch b[0] {
 		case netproxy.Local:
-			netproxy.LocalServer(ch, string(init))
+			netproxy.LocalServer(ch, string(arg))
 			return
 		case netproxy.Remote:
-			netproxy.RemoteServer(ch, string(init))
+			netproxy.RemoteServer(ch, string(arg))
 			return
 		}
+		logrus.Error("undefined netproxy type")
+		ch.Write([]byte{netproxy.NpcDen})
 	}
-	logrus.Error("undefined netproxy type")
-	ch.Write([]byte{netproxy.NpcDen})
-
 }

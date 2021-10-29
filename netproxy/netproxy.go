@@ -59,8 +59,8 @@ func fromBytes(b []byte) *npcInitMsg {
 }
 
 //Start sends an NPCInitMsg and waits for confirmation that the proxy connection is ready
-func Start(npTube *tubes.Reliable, addr string, t byte) error {
-	npTube.Write(newNPCInitMsg(addr, t).toBytes()) //tell server to prepare to proxy to addr (start a UDP conn)
+func Start(npTube *tubes.Reliable, arg string, t byte) error {
+	npTube.Write(newNPCInitMsg(arg, t).toBytes()) //tell server to prepare to proxy to addr (start a UDP conn)
 	//TODO(baumanl): Make better conf/denial messages for NPC
 	//wait until server says it has a UDP conn to desired address
 	res := make([]byte, 1)
@@ -74,20 +74,6 @@ func Start(npTube *tubes.Reliable, addr string, t byte) error {
 	logrus.Info("Receieved NPC Conf")
 	return nil
 }
-
-//Handle starts appropriate hop server handling of port/proxy functionality
-// func Handle(npTube *tubes.Reliable) {
-// 	b := make([]byte, 1)
-// 	npTube.Read(b)
-// 	switch b[0] {
-// 	case Local:
-// 		LocalServer(npTube)
-// 	case Remote:
-// 		RemoteServer(npTube)
-// 	case AG:
-// 		Server(npTube)
-// 	}
-// }
 
 //Server starts a UDP Conn with remote addr and proxies traffic from ch -> udp and upd -> ch
 func Server(npTube *tubes.Reliable) {

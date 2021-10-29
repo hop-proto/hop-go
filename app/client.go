@@ -128,14 +128,14 @@ func (sess *session) userAuthorization(username string) error {
 	return nil
 }
 
-func (sess *session) remoteForward(parts []string) error {
+func (sess *session) remoteForward(remoteArg string) error {
+	parts := strings.Split(remoteArg, ":")
 	localPort := parts[2]
-	remotePort := parts[0]
 	npt, e := sess.tubeMuxer.CreateTube(tubes.NetProxyTube)
 	if e != nil {
 		return e
 	}
-	e = netproxy.Start(npt, remotePort, netproxy.Remote)
+	e = netproxy.Start(npt, remoteArg, netproxy.Remote)
 	if e != nil {
 		return e
 	}
@@ -155,13 +155,13 @@ func (sess *session) remoteForward(parts []string) error {
 	return nil
 }
 
-func (sess *session) localForward(parts []string) error {
-	remoteAddr := net.JoinHostPort(parts[1], parts[2])
+func (sess *session) localForward(localArg string) error {
+	parts := strings.Split(localArg, ":")
 	npt, e := sess.tubeMuxer.CreateTube(tubes.NetProxyTube)
 	if e != nil {
 		return e
 	}
-	e = netproxy.Start(npt, remoteAddr, netproxy.Local)
+	e = netproxy.Start(npt, localArg, netproxy.Local)
 	if e != nil {
 		return e
 	}
