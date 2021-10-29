@@ -96,7 +96,7 @@ func TestIntentRequest(t *testing.T) {
 			"port: ", ir.port, " ",
 			"serversni: ", ir.serverSNI, " ",
 			"serverUser: ", ir.serverUsername, " ",
-			"grantType: ", ir.grantType, " ",
+			"grantType: ", ir.actionType, " ",
 			"sha3: ", ir.sha3)
 		err := agc.sendIntentRequest([32]byte{}, "user", "host", "port", 2, "myCmd")
 		assert.NilError(t, err)
@@ -120,7 +120,7 @@ func TestIntentRequest(t *testing.T) {
 		"port: ", ir.port, " ",
 		"serversni: ", ir.serverSNI, " ",
 		"serverUser: ", ir.serverUsername, " ",
-		"grantType: ", ir.grantType, " ",
+		"grantType: ", ir.actionType, " ",
 		"sha3: ", ir.sha3)
 	//err = SendIntentConf(stube, time.Now())
 	err = sagc.SendIntentDenied("because I say so")

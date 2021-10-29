@@ -29,12 +29,12 @@ var ErrUnknownMessage = errors.New("received message with unknown message type")
 //ErrIntentDenied indicates an intent request was denied
 var ErrIntentDenied = errors.New("received intent denied message")
 
-//Grant Type Constants
+//Action Type Constants
 const (
-	ShellGrant   = byte(1)
-	CommandGrant = byte(2)
-	LocalGrant   = byte(3)
-	RemoteGrant  = byte(4)
+	ShellAction   = byte(1)
+	CommandAction = byte(2)
+	LocalPFAction = byte(3)
+	RemotePFGrant = byte(4)
 )
 
 //Intent Request and Communication constants
@@ -43,10 +43,10 @@ const (
 	usernameLen          = 32
 	sniLen               = 256
 	portLen              = 2
-	grantTypeLen         = 1
+	actionTypeLen        = 1
 	reservedLen          = 1
 	associatedDataLenLen = 2
-	irHeaderLen          = sha3Len + 2*(usernameLen+sniLen) + portLen + grantTypeLen + reservedLen + associatedDataLenLen
+	irHeaderLen          = sha3Len + 2*(usernameLen+sniLen) + portLen + actionTypeLen + reservedLen + associatedDataLenLen
 
 	sha3Offset              = 0
 	cUserOffset             = sha3Offset + sha3Len
@@ -54,9 +54,9 @@ const (
 	sUserOffset             = cSNIOffset + sniLen
 	sSNIOffset              = sUserOffset + usernameLen
 	portOffset              = sSNIOffset + sniLen
-	grantTypeOffset         = portOffset + portLen
-	associatedDataLenOffset = grantTypeOffset + grantTypeLen + reservedLen
-	associatedDataOffset    = grantTypeOffset + grantTypeLen + reservedLen + associatedDataLenLen //2 bytes for length of associated data
+	actionTypeOffset        = portOffset + portLen
+	associatedDataLenOffset = actionTypeOffset + actionTypeLen + reservedLen
+	associatedDataOffset    = actionTypeOffset + actionTypeLen + reservedLen + associatedDataLenLen //2 bytes for length of associated data
 )
 
 //Intent Confirmation constants
@@ -91,7 +91,7 @@ type Intent struct {
 	serverUsername string
 	serverSNI      string
 	port           uint16
-	grantType      byte
+	actionType     byte
 	associatedData string
 }
 
@@ -118,7 +118,7 @@ func newIntent(digest [sha3Len]byte, sUser string, hostname string, port string,
 		serverUsername: sUser,
 		serverSNI:      hostname,
 		port:           uint16(p),
-		grantType:      grantType,
+		actionType:     grantType,
 		associatedData: associatedData,
 	}
 	return r
@@ -164,8 +164,8 @@ func (r *Intent) toBytes() []byte {
 	copy(s[cSNIOffset:sUserOffset], []byte(r.clientSNI))
 	copy(s[sUserOffset:sSNIOffset], []byte(r.serverUsername))
 	copy(s[sSNIOffset:portOffset], []byte(r.serverSNI))
-	binary.BigEndian.PutUint16(s[portOffset:grantTypeOffset], r.port)
-	s[grantTypeOffset] = r.grantType
+	binary.BigEndian.PutUint16(s[portOffset:actionTypeOffset], r.port)
+	s[actionTypeOffset] = r.actionType
 	binary.BigEndian.PutUint16(s[associatedDataLenOffset:associatedDataOffset], uint16(len(r.associatedData)))
 	return append(s[:], []byte(r.associatedData)...)
 }
@@ -202,8 +202,8 @@ func fromIntentBytes(b []byte) *Intent {
 	r.clientSNI = trimNullBytes(b[cSNIOffset:sUserOffset])
 	r.serverUsername = trimNullBytes(b[sUserOffset:sSNIOffset])
 	r.serverSNI = trimNullBytes(b[sSNIOffset:portOffset])
-	r.port = binary.BigEndian.Uint16(b[portOffset:grantTypeOffset])
-	r.grantType = b[grantTypeOffset]
+	r.port = binary.BigEndian.Uint16(b[portOffset:actionTypeOffset])
+	r.actionType = b[actionTypeOffset]
 	r.associatedData = string(b[associatedDataOffset:])
 	return &r
 }
@@ -242,7 +242,7 @@ func (r *Intent) Username() string {
 func (r *Intent) Prompt(reader *io.PipeReader) bool {
 	var ans string
 	for ans != "y" && ans != "n" {
-		if r.grantType == CommandGrant {
+		if r.actionType == CommandAction {
 			fmt.Printf("\nAllow %v@%v to run %v on %v@%v? [y/n]: ",
 				r.clientUsername,
 				r.clientSNI,
@@ -250,7 +250,7 @@ func (r *Intent) Prompt(reader *io.PipeReader) bool {
 				r.serverUsername,
 				r.serverSNI,
 			)
-		} else if r.grantType == ShellGrant {
+		} else if r.actionType == ShellAction {
 			fmt.Printf("\nAllow %v@%v to open a default shell on %v@%v? [y/n]: ",
 				r.clientUsername,
 				r.clientSNI,

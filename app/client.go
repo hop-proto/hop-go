@@ -55,7 +55,7 @@ func (sess *session) getAuthorization(username string, hostname string, port str
 	agc := authgrants.NewAuthGrantConn(c)
 	defer agc.Close()
 	if !headless && cmd == "" { //shell
-		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.ShellGrant, "")
+		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.ShellAction, "")
 		if e == nil {
 			logrus.Infof("C: Principal approved request to open a shell. Deadline: %v", t)
 		} else if e != authgrants.ErrIntentDenied {
@@ -63,7 +63,7 @@ func (sess *session) getAuthorization(username string, hostname string, port str
 		}
 	}
 	if !headless && cmd != "" { //cmd
-		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.CommandGrant, cmd)
+		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.CommandAction, cmd)
 		if e == nil {
 			logrus.Infof("C: Principal approved request to run cmd: %v. Deadline: %v", cmd, t)
 		} else if e != authgrants.ErrIntentDenied {
@@ -71,7 +71,7 @@ func (sess *session) getAuthorization(username string, hostname string, port str
 		}
 	}
 	if local { //local forwarding
-		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.LocalGrant, localArg)
+		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.LocalPFAction, localArg)
 		if e == nil {
 			logrus.Infof("C: Principal approved request to do local forwarding. Deadline: %v", t)
 		} else if e != authgrants.ErrIntentDenied {
@@ -79,7 +79,7 @@ func (sess *session) getAuthorization(username string, hostname string, port str
 		}
 	}
 	if remote { //remote forwarding
-		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.RemoteGrant, remoteArg)
+		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.RemotePFGrant, remoteArg)
 		if e == nil {
 			logrus.Infof("C: Principal approved request to do remote forwarding. Deadline: %v", t)
 		} else if e != authgrants.ErrIntentDenied {

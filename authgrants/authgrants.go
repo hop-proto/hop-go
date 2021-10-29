@@ -74,7 +74,7 @@ func (c *AuthGrantConn) HandleIntentComm() (keys.PublicKey, time.Time, string, s
 	logrus.Infof("Pretending s2 approved intent request") //TODO(baumanl): check policy or something?
 	k := keys.PublicKey(intent.sha3)
 	t := time.Now().Add(time.Minute)
-	return k, t, intent.serverUsername, intent.associatedData, intent.grantType, nil
+	return k, t, intent.serverUsername, intent.associatedData, intent.actionType, nil
 }
 
 //ReadResponse gets either an intent confirmation or intent denied message

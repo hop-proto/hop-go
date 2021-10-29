@@ -234,9 +234,9 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 	cmd, shell, _ := codex.GetCmd(ch)
 	logrus.Info("CMD: ", cmd)
 	if !sess.isPrincipal {
-		err := sess.checkAction(cmd, authgrants.CommandGrant)
+		err := sess.checkAction(cmd, authgrants.CommandAction)
 		if err != nil {
-			err = sess.checkAction(cmd, authgrants.ShellGrant)
+			err = sess.checkAction(cmd, authgrants.ShellAction)
 		}
 		if err != nil {
 			logrus.Error(err)
@@ -324,9 +324,9 @@ func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
 		return
 	}
 	if b[0] == netproxy.Local || b[0] == netproxy.Remote {
-		actionType := authgrants.LocalGrant
+		actionType := authgrants.LocalPFAction
 		if b[0] == netproxy.Remote {
-			actionType = authgrants.RemoteGrant
+			actionType = authgrants.RemotePFGrant
 		}
 		buf := make([]byte, 4)
 		ch.Read(buf)
