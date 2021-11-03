@@ -154,7 +154,7 @@ func (sess *hopSession) start() {
 			case tubes.AuthGrantTube:
 				go sess.handleAgc(serverChan)
 			case tubes.NetProxyTube:
-				//go netproxy.Handle(serverChan) //TODO(baumanl): different tube types for local/remote/ag forwarding?
+				//TODO(baumanl): different tube types for local/remote/ag forwarding?
 				go sess.startNetProxy(serverChan)
 			default:
 				serverChan.Close()
@@ -326,7 +326,7 @@ func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
 	if b[0] == netproxy.Local || b[0] == netproxy.Remote {
 		actionType := authgrants.LocalPFAction
 		if b[0] == netproxy.Remote {
-			actionType = authgrants.RemotePFGrant
+			actionType = authgrants.RemotePFAction
 		}
 		buf := make([]byte, 4)
 		ch.Read(buf)

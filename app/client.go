@@ -79,7 +79,7 @@ func (sess *session) getAuthorization(username string, hostname string, port str
 		}
 	}
 	if remote { //remote forwarding
-		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.RemotePFGrant, remoteArg)
+		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.RemotePFAction, remoteArg)
 		if e == nil {
 			logrus.Infof("C: Principal approved request to do remote forwarding. Deadline: %v", t)
 		} else if e != authgrants.ErrIntentDenied {

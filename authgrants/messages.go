@@ -31,10 +31,10 @@ var ErrIntentDenied = errors.New("received intent denied message")
 
 //Action Type Constants
 const (
-	ShellAction   = byte(1)
-	CommandAction = byte(2)
-	LocalPFAction = byte(3)
-	RemotePFGrant = byte(4)
+	ShellAction    = byte(1)
+	CommandAction  = byte(2)
+	LocalPFAction  = byte(3)
+	RemotePFAction = byte(4)
 )
 
 //Intent Request and Communication constants
