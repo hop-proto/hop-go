@@ -16,16 +16,6 @@ import (
 
 const maxOutstandingAuthgrants = 50 //TODO(baumanl): calibrate/allow being set from config file
 
-//AuthGrant contains deadline, user, action
-type authGrant struct {
-	deadline         time.Time
-	user             string
-	arg              string
-	principalSession *hopSession
-	used             bool
-	grantType        byte
-}
-
 //Serve listens for incoming hop connection requests and start corresponding authGrantServer on a Unix Domain socket
 func Serve(args []string) {
 	logrus.SetLevel(logrus.InfoLevel)
@@ -59,8 +49,8 @@ func Serve(args []string) {
 	go transportServer.Serve()
 
 	//*****AUTHGRANT SERVER ON UNIX DOMAIN SOCKET SET UP*****
-	principals := make(map[int32]*hopSession)           //PID -> principal hop session
-	authgrants := make(map[keys.PublicKey][]*authGrant) //static key -> authgrant
+	principals := make(map[int32]*hopSession)         //PID -> principal hop session
+	authgrants := make(map[keys.PublicKey]*authGrant) //static key -> authgrant
 
 	//Start UDS socket
 	//make sure the socket does not already exist.

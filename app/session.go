@@ -2,7 +2,9 @@ package app
 
 import (
 	"bufio"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -20,6 +22,19 @@ import (
 	"zmap.io/portal/userauth"
 )
 
+//AuthGrant contains deadline, user, data
+type data struct {
+	actionType     byte
+	associatedData string
+}
+
+type authGrant struct {
+	deadline         time.Time
+	actions          map[*data]bool //apparently golang doesn't have sets...? Found this on StackOverflow. too hacky???
+	user             string
+	principalSession *hopSession
+}
+
 type hopSession struct {
 	transportConn *transport.Handle
 	tubeMuxer     *tubes.Muxer
@@ -30,7 +45,7 @@ type hopSession struct {
 	user   string
 
 	isPrincipal bool
-	authgrants  []*authGrant
+	authgrant   *authGrant
 }
 
 func (sess *hopSession) checkAuthorization() bool {
@@ -75,26 +90,27 @@ func (sess *hopSession) checkAuthorization() bool {
 	//Check for a matching authgrant
 	sess.server.m.Lock()
 	defer sess.server.m.Unlock()
-	authgrants, ok := sess.server.authgrants[k]
+	authgrant, ok := sess.server.authgrants[k]
 	if !ok {
 		logrus.Info("USER NOT AUTHORIZED")
 		uaTube.Write([]byte{userauth.UserAuthDen})
 		return false
 	}
-	if authgrants[0].deadline.Before(time.Now()) {
+	if authgrant.deadline.Before(time.Now()) {
 		delete(sess.server.authgrants, k)
 		logrus.Info("AUTHGRANT DEADLINE EXCEEDED")
 		uaTube.Write([]byte{userauth.UserAuthDen})
 		return false
 	}
-	if sess.user != authgrants[0].user {
+	if sess.user != authgrant.user {
 		logrus.Info("AUTHGRANT USER DOES NOT MATCH")
 		uaTube.Write([]byte{userauth.UserAuthDen})
 		return false
 	}
-	sess.authgrants = authgrants
+	sess.authgrant = authgrant
 	sess.isPrincipal = false
 	delete(sess.server.authgrants, k)
+	sess.server.outstandingAuthgrants--
 	logrus.Info("USER AUTHORIZED")
 	uaTube.Write([]byte{userauth.UserAuthConf})
 	return true
@@ -138,7 +154,8 @@ func (sess *hopSession) start() {
 			case tubes.AuthGrantTube:
 				go sess.handleAgc(serverChan)
 			case tubes.NetProxyTube:
-				go netproxy.Handle(serverChan) //TODO(baumanl): different tube types for local/remote/ag forwarding?
+				//TODO(baumanl): different tube types for local/remote/ag forwarding?
+				go sess.startNetProxy(serverChan)
 			default:
 				serverChan.Close()
 			}
@@ -150,7 +167,7 @@ func (sess *hopSession) start() {
 func (sess *hopSession) close() error {
 	var err, err2 error
 	if !sess.isPrincipal {
-		err = sess.authgrants[0].principalSession.close() //TODO: move where principalSession stored?
+		err = sess.authgrant.principalSession.close() //TODO: move where principalSession stored?
 	}
 	sess.tubeMuxer.Stop()
 	//err2 = sess.transportConn.Close() (not implemented yet)
@@ -163,64 +180,65 @@ func (sess *hopSession) close() error {
 //handleAgc handles Intent Communications from principals and updates the outstanding authgrants maps appropriately
 func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 	agc := authgrants.NewAuthGrantConn(tube)
-	k, t, user, arg, grantType, e := agc.HandleIntentComm()
-	logrus.Info("got intent comm")
-	if e != nil {
-		logrus.Info("Server denied authgrant")
-		agc.SendIntentDenied("Server denied")
-		return
-	}
-	sess.server.m.Lock()
-	if sess.server.outstandingAuthgrants >= maxOutstandingAuthgrants {
+	defer agc.Close()
+	for {
+		k, t, user, arg, grantType, e := agc.HandleIntentComm()
+		if e != nil {
+			//better error handling
+			logrus.Infof("agc closed: %v", e)
+			return
+		}
+		logrus.Info("got intent comm")
+		sess.server.m.Lock()
+		if sess.server.outstandingAuthgrants >= maxOutstandingAuthgrants {
+			sess.server.m.Unlock()
+			logrus.Info("Server exceeded max number of authgrants")
+			agc.SendIntentDenied("Server denied. Too many outstanding authgrants.")
+			return
+		}
+		if _, ok := sess.server.authgrants[k]; !ok {
+			sess.server.outstandingAuthgrants++
+			sess.server.authgrants[k] = &authGrant{
+				deadline:         t,
+				user:             user,
+				principalSession: sess,
+				actions:          make(map[*data]bool),
+			}
+		}
+		sess.server.authgrants[k].actions[&data{
+			actionType:     grantType,
+			associatedData: arg,
+		}] = true
+		logrus.Infof("Added AG: action %v, type %v", arg, grantType)
 		sess.server.m.Unlock()
-		logrus.Info("Server exceeded max number of authgrants")
-		agc.SendIntentDenied("Server denied. Too many outstanding authgrants.")
-		return
+		agc.SendIntentConf(t)
+		logrus.Info("Sent intent conf")
 	}
-	sess.server.outstandingAuthgrants++
-	sess.server.authgrants[k] = append(sess.server.authgrants[k], &authGrant{
-		deadline:         t,
-		user:             user,
-		arg:              arg,
-		principalSession: sess,
-		grantType:        grantType,
-		used:             false,
-	})
-
-	sess.server.m.Unlock()
-	agc.SendIntentConf(t)
-	logrus.Info("Sent intent conf")
-	tube.Close()
 }
 
-//TODO(baumanl): Add in better privilege separation?
-//Right now hopd(root) directly starts commands through go routines.
-//sshd uses like 3 levels of separation.
+//server enforces that delegates only execute approved actions
+func (sess *hopSession) checkAction(action string, actionType byte) error {
+	logrus.Info("CHECKING ACTION IS AUTHORIZED")
+	for elem := range sess.authgrant.actions {
+		if elem.actionType == actionType && elem.associatedData == action {
+			delete(sess.authgrant.actions, elem)
+			return nil
+		}
+	}
+	err := fmt.Errorf("no authgrant of action: %v and type: %v, found", action, actionType)
+	return err
+
+}
+
 func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 	cmd, shell, _ := codex.GetCmd(ch)
 	logrus.Info("CMD: ", cmd)
 	if !sess.isPrincipal {
-		var ag *authGrant = nil
-		for _, v := range sess.authgrants {
-			if v.grantType == authgrants.CommandGrant || v.grantType == authgrants.ShellGrant {
-				ag = v
-			}
+		err := sess.checkAction(cmd, authgrants.CommandAction)
+		if err != nil {
+			err = sess.checkAction(cmd, authgrants.ShellAction)
 		}
-		if ag == nil {
-			err := errors.New("no CommandGrant or ShellGrant authgrant found")
-			logrus.Error(err)
-			codex.SendFailure(ch, err)
-			return
-		}
-		if ag.used {
-			err := errors.New("already performed approved action")
-			logrus.Error(err)
-			codex.SendFailure(ch, err)
-			return
-		}
-		ag.used = true
-		if cmd != ag.arg {
-			err := errors.New("CMD does not match Authgrant approved action")
+		if err != nil {
 			logrus.Error(err)
 			codex.SendFailure(ch, err)
 			return
@@ -279,7 +297,7 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 
 		sess.server.m.Lock()
 		if !sess.isPrincipal {
-			sess.server.principals[int32(c.Process.Pid)] = sess.authgrants[0].principalSession
+			sess.server.principals[int32(c.Process.Pid)] = sess.authgrant.principalSession
 		} else {
 			logrus.Infof("S: using standard muxer")
 			sess.server.principals[int32(c.Process.Pid)] = sess
@@ -295,5 +313,44 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 		logrus.Error(err)
 		codex.SendFailure(ch, err)
 		return
+	}
+}
+
+func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
+	b := make([]byte, 1)
+	ch.Read(b)
+	if b[0] == netproxy.AG {
+		netproxy.Server(ch)
+		return
+	}
+	if b[0] == netproxy.Local || b[0] == netproxy.Remote {
+		actionType := authgrants.LocalPFAction
+		if b[0] == netproxy.Remote {
+			actionType = authgrants.RemotePFAction
+		}
+		buf := make([]byte, 4)
+		ch.Read(buf)
+		l := binary.BigEndian.Uint32(buf[0:4])
+		arg := make([]byte, l)
+		ch.Read(arg)
+		//Check authorization
+		if !sess.isPrincipal {
+			err := sess.checkAction(string(arg), actionType)
+			if err != nil {
+				logrus.Error(err)
+				ch.Write([]byte{netproxy.NpcDen})
+				return
+			}
+		}
+		switch b[0] {
+		case netproxy.Local:
+			netproxy.LocalServer(ch, string(arg))
+			return
+		case netproxy.Remote:
+			netproxy.RemoteServer(ch, string(arg))
+			return
+		}
+		logrus.Error("undefined netproxy type")
+		ch.Write([]byte{netproxy.NpcDen})
 	}
 }

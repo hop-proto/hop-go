@@ -67,13 +67,14 @@ func (c *AuthGrantConn) GetAuthGrant(digest [sha3Len]byte, sUser string, hostnam
 func (c *AuthGrantConn) HandleIntentComm() (keys.PublicKey, time.Time, string, string, byte, error) {
 	msg, e := c.readIntentCommunication()
 	if e != nil {
-		logrus.Fatalf("error reading intent communication")
+		logrus.Error("error reading intent communication")
+		return keys.PublicKey{}, time.Now(), "", "", 0, e
 	}
 	intent := fromIntentCommunicationBytes(msg)
 	logrus.Infof("Pretending s2 approved intent request") //TODO(baumanl): check policy or something?
 	k := keys.PublicKey(intent.sha3)
 	t := time.Now().Add(time.Minute)
-	return k, t, intent.serverUsername, intent.associatedData, intent.grantType, nil
+	return k, t, intent.serverUsername, intent.associatedData, intent.actionType, nil
 }
 
 //ReadResponse gets either an intent confirmation or intent denied message

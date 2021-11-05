@@ -1,45 +1,42 @@
 package netproxy
 
 import (
-	"encoding/binary"
 	"io"
 	"net"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/tubes"
 )
 
 //LocalServer starts a TCP Conn with remote addr and proxies traffic from ch -> tcp and tcp -> ch
-func LocalServer(npTube *tubes.Reliable) {
-	b := make([]byte, 4)
-	npTube.Read(b)
-	l := binary.BigEndian.Uint32(b[0:4])
-	logrus.Infof("Expecting %v bytes", l)
-	init := make([]byte, l)
-	npTube.Read(init)
-	dest := fromBytes(init)
-	if _, err := net.LookupAddr(dest.info); err != nil {
+func LocalServer(npTube *tubes.Reliable, arg string) {
+	//dest := fromBytes(init)
+	//TODO: more flexible parsing of arg
+	parts := strings.Split(arg, ":") //assuming port:host:hostport
+	addr := net.JoinHostPort(parts[1], parts[2])
+	if _, err := net.LookupAddr(addr); err != nil {
 		//Couldn't resolve address with local resolver
-		h, p, e := net.SplitHostPort(dest.info)
+		h, p, e := net.SplitHostPort(addr)
 		if e != nil {
 			logrus.Error(e)
-			npTube.Write([]byte{npcDen})
+			npTube.Write([]byte{NpcDen})
 			return
 		}
 		if ip, ok := hostToIPAddr[h]; ok {
-			dest.info = ip + ":" + p
+			addr = ip + ":" + p
 		}
 	}
-	logrus.Infof("dialing dest: %v", dest.info)
-	tconn, err := net.Dial("tcp", dest.info)
+	logrus.Infof("dialing dest: %v", addr)
+	tconn, err := net.Dial("tcp", addr)
 	if err != nil {
 		logrus.Errorf("C: error dialing server: %v", err)
-		npTube.Write([]byte{npcDen})
+		npTube.Write([]byte{NpcDen})
 		return
 	}
 	defer tconn.Close()
-	logrus.Info("connected to: ", dest.info)
-	npTube.Write([]byte{npcConf})
+	logrus.Info("connected to: ", arg)
+	npTube.Write([]byte{NpcConf})
 	logrus.Infof("wrote confirmation that NPC ready")
 	//could net.Pipe() be useful here?
 	go func() {

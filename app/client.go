@@ -55,7 +55,7 @@ func (sess *session) getAuthorization(username string, hostname string, port str
 	agc := authgrants.NewAuthGrantConn(c)
 	defer agc.Close()
 	if !headless && cmd == "" { //shell
-		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.ShellGrant, "")
+		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.ShellAction, "")
 		if e == nil {
 			logrus.Infof("C: Principal approved request to open a shell. Deadline: %v", t)
 		} else if e != authgrants.ErrIntentDenied {
@@ -63,7 +63,7 @@ func (sess *session) getAuthorization(username string, hostname string, port str
 		}
 	}
 	if !headless && cmd != "" { //cmd
-		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.CommandGrant, cmd)
+		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.CommandAction, cmd)
 		if e == nil {
 			logrus.Infof("C: Principal approved request to run cmd: %v. Deadline: %v", cmd, t)
 		} else if e != authgrants.ErrIntentDenied {
@@ -71,7 +71,7 @@ func (sess *session) getAuthorization(username string, hostname string, port str
 		}
 	}
 	if local { //local forwarding
-		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.LocalGrant, localArg)
+		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.LocalPFAction, localArg)
 		if e == nil {
 			logrus.Infof("C: Principal approved request to do local forwarding. Deadline: %v", t)
 		} else if e != authgrants.ErrIntentDenied {
@@ -79,7 +79,7 @@ func (sess *session) getAuthorization(username string, hostname string, port str
 		}
 	}
 	if remote { //remote forwarding
-		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.RemoteGrant, remoteArg)
+		t, e := agc.GetAuthGrant(sess.config.KeyPair.Public, username, hostname, port, authgrants.RemotePFAction, remoteArg)
 		if e == nil {
 			logrus.Infof("C: Principal approved request to do remote forwarding. Deadline: %v", t)
 		} else if e != authgrants.ErrIntentDenied {
@@ -128,14 +128,14 @@ func (sess *session) userAuthorization(username string) error {
 	return nil
 }
 
-func (sess *session) remoteForward(parts []string) error {
+func (sess *session) remoteForward(remoteArg string) error {
+	parts := strings.Split(remoteArg, ":")
 	localPort := parts[2]
-	remotePort := parts[0]
 	npt, e := sess.tubeMuxer.CreateTube(tubes.NetProxyTube)
 	if e != nil {
 		return e
 	}
-	e = netproxy.Start(npt, remotePort, netproxy.Remote)
+	e = netproxy.Start(npt, remoteArg, netproxy.Remote)
 	if e != nil {
 		return e
 	}
@@ -155,13 +155,13 @@ func (sess *session) remoteForward(parts []string) error {
 	return nil
 }
 
-func (sess *session) localForward(parts []string) error {
-	remoteAddr := net.JoinHostPort(parts[1], parts[2])
+func (sess *session) localForward(localArg string) error {
+	parts := strings.Split(localArg, ":")
 	npt, e := sess.tubeMuxer.CreateTube(tubes.NetProxyTube)
 	if e != nil {
 		return e
 	}
-	e = netproxy.Start(npt, remoteAddr, netproxy.Local)
+	e = netproxy.Start(npt, localArg, netproxy.Local)
 	if e != nil {
 		return e
 	}
@@ -239,6 +239,7 @@ func (sess *session) principal(tube *tubes.Reliable) {
 	logrus.SetOutput(io.Discard)
 	agt := authgrants.NewAuthGrantConn(tube)
 	var remoteSession *session = nil
+	var targetAgt *authgrants.AuthGrantConn = nil
 
 	for { //allows for user to retry sending intent request if denied
 		intent, err := agt.GetIntentRequest()
@@ -266,8 +267,14 @@ func (sess *session) principal(tube *tubes.Reliable) {
 				agt.SendIntentDenied("Unable to connect to remote server")
 				break
 			}
+			targetAgt, err = authgrants.NewAuthGrantConnFromMux(remoteSession.tubeMuxer)
+			if err != nil {
+				logrus.Fatal("Error creating AGC: ", err)
+			}
+			defer targetAgt.Close()
+			logrus.Info("CREATED AGC")
 		}
-		response, err := remoteSession.confirmWithRemote(intent, agt)
+		response, err := remoteSession.confirmWithRemote(intent, targetAgt, agt)
 		if err != nil {
 			logrus.Error("error getting confirmation from remote server")
 			agt.SendIntentDenied("Unable to connect to remote server")
@@ -327,15 +334,9 @@ func (sess *session) setupRemoteSession(req *authgrants.Intent) (*session, error
 }
 
 //start an authorization grant connection with the remote server and send intent request. return response.
-func (sess *session) confirmWithRemote(req *authgrants.Intent, agt *authgrants.AuthGrantConn) ([]byte, error) {
-	//start AGC and send INTENT_COMMUNICATION
-	npAgc, e := authgrants.NewAuthGrantConnFromMux(sess.tubeMuxer)
-	if e != nil {
-		logrus.Fatal("Error creating AGC: ", e)
-	}
-	defer npAgc.Close()
-	logrus.Info("CREATED AGC")
-	e = npAgc.SendIntentCommunication(req)
+func (sess *session) confirmWithRemote(req *authgrants.Intent, npAgc *authgrants.AuthGrantConn, agt *authgrants.AuthGrantConn) ([]byte, error) {
+	//send INTENT_COMMUNICATION
+	e := npAgc.SendIntentCommunication(req)
 	if e != nil {
 		logrus.Info("Issue writing intent comm to netproxyAgc")
 	}
