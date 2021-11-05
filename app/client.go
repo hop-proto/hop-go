@@ -47,7 +47,7 @@ func (sess *session) getAuthorization(username string, hostname string, port str
 	logrus.Infof("Client generated: %v", sess.config.KeyPair.Public.String())
 	logrus.Infof("C: Initiating AGC Protocol.")
 
-	c, err := net.Dial("unix", defaultHopAuthSocket)
+	c, err := net.Dial("unix", DefaultHopAuthSocket)
 	if err != nil {
 		return err
 	}

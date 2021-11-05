@@ -41,7 +41,7 @@ type hopSession struct {
 	tubeQueue     chan *tubes.Reliable
 	done          chan int
 
-	server *hopServer
+	server *HopServer
 	user   string
 
 	isPrincipal bool
@@ -190,7 +190,7 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 		}
 		logrus.Info("got intent comm")
 		sess.server.m.Lock()
-		if sess.server.outstandingAuthgrants >= maxOutstandingAuthgrants {
+		if sess.server.outstandingAuthgrants >= sess.server.config.MaxOutstandingAuthgrants {
 			sess.server.m.Unlock()
 			logrus.Info("Server exceeded max number of authgrants")
 			agc.SendIntentDenied("Server denied. Too many outstanding authgrants.")

@@ -29,7 +29,7 @@ func Client(args []string) error {
 	//******PROCESS CMD LINE ARGUMENTS******
 	var fs flag.FlagSet
 	keypath, _ := os.UserHomeDir()
-	keypath += defaultKeyPath
+	keypath += DefaultKeyPath
 
 	sess := &session{isPrincipal: false, primarywg: sync.WaitGroup{}}
 
@@ -108,7 +108,7 @@ func Client(args []string) error {
 	hostname := url.Hostname()
 	port := url.Port()
 	if port == "" {
-		port = defaultHopPort
+		port = DefaultHopPort
 	}
 
 	username := url.User.Username()
@@ -120,7 +120,7 @@ func Client(args []string) error {
 		username = u.Username
 	}
 
-	_, verify := newTestServerConfig()
+	_, verify := NewTestServerConfig(TestDataPathPrefixDef)
 	sess.config = transport.ClientConfig{Verify: *verify}
 	if sess.isPrincipal {
 		err = sess.loadKeys(keypath)

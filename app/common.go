@@ -9,12 +9,13 @@ import (
 	"zmap.io/portal/transport"
 )
 
+//Defaults and constants for starting a hop session
 const (
-	defaultHopPort       = "7777"
-	defaultKeyPath       = "/.hop/key"
-	clientUsage          = "hop [user@]host[:port] [-K or -k path] [-L port:host:hostport] [-R port:host:hostport] [-N] [-c cmd] [-q] [-h]"
-	testDataPathPrefix   = "../../certs/"
-	defaultHopAuthSocket = "@hopauth"
+	DefaultHopPort        = "7777"
+	DefaultKeyPath        = "/.hop/key"
+	clientUsage           = "hop [user@]host[:port] [-K or -k path] [-L port:host:hostport] [-R port:host:hostport] [-N] [-c cmd] [-q] [-h]"
+	TestDataPathPrefixDef = "../../certs/"
+	DefaultHopAuthSocket  = "@hopauth"
 )
 
 //ErrInvalidPortForwardingArgs returned when client receives unsupported -L or -R options
@@ -38,7 +39,8 @@ var ErrClientUnauthorized = errors.New("client not authorized")
 //ErrClientStartingExecTube is returned by client when cmd execution and/or I/O redirection fails
 var ErrClientStartingExecTube = errors.New("failed to start session")
 
-func newTestServerConfig() (*transport.ServerConfig, *transport.VerifyConfig) {
+//NewTestServerConfig populates server config and verify config with sample cert data
+func NewTestServerConfig(testDataPathPrefix string) (*transport.ServerConfig, *transport.VerifyConfig) {
 	keyPair, err := keys.ReadDHKeyFromPEMFile(testDataPathPrefix + "testdata/leaf-key.pem")
 	if err != nil {
 		logrus.Fatalf("S: ERROR WITH KEYPAIR %v", err)

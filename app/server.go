@@ -16,18 +16,20 @@ import (
 	"zmap.io/portal/tubes"
 )
 
-type hopServer struct {
+//HopServer represents state/conns needed for a hop server
+type HopServer struct {
 	m                     sync.Mutex
 	principals            map[int32]*hopSession
 	authgrants            map[keys.PublicKey]*authGrant //static key -> authgrant associated with that key
 	outstandingAuthgrants int
+	config                *HopServerConfig
 
 	server   *transport.Server
 	authsock net.Listener
 }
 
 //Starts a new hop session
-func (s *hopServer) newSession(serverConn *transport.Handle) {
+func (s *HopServer) newSession(serverConn *transport.Handle) {
 	sess := &hopSession{
 		transportConn: serverConn,
 		tubeMuxer:     tubes.NewMuxer(serverConn, serverConn),
@@ -39,7 +41,7 @@ func (s *hopServer) newSession(serverConn *transport.Handle) {
 }
 
 //handles connections to the hop server UDS to allow hop client processes to get authorization grants from their principal
-func (s *hopServer) authGrantServer() {
+func (s *HopServer) authGrantServer() {
 	defer s.authsock.Close()
 	logrus.Info("S: STARTED LISTENING AT UDS: ", s.authsock.Addr().String())
 
@@ -56,7 +58,7 @@ func (s *hopServer) authGrantServer() {
 
 //proxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
 //Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
-func (s *hopServer) proxyAuthGrantRequest(c net.Conn) {
+func (s *HopServer) proxyAuthGrantRequest(c net.Conn) {
 	logrus.Info("S: ACCEPTED NEW UDS CONNECTION")
 	defer c.Close()
 	//Verify that the client is a legit descendent
@@ -108,7 +110,7 @@ func (s *hopServer) proxyAuthGrantRequest(c net.Conn) {
 }
 
 //verifies that client is a descendent of a process started by the principal and returns its ancestor process PID if found
-func (s *hopServer) checkCredentials(c net.Conn) (int32, error) {
+func (s *HopServer) checkCredentials(c net.Conn) (int32, error) {
 	creds, err := readCreds(c)
 	if err != nil {
 		return 0, err
