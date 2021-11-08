@@ -1,211 +1,470 @@
+//Package app provides functions to run hop client and hop server
 package app
 
 import (
-	"flag"
 	"io"
-	"net/url"
+	"net"
 	"os"
-	"os/user"
 	"strings"
 	"sync"
 
 	"github.com/sirupsen/logrus"
+	"zmap.io/portal/authgrants"
+	"zmap.io/portal/codex"
+	"zmap.io/portal/keys"
+	"zmap.io/portal/netproxy"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
+	"zmap.io/portal/userauth"
 )
 
-var hostToIPAddr = map[string]string{ //TODO(baumanl): this should be dealt with in some user hop config file
-	"scratch-01": "10.216.2.64",
-	"scratch-02": "10.216.2.128",
-	"scratch-07": "10.216.2.208",
-	"localhost":  "127.0.0.1",
+//HopClient holds state for client's perspective of session
+type HopClient struct {
+	TransportConn   *transport.Client
+	ProxyConn       *tubes.Reliable
+	TubeMuxer       *tubes.Muxer
+	ExecTube        *codex.ExecTube
+	Config          *HopClientConfig
+	TransportConfig transport.ClientConfig
+	Proxied         bool
+	Primarywg       sync.WaitGroup
 }
 
-//Client parses cmd line arguments and establishes hop session with remote hop server
-func Client(args []string) error {
-	logrus.SetLevel(logrus.InfoLevel)
+//HopClientConfig holds configuration options for hop client
+type HopClientConfig struct {
+	Principal     bool
+	RemoteForward bool
+	LocalForward  bool
+	Quiet         bool
+	Headless      bool
+	Verify        transport.VerifyConfig
+	SockAddr      string
+	Keypath       string
+	Username      string
+	Hostname      string
+	Port          string
+	LocalArg      string
+	RemoteArg     string
+	Cmd           string
+}
 
-	//TODO(baumanl): add .hop_config support
-	//******PROCESS CMD LINE ARGUMENTS******
-	var fs flag.FlagSet
-	keypath, _ := os.UserHomeDir()
-	keypath += DefaultKeyPath
-
-	sess := &session{isPrincipal: false, primarywg: sync.WaitGroup{}}
-
-	fs.Func("k", "indicates principal with specific key location", func(s string) error {
-		sess.isPrincipal = true
-		keypath = s
-		return nil
-	})
-
-	fs.BoolVar(&sess.isPrincipal, "K", sess.isPrincipal, "indicates principal with default key location: $HOME/.hop/key")
-
-	remoteForward := false
-	remoteArg := ""
-	fs.Func("R", "perform remote port forwarding", func(s string) error {
-		remoteForward = true
-		remoteArg = s
-		return nil
-	})
-
-	localForward := false
-	localArg := ""
-	fs.Func("L", "perform local port forwarding", func(s string) error {
-		localForward = true
-		localArg = s
-		return nil
-	})
-
-	/*TODO(baumanl): Right now all explicit commands are run within the context of a shell using "$SHELL -c <cmd>"
-	(this allows for expanding env variables, piping, etc.) However, there may be instances where this is undesirable.
-	Add an option to resort to running the command without this feature.
-	Decide which is the better default.
-	Add config/enforcement on what clients/auth grants are allowed to do.
-	How should this be communicated within Intent and in Authgrant?*/
-	//var runCmdInShell bool
-	// fs.BoolVar(&runCmdInShell, "s", false, "run specified command...")
-
-	var cmd string
-	fs.StringVar(&cmd, "c", "", "specific command to execute on remote server")
-
-	var quiet bool
-	fs.BoolVar(&quiet, "q", false, "turn off logging")
-
-	fs.BoolVar(&sess.headless, "N", false, "don't execute a remote command. Useful for just port forwarding.")
-
-	err := fs.Parse(os.Args[1:])
-	if err != nil {
-		if err == flag.ErrHelp {
-			return nil
-		}
-		return ErrClientInvalidUsage
+//NewHopClient creates a new client object and loads keys from file or auth grant protocol
+func NewHopClient(cConfig *HopClientConfig) (*HopClient, error) {
+	client := &HopClient{
+		TransportConfig: transport.ClientConfig{Verify: cConfig.Verify},
+		Config:          cConfig,
+		Primarywg:       sync.WaitGroup{},
 	}
-	if fs.NArg() < 1 { //there needs to be an argument that is not a flag of the form [user@]host[:port]
-		return ErrClientInvalidUsage
-	}
-	hoststring := fs.Arg(0)
-	if fs.NArg() > 1 { //still flags after the hoststring that need to be parsed
-		err = fs.Parse(fs.Args()[1:])
-		if err != nil || fs.NArg() > 0 {
-			if err == flag.ErrHelp {
-				return nil
-			}
-			return ErrClientInvalidUsage
-		}
-	}
-
-	if quiet {
-		logrus.SetOutput(io.Discard)
-	}
-
-	url, err := url.Parse("//" + hoststring) //double slashes necessary since there is never a scheme
-	if err != nil {
-		logrus.Error(err)
-		return ErrClientInvalidUsage
-	}
-
-	hostname := url.Hostname()
-	port := url.Port()
-	if port == "" {
-		port = DefaultHopPort
-	}
-
-	username := url.User.Username()
-	if username == "" { //if no username is entered use local client username
-		u, e := user.Current()
-		if e != nil {
-			return e
-		}
-		username = u.Username
-	}
-
-	_, verify := NewTestServerConfig(TestDataPathPrefixDef)
-	sess.config = transport.ClientConfig{Verify: *verify}
-	if sess.isPrincipal {
-		err = sess.loadKeys(keypath)
+	if cConfig.Principal {
+		keypath, _ := os.UserHomeDir()
+		keypath += DefaultKeyPath
+		err := client.LoadKeys(keypath)
 		if err != nil {
-			logrus.Error(err)
-			return ErrClientLoadingKeys
+			return nil, err
 		}
 	} else {
-		err = sess.getAuthorization(username, hostname, port, sess.headless, cmd, localForward, localArg, remoteForward, remoteArg)
+		err := client.getAuthorization()
 		if err != nil {
-			logrus.Error(err)
-			return ErrClientGettingAuthorization
+			return nil, err
 		}
 	}
+	return client, nil
+}
 
-	err = sess.startUnderlying(hostname, port)
-	if err != nil {
-		return ErrClientStartingUnderlying
-	}
-
-	sess.tubeMuxer = tubes.NewMuxer(sess.transportConn, sess.transportConn)
-	go sess.tubeMuxer.Start()
-	defer func() {
-		sess.tubeMuxer.Stop()
-		logrus.Info("muxer stopped")
-		//TODO: finish closing behavior
-		// e := transportConn.Close()
-		// logrus.Error("closing transport: ", e)
-	}()
-
-	err = sess.userAuthorization(username)
+//Connect starts hop transport, tube muxer, conducts user authorization
+func (c *HopClient) Connect() error {
+	err := c.startUnderlying()
 	if err != nil {
 		return err
 	}
+	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.TransportConn)
+	go c.TubeMuxer.Start()
+	err = c.userAuthorization()
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
+//Start starts any port forwarding/cmds/shells from the client
+func (c *HopClient) Start() error {
 	//TODO(baumanl): fix how session duration tied to cmd duration or port forwarding duration depending on options
-	if remoteForward {
-		logrus.Info("Doing remote with: ", remoteArg)
-		parts := strings.Split(remoteArg, ":")
-		if len(parts) != 3 {
-			logrus.Error("remote port forwarding currently only supported with port:host:hostport format")
-			return ErrInvalidPortForwardingArgs
-		}
-		logrus.Info("Forwarding traffic from remote port ", parts[0], " to localhost port ", parts[2])
-		if sess.headless {
-			sess.primarywg.Add(1)
+	if c.Config.RemoteForward {
+		if c.Config.Headless {
+			c.Primarywg.Add(1)
 		}
 		go func() {
-			if sess.headless {
-				defer sess.primarywg.Done()
+			if c.Config.Headless {
+				defer c.Primarywg.Done()
 			}
-			e := sess.remoteForward(remoteArg)
+			e := c.remoteForward()
 			logrus.Error(e)
 		}()
 	}
-	if localForward {
-		logrus.Info("Doing local with: ", localArg)
-		parts := strings.Split(localArg, ":")
-		if len(parts) != 3 {
-			logrus.Error("local port forwarding currently only supported with port:host:hostport format")
-			return ErrInvalidPortForwardingArgs
-		}
-		logrus.Info("Forwarding traffic from local port ", parts[0], " to remote port ", parts[2], " on host ", parts[1])
-		if sess.headless {
-			sess.primarywg.Add(1)
+	if c.Config.LocalForward {
+		if c.Config.Headless {
+			c.Primarywg.Add(1)
 		}
 		go func() {
-			if sess.headless {
-				defer sess.primarywg.Done()
+			if c.Config.Headless {
+				defer c.Primarywg.Done()
 			}
-			e := sess.localForward(localArg)
+			e := c.localForward()
 			logrus.Error(e)
 		}()
 
 	}
-	if !sess.headless {
-		err = sess.startExecTube(cmd)
+	if !c.Config.Headless {
+		err := c.startExecTube()
 		if err != nil {
 			logrus.Error(err)
 			return ErrClientStartingExecTube
 		}
 	}
-	go sess.handleTubes()
-
-	sess.primarywg.Wait() //client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
-	//TODO(baumanl): figure out definitive closing behavior --> multiple code exec tubes?
 	return nil
+}
+
+//LoadKeys reads keys from provided file location and stores them in sess.Config.KeyPair
+func (c *HopClient) LoadKeys(keypath string) error {
+	logrus.Infof("C: Using key-file at %v for auth.", keypath)
+	pair, e := keys.ReadDHKeyFromPEMFile(keypath)
+	if e != nil {
+		return e
+	}
+	c.TransportConfig.KeyPair = pair
+	return nil
+}
+
+func (c *HopClient) getAuthorization() error {
+	c.TransportConfig.KeyPair = new(keys.X25519KeyPair)
+	c.TransportConfig.KeyPair.Generate()
+
+	logrus.Infof("Client generated: %v", c.TransportConfig.KeyPair.Public.String())
+	logrus.Infof("C: Initiating AGC Protocol.")
+
+	udsconn, err := net.Dial("unix", DefaultHopAuthSocket)
+	if err != nil {
+		return err
+	}
+	logrus.Infof("C: CONNECTED TO UDS: [%v]", udsconn.RemoteAddr().String())
+	agc := authgrants.NewAuthGrantConn(udsconn)
+	defer agc.Close()
+	if !c.Config.Headless && c.Config.Cmd == "" { //shell
+		t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+			c.Config.Port, authgrants.ShellAction, "")
+		if e == nil {
+			logrus.Infof("C: Principal approved request to open a shell. Deadline: %v", t)
+		} else if e != authgrants.ErrIntentDenied {
+			return e
+		}
+	}
+	if !c.Config.Headless && c.Config.Cmd != "" { //cmd
+		t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+			c.Config.Port, authgrants.CommandAction, c.Config.Cmd)
+		if e == nil {
+			logrus.Infof("C: Principal approved request to run cmd: %v. Deadline: %v", c.Config.Cmd, t)
+		} else if e != authgrants.ErrIntentDenied {
+			return e
+		}
+	}
+	if c.Config.LocalForward { //local forwarding
+		t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+			c.Config.Port, authgrants.LocalPFAction, c.Config.LocalArg)
+		if e == nil {
+			logrus.Infof("C: Principal approved request to do local forwarding. Deadline: %v", t)
+		} else if e != authgrants.ErrIntentDenied {
+			return e
+		}
+	}
+	if c.Config.RemoteForward { //remote forwarding
+		t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+			c.Config.Port, authgrants.RemotePFAction, c.Config.RemoteArg)
+		if e == nil {
+			logrus.Infof("C: Principal approved request to do remote forwarding. Deadline: %v", t)
+		} else if e != authgrants.ErrIntentDenied {
+			return e
+		}
+	}
+	return nil
+}
+
+func (c *HopClient) startUnderlying() error {
+	//******ESTABLISH HOP SESSION******
+	//TODO(baumanl): figure out addr format requirements + check for them above
+	addr := c.Config.Hostname + ":" + c.Config.Port
+	if _, err := net.LookupAddr(addr); err != nil {
+		//Couldn't resolve address with local resolver
+		if ip, ok := hostToIPAddr[c.Config.Hostname]; ok {
+			addr = ip + ":" + c.Config.Port
+		}
+	}
+	var err error
+	if !c.Proxied {
+		c.TransportConn, err = transport.Dial("udp", addr, c.TransportConfig) //There seem to be limits on Dial() and addr format
+	} else {
+		c.TransportConn, err = transport.DialNP("netproxy", addr, c.ProxyConn, c.TransportConfig)
+	}
+	if err != nil {
+		logrus.Errorf("C: error dialing server: %v", err)
+		return err
+	}
+	err = c.TransportConn.Handshake() //This hangs if the server is not available when it starts. Add retry or timeout?
+	if err != nil {
+		logrus.Errorf("C: Issue with handshake: %v", err)
+		return err
+	}
+	return nil
+}
+
+func (c *HopClient) userAuthorization() error {
+	//*****PERFORM USER AUTHORIZATION******
+	uaCh, _ := c.TubeMuxer.CreateTube(tubes.UserAuthTube)
+	defer uaCh.Close()
+	if ok := userauth.RequestAuthorization(uaCh, c.Config.Username); !ok {
+		return ErrClientUnauthorized
+	}
+	logrus.Info("User authorization complete")
+	return nil
+}
+
+func (c *HopClient) remoteForward() error {
+	logrus.Info("Doing remote with: ", c.Config.RemoteArg)
+	parts := strings.Split(c.Config.RemoteArg, ":")
+	if len(parts) != 3 {
+		logrus.Error("remote port forwarding currently only supported with port:host:hostport format")
+		return ErrInvalidPortForwardingArgs
+	}
+	logrus.Info("Forwarding traffic from remote port ", parts[0], " to localhost port ", parts[2])
+	localPort := parts[2]
+	npt, e := c.TubeMuxer.CreateTube(tubes.NetProxyTube)
+	if e != nil {
+		return e
+	}
+	e = netproxy.Start(npt, c.Config.RemoteArg, netproxy.Remote)
+	if e != nil {
+		return e
+	}
+
+	//TODO: fix address (not just local host)
+	//TODO: add bind address options
+	tconn, e := net.Dial("tcp", "localhost:"+localPort)
+	if e != nil {
+		logrus.Error(e)
+		return e
+	}
+	//do remote port forwarding
+	go func() {
+		io.Copy(tconn, npt)
+	}()
+	io.Copy(npt, tconn)
+	return nil
+}
+
+func (c *HopClient) localForward() error {
+	logrus.Info("Doing local with: ", c.Config.LocalArg)
+	parts := strings.Split(c.Config.LocalArg, ":")
+	if len(parts) != 3 {
+		logrus.Error("local port forwarding currently only supported with port:host:hostport format")
+		return ErrInvalidPortForwardingArgs
+	}
+	logrus.Info("Forwarding traffic from local port ", parts[0], " to remote port ", parts[2], " on host ", parts[1])
+	npt, e := c.TubeMuxer.CreateTube(tubes.NetProxyTube)
+	if e != nil {
+		return e
+	}
+	e = netproxy.Start(npt, c.Config.LocalArg, netproxy.Local)
+	if e != nil {
+		return e
+	}
+	if c.Config.Headless {
+		c.Primarywg.Add(1)
+	}
+	//do local port forwarding
+	go func() {
+		if c.Config.Headless {
+			defer c.Primarywg.Done()
+		}
+
+		local, e := net.Listen("tcp", ":"+strings.Trim(parts[0], ":"))
+		if e != nil {
+			logrus.Error(e)
+			return
+		}
+		for {
+			localConn, e := local.Accept()
+			if e != nil {
+				logrus.Error(e)
+				break
+			}
+			go io.Copy(npt, localConn)
+		}
+	}()
+	return nil
+}
+
+func (c *HopClient) startExecTube() error {
+	//*****RUN COMMAND (BASH OR AG ACTION)*****
+	//Hop Session is tied to the life of this code execution tube.
+	logrus.Infof("Performing action: %v", c.Config.Cmd)
+	ch, err := c.TubeMuxer.CreateTube(tubes.ExecTube)
+	if err != nil {
+		logrus.Error(err)
+		return err
+	}
+	c.Primarywg.Add(1)
+	c.ExecTube, err = codex.NewExecTube(c.Config.Cmd, ch, &c.Primarywg)
+	return err
+}
+
+//HandleTubes handles incoming tube requests to the client
+func (c *HopClient) HandleTubes() {
+	//TODO(baumanl): figure out responses to different tube types/what all should be allowed
+	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****
+	for {
+		t, e := c.TubeMuxer.Accept()
+		if e != nil {
+			logrus.Errorf("Error accepting tube: %v", e)
+			continue
+		}
+		logrus.Infof("ACCEPTED NEW CHANNEL of TYPE: %v", t.Type())
+		if t.Type() == tubes.AuthGrantTube && c.Config.Headless {
+			go c.principal(t)
+		} else {
+			//Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
+			e := t.Close()
+			if e != nil {
+				logrus.Errorf("Error closing tube: %v", e)
+			}
+			continue
+		}
+	}
+	/*
+		switch {
+		case <- mux.Stop()
+		case <- mux.Accept()
+		}
+	*/
+}
+
+func (c *HopClient) principal(tube *tubes.Reliable) {
+	defer tube.Close()
+	logrus.SetOutput(io.Discard)
+	agt := authgrants.NewAuthGrantConn(tube)
+	var remoteSession *HopClient = nil
+	var targetAgt *authgrants.AuthGrantConn = nil
+
+	for { //allows for user to retry sending intent request if denied
+		intent, err := agt.GetIntentRequest()
+		if err != nil { //when the agt is closed this will error out
+			logrus.Error("error getting intent request")
+			return
+		}
+		//logrus.SetOutput(os.Stdout)
+		c.ExecTube.Restore()
+		r := c.ExecTube.Redirect()
+
+		allow := intent.Prompt(r)
+
+		c.ExecTube.Raw()
+		c.ExecTube.Resume()
+		//logrus.SetOutput(io.Discard)
+		if !allow {
+			agt.SendIntentDenied("User denied")
+			continue
+		}
+		if remoteSession == nil {
+			remoteSession, err = c.setupRemoteSession(intent)
+			if err != nil {
+				logrus.Errorf("error getting remote session from principal: %v", err)
+				agt.SendIntentDenied("Unable to connect to remote server")
+				break
+			}
+			targetAgt, err = authgrants.NewAuthGrantConnFromMux(remoteSession.TubeMuxer)
+			if err != nil {
+				logrus.Fatal("Error creating AGC: ", err)
+			}
+			defer targetAgt.Close()
+			logrus.Info("CREATED AGC")
+		}
+		response, err := remoteSession.confirmWithRemote(intent, targetAgt, agt)
+		if err != nil {
+			logrus.Error("error getting confirmation from remote server")
+			agt.SendIntentDenied("Unable to connect to remote server")
+			break
+		}
+		//write response back to server asking for Authorization Grant
+		err = agt.WriteRawBytes(response)
+		if err != nil {
+			logrus.Errorf("C: error writing to agt: %v", err)
+			break
+		}
+	}
+}
+
+//start session between principal and target proxied through the delegate
+func (c *HopClient) setupRemoteSession(req *authgrants.Intent) (*HopClient, error) {
+	logrus.Debug("C: USER CONFIRMED FIRST INTENT_REQUEST. CONTACTING S2...")
+
+	//create netproxy with server
+	npt, e := c.TubeMuxer.CreateTube(tubes.NetProxyTube)
+	logrus.Info("started netproxy tube from principal")
+	if e != nil {
+		logrus.Fatal("C: Error starting netproxy tube")
+	}
+
+	hostname, port := req.Address()
+	addr := hostname + ":" + port
+	e = netproxy.Start(npt, addr, netproxy.AG)
+	if e != nil {
+		logrus.Error("Issue proxying connection")
+		return nil, e
+	}
+
+	subConfig := c.Config
+	subConfig.Hostname = hostname
+	subConfig.Port = port
+	subConfig.Username = req.Username()
+	subsess, err := NewHopClient(subConfig)
+	if err != nil {
+		logrus.Error("Issue creating client")
+		return nil, err
+	}
+	subsess.Proxied = true
+	subsess.ProxyConn = npt
+
+	e = subsess.startUnderlying()
+	if e != nil {
+		logrus.Error("Issue starting underlying connection")
+		return nil, e
+	}
+	subsess.TubeMuxer = tubes.NewMuxer(subsess.TransportConn, subsess.TransportConn)
+	go subsess.TubeMuxer.Start()
+
+	e = subsess.userAuthorization()
+	if e != nil {
+		logrus.Error("Failed user authorization")
+		return nil, e
+	}
+	// Want to keep this session open in case the "server 2" wants to continue chaining hop sessions together
+	// TODO(baumanl): Simplify this. Should only get authorization grant tubes?
+	go subsess.HandleTubes()
+
+	return subsess, nil
+}
+
+//start an authorization grant connection with the remote server and send intent request. return response.
+func (c *HopClient) confirmWithRemote(req *authgrants.Intent, npAgc *authgrants.AuthGrantConn, agt *authgrants.AuthGrantConn) ([]byte, error) {
+	//send INTENT_COMMUNICATION
+	e := npAgc.SendIntentCommunication(req)
+	if e != nil {
+		logrus.Info("Issue writing intent comm to netproxyAgc")
+	}
+	logrus.Info("sent intent comm")
+	_, response, e := npAgc.ReadResponse()
+	if e != nil {
+		logrus.Errorf("C: error reading from agc: %v", e)
+		return nil, e
+	}
+	logrus.Info("got response")
+	return response, nil
 }

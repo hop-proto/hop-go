@@ -18,6 +18,13 @@ const (
 	DefaultHopAuthSocket  = "@hopauth"
 )
 
+var hostToIPAddr = map[string]string{ //TODO(baumanl): this should be dealt with in some user hop config file
+	"scratch-01": "10.216.2.64",
+	"scratch-02": "10.216.2.128",
+	"scratch-07": "10.216.2.208",
+	"localhost":  "127.0.0.1",
+}
+
 //ErrInvalidPortForwardingArgs returned when client receives unsupported -L or -R options
 var ErrInvalidPortForwardingArgs = errors.New("port forwarding currently only supported with port:host:hostport format")
 
