@@ -142,7 +142,7 @@ func (c *HopClient) getAuthorization() error {
 	logrus.Infof("Client generated: %v", c.TransportConfig.KeyPair.Public.String())
 	logrus.Infof("C: Initiating AGC Protocol.")
 
-	udsconn, err := net.Dial("unix", DefaultHopAuthSocket)
+	udsconn, err := net.Dial("unix", c.Config.SockAddr)
 	if err != nil {
 		return err
 	}

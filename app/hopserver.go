@@ -133,26 +133,29 @@ func (s *HopServer) authGrantServer() {
 			logrus.Error("accept error:", err)
 			continue
 		}
-
-		go s.proxyAuthGrantRequest(c)
+		go func() {
+			//Verify that the client is a legit descendent
+			ancestor, e := s.checkCredentials(c)
+			if e != nil {
+				logrus.Errorf("S: ISSUE CHECKING CREDENTIALS: %v", e)
+				return
+			}
+			s.m.Lock()
+			// find corresponding session
+			principalSess := s.principals[ancestor]
+			s.m.Unlock()
+			s.proxyAuthGrantRequest(principalSess, c)
+		}()
 	}
+
 }
 
 //proxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
 //Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
-func (s *HopServer) proxyAuthGrantRequest(c net.Conn) {
+func (s *HopServer) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn) {
 	logrus.Info("S: ACCEPTED NEW UDS CONNECTION")
 	defer c.Close()
-	//Verify that the client is a legit descendent
-	ancestor, e := s.checkCredentials(c)
-	if e != nil {
-		logrus.Errorf("S: ISSUE CHECKING CREDENTIALS: %v", e)
-		return
-	}
-	s.m.Lock()
-	// find corresponding session
-	principalSess := s.principals[ancestor]
-	s.m.Unlock()
+
 	if principalSess.transportConn.IsClosed() {
 		logrus.Error("S: Connection with Principal is closed")
 		return
