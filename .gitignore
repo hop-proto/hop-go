@@ -4,3 +4,4 @@
 app/authorized_keys
 cmd/hop/hop
 cmd/hopd/hopd
+cmd/hop-keygen/hop-keygen

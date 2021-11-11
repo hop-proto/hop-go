@@ -9,13 +9,21 @@ import (
 	"zmap.io/portal/transport"
 )
 
+//Defaults and constants for starting a hop session
 const (
-	defaultHopPort       = "7777"
-	defaultKeyPath       = "/.hop/key"
-	clientUsage          = "hop [user@]host[:port] [-K or -k path] [-L port:host:hostport] [-R port:host:hostport] [-N] [-c cmd] [-q] [-h]"
-	testDataPathPrefix   = "../../certs/"
-	defaultHopAuthSocket = "@hopauth"
+	DefaultHopPort        = "7777"
+	DefaultKeyPath        = "/.hop/key"
+	clientUsage           = "hop [user@]host[:port] [-K or -k path] [-L port:host:hostport] [-R port:host:hostport] [-N] [-c cmd] [-q] [-h]"
+	TestDataPathPrefixDef = "../../certs/"
+	DefaultHopAuthSocket  = "@hopauth"
 )
+
+var hostToIPAddr = map[string]string{ //TODO(baumanl): this should be dealt with in some user hop config file
+	"scratch-01": "10.216.2.64",
+	"scratch-02": "10.216.2.128",
+	"scratch-07": "10.216.2.208",
+	"localhost":  "127.0.0.1",
+}
 
 //ErrInvalidPortForwardingArgs returned when client receives unsupported -L or -R options
 var ErrInvalidPortForwardingArgs = errors.New("port forwarding currently only supported with port:host:hostport format")
@@ -38,7 +46,8 @@ var ErrClientUnauthorized = errors.New("client not authorized")
 //ErrClientStartingExecTube is returned by client when cmd execution and/or I/O redirection fails
 var ErrClientStartingExecTube = errors.New("failed to start session")
 
-func newTestServerConfig() (*transport.ServerConfig, *transport.VerifyConfig) {
+//NewTestServerConfig populates server config and verify config with sample cert data
+func NewTestServerConfig(testDataPathPrefix string) (*transport.ServerConfig, *transport.VerifyConfig) {
 	keyPair, err := keys.ReadDHKeyFromPEMFile(testDataPathPrefix + "testdata/leaf-key.pem")
 	if err != nil {
 		logrus.Fatalf("S: ERROR WITH KEYPAIR %v", err)

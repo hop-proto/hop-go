@@ -73,7 +73,7 @@ func (c *AuthGrantConn) HandleIntentComm() (keys.PublicKey, time.Time, string, s
 	intent := fromIntentCommunicationBytes(msg)
 	logrus.Infof("Pretending s2 approved intent request") //TODO(baumanl): check policy or something?
 	k := keys.PublicKey(intent.sha3)
-	t := time.Now().Add(time.Minute)
+	t := time.Now().Add(authGrantValidTime)
 	return k, t, intent.serverUsername, intent.associatedData, intent.actionType, nil
 }
 

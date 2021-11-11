@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"os"
 
 	"github.com/sirupsen/logrus"
@@ -9,10 +10,20 @@ import (
 )
 
 func main() { //add a key
+	var fs flag.FlagSet
+
+	suffix := "/.hop/key"
+	fs.StringVar(&suffix, "s", suffix, "path suffix homedir + suffix")
+
+	var addToAuthKeys bool
+	fs.BoolVar(&addToAuthKeys, "a", false, "add the key to its own authorized keys file")
+
+	fs.Parse(os.Args[1:])
+
 	pair := new(keys.X25519KeyPair)
 	pair.Generate()
 	path, _ := os.UserHomeDir()
-	path += "/.hop/key"
+	path += suffix
 	_, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		logrus.Info("file does not exist, creating...")
@@ -26,12 +37,12 @@ func main() { //add a key
 	if e != nil {
 		logrus.Fatalf("error opening default key file: %v", e)
 	}
-	logrus.Infof("adding private to ~/.hop/key: %v", pair.Private.String())
+	logrus.Infof("adding private to ~%v: %v", suffix, pair.Private.String())
 	f.WriteString(pair.Private.String())
 	f.Close()
 
 	path, _ = os.UserHomeDir()
-	path += "/.hop/key.pub"
+	path += suffix + ".pub"
 	_, err = os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		logrus.Info("file does not exist, creating...")
@@ -45,27 +56,30 @@ func main() { //add a key
 	if e != nil {
 		logrus.Fatalf("error opening default key file: %v", e)
 	}
-	logrus.Infof("adding public to ~/.hop/key.pub: %v", pair.Public.String())
+	logrus.Infof("adding public to ~%v.pub: %v", suffix, pair.Public.String())
 	f.WriteString(pair.Public.String())
 	f.Close()
 
-	path, _ = os.UserHomeDir()
-	path += "/.hop/authorized_keys" //adds the key to its own authorized key file so that localhost operations will work
-	_, err = os.Stat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		logrus.Info("file does not exist, creating...")
-		f, e := os.Create(path)
-		if e != nil {
-			logrus.Error(e)
+	if addToAuthKeys {
+		logrus.Info("adding to authorized keys")
+		path, _ = os.UserHomeDir()
+		path += "/.hop/authorized_keys" //adds the key to its own authorized key file so that localhost operations will work
+		_, err = os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			logrus.Info("file does not exist, creating...")
+			f, e := os.Create(path)
+			if e != nil {
+				logrus.Error(e)
+			}
+			f.Close()
 		}
-		f.Close()
+		auth, e := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+		if e != nil {
+			logrus.Fatalf("error opening auth key file: %v", e)
+		}
+		defer auth.Close()
+		logrus.Infof("adding public to auth keys: %v", pair.Public.String())
+		auth.WriteString(pair.Public.String())
+		auth.WriteString("\n")
 	}
-	auth, e := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
-	if e != nil {
-		logrus.Fatalf("error opening auth key file: %v", e)
-	}
-	defer auth.Close()
-	logrus.Infof("adding public to auth keys: %v", pair.Public.String())
-	auth.WriteString(pair.Public.String())
-	auth.WriteString("\n")
 }
