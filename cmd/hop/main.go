@@ -86,8 +86,8 @@ func main() {
 	}
 
 	cConfig.Hostname = url.Hostname()
-	port := url.Port()
-	if cConfig.Port == "" && port == "" {
+	cConfig.Port = url.Port()
+	if cConfig.Port == "" {
 		cConfig.Port = app.DefaultHopPort
 	}
 
@@ -101,8 +101,20 @@ func main() {
 	}
 
 	client, err := app.NewHopClient(cConfig)
-	client.Connect()
-	client.Start()
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	err = client.Connect()
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	err = client.Start()
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
 	//handle incoming tubes
 	go client.HandleTubes()
 	client.Primarywg.Wait() //client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session

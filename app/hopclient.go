@@ -54,6 +54,7 @@ func NewHopClient(cConfig *HopClientConfig) (*HopClient, error) {
 		TransportConfig: transport.ClientConfig{Verify: cConfig.Verify},
 		Config:          cConfig,
 		Primarywg:       sync.WaitGroup{},
+		Proxied:         false,
 	}
 	if cConfig.Principal {
 		keypath, _ := os.UserHomeDir()
