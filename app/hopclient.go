@@ -4,7 +4,6 @@ package app
 import (
 	"io"
 	"net"
-	"os"
 	"strings"
 	"sync"
 
@@ -57,9 +56,7 @@ func NewHopClient(cConfig *HopClientConfig) (*HopClient, error) {
 		Proxied:         false,
 	}
 	if cConfig.Principal {
-		keypath, _ := os.UserHomeDir()
-		keypath += DefaultKeyPath
-		err := client.LoadKeys(keypath)
+		err := client.LoadKeys(cConfig.Keypath)
 		if err != nil {
 			return nil, err
 		}

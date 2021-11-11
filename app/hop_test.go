@@ -194,3 +194,43 @@ func TestAuthgrantOneHop(t *testing.T) {
 	err = delegate.Connect()
 	assert.NilError(t, err)
 }
+
+func TestClientNotAuthorized(t *testing.T) {
+	//start hop server
+	tconf, verify := NewTestServerConfig("../certs/")
+	serverConfig := &HopServerConfig{
+		Port:                     DefaultHopPort,
+		Host:                     "localhost",
+		SockAddr:                 DefaultHopAuthSocket,
+		TransportConfig:          tconf,
+		MaxOutstandingAuthgrants: 50,
+	}
+	s, err := NewHopServer(serverConfig)
+	assert.NilError(t, err)
+	go s.Serve() //starts transport layer server, authgrant server, and listens for hop conns
+
+	keypath, _ := os.UserHomeDir()
+	keypath += "/.hop/mykey" //mykey is not in authorized keys file
+
+	u, e := user.Current()
+	assert.NilError(t, e)
+	clientConfig := &HopClientConfig{
+		Verify:        *verify,
+		SockAddr:      DefaultHopAuthSocket,
+		Keypath:       keypath,
+		Hostname:      "127.0.0.1",
+		Port:          DefaultHopPort,
+		Username:      u.Username,
+		Principal:     true,
+		RemoteForward: false,
+		LocalForward:  false,
+		Cmd:           "echo hello world",
+		Quiet:         false,
+		Headless:      false,
+	}
+	client, err := NewHopClient(clientConfig)
+	assert.NilError(t, err)
+
+	err = client.Connect()
+	assert.Error(t, err, ErrClientUnauthorized.Error())
+}
