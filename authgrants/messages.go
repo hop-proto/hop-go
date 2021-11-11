@@ -14,6 +14,7 @@ import (
 )
 
 //TODO(baumanl): Some of this may be overly complex. Figure out best way to standardize/simplify.
+const authGrantValidTime = 5 * time.Second
 
 //General Constants
 const (
