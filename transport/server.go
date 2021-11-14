@@ -319,7 +319,12 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState)
 func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeState, error) {
 	x := b
 	pos := 0
-	if len(b) < HeaderLen+SessionIDLen+MacLen+MacLen {
+	if len(b) < HeaderLen {
+		logrus.Debug("server: client auth missing header")
+		return 0, nil, ErrBufUnderflow
+	}
+	encCertsLen := (int(b[2]) << 8) + int(b[3])
+	if len(b) < HeaderLen+SessionIDLen+encCertsLen+MacLen {
 		logrus.Debug("server: client auth too short")
 		return 0, nil, ErrBufUnderflow
 	}
@@ -327,7 +332,7 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	if mt := MessageType(b[0]); mt != MessageTypeClientAuth {
 		return 0, nil, ErrUnexpectedMessage
 	}
-	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
+	if b[1] != 0 {
 		return 0, nil, ErrInvalidMessage
 	}
 	hs := s.fetchHandshakeState(addr)
@@ -351,21 +356,55 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	hs.duplex.Absorb(sessionID)
 	x = x[SessionIDLen:]
 	pos += SessionIDLen
-	encStatic := x[:DHLen]
-	hs.duplex.Decrypt(hs.clientStatic[:], encStatic)
-	x = x[DHLen:]
-	pos += DHLen
+	encCerts := x[:encCertsLen]
+	rawLeaf, rawIntermediate, err := DecryptCertificates(&hs.duplex, encCerts)
+	if err != nil {
+		return pos, nil, err
+	}
+	x = x[encCertsLen:]
+	pos += encCertsLen
 	hs.duplex.Squeeze(hs.macBuf[:])
 	clientTag := x[:MacLen]
 	if !bytes.Equal(hs.macBuf[:], clientTag) {
 		logrus.Debugf("server: mismatched tag in client auth: expected %x, got %x", hs.macBuf, clientTag)
 		return pos, nil, ErrInvalidMessage
 	}
-
 	x = x[MacLen:]
 	pos += MacLen
-	var err error
-	hs.se, err = hs.ephemeral.DH(hs.clientStatic[:])
+	// Parse certificates
+	opts := certs.VerifyOptions{
+		Name: hs.certVerify.Name,
+	}
+	leaf := certs.Certificate{}
+	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
+	if err != nil {
+		return pos, nil, err
+	}
+	if int(leafLen) != len(rawLeaf) {
+		return pos, nil, errors.New("extra bytes after leaf certificate")
+	}
+
+	intermediate := certs.Certificate{}
+	if len(rawIntermediate) > 0 {
+		intermediateLen, err := intermediate.ReadFrom(bytes.NewBuffer(rawIntermediate))
+		if err != nil {
+			return pos, nil, err
+		}
+		if int(intermediateLen) != len(rawIntermediate) {
+			return pos, nil, errors.New("extra bytes after intermediate certificate")
+		}
+		opts.PresentedIntermediate = &intermediate
+	}
+
+	if !hs.certVerify.InsecureSkipVerify {
+		err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
+		if err != nil {
+			logrus.Errorf("server: failed to verify certificate: %s", err)
+			return pos, nil, err
+		}
+	}
+
+	hs.se, err = hs.ephemeral.DH(leaf.PublicKey[:])
 	if err != nil {
 		logrus.Debugf("server: unable to calculated se: %s", err)
 		return pos, nil, err

@@ -19,10 +19,19 @@ type VerifyConfig struct {
 	Name certs.Name
 }
 
+// IdentityConfig associates a certificate chain with a Name.
+type IdentityConfig struct {
+	// TODO(dadrian): Wildcards?
+	Name         certs.Name
+	Leaf         *certs.Certificate
+	Intermediate *certs.Certificate
+}
+
 // ClientConfig contains client-specific configuration settings.
 type ClientConfig struct {
-	KeyPair *keys.X25519KeyPair
-	Verify  VerifyConfig
+	KeyPair        *keys.X25519KeyPair
+	Verify         VerifyConfig
+	ClientIdentity IdentityConfig
 }
 
 const (

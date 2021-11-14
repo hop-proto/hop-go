@@ -96,7 +96,7 @@ func (c *Client) clientHandshakeLocked() error {
 		logrus.Infof("client static is: %v from config", c.hs.static.Public.String())
 	}
 
-	c.hs.clientVerify = &c.config.Verify
+	c.hs.certVerify = &c.config.Verify
 
 	c.hs.duplex.Absorb([]byte(ProtocolName))
 

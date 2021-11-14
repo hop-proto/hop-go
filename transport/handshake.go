@@ -38,6 +38,12 @@ func AddressHashKey(addr *net.UDPAddr) string {
 	return key
 }
 
+// A Handshake Identity is a name and two serialized certificates.
+type HandshakeIdentity struct {
+	Name               certs.Name
+	Leaf, Intermediate []byte
+}
+
 // HandshakeState tracks state across the lifetime of a handshake, starting with
 // the ClientHello. A HandshakeState may be allocated on ClientHello, it does
 // not need to be stored until after the ClientAck since enough state is
@@ -55,7 +61,8 @@ type HandshakeState struct {
 
 	cookieKey *[KeyLen]byte // server only
 
-	cookie []byte // client only
+	cookie   []byte // client only
+	identity IdentityConfig
 
 	// TODO(dadrian): Rework APIs to make these arrays and avoid copies with the curve25519 API.
 	ee []byte
@@ -63,7 +70,8 @@ type HandshakeState struct {
 	se []byte
 
 	// Certificate Stuff
-	clientVerify *VerifyConfig
+	certVerify         *VerifyConfig
+	leaf, intermediate []byte
 
 	remoteAddr *net.UDPAddr
 }
@@ -295,7 +303,7 @@ func (hs *HandshakeState) writeClientAck(b []byte) (int, error) {
 	b = b[CookieLen:]
 
 	// Encrypted SNI
-	err := hs.EncryptSNI(b, hs.clientVerify.Name)
+	err := hs.EncryptSNI(b, hs.certVerify.Name)
 	if err != nil {
 		return HeaderLen + DHLen + CookieLen, ErrInvalidMessage
 	}
@@ -360,7 +368,7 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 
 	// Parse the certificate
 	opts := certs.VerifyOptions{
-		Name: hs.clientVerify.Name,
+		Name: hs.certVerify.Name,
 	}
 	leaf := certs.Certificate{}
 	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
@@ -383,8 +391,8 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 		opts.PresentedIntermediate = &intermediate
 	}
 
-	if !hs.clientVerify.InsecureSkipVerify {
-		err := hs.clientVerify.Store.VerifyLeaf(&leaf, opts)
+	if !hs.certVerify.InsecureSkipVerify {
+		err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
 		if err != nil {
 			logrus.Errorf("client: failed to verify certificate: %s", err)
 			return 0, err
@@ -412,7 +420,8 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 }
 
 func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
-	length := HeaderLen + SessionIDLen + DHLen + MacLen + MacLen
+	encCertLen := EncryptedCertificatesLength(hs.leaf, hs.intermediate)
+	length := HeaderLen + SessionIDLen + encCertLen + MacLen + MacLen
 	if len(b) < length {
 		return 0, ErrBufUnderflow
 	}
@@ -420,8 +429,8 @@ func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
 	// Header
 	b[0] = byte(MessageTypeClientAuth)
 	b[1] = 0
-	b[2] = 0
-	b[3] = 0
+	b[2] = byte(encCertLen >> 8)
+	b[3] = byte(encCertLen)
 	hs.duplex.Absorb(b[:HeaderLen])
 	b = b[HeaderLen:]
 
@@ -430,8 +439,15 @@ func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
 	hs.duplex.Absorb(hs.sessionID[:])
 	b = b[SessionIDLen:]
 
-	// Encrypted Static
-	hs.duplex.Encrypt(b[:DHLen], hs.static.Public[:])
+	// Encrypted Certificates
+	if len(hs.leaf) == 0 {
+		return HeaderLen + SessionIDLen, errors.New("client did not set leaf certificate")
+	}
+	encCerts, err := EncryptCertificates(&hs.duplex, hs.leaf, hs.intermediate)
+	if err != nil {
+		return HeaderLen + SessionIDLen, err
+	}
+	hs.duplex.Encrypt(b[:encCertLen], encCerts)
 	b = b[DHLen:]
 
 	// Tag
@@ -439,7 +455,6 @@ func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
 	b = b[MacLen:]
 
 	// DH (se)
-	var err error
 	hs.se, err = hs.static.DH(hs.remoteEphemeral[:])
 	if err != nil {
 		logrus.Debugf("client: unable to calculate se: %s", err)
