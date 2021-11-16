@@ -30,6 +30,5 @@ jobs:
         with:
           version: v1.33.0
           args: --deadline 1m
-      # Tests disabled since channels don't pass in CI
-      # - name: test
-      #   run: make test
+      - name: test
+        run: make test
