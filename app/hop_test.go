@@ -17,6 +17,10 @@ import (
 )
 
 func TestClientServer(t *testing.T) {
+	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
+	//put public key in /home/user/.hop/authorized_keys
+	KeyGen(DefaultKeyPath, true)
+
 	//start hop server
 	tconf, verify := NewTestServerConfig("../certs/")
 	serverConfig := &HopServerConfig{
@@ -57,10 +61,14 @@ func TestClientServer(t *testing.T) {
 }
 
 func TestAuthgrantOneHop(t *testing.T) {
+	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
+	//put public key in /home/user/.hop/authorized_keys
+	KeyGen(DefaultKeyPath, true)
+
 	//start hop server 1
 	tconf, verify := NewTestServerConfig("../certs/")
 	serverConfig := &HopServerConfig{
-		Port:                     DefaultHopPort,
+		Port:                     "7778",
 		Host:                     "localhost",
 		SockAddr:                 DefaultHopAuthSocket,
 		TransportConfig:          tconf,
@@ -80,7 +88,7 @@ func TestAuthgrantOneHop(t *testing.T) {
 		SockAddr:      DefaultHopAuthSocket,
 		Keypath:       keypath,
 		Hostname:      "127.0.0.1",
-		Port:          DefaultHopPort,
+		Port:          "7778",
 		Username:      u.Username,
 		Principal:     true,
 		RemoteForward: false,
@@ -196,10 +204,13 @@ func TestAuthgrantOneHop(t *testing.T) {
 }
 
 func TestClientNotAuthorized(t *testing.T) {
+	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
+	//put public key in /home/user/.hop/authorized_keys
+	KeyGen(DefaultKeyPath, true)
 	//start hop server
 	tconf, verify := NewTestServerConfig("../certs/")
 	serverConfig := &HopServerConfig{
-		Port:                     DefaultHopPort,
+		Port:                     "7779",
 		Host:                     "localhost",
 		SockAddr:                 DefaultHopAuthSocket,
 		TransportConfig:          tconf,
@@ -219,7 +230,7 @@ func TestClientNotAuthorized(t *testing.T) {
 		SockAddr:      DefaultHopAuthSocket,
 		Keypath:       keypath,
 		Hostname:      "127.0.0.1",
-		Port:          DefaultHopPort,
+		Port:          "7779",
 		Username:      u.Username,
 		Principal:     true,
 		RemoteForward: false,
@@ -236,10 +247,13 @@ func TestClientNotAuthorized(t *testing.T) {
 }
 
 func TestAuthgrantTimeOut(t *testing.T) {
+	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
+	//put public key in /home/user/.hop/authorized_keys
+	KeyGen(DefaultKeyPath, true)
 	//start hop server 1
 	tconf, verify := NewTestServerConfig("../certs/")
 	serverConfig := &HopServerConfig{
-		Port:                     DefaultHopPort,
+		Port:                     "7780",
 		Host:                     "localhost",
 		SockAddr:                 DefaultHopAuthSocket,
 		TransportConfig:          tconf,
@@ -259,7 +273,7 @@ func TestAuthgrantTimeOut(t *testing.T) {
 		SockAddr:      DefaultHopAuthSocket,
 		Keypath:       keypath,
 		Hostname:      "127.0.0.1",
-		Port:          DefaultHopPort,
+		Port:          "7780",
 		Username:      u.Username,
 		Principal:     true,
 		RemoteForward: false,

@@ -1,12 +1,10 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"os"
 
-	"github.com/sirupsen/logrus"
-	"zmap.io/portal/keys"
+	"zmap.io/portal/app"
 )
 
 func main() { //add a key
@@ -19,67 +17,5 @@ func main() { //add a key
 	fs.BoolVar(&addToAuthKeys, "a", false, "add the key to its own authorized keys file")
 
 	fs.Parse(os.Args[1:])
-
-	pair := new(keys.X25519KeyPair)
-	pair.Generate()
-	path, _ := os.UserHomeDir()
-	path += suffix
-	_, err := os.Stat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		logrus.Info("file does not exist, creating...")
-		f, e := os.Create(path)
-		if e != nil {
-			logrus.Error(e)
-		}
-		f.Close()
-	}
-	f, e := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
-	if e != nil {
-		logrus.Fatalf("error opening default key file: %v", e)
-	}
-	logrus.Infof("adding private to ~%v: %v", suffix, pair.Private.String())
-	f.WriteString(pair.Private.String())
-	f.Close()
-
-	path, _ = os.UserHomeDir()
-	path += suffix + ".pub"
-	_, err = os.Stat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		logrus.Info("file does not exist, creating...")
-		f, e := os.Create(path)
-		if e != nil {
-			logrus.Error(e)
-		}
-		f.Close()
-	}
-	f, e = os.OpenFile(path, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
-	if e != nil {
-		logrus.Fatalf("error opening default key file: %v", e)
-	}
-	logrus.Infof("adding public to ~%v.pub: %v", suffix, pair.Public.String())
-	f.WriteString(pair.Public.String())
-	f.Close()
-
-	if addToAuthKeys {
-		logrus.Info("adding to authorized keys")
-		path, _ = os.UserHomeDir()
-		path += "/.hop/authorized_keys" //adds the key to its own authorized key file so that localhost operations will work
-		_, err = os.Stat(path)
-		if errors.Is(err, os.ErrNotExist) {
-			logrus.Info("file does not exist, creating...")
-			f, e := os.Create(path)
-			if e != nil {
-				logrus.Error(e)
-			}
-			f.Close()
-		}
-		auth, e := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
-		if e != nil {
-			logrus.Fatalf("error opening auth key file: %v", e)
-		}
-		defer auth.Close()
-		logrus.Infof("adding public to auth keys: %v", pair.Public.String())
-		auth.WriteString(pair.Public.String())
-		auth.WriteString("\n")
-	}
+	app.KeyGen(suffix, addToAuthKeys)
 }
