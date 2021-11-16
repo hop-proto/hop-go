@@ -1,7 +1,6 @@
 package authgrants
 
 import (
-	"encoding/hex"
 	"net"
 	"testing"
 	"time"
@@ -14,9 +13,10 @@ import (
 	"zmap.io/portal/tubes"
 )
 
-const testDataPathPrefix = "../cmd/"
+const testDataPathPrefix = "../transport/"
 
-func newTestServerConfig() (*transport.ServerConfig, *transport.VerifyConfig) {
+//NewTestServerConfig populates server config and verify config with sample cert data
+func newTestServerConfig(testDataPathPrefix string) (*transport.ServerConfig, *transport.VerifyConfig) {
 	keyPair, err := keys.ReadDHKeyFromPEMFile(testDataPathPrefix + "testdata/leaf-key.pem")
 	if err != nil {
 		logrus.Fatalf("S: ERROR WITH KEYPAIR %v", err)
@@ -33,9 +33,19 @@ func newTestServerConfig() (*transport.ServerConfig, *transport.VerifyConfig) {
 	if err != nil {
 		logrus.Fatalf("S: ERROR WITH ROOT CERT %v", err)
 	}
-	if hex.EncodeToString(root.Fingerprint[:]) != "087aa52c8c287f34fcf6b33b22d68b02489d7168edae696a8ce4ae5e825bd1e9" {
-		logrus.Fatal("S: ROOT FINGERPRINT DOES NOT MATCH")
+	err = certs.VerifyParent(certificate, intermediate)
+	if err != nil {
+		logrus.Fatal("Verify Parent Issue: ", err)
 	}
+	err = certs.VerifyParent(intermediate, root)
+	if err != nil {
+		logrus.Fatal("Verify Parent Issue: ", err)
+	}
+	err = certs.VerifyParent(root, root)
+	if err != nil {
+		logrus.Fatal("Verify Parent Issue: ", err)
+	}
+
 	server := transport.ServerConfig{
 		KeyPair:      keyPair,
 		Certificate:  certificate,
@@ -62,7 +72,7 @@ func TestIntentRequest(t *testing.T) {
 	assert.NilError(t, err)
 	// It's actually a UDP conn
 	udpConn := pktConn.(*net.UDPConn)
-	s, _ := newTestServerConfig()
+	s, _ := newTestServerConfig(testDataPathPrefix)
 	server, err := transport.NewServer(udpConn, s)
 	assert.NilError(t, err)
 	go server.Serve()

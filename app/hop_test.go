@@ -1,6 +1,7 @@
 package app
 
 import (
+	"io"
 	"net"
 	"os"
 	"os/user"
@@ -17,6 +18,7 @@ import (
 )
 
 func TestClientServer(t *testing.T) {
+	logrus.SetOutput(io.Discard)
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
 	KeyGen(DefaultKeyPath, true)
@@ -26,7 +28,7 @@ func TestClientServer(t *testing.T) {
 	serverConfig := &HopServerConfig{
 		Port:                     DefaultHopPort,
 		Host:                     "localhost",
-		SockAddr:                 DefaultHopAuthSocket,
+		SockAddr:                 DefaultHopAuthSocket + "1",
 		TransportConfig:          tconf,
 		MaxOutstandingAuthgrants: 50,
 	}
@@ -41,7 +43,7 @@ func TestClientServer(t *testing.T) {
 	assert.NilError(t, e)
 	clientConfig := &HopClientConfig{
 		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket,
+		SockAddr:      DefaultHopAuthSocket + "1",
 		Keypath:       keypath,
 		Hostname:      "127.0.0.1",
 		Port:          DefaultHopPort,
@@ -61,6 +63,7 @@ func TestClientServer(t *testing.T) {
 }
 
 func TestAuthgrantOneHop(t *testing.T) {
+	logrus.SetOutput(io.Discard)
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
 	KeyGen(DefaultKeyPath, true)
@@ -70,7 +73,7 @@ func TestAuthgrantOneHop(t *testing.T) {
 	serverConfig := &HopServerConfig{
 		Port:                     "7778",
 		Host:                     "localhost",
-		SockAddr:                 DefaultHopAuthSocket,
+		SockAddr:                 DefaultHopAuthSocket + "2",
 		TransportConfig:          tconf,
 		MaxOutstandingAuthgrants: 50,
 	}
@@ -85,7 +88,7 @@ func TestAuthgrantOneHop(t *testing.T) {
 	assert.NilError(t, e)
 	principalConfig := &HopClientConfig{
 		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket,
+		SockAddr:      "",
 		Keypath:       keypath,
 		Hostname:      "127.0.0.1",
 		Port:          "7778",
@@ -153,7 +156,7 @@ func TestAuthgrantOneHop(t *testing.T) {
 	serverConfig2 := &HopServerConfig{
 		Port:                     "8888",
 		Host:                     "localhost",
-		SockAddr:                 "@authsock2",
+		SockAddr:                 DefaultHopAuthSocket + "3",
 		TransportConfig:          tconf,
 		MaxOutstandingAuthgrants: 50,
 	}
@@ -164,7 +167,7 @@ func TestAuthgrantOneHop(t *testing.T) {
 	//set up delegate client
 	delegateConfig := &HopClientConfig{
 		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket,
+		SockAddr:      DefaultHopAuthSocket + "2",
 		Keypath:       "",
 		Hostname:      "127.0.0.1",
 		Port:          "8888",
@@ -204,6 +207,7 @@ func TestAuthgrantOneHop(t *testing.T) {
 }
 
 func TestClientNotAuthorized(t *testing.T) {
+	logrus.SetOutput(io.Discard)
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
 	KeyGen(DefaultKeyPath, true)
@@ -212,7 +216,7 @@ func TestClientNotAuthorized(t *testing.T) {
 	serverConfig := &HopServerConfig{
 		Port:                     "7779",
 		Host:                     "localhost",
-		SockAddr:                 DefaultHopAuthSocket,
+		SockAddr:                 DefaultHopAuthSocket + "4",
 		TransportConfig:          tconf,
 		MaxOutstandingAuthgrants: 50,
 	}
@@ -227,7 +231,7 @@ func TestClientNotAuthorized(t *testing.T) {
 	assert.NilError(t, e)
 	clientConfig := &HopClientConfig{
 		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket,
+		SockAddr:      DefaultHopAuthSocket + "4",
 		Keypath:       keypath,
 		Hostname:      "127.0.0.1",
 		Port:          "7779",
@@ -247,6 +251,7 @@ func TestClientNotAuthorized(t *testing.T) {
 }
 
 func TestAuthgrantTimeOut(t *testing.T) {
+	logrus.SetOutput(io.Discard)
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
 	KeyGen(DefaultKeyPath, true)
@@ -255,7 +260,7 @@ func TestAuthgrantTimeOut(t *testing.T) {
 	serverConfig := &HopServerConfig{
 		Port:                     "7780",
 		Host:                     "localhost",
-		SockAddr:                 DefaultHopAuthSocket,
+		SockAddr:                 DefaultHopAuthSocket + "5",
 		TransportConfig:          tconf,
 		MaxOutstandingAuthgrants: 50,
 	}
@@ -270,7 +275,7 @@ func TestAuthgrantTimeOut(t *testing.T) {
 	assert.NilError(t, e)
 	principalConfig := &HopClientConfig{
 		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket,
+		SockAddr:      "",
 		Keypath:       keypath,
 		Hostname:      "127.0.0.1",
 		Port:          "7780",
@@ -336,9 +341,9 @@ func TestAuthgrantTimeOut(t *testing.T) {
 
 	//start hop server 2
 	serverConfig2 := &HopServerConfig{
-		Port:                     "8888",
+		Port:                     "8889",
 		Host:                     "localhost",
-		SockAddr:                 "@authsock2",
+		SockAddr:                 DefaultHopAuthSocket + "6",
 		TransportConfig:          tconf,
 		MaxOutstandingAuthgrants: 50,
 	}
@@ -349,10 +354,10 @@ func TestAuthgrantTimeOut(t *testing.T) {
 	//set up delegate client
 	delegateConfig := &HopClientConfig{
 		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket,
+		SockAddr:      DefaultHopAuthSocket + "5",
 		Keypath:       "",
 		Hostname:      "127.0.0.1",
-		Port:          "8888",
+		Port:          "8889",
 		Username:      u.Username,
 		Principal:     false,
 		RemoteForward: false,

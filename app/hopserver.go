@@ -69,11 +69,11 @@ func NewHopServer(hconfig *HopServerConfig) (*HopServer, error) {
 	//set socket options and start listening to socket
 	sockconfig := &net.ListenConfig{Control: setListenerOptions}
 	authgrantServer, err := sockconfig.Listen(context.Background(), "unix", hconfig.SockAddr)
-	logrus.Infof("address: %v", authgrantServer.Addr())
 	if err != nil {
 		logrus.Error("S: UDS LISTEN ERROR:", err)
 		return nil, err
 	}
+	logrus.Infof("address: %v", authgrantServer.Addr())
 
 	principals := make(map[int32]*hopSession)         //PID -> principal hop session
 	authgrants := make(map[keys.PublicKey]*authGrant) //static key -> authgrant
