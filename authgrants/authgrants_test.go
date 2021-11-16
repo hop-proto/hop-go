@@ -68,7 +68,7 @@ func getInsecureClientConfig() transport.ClientConfig {
 
 func TestIntentRequest(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
-	pktConn, err := net.ListenPacket("udp", "localhost:7777")
+	pktConn, err := net.ListenPacket("udp", "localhost:1234")
 	assert.NilError(t, err)
 	// It's actually a UDP conn
 	udpConn := pktConn.(*net.UDPConn)

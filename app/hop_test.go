@@ -1,7 +1,6 @@
 package app
 
 import (
-	"io"
 	"net"
 	"os"
 	"os/user"
@@ -18,7 +17,7 @@ import (
 )
 
 func TestClientServer(t *testing.T) {
-	logrus.SetOutput(io.Discard)
+	logrus.SetLevel(logrus.ErrorLevel)
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
 	KeyGen(DefaultKeyPath, true)
@@ -63,7 +62,7 @@ func TestClientServer(t *testing.T) {
 }
 
 func TestAuthgrantOneHop(t *testing.T) {
-	logrus.SetOutput(io.Discard)
+	logrus.SetLevel(logrus.ErrorLevel)
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
 	KeyGen(DefaultKeyPath, true)
@@ -207,7 +206,7 @@ func TestAuthgrantOneHop(t *testing.T) {
 }
 
 func TestClientNotAuthorized(t *testing.T) {
-	logrus.SetOutput(io.Discard)
+	logrus.SetLevel(logrus.ErrorLevel)
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
 	KeyGen(DefaultKeyPath, true)
@@ -251,7 +250,7 @@ func TestClientNotAuthorized(t *testing.T) {
 }
 
 func TestAuthgrantTimeOut(t *testing.T) {
-	logrus.SetOutput(io.Discard)
+	logrus.SetLevel(logrus.ErrorLevel)
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
 	KeyGen(DefaultKeyPath, true)
