@@ -16,11 +16,16 @@ import (
 	"zmap.io/portal/tubes"
 )
 
+var akMutex = sync.Mutex{}
+
 func TestClientServer(t *testing.T) {
-	logrus.SetLevel(logrus.ErrorLevel)
+	//logrus.SetLevel(logrus.ErrorLevel)
+	keyname := "key1"
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
-	KeyGen(DefaultKeyPath, true)
+	akMutex.Lock()
+	KeyGen("/.hop", keyname, true)
+	akMutex.Unlock()
 
 	//start hop server
 	tconf, verify := NewTestServerConfig("../certs/")
@@ -36,7 +41,7 @@ func TestClientServer(t *testing.T) {
 	go s.Serve() //starts transport layer server, authgrant server, and listens for hop conns
 
 	keypath, _ := os.UserHomeDir()
-	keypath += DefaultKeyPath
+	keypath += "/.hop/" + keyname
 
 	u, e := user.Current()
 	assert.NilError(t, e)
@@ -63,9 +68,12 @@ func TestClientServer(t *testing.T) {
 
 func TestAuthgrantOneHop(t *testing.T) {
 	logrus.SetLevel(logrus.ErrorLevel)
+	keyname := "key2"
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
-	KeyGen(DefaultKeyPath, true)
+	akMutex.Lock()
+	KeyGen("/.hop", keyname, true)
+	akMutex.Unlock()
 
 	//start hop server 1
 	tconf, verify := NewTestServerConfig("../certs/")
@@ -81,7 +89,7 @@ func TestAuthgrantOneHop(t *testing.T) {
 
 	//start principal
 	keypath, _ := os.UserHomeDir()
-	keypath += DefaultKeyPath
+	keypath += "/.hop/" + keyname
 
 	u, e := user.Current()
 	assert.NilError(t, e)
@@ -207,9 +215,12 @@ func TestAuthgrantOneHop(t *testing.T) {
 
 func TestClientNotAuthorized(t *testing.T) {
 	logrus.SetLevel(logrus.ErrorLevel)
+	keyname := "key3"
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
-	//put public key in /home/user/.hop/authorized_keys
-	KeyGen(DefaultKeyPath, true)
+	//DON'T put public key in /home/user/.hop/authorized_keys
+	akMutex.Lock()
+	KeyGen("/.hop", keyname, false)
+	akMutex.Unlock()
 	//start hop server
 	tconf, verify := NewTestServerConfig("../certs/")
 	serverConfig := &HopServerConfig{
@@ -224,7 +235,7 @@ func TestClientNotAuthorized(t *testing.T) {
 	go s.Serve() //starts transport layer server, authgrant server, and listens for hop conns
 
 	keypath, _ := os.UserHomeDir()
-	keypath += "/.hop/mykey" //mykey is not in authorized keys file
+	keypath += "/.hop/" + keyname
 
 	u, e := user.Current()
 	assert.NilError(t, e)
@@ -251,9 +262,12 @@ func TestClientNotAuthorized(t *testing.T) {
 
 func TestAuthgrantTimeOut(t *testing.T) {
 	logrus.SetLevel(logrus.ErrorLevel)
+	keyname := "key4"
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
-	KeyGen(DefaultKeyPath, true)
+	akMutex.Lock()
+	KeyGen("/.hop", keyname, true)
+	akMutex.Unlock()
 	//start hop server 1
 	tconf, verify := NewTestServerConfig("../certs/")
 	serverConfig := &HopServerConfig{
@@ -268,7 +282,7 @@ func TestAuthgrantTimeOut(t *testing.T) {
 
 	//start principal
 	keypath, _ := os.UserHomeDir()
-	keypath += DefaultKeyPath
+	keypath += "/.hop/" + keyname
 
 	u, e := user.Current()
 	assert.NilError(t, e)

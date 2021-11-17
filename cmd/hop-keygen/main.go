@@ -10,12 +10,15 @@ import (
 func main() { //add a key
 	var fs flag.FlagSet
 
-	suffix := "/.hop/key"
-	fs.StringVar(&suffix, "s", suffix, "path suffix homedir + suffix")
+	dir := "/.hop/key"
+	fs.StringVar(&dir, "d", dir, "homedir + dir is dir where key stored")
+
+	filename := "key"
+	fs.StringVar(&filename, "f", filename, "name of key")
 
 	var addToAuthKeys bool
 	fs.BoolVar(&addToAuthKeys, "a", false, "add the key to its own authorized keys file")
 
 	fs.Parse(os.Args[1:])
-	app.KeyGen(suffix, addToAuthKeys)
+	app.KeyGen(dir, filename, addToAuthKeys)
 }
