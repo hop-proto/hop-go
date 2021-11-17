@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"net"
 	"os"
 	"os/user"
 
@@ -9,9 +11,18 @@ import (
 
 func main() {
 	//set up logging to file
+	_, err := os.Stat("log.txt")
+	if errors.Is(err, os.ErrNotExist) {
+		f, e := os.Create("log.txt")
+		if e != nil {
+			logrus.Error(e)
+			return
+		}
+		f.Close()
+	}
 	f, e := os.OpenFile("log.txt", os.O_APPEND|os.O_WRONLY, os.ModeAppend)
 	if e != nil {
-		logrus.Error("error opening a.txt", e)
+		logrus.Error("error opening log.txt: ", e)
 		return
 	}
 	defer f.Close()
@@ -23,8 +34,13 @@ func main() {
 		return
 	}
 	logrus.Infof("Child running as: %v. With UID: %v GID: %v", curUser.Username, curUser.Uid, curUser.Gid)
+	logrus.Infof("Will start TCP listener on port: %v", os.Args[1])
 
-	// tcpListener, e := net.Listen("tcp", ":"+parts[0]) //TODO(baumanl): this runs with root privileges which is bad because unprivileged users can forward privileged ports on the server
+	tcpListener, e := net.Listen("tcp", ":"+os.Args[1])
+	if e != nil {
+		logrus.Fatal(e)
+	}
+	tcpListener.Close()
 	// if e != nil {
 	// 	logrus.Error("Issue listening on requested port")
 	// 	npTube.Write([]byte{NpcDen})
