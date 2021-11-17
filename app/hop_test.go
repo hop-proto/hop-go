@@ -354,7 +354,7 @@ func TestAuthgrantTimeOut(t *testing.T) {
 
 	//start hop server 2
 	serverConfig2 := &HopServerConfig{
-		Port:                     "8889",
+		Port:                     "7781",
 		Host:                     "localhost",
 		SockAddr:                 DefaultHopAuthSocket + "6",
 		TransportConfig:          tconf,
@@ -370,7 +370,7 @@ func TestAuthgrantTimeOut(t *testing.T) {
 		SockAddr:      DefaultHopAuthSocket + "5",
 		Keypath:       "",
 		Hostname:      "127.0.0.1",
-		Port:          "8889",
+		Port:          "7781",
 		Username:      u.Username,
 		Principal:     false,
 		RemoteForward: false,
