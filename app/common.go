@@ -99,11 +99,11 @@ func KeyGen(dir string, filename string, addToAuthKeys bool) {
 	path, _ := os.UserHomeDir()
 	path += dir
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		err := os.Mkdir(path, fs.ModeDir)
+		err := os.Mkdir(path, fs.ModeDir|0700)
 		if err != nil {
 			logrus.Error(err)
+			return
 		}
-		return
 	}
 	path += "/" + filename
 	f, e := os.Create(path)

@@ -19,7 +19,7 @@ import (
 var akMutex = sync.Mutex{}
 
 func TestClientServer(t *testing.T) {
-	//logrus.SetLevel(logrus.ErrorLevel)
+	logrus.SetLevel(logrus.ErrorLevel)
 	keyname := "key1"
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
