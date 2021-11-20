@@ -39,17 +39,18 @@ func main() {
 	// }
 
 	tcpListener, tcperr := net.Listen("tcp", ":"+os.Args[1])
+	if tcperr != nil {
+		//cudsconn.Write([]byte{netproxy.NpcDen})
+		logrus.Fatal(tcperr)
+	}
 
 	logrus.Infof("Started TCP listener on port: %v", os.Args[1])
-	for {
+	for i := 0; i < 2; i++ {
 		cudsconn, err := net.Dial("unix", sock)
 		if err != nil {
 			logrus.Error("error dialing socket", err)
 		}
-		if tcperr != nil {
-			cudsconn.Write([]byte{netproxy.NpcDen})
-			logrus.Fatal(e)
-		}
+		logrus.Info("dialed UDS")
 		tconn, e := tcpListener.Accept()
 		if e != nil {
 			cudsconn.Write([]byte{netproxy.NpcDen})
@@ -57,12 +58,16 @@ func main() {
 			return
 		}
 		logrus.Info("Accepted TCPConn...")
-		defer tconn.Close()
-		cudsconn.Write([]byte{netproxy.NpcConf})
+		_, err = cudsconn.Write([]byte{netproxy.NpcConf})
+		if err != nil {
+			logrus.Error("error writing: ", err)
+		}
+		logrus.Info("wrote conf")
 		go func() {
 			io.Copy(cudsconn, tconn)
 			cudsconn.Close()
 		}()
 		io.Copy(tconn, cudsconn)
+		tconn.Close()
 	}
 }

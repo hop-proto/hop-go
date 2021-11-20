@@ -21,7 +21,7 @@ func TestRemote(t *testing.T) {
 	logrus.Infof("Currently running as: %v. With UID: %v GID: %v", curUser.Username, curUser.Uid, curUser.Gid)
 	cache, err := etcpwdparse.NewLoadedEtcPasswdCache()
 	assert.NilError(t, err)
-	args := []string{"./remotePF", "7778"}
+	args := []string{"./remotePF", "7779"}
 	c := exec.Command(args[0], args[1:]...)
 	if curUser.Uid == "0" {
 		logrus.Info("running as root, configuring to run as 'baumanl'")
@@ -60,6 +60,23 @@ func TestRemote(t *testing.T) {
 	udsconn, err := uds.Accept()
 	assert.NilError(t, err)
 
+	go func() {
+		//start TCP connections to the other process
+		ctconn, err := net.Dial("tcp", ":7779")
+		assert.NilError(t, err)
+		_, err = ctconn.Write([]byte("Hi there! this is the first tcp conn.\n"))
+		assert.NilError(t, err)
+		err = ctconn.Close()
+		assert.NilError(t, err)
+
+		ctconn, err = net.Dial("tcp", ":7779")
+		assert.NilError(t, err)
+		_, err = ctconn.Write([]byte("Howdy! this is the second tcp conn.\n"))
+		assert.NilError(t, err)
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
 	logrus.Info("got first conn")
 	buf := make([]byte, 1)
 	_, err = udsconn.Read(buf)
@@ -73,17 +90,17 @@ func TestRemote(t *testing.T) {
 		}()
 	}
 
-	udsconn, err = uds.Accept()
+	udsconn2, err := uds.Accept()
 	assert.NilError(t, err)
 	logrus.Info("got second conn")
 	buf = make([]byte, 1)
-	_, err = udsconn.Read(buf)
+	_, err = udsconn2.Read(buf)
 	assert.NilError(t, err)
 	if buf[0] == netproxy.NpcConf {
 		logrus.Info("got conf")
 		go func() {
-			io.Copy(os.Stdout, udsconn)
-			udsconn.Close()
+			io.Copy(os.Stdout, udsconn2)
+			udsconn2.Close()
 		}()
 	}
 	// assert.NilError(t, err)
