@@ -34,14 +34,6 @@ const (
 	closed     state = iota
 )
 
-//Tube Type constants
-const (
-	ExecTube      = byte(1)
-	AuthGrantTube = byte(2)
-	NetProxyTube  = byte(3) //Net Proxy should maybe be unreliable tube?
-	UserAuthTube  = byte(4)
-)
-
 // Reliable implements a reliable and receiveWindow tube on top
 type Reliable struct {
 	closedCond sync.Cond

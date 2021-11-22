@@ -5,8 +5,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"strings"
 	"syscall"
 	"time"
@@ -151,13 +154,17 @@ func (sess *hopSession) start() {
 		case serverChan := <-sess.tubeQueue:
 			logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", serverChan.Type())
 			switch serverChan.Type() {
-			case tubes.ExecTube:
+			case ExecTube:
 				go sess.startCodex(serverChan)
-			case tubes.AuthGrantTube:
+			case AuthGrantTube:
 				go sess.handleAgc(serverChan)
-			case tubes.NetProxyTube:
+			case NetProxyTube:
 				//TODO(baumanl): different tube types for local/remote/ag forwarding?
 				go sess.startNetProxy(serverChan)
+			case RemotePFTube:
+				go sess.startRemote(serverChan)
+			case LocalPFTube:
+				go sess.startLocal(serverChan)
 			default:
 				serverChan.Close()
 			}
@@ -318,41 +325,126 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 	}
 }
 
-func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
-	b := make([]byte, 1)
-	ch.Read(b)
-	if b[0] == netproxy.AG {
-		netproxy.Server(ch)
-		return
+func (sess *hopSession) startLocal(ch *tubes.Reliable) {
+	buf := make([]byte, 4)
+	ch.Read(buf)
+	l := binary.BigEndian.Uint32(buf[0:4])
+	arg := make([]byte, l)
+	ch.Read(arg)
+	//Check authorization
+	if !sess.isPrincipal {
+		err := sess.checkAction(string(arg), authgrants.LocalPFAction)
+		if err != nil {
+			logrus.Error(err)
+			ch.Write([]byte{netproxy.NpcDen})
+			return
+		}
 	}
-	if b[0] == netproxy.Local || b[0] == netproxy.Remote {
-		actionType := authgrants.LocalPFAction
-		if b[0] == netproxy.Remote {
-			actionType = authgrants.RemotePFAction
-		}
-		buf := make([]byte, 4)
-		ch.Read(buf)
-		l := binary.BigEndian.Uint32(buf[0:4])
-		arg := make([]byte, l)
-		ch.Read(arg)
-		//Check authorization
-		if !sess.isPrincipal {
-			err := sess.checkAction(string(arg), actionType)
-			if err != nil {
-				logrus.Error(err)
-				ch.Write([]byte{netproxy.NpcDen})
-				return
-			}
-		}
-		switch b[0] {
-		case netproxy.Local:
-			netproxy.LocalServer(ch, string(arg))
-			return
-		case netproxy.Remote:
-			netproxy.RemoteServer(ch, string(arg))
+	sess.LocalServer(ch, string(arg))
+}
+
+func (sess *hopSession) startRemote(ch *tubes.Reliable) {
+	buf := make([]byte, 4)
+	ch.Read(buf)
+	l := binary.BigEndian.Uint32(buf[0:4])
+	arg := make([]byte, l)
+	ch.Read(arg)
+	//Check authorization
+	if !sess.isPrincipal {
+		err := sess.checkAction(string(arg), authgrants.RemotePFAction)
+		if err != nil {
+			logrus.Error(err)
+			ch.Write([]byte{netproxy.NpcDen})
 			return
 		}
-		logrus.Error("undefined netproxy type")
+	}
+	sess.RemoteServer(ch, string(arg))
+}
+
+func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
+	netproxy.Server(ch)
+}
+
+func (sess *hopSession) RemoteServer(ch *tubes.Reliable, arg string) {
+	sock := "@placeholder"
+	//RemoteServer starts listening on given port and pipes the traffic back over the tube
+	parts := strings.Split(arg, ":") //assuming port:host:hostport
+
+	curUser, err := user.Current()
+	if err != nil {
+		logrus.Error("couldn't find current user")
 		ch.Write([]byte{netproxy.NpcDen})
 	}
+	logrus.Infof("Currently running as: %v. With UID: %v GID: %v", curUser.Username, curUser.Uid, curUser.Gid)
+	cache, err := etcpwdparse.NewLoadedEtcPasswdCache()
+	if err != nil {
+		logrus.Error("couln't load passwd cache")
+		ch.Write([]byte{netproxy.NpcDen})
+	}
+	args := []string{"./remotePF", parts[0]}
+	c := exec.Command(args[0], args[1:]...)
+	logrus.Info("running as %v, configuring to run as %v", curUser.Username)
+	user, ok := cache.LookupUserByName(sess.user)
+	if !ok {
+		logrus.Error("couldn't find session user")
+		ch.Write([]byte{netproxy.NpcDen})
+	}
+	c.SysProcAttr = &syscall.SysProcAttr{}
+	c.SysProcAttr.Credential = &syscall.Credential{
+		Uid:    uint32(user.Uid()),
+		Gid:    uint32(user.Gid()),
+		Groups: []uint32{uint32(user.Gid())},
+	}
+
+	//TODO: dynamically generate sock address and put it as an argument to child process
+	//set up authgrantServer (UDS socket)
+	//make sure the socket does not already exist.
+	err = os.RemoveAll(sock)
+	if err != nil {
+		logrus.Error("couln't remove other process listening on UDS socket")
+		ch.Write([]byte{netproxy.NpcDen})
+	}
+
+	//set socket options and start listening to socket
+	//sockconfig := &net.ListenConfig{Control: setListenerOptions}
+	uds, err := net.Listen("unix", sock)
+	if err != nil {
+		logrus.Error("error listening on socket")
+		ch.Write([]byte{netproxy.NpcDen})
+	}
+	defer uds.Close()
+	logrus.Infof("address: %v", uds.Addr())
+
+	err = c.Start()
+	if err != nil {
+		logrus.Error("error starting child process")
+		ch.Write([]byte{netproxy.NpcDen})
+	}
+	ch.Write([]byte{netproxy.NpcConf})
+
+	for {
+		udsconn, err := uds.Accept() //TODO: add some timer so if child can't connect for some reason it doesn't hang forever
+		if err != nil {
+			logrus.Error("error accepting uds conn")
+		}
+		logrus.Info("got second conn")
+		buf := make([]byte, 1)
+		_, err = udsconn.Read(buf)
+		if err != nil {
+			logrus.Error("error reading from uds conn")
+			ch.Write([]byte{netproxy.NpcDen})
+		}
+		if buf[0] == netproxy.NpcConf {
+			logrus.Info("got conf")
+			go func() {
+				io.Copy(os.Stdout, udsconn)
+				udsconn.Close()
+			}()
+		}
+	}
+
+}
+
+func (sess *hopSession) LocalServer(ch *tubes.Reliable, arg string) {
+
 }

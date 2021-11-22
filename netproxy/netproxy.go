@@ -27,16 +27,14 @@ const (
 )
 
 type npcInitMsg struct {
-	msgLen  uint32
-	tunType byte
-	info    string
+	msgLen uint32
+	info   string
 }
 
 func newNPCInitMsg(address string, t byte) *npcInitMsg {
 	return &npcInitMsg{
-		msgLen:  uint32(len(address)),
-		tunType: t,
-		info:    address,
+		msgLen: uint32(len(address)),
+		info:   address,
 	}
 }
 
@@ -45,9 +43,8 @@ func (n *npcInitMsg) Addr() string {
 }
 
 func (n *npcInitMsg) toBytes() []byte {
-	r := make([]byte, 5)
-	r[0] = n.tunType
-	binary.BigEndian.PutUint32(r[1:], n.msgLen)
+	r := make([]byte, 4)
+	binary.BigEndian.PutUint32(r[0:], n.msgLen)
 	return append(r, []byte(n.info)...)
 }
 

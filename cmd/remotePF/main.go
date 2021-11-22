@@ -33,41 +33,69 @@ func main() {
 	}
 	logrus.Infof("Child running as: %v. With UID: %v GID: %v", curUser.Username, curUser.Uid, curUser.Gid)
 
-	// cudsconn, err := net.Dial("unix", sock)
-	// if err != nil {
-	// 	logrus.Error("error dialing socket", err)
-	// }
-
 	tcpListener, tcperr := net.Listen("tcp", ":"+os.Args[1])
 	if tcperr != nil {
-		//cudsconn.Write([]byte{netproxy.NpcDen})
-		logrus.Fatal(tcperr)
-	}
-
-	logrus.Infof("Started TCP listener on port: %v", os.Args[1])
-	for i := 0; i < 2; i++ {
 		cudsconn, err := net.Dial("unix", sock)
 		if err != nil {
-			logrus.Error("error dialing socket", err)
+			logrus.Fatal("error dialing socket", err)
 		}
-		logrus.Info("dialed UDS")
-		tconn, e := tcpListener.Accept()
-		if e != nil {
-			cudsconn.Write([]byte{netproxy.NpcDen})
-			logrus.Error("error accepting tcp conn")
-			return
+		cudsconn.Write([]byte{netproxy.NpcDen})
+		logrus.Fatal(tcperr)
+	}
+	logrus.Infof("Started TCP listener on port: %v", os.Args[1])
+
+	regchan := make(chan net.Conn)
+	go func() {
+		logrus.Info("started tcp accept go routine")
+		c, err := tcpListener.Accept()
+		if err != nil {
+			logrus.Error(err)
 		}
 		logrus.Info("Accepted TCPConn...")
-		_, err = cudsconn.Write([]byte{netproxy.NpcConf})
-		if err != nil {
-			logrus.Error("error writing: ", err)
+		regchan <- c
+	}()
+
+	logrus.Info("Dialed control socket")
+	ccconn, _ := net.Dial("unix", "@control")
+
+	controlChan := make(chan byte)
+	go func() {
+		buf := make([]byte, 1)
+		ccconn.Read(buf)
+		controlChan <- buf[0]
+	}()
+
+	for {
+		logrus.Info("entered for loop")
+		select {
+		case <-controlChan:
+			return
+		case tconn := <-regchan:
+			logrus.Info("got a tconn")
+			go func() {
+				cudsconn, err := net.Dial("unix", sock)
+				if err != nil {
+					logrus.Fatal("error dialing socket", err)
+				}
+				logrus.Info("dialed UDS")
+
+				_, err = cudsconn.Write([]byte{netproxy.NpcConf})
+				if err != nil {
+					logrus.Error("error writing: ", err)
+				}
+				logrus.Info("wrote conf")
+				go func() {
+					io.Copy(cudsconn, tconn)
+					cudsconn.Close()
+				}()
+				io.Copy(tconn, cudsconn)
+				tconn.Close()
+				go func() {
+					c, _ := tcpListener.Accept()
+					logrus.Info("Accepted TCPConn...")
+					regchan <- c
+				}()
+			}()
 		}
-		logrus.Info("wrote conf")
-		go func() {
-			io.Copy(cudsconn, tconn)
-			cudsconn.Close()
-		}()
-		io.Copy(tconn, cudsconn)
-		tconn.Close()
 	}
 }

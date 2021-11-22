@@ -46,22 +46,20 @@ func TestRemote(t *testing.T) {
 	defer uds.Close()
 	logrus.Infof("address: %v", uds.Addr())
 
-	// r, err := c.StdoutPipe()
-	// assert.NilError(t, err)
-
-	// w, err := c.StdinPipe()
-	// assert.NilError(t, err)
-	// _, err = c.StderrPipe()
-	// assert.NilError(t, err)
-
-	err = c.Start()
+	//control socket
+	control, err := net.Listen("unix", "@control")
+	assert.NilError(t, err)
+	defer uds.Close()
+	logrus.Infof("control address: %v", control.Addr())
 	assert.NilError(t, err)
 
-	udsconn, err := uds.Accept()
-	assert.NilError(t, err)
+	c.Start()
+
+	controlChan, _ := control.Accept()
 
 	go func() {
 		//start TCP connections to the other process
+		logrus.Info("started this go routine")
 		ctconn, err := net.Dial("tcp", ":7779")
 		assert.NilError(t, err)
 		_, err = ctconn.Write([]byte("Hi there! this is the first tcp conn.\n"))
@@ -69,6 +67,7 @@ func TestRemote(t *testing.T) {
 		err = ctconn.Close()
 		assert.NilError(t, err)
 
+		logrus.Info("midway through this go routine")
 		ctconn, err = net.Dial("tcp", ":7779")
 		assert.NilError(t, err)
 		_, err = ctconn.Write([]byte("Howdy! this is the second tcp conn.\n"))
@@ -76,6 +75,9 @@ func TestRemote(t *testing.T) {
 		err = ctconn.Close()
 		assert.NilError(t, err)
 	}()
+
+	udsconn, err := uds.Accept()
+	assert.NilError(t, err)
 
 	logrus.Info("got first conn")
 	buf := make([]byte, 1)
@@ -101,16 +103,10 @@ func TestRemote(t *testing.T) {
 		go func() {
 			io.Copy(os.Stdout, udsconn2)
 			udsconn2.Close()
+			logrus.Info("closed second conn")
+			controlChan.Write([]byte{1})
 		}()
 	}
-	// assert.NilError(t, err)
-	// buf := make([]byte, 10)
-	// n, _ := udsconn.Read(buf)
-	// assert.Equal(t, n, 10)
-	// assert.Equal(t, string(buf), "Hi there!!")
-	// logrus.Infof("received: %v bytes : %v", n, string(buf))
-	// err = udsconn.Close()
-	// assert.NilError(t, err)
 
 	err = c.Wait()
 	assert.NilError(t, err)
