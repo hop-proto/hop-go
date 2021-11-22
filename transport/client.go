@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -9,7 +10,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"zmap.io/portal/keys"
+	"zmap.io/portal/certs"
 )
 
 //UDPLike interface standardizes Reliable channels and UDPConn.
@@ -78,26 +79,50 @@ func (c *Client) Handshake() error {
 	return c.clientHandshakeLocked()
 }
 
+func (c *Client) prepareCertificates() (leaf, intermediate []byte, err error) {
+	if c.config.KeyPair == nil {
+		return nil, nil, errors.New("ClientConfig.KeyPair must be non-nil")
+	}
+
+	if !c.config.UseCertificate {
+		// Generate a temporary self-signed certificate.
+		identity := certs.Identity{
+			PublicKey: c.config.KeyPair.Public,
+		}
+		var tmp *certs.Certificate
+		tmp, err = certs.SelfSignLeaf(&identity)
+		if err != nil {
+			return nil, nil, err
+		}
+		leaf, err = tmp.Marshal()
+		return
+	}
+
+	// Otherwise, certs have been provided
+	if c.config.Leaf == nil {
+		return nil, nil, errors.New("ClientConfig.Leaf must be non-nil when ClientConfig.UseCertificate is true")
+	}
+	if leaf, err = c.config.Leaf.Marshal(); err != nil {
+		return nil, nil, fmt.Errorf("unable to serialize provided client leaf certificate: %w", err)
+	}
+	if c.config.Intermediate != nil {
+		intermediate, err = c.config.Intermediate.Marshal()
+	}
+	return
+}
+
 func (c *Client) clientHandshakeLocked() error {
-	//logrus.SetLevel(logrus.DebugLevel)
 	c.hs = new(HandshakeState)
 	c.hs.remoteAddr = c.dialAddr
 	c.hs.duplex.InitializeEmpty()
 	c.hs.ephemeral.Generate()
-	logrus.SetLevel(logrus.InfoLevel)
 
-	// TODO(dadrian): This should actually be, well, static
-	if c.config.KeyPair == nil { //This shouldn't happen if there is actually a key provided
-		c.hs.static = new(keys.X25519KeyPair)
-		c.hs.static.Generate()
-		logrus.Infof("client static is: %v from rand", c.hs.static.Public.String())
-	} else {
-		c.hs.static = c.config.KeyPair
-		logrus.Infof("client static is: %v from config", c.hs.static.Public.String())
+	var err error
+	c.hs.leaf, c.hs.intermediate, err = c.prepareCertificates()
+	if err != nil {
+		return err
 	}
-
 	c.hs.certVerify = &c.config.Verify
-
 	c.hs.duplex.Absorb([]byte(ProtocolName))
 
 	// TODO(dadrian): This should be allocated smaller

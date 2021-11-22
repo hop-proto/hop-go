@@ -1,6 +1,7 @@
 package certs
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -65,9 +66,8 @@ func VerifyParent(child *Certificate, parent *Certificate) error {
 func (c *Certificate) MatchesName(name Name) bool {
 	switch c.Type {
 	case Leaf:
-		// TODO(dadrian): This should really be a byte array comparison
 		for _, b := range c.IDChunk.Blocks {
-			if b == name {
+			if bytes.Equal(b.Label, name.Label) && b.Type == name.Type {
 				return true
 			}
 		}

@@ -38,7 +38,7 @@ func TestWriteTo(t *testing.T) {
 			Blocks: []Name{
 				{
 					Type:  TypeDNSName,
-					Label: "example.domain",
+					Label: []byte("example.domain"),
 				},
 			},
 		},

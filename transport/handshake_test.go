@@ -9,6 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
+	"zmap.io/portal/keys"
 )
 
 func TestClientServerCompatibilityHandshake(t *testing.T) {
@@ -20,7 +21,9 @@ func TestClientServerCompatibilityHandshake(t *testing.T) {
 	s, err := NewServer(udpC, serverConfig)
 	assert.NilError(t, err)
 	go s.Serve()
-	c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verifyConfig})
+	keyPair, err := keys.ReadDHKeyFromPEMFile("testdata/leaf-key.pem")
+	assert.NilError(t, err)
+	c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verifyConfig, KeyPair: keyPair})
 	assert.NilError(t, err)
 	err = c.Handshake()
 	assert.Check(t, err)

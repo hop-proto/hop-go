@@ -29,9 +29,10 @@ type IdentityConfig struct {
 
 // ClientConfig contains client-specific configuration settings.
 type ClientConfig struct {
-	KeyPair        *keys.X25519KeyPair
-	Verify         VerifyConfig
-	ClientIdentity IdentityConfig
+	KeyPair            *keys.X25519KeyPair
+	Verify             VerifyConfig
+	UseCertificate     bool
+	Leaf, Intermediate *certs.Certificate
 }
 
 const (

@@ -82,6 +82,7 @@ const (
 type SHA3Fingerprint = [SHA3Len]byte
 
 var zero SHA3Fingerprint
+var zeroSignature [SignatureLen]byte
 
 // Certificate represent a Hop certificate, and can be serialized to and from
 // bytes. A Certificate can optionally be associated with its corresponding
@@ -110,6 +111,7 @@ type IDType byte
 
 // Known IDType values
 const (
+	TypeRaw         IDType = 0x00
 	TypeDNSName     IDType = 0x01
 	TypeIPv4Address IDType = 0x02
 	TypeIPv6Address IDType = 0x03
@@ -117,21 +119,32 @@ const (
 
 // Name is a UTF-8 label and an IDType. It can be encoded to an IDBlock.
 type Name struct {
-	Label string
+	Label []byte
 	Type  IDType
 }
 
 // DNSName returns a Name with Type set to TypeDNSName and the provided label.
 func DNSName(label string) Name {
 	return Name{
-		Label: label,
+		Label: []byte(label),
 		Type:  TypeDNSName,
+	}
+}
+
+// RawStringName returns a Name with Type set to TypeRaw and the label set to
+// the UTF-8 encoded string. It is useful for creating names where the meaning is interpreted from a string, but that do not represent a DNSName.
+func RawStringName(label string) Name {
+	return Name{
+		Label: []byte(label),
+		Type:  TypeRaw,
 	}
 }
 
 // IsZero returns true if the label is empty and tye type is 0.
 func (name Name) IsZero() bool {
-	return name.Label == "" && name.Type == 0
+	// When Label is []byte{} (0-length, non-nil), it does not count as zero.
+	// It's an explicitly empty, raw name.
+	return name.Label == nil && name.Type == 0
 }
 
 // IDChunk contains the IDBlocks in a certificate
@@ -184,6 +197,16 @@ func (c *Certificate) WriteTo(w io.Writer) (int64, error) {
 	}
 
 	return written, nil
+}
+
+// Marshal writes a serialized certificate to newly-allocated memory.
+func (c *Certificate) Marshal() ([]byte, error) {
+	buf := bytes.Buffer{}
+	_, err := c.WriteTo(&buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // ReadFrom populates a certificate from serialized bytes.
@@ -354,13 +377,15 @@ func (name *Name) ReadFrom(r io.Reader) (int64, error) {
 
 	// TODO(dadrian): Maybe IDBlock should store an []byte, then we can avoid
 	// this allocation.
+	// TODO(dadrian): This shouldn't be a string builder, not that the labels
+	// aren't immediately converted to strings.
 	builder := strings.Builder{}
 	copied, err := io.CopyN(&builder, r, int64(serverIDLen))
 	bytesRead += copied
 	if err != nil {
 		return bytesRead, err
 	}
-	name.Label = builder.String()
+	name.Label = []byte(builder.String())
 
 	return bytesRead, nil
 }
