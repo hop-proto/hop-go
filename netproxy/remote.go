@@ -32,8 +32,6 @@ SSH doc on -R option
              standard output.
 */
 
-const sock = "@remotesock"
-
 //RemoteServer starts listening on given port and pipes the traffic back over the tube
 // func RemoteServer(npTube *tubes.Reliable, arg string) {
 // 	parts := strings.Split(arg, ":")                  //assuming port:host:hostport
