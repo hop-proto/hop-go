@@ -96,7 +96,10 @@ func (c *HopClient) Start() error {
 				defer c.Primarywg.Done()
 			}
 			e := c.remoteForward()
-			logrus.Error(e)
+			if e != nil {
+				logrus.Error(e)
+			}
+
 		}()
 	}
 	if c.Config.LocalForward {
@@ -108,7 +111,9 @@ func (c *HopClient) Start() error {
 				defer c.Primarywg.Done()
 			}
 			e := c.localForward()
-			logrus.Error(e)
+			if e != nil {
+				logrus.Error(e)
+			}
 		}()
 
 	}
@@ -216,7 +221,7 @@ func (c *HopClient) startUnderlying() error {
 
 func (c *HopClient) userAuthorization() error {
 	//*****PERFORM USER AUTHORIZATION******
-	uaCh, _ := c.TubeMuxer.CreateTube(tubes.UserAuthTube)
+	uaCh, _ := c.TubeMuxer.CreateTube(UserAuthTube)
 	defer uaCh.Close()
 	if ok := userauth.RequestAuthorization(uaCh, c.Config.Username); !ok {
 		return ErrClientUnauthorized
@@ -225,7 +230,10 @@ func (c *HopClient) userAuthorization() error {
 	return nil
 }
 
-func (c *HopClient) remoteForward() error {
+// reroutes remote port forwarding connections to the appropriate destination
+// TODO(baumanl): add ability to handle multiple PF relationships
+func (c *HopClient) handleRemote(tube *tubes.Reliable) error {
+	//handle another remote pf conn (rewire to dest)
 	logrus.Info("Doing remote with: ", c.Config.RemoteArg)
 	parts := strings.Split(c.Config.RemoteArg, ":")
 	if len(parts) != 3 {
@@ -234,14 +242,6 @@ func (c *HopClient) remoteForward() error {
 	}
 	logrus.Info("Forwarding traffic from remote port ", parts[0], " to localhost port ", parts[2])
 	localPort := parts[2]
-	npt, e := c.TubeMuxer.CreateTube(tubes.NetProxyTube)
-	if e != nil {
-		return e
-	}
-	e = netproxy.Start(npt, c.Config.RemoteArg, netproxy.Remote)
-	if e != nil {
-		return e
-	}
 
 	//TODO: fix address (not just local host)
 	//TODO: add bind address options
@@ -250,12 +250,37 @@ func (c *HopClient) remoteForward() error {
 		logrus.Error(e)
 		return e
 	}
+	wg := sync.WaitGroup{}
 	//do remote port forwarding
+	wg.Add(1)
 	go func() {
-		io.Copy(tconn, npt)
+		defer wg.Done()
+		n, _ := io.Copy(tube, tconn)
+		logrus.Infof("Copied %v bytes from tconn to tube", n)
 	}()
-	io.Copy(npt, tconn)
+
+	n, _ := io.Copy(tconn, tube)
+	tconn.Close()
+	logrus.Infof("Copied %v bytes from tube to tconn", n)
+	wg.Wait()
 	return nil
+}
+
+// client initiates remote port forwarding and sends the server the info it needs
+func (c *HopClient) remoteForward() error {
+	logrus.Info("Setting up remote with: ", c.Config.RemoteArg)
+	parts := strings.Split(c.Config.RemoteArg, ":")
+	if len(parts) != 3 {
+		logrus.Error("remote port forwarding currently only supported with port:host:hostport format")
+		return ErrInvalidPortForwardingArgs
+	}
+	logrus.Info("Asking remote to forward traffic from remote port ", parts[0], " to localhost port ", parts[2])
+	npt, e := c.TubeMuxer.CreateTube(RemotePFTube)
+	if e != nil {
+		return e
+	}
+	e = netproxy.Start(npt, c.Config.RemoteArg, netproxy.Remote)
+	return e
 }
 
 func (c *HopClient) localForward() error {
@@ -266,7 +291,7 @@ func (c *HopClient) localForward() error {
 		return ErrInvalidPortForwardingArgs
 	}
 	logrus.Info("Forwarding traffic from local port ", parts[0], " to remote port ", parts[2], " on host ", parts[1])
-	npt, e := c.TubeMuxer.CreateTube(tubes.NetProxyTube)
+	npt, e := c.TubeMuxer.CreateTube(LocalPFTube)
 	if e != nil {
 		return e
 	}
@@ -304,7 +329,7 @@ func (c *HopClient) startExecTube() error {
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	//Hop Session is tied to the life of this code execution tube.
 	logrus.Infof("Performing action: %v", c.Config.Cmd)
-	ch, err := c.TubeMuxer.CreateTube(tubes.ExecTube)
+	ch, err := c.TubeMuxer.CreateTube(ExecTube)
 	if err != nil {
 		logrus.Error(err)
 		return err
@@ -325,8 +350,10 @@ func (c *HopClient) HandleTubes() {
 			continue
 		}
 		logrus.Infof("ACCEPTED NEW CHANNEL of TYPE: %v", t.Type())
-		if t.Type() == tubes.AuthGrantTube && c.Config.Headless {
+		if t.Type() == AuthGrantTube && c.Config.Headless {
 			go c.principal(t)
+		} else if t.Type() == RemotePFTube {
+			go c.handleRemote(t)
 		} else {
 			//Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
 			e := t.Close()
@@ -404,7 +431,7 @@ func (c *HopClient) setupRemoteSession(req *authgrants.Intent) (*HopClient, erro
 	logrus.Debug("C: USER CONFIRMED FIRST INTENT_REQUEST. CONTACTING S2...")
 
 	//create netproxy with server
-	npt, e := c.TubeMuxer.CreateTube(tubes.NetProxyTube)
+	npt, e := c.TubeMuxer.CreateTube(NetProxyTube)
 	logrus.Info("started netproxy tube from principal")
 	if e != nil {
 		logrus.Fatal("C: Error starting netproxy tube")

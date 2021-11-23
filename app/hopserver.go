@@ -114,11 +114,12 @@ func (s *HopServer) Serve() {
 //Starts a new hop session
 func (s *HopServer) newSession(serverConn *transport.Handle) {
 	sess := &hopSession{
-		transportConn: serverConn,
-		tubeMuxer:     tubes.NewMuxer(serverConn, serverConn),
-		tubeQueue:     make(chan *tubes.Reliable),
-		done:          make(chan int),
-		server:        s,
+		transportConn:   serverConn,
+		tubeMuxer:       tubes.NewMuxer(serverConn, serverConn),
+		tubeQueue:       make(chan *tubes.Reliable),
+		done:            make(chan int),
+		controlChannels: []net.Conn{},
+		server:          s,
 	}
 	sess.start()
 }

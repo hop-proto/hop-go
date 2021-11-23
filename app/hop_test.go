@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"os/user"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -421,4 +422,102 @@ func TestAuthgrantTimeOut(t *testing.T) {
 	//delegate connects to server2
 	err = delegate.Connect()
 	assert.Error(t, err, ErrClientUnauthorized.Error())
+}
+
+func TestRemotePF(t *testing.T) {
+	logrus.SetLevel(logrus.ErrorLevel)
+	keyname := "key7"
+	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
+	//put public key in /home/user/.hop/authorized_keys
+	akMutex.Lock()
+	KeyGen("/.hop", keyname, true)
+	akMutex.Unlock()
+	port := getPortNumber()
+	//start hop server
+	tconf, verify := NewTestServerConfig("../certs/")
+	serverConfig := &HopServerConfig{
+		Port:                     port,
+		Host:                     "localhost",
+		SockAddr:                 DefaultHopAuthSocket + "7",
+		TransportConfig:          tconf,
+		MaxOutstandingAuthgrants: 50,
+	}
+	s, err := NewHopServer(serverConfig)
+	assert.NilError(t, err)
+	go s.Serve() //starts transport layer server, authgrant server, and listens for hop conns
+
+	keypath, _ := os.UserHomeDir()
+	keypath += "/.hop/" + keyname
+
+	remoteport1 := getPortNumber()
+	remoteport2 := getPortNumber()
+
+	u, e := user.Current()
+	assert.NilError(t, e)
+	clientConfig := &HopClientConfig{
+		Verify:        *verify,
+		SockAddr:      DefaultHopAuthSocket + "7",
+		Keypath:       keypath,
+		Hostname:      "127.0.0.1",
+		Port:          port,
+		Username:      u.Username,
+		Principal:     true,
+		RemoteForward: true,
+		RemoteArg:     remoteport1 + ":localhost:" + remoteport2,
+		LocalForward:  false,
+		Cmd:           "",
+		Quiet:         false,
+		Headless:      false,
+	}
+	client, err := NewHopClient(clientConfig)
+	assert.NilError(t, err)
+
+	err = client.Connect()
+	assert.NilError(t, err)
+
+	err = client.remoteForward()
+	assert.NilError(t, err)
+
+	logrus.Info("simulating a tcp conn")
+
+	parts := strings.Split(clientConfig.RemoteArg, ":") //assuming port:host:hostport
+
+	go func() {
+		//simulate program listening on local (target port)
+		li, err := net.Listen("tcp", ":"+parts[2])
+		logrus.Info("simulating listening program on target: port ", parts[2])
+		assert.NilError(t, err)
+		liconn, err := li.Accept()
+		assert.NilError(t, err)
+		var buf [38]byte
+		n := 0
+		for n < 38 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on target got: ", string(buf[:]))
+		liconn.Close()
+	}()
+
+	go func() {
+		//simulate TCP conn to remote port
+		logrus.Info("attempting to dial port ", parts[0])
+		ctconn, err := net.Dial("tcp", ":"+parts[0])
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn.\n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn", n)
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	crft, err := client.TubeMuxer.Accept()
+	assert.NilError(t, err)
+	assert.Equal(t, crft.Type(), RemotePFTube)
+
+	err = client.handleRemote(crft)
+	assert.NilError(t, err)
+
 }

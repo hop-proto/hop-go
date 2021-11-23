@@ -12,7 +12,6 @@ import (
 	"github.com/AstromechZA/etcpwdparse"
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
-	"zmap.io/portal/netproxy"
 )
 
 func TestRemote(t *testing.T) {
@@ -21,7 +20,7 @@ func TestRemote(t *testing.T) {
 	logrus.Infof("Currently running as: %v. With UID: %v GID: %v", curUser.Username, curUser.Uid, curUser.Gid)
 	cache, err := etcpwdparse.NewLoadedEtcPasswdCache()
 	assert.NilError(t, err)
-	args := []string{"./remotePF", "7779"}
+	args := []string{"remotePF", "7779"}
 	c := exec.Command(args[0], args[1:]...)
 	if curUser.Uid == "0" {
 		logrus.Info("running as root, configuring to run as 'baumanl'")
@@ -34,7 +33,7 @@ func TestRemote(t *testing.T) {
 			Groups: []uint32{uint32(user.Gid())},
 		}
 	}
-	//set up authgrantServer (UDS socket)
+	//set up UDS socket
 	//make sure the socket does not already exist.
 	err = os.RemoveAll(sock)
 	assert.NilError(t, err)
@@ -51,15 +50,13 @@ func TestRemote(t *testing.T) {
 	assert.NilError(t, err)
 	defer uds.Close()
 	logrus.Infof("control address: %v", control.Addr())
-	assert.NilError(t, err)
 
 	c.Start()
 
-	controlChan, _ := control.Accept()
+	controlChan, _ := control.Accept() //wait for the child process to start listening for TCP conns and connect to control
 
 	go func() {
 		//start TCP connections to the other process
-		logrus.Info("started this go routine")
 		ctconn, err := net.Dial("tcp", ":7779")
 		assert.NilError(t, err)
 		_, err = ctconn.Write([]byte("Hi there! this is the first tcp conn.\n"))
@@ -67,7 +64,6 @@ func TestRemote(t *testing.T) {
 		err = ctconn.Close()
 		assert.NilError(t, err)
 
-		logrus.Info("midway through this go routine")
 		ctconn, err = net.Dial("tcp", ":7779")
 		assert.NilError(t, err)
 		_, err = ctconn.Write([]byte("Howdy! this is the second tcp conn.\n"))
@@ -76,37 +72,27 @@ func TestRemote(t *testing.T) {
 		assert.NilError(t, err)
 	}()
 
-	udsconn, err := uds.Accept()
-	assert.NilError(t, err)
+	go func() {
+		udsconn, err := uds.Accept()
+		assert.NilError(t, err)
 
-	logrus.Info("got first conn")
-	buf := make([]byte, 1)
-	_, err = udsconn.Read(buf)
-	assert.NilError(t, err)
-	if buf[0] == netproxy.NpcConf {
-		logrus.Info("got conf")
+		logrus.Info("got first conn")
 		go func() {
 			io.Copy(os.Stdout, udsconn)
 			udsconn.Close()
 			logrus.Info("closed first conn")
 		}()
-	}
+	}()
 
 	udsconn2, err := uds.Accept()
 	assert.NilError(t, err)
 	logrus.Info("got second conn")
-	buf = make([]byte, 1)
-	_, err = udsconn2.Read(buf)
-	assert.NilError(t, err)
-	if buf[0] == netproxy.NpcConf {
-		logrus.Info("got conf")
-		go func() {
-			io.Copy(os.Stdout, udsconn2)
-			udsconn2.Close()
-			logrus.Info("closed second conn")
-			controlChan.Write([]byte{1})
-		}()
-	}
+	go func() {
+		io.Copy(os.Stdout, udsconn2)
+		udsconn2.Close()
+		logrus.Info("closed second conn")
+		controlChan.Write([]byte{1})
+	}()
 
 	err = c.Wait()
 	assert.NilError(t, err)

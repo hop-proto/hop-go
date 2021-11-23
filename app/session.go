@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/user"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -39,10 +40,11 @@ type authGrant struct {
 }
 
 type hopSession struct {
-	transportConn *transport.Handle
-	tubeMuxer     *tubes.Muxer
-	tubeQueue     chan *tubes.Reliable
-	done          chan int
+	transportConn   *transport.Handle
+	tubeMuxer       *tubes.Muxer
+	tubeQueue       chan *tubes.Reliable
+	done            chan int
+	controlChannels []net.Conn
 
 	server *HopServer
 	user   string
@@ -178,6 +180,7 @@ func (sess *hopSession) close() error {
 	if !sess.isPrincipal {
 		err = sess.authgrant.principalSession.close() //TODO: move where principalSession stored?
 	}
+
 	sess.tubeMuxer.Stop()
 	//err2 = sess.transportConn.Close() (not implemented yet)
 	if err != nil {
@@ -366,7 +369,7 @@ func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
 }
 
 func (sess *hopSession) RemoteServer(ch *tubes.Reliable, arg string) {
-	sock := "@placeholder"
+	sock := "@remotesock"
 	//RemoteServer starts listening on given port and pipes the traffic back over the tube
 	parts := strings.Split(arg, ":") //assuming port:host:hostport
 
@@ -381,19 +384,21 @@ func (sess *hopSession) RemoteServer(ch *tubes.Reliable, arg string) {
 		logrus.Error("couln't load passwd cache")
 		ch.Write([]byte{netproxy.NpcDen})
 	}
-	args := []string{"./remotePF", parts[0]}
+	args := []string{"remotePF", parts[0]}
 	c := exec.Command(args[0], args[1:]...)
-	logrus.Info("running as %v, configuring to run as %v", curUser.Username)
+	logrus.Infof("running as %v, configuring to run as %v", curUser.Username, sess.user)
 	user, ok := cache.LookupUserByName(sess.user)
 	if !ok {
 		logrus.Error("couldn't find session user")
 		ch.Write([]byte{netproxy.NpcDen})
 	}
-	c.SysProcAttr = &syscall.SysProcAttr{}
-	c.SysProcAttr.Credential = &syscall.Credential{
-		Uid:    uint32(user.Uid()),
-		Gid:    uint32(user.Gid()),
-		Groups: []uint32{uint32(user.Gid())},
+	if curUser.Uid == "0" { //remove check (for testing purposes)
+		c.SysProcAttr = &syscall.SysProcAttr{}
+		c.SysProcAttr.Credential = &syscall.Credential{
+			Uid:    uint32(user.Uid()),
+			Gid:    uint32(user.Gid()),
+			Groups: []uint32{uint32(user.Gid())},
+		}
 	}
 
 	//TODO: dynamically generate sock address and put it as an argument to child process
@@ -415,32 +420,54 @@ func (sess *hopSession) RemoteServer(ch *tubes.Reliable, arg string) {
 	defer uds.Close()
 	logrus.Infof("address: %v", uds.Addr())
 
-	err = c.Start()
+	//control socket
+	control, err := net.Listen("unix", "@control")
 	if err != nil {
-		logrus.Error("error starting child process")
+		logrus.Error("error listening on control socket")
 		ch.Write([]byte{netproxy.NpcDen})
 	}
+	defer uds.Close()
+	logrus.Infof("control address: %v", control.Addr())
+
+	err = c.Start()
+	if err != nil {
+		logrus.Error("error starting child process: ", err)
+		ch.Write([]byte{netproxy.NpcDen})
+	}
+
+	controlChan, _ := control.Accept()
+	sess.controlChannels = append(sess.controlChannels, controlChan)
+	logrus.Info("S: accepted Control channel")
+
+	logrus.Info("started child process")
 	ch.Write([]byte{netproxy.NpcConf})
+	ch.Close()
 
 	for {
 		udsconn, err := uds.Accept() //TODO: add some timer so if child can't connect for some reason it doesn't hang forever
+		wg := sync.WaitGroup{}
 		if err != nil {
 			logrus.Error("error accepting uds conn")
+			return
 		}
-		logrus.Info("got second conn")
-		buf := make([]byte, 1)
-		_, err = udsconn.Read(buf)
+		t, err := sess.tubeMuxer.CreateTube(RemotePFTube)
 		if err != nil {
-			logrus.Error("error reading from uds conn")
-			ch.Write([]byte{netproxy.NpcDen})
+			logrus.Error("error creating tube", err)
+			return
 		}
-		if buf[0] == netproxy.NpcConf {
-			logrus.Info("got conf")
-			go func() {
-				io.Copy(os.Stdout, udsconn)
-				udsconn.Close()
-			}()
-		}
+		logrus.Info("S: started new RPF tube")
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			n, _ := io.Copy(udsconn, t)
+			logrus.Infof("Copied %v bytes from t to udsconn", n)
+			udsconn.Close()
+		}()
+		n, _ := io.Copy(t, udsconn)
+		logrus.Infof("Copied %v bytes from udsconn to t", n)
+		t.Close()
+		wg.Wait()
+
 	}
 
 }
