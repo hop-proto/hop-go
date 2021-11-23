@@ -489,16 +489,57 @@ func TestRemotePF(t *testing.T) {
 		assert.NilError(t, err)
 		liconn, err := li.Accept()
 		assert.NilError(t, err)
-		var buf [38]byte
+		buf := make([]byte, 39)
 		n := 0
-		for n < 38 {
+		for n < 39 {
 			x, err := liconn.Read(buf[n:])
 			logrus.Infof("listening program read %v bytes", x)
 			assert.NilError(t, err)
 			n += x
 		}
 		logrus.Info("program listening on target got: ", string(buf[:]))
+		if string(buf) == "Howdy! This is connection number two./n" {
+			logrus.Info("writing Hello")
+			liconn.Write([]byte("Hello/n"))
+		}
 		liconn.Close()
+
+		logrus.Info("expecting second conn")
+		liconn, err = li.Accept()
+		assert.NilError(t, err)
+		n = 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on target got: ", string(buf[:]))
+		if string(buf) == "Howdy! This is connection number two./n" {
+			logrus.Info("writing Hello")
+			liconn.Write([]byte("Hello/n"))
+		}
+		liconn.Close()
+	}()
+
+	go func() {
+		logrus.Info("attempting to dial port ", parts[0])
+		ctconn, err := net.Dial("tcp", ":"+parts[0])
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("Howdy! This is connection number two./n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn. Waiting for response...", n)
+		buf := make([]byte, 7)
+		n = 0
+		for n < 7 {
+			x, err := ctconn.Read(buf[n:])
+			logrus.Infof("response read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("2nd tcp initiator got: ", string(buf))
+		err = ctconn.Close()
+		assert.NilError(t, err)
 	}()
 
 	go func() {
@@ -506,7 +547,7 @@ func TestRemotePF(t *testing.T) {
 		logrus.Info("attempting to dial port ", parts[0])
 		ctconn, err := net.Dial("tcp", ":"+parts[0])
 		assert.NilError(t, err)
-		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn.\n"))
+		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn./n"))
 		assert.NilError(t, err)
 		logrus.Infof("sent %v bytes over tcpconn", n)
 		err = ctconn.Close()
@@ -514,6 +555,14 @@ func TestRemotePF(t *testing.T) {
 	}()
 
 	crft, err := client.TubeMuxer.Accept()
+	assert.NilError(t, err)
+	assert.Equal(t, crft.Type(), RemotePFTube)
+
+	err = client.handleRemote(crft)
+	assert.NilError(t, err)
+	logrus.Info("First tube done")
+
+	crft, err = client.TubeMuxer.Accept()
 	assert.NilError(t, err)
 	assert.Equal(t, crft.Type(), RemotePFTube)
 

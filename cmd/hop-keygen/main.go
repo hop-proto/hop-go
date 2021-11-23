@@ -10,7 +10,7 @@ import (
 func main() { //add a key
 	var fs flag.FlagSet
 
-	dir := "/.hop/key"
+	dir := "/.hop"
 	fs.StringVar(&dir, "d", dir, "homedir + dir is dir where key stored")
 
 	filename := "key"

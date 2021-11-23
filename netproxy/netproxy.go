@@ -69,6 +69,11 @@ func Start(npTube *tubes.Reliable, arg string, t byte) error {
 		return errors.New("denied")
 	}
 	logrus.Info("Receieved NPC Conf")
+	// exit := make([]byte, 1) //TODO(baumanl): replace this with a better soln that doesn't block
+	// _, err = npTube.Read(exit) //wait for server to say if there is a problem
+	// if err != nil {
+	// 	return err
+	// }
 	return nil
 }
 

@@ -18,7 +18,12 @@ build: ## compile
 build:
 	go build ./...
 
+.PHONY: install
+install: ## install rpf
+install:
+	go install ./cmd/remotePF
+
 .PHONY: test
 test: ## test
 test:
-	go test ./... -timeout 60s
+	go test ./... -timeout 120s

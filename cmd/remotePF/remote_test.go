@@ -51,7 +51,8 @@ func TestRemote(t *testing.T) {
 	defer uds.Close()
 	logrus.Infof("control address: %v", control.Addr())
 
-	c.Start()
+	err = c.Start()
+	assert.NilError(t, err)
 
 	controlChan, _ := control.Accept() //wait for the child process to start listening for TCP conns and connect to control
 

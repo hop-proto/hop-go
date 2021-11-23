@@ -233,6 +233,7 @@ func (c *HopClient) userAuthorization() error {
 // reroutes remote port forwarding connections to the appropriate destination
 // TODO(baumanl): add ability to handle multiple PF relationships
 func (c *HopClient) handleRemote(tube *tubes.Reliable) error {
+	defer tube.Close()
 	//handle another remote pf conn (rewire to dest)
 	logrus.Info("Doing remote with: ", c.Config.RemoteArg)
 	parts := strings.Split(c.Config.RemoteArg, ":")
@@ -428,7 +429,7 @@ func (c *HopClient) principal(tube *tubes.Reliable) {
 
 //start session between principal and target proxied through the delegate
 func (c *HopClient) setupRemoteSession(req *authgrants.Intent) (*HopClient, error) {
-	logrus.Debug("C: USER CONFIRMED FIRST INTENT_REQUEST. CONTACTING S2...")
+	logrus.Info("C: USER CONFIRMED FIRST INTENT_REQUEST. CONTACTING S2...")
 
 	//create netproxy with server
 	npt, e := c.TubeMuxer.CreateTube(NetProxyTube)

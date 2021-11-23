@@ -441,7 +441,10 @@ func (sess *hopSession) RemoteServer(ch *tubes.Reliable, arg string) {
 
 	logrus.Info("started child process")
 	ch.Write([]byte{netproxy.NpcConf})
-	ch.Close()
+	defer func() {
+		ch.Write([]byte{netproxy.NpcDen}) //tell it something went wrong
+		ch.Close()
+	}()
 
 	for {
 		udsconn, err := uds.Accept() //TODO: add some timer so if child can't connect for some reason it doesn't hang forever
@@ -450,6 +453,7 @@ func (sess *hopSession) RemoteServer(ch *tubes.Reliable, arg string) {
 			logrus.Error("error accepting uds conn")
 			return
 		}
+		logrus.Info("server got a uds conn from child")
 		t, err := sess.tubeMuxer.CreateTube(RemotePFTube)
 		if err != nil {
 			logrus.Error("error creating tube", err)
@@ -467,7 +471,6 @@ func (sess *hopSession) RemoteServer(ch *tubes.Reliable, arg string) {
 		logrus.Infof("Copied %v bytes from udsconn to t", n)
 		t.Close()
 		wg.Wait()
-
 	}
 
 }
