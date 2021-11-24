@@ -71,16 +71,41 @@ func TestClientCertificates(t *testing.T) {
 		}
 	}
 
+	selfSignClientLeaf := func(t *testing.T, names ...certs.Name) ClientConfig {
+		clientLeafIdentity := certs.Identity{
+			PublicKey: clientKey.Public,
+			Names:     names,
+		}
+		clientLeaf, err := certs.SelfSignLeaf(&clientLeafIdentity)
+		assert.NilError(t, err)
+
+		return ClientConfig{
+			KeyPair:      clientKey,
+			Leaf:         clientLeaf,
+			Intermediate: clientIntermediate,
+			Verify:       *verify,
+		}
+	}
+
 	assertHandshake := func(t *testing.T, clientConfig ClientConfig, server *Server) {
 		client, err := Dial("udp", server.ListenAddress().String(), clientConfig)
 		assert.NilError(t, err)
 
-		assert.NilError(t, err)
 		err = client.Handshake()
 		assert.NilError(t, err)
 		err = client.Close()
 		assert.NilError(t, err)
 		err = server.Close()
+		assert.NilError(t, err)
+	}
+
+	assertNoHandshake := func(t *testing.T, clientConfig ClientConfig, server *Server) {
+		client, err := Dial("udp", server.ListenAddress().String(), clientConfig)
+		assert.NilError(t, err)
+
+		err = client.Handshake()
+		assert.Check(t, err != nil)
+		err = client.Close()
 		assert.NilError(t, err)
 	}
 
@@ -108,8 +133,34 @@ func TestClientCertificates(t *testing.T) {
 
 	t.Run("name with chain auth", func(t *testing.T) {
 		clientConfig := issueClientLeaf(t, certs.DNSName("hop.computer"))
-		server := startServer(t, nil)
+		verify := &VerifyConfig{
+			Store: clientRootStore,
+		}
+		server := startServer(t, verify)
 		assertHandshake(t, clientConfig, server)
+	})
+
+	t.Run("username with bad signature", func(t *testing.T) {
+		clientConfig := issueClientLeaf(t, certs.RawStringName("username"))
+		clientConfig.Leaf.Signature[8] ^= 0xFF
+		verify := &VerifyConfig{
+			Store: clientRootStore,
+		}
+		server := startServer(t, verify)
+		assertNoHandshake(t, clientConfig, server)
+	})
+
+	t.Run("self-signed with username when expecting chain", func(t *testing.T) {
+		clientConfig := selfSignClientLeaf(t, certs.RawStringName("username"))
+		server := startServer(t, verify)
+		assertNoHandshake(t, clientConfig, server)
+	})
+
+	t.Run("self-signed with no name when expecting chain", func(t *testing.T) {
+		var names []certs.Name
+		clientConfig := selfSignClientLeaf(t, names...)
+		server := startServer(t, verify)
+		assertNoHandshake(t, clientConfig, server)
 	})
 
 }

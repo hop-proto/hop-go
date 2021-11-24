@@ -358,11 +358,9 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	pos += SessionIDLen
 	encCerts := x[:encCertsLen]
 	rawLeaf, rawIntermediate, err := DecryptCertificates(&hs.duplex, encCerts)
-	logrus.Error("FUCK")
 	if err != nil {
 		return pos, nil, err
 	}
-	logrus.Error("FUCK2")
 	x = x[encCertsLen:]
 	pos += encCertsLen
 	hs.duplex.Squeeze(hs.macBuf[:])
@@ -376,15 +374,14 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	// Parse certificates
 	opts := certs.VerifyOptions{}
 	if hs.certVerify != nil {
+		logrus.Error("YAY")
 		opts.Name = hs.certVerify.Name
 	}
 	leaf := certs.Certificate{}
-	logrus.Error("FUCK3")
 	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
 	if err != nil {
 		return pos, nil, err
 	}
-	logrus.Error("FUCK4")
 	if int(leafLen) != len(rawLeaf) {
 		return pos, nil, errors.New("extra bytes after leaf certificate")
 	}
