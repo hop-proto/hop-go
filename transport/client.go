@@ -122,6 +122,7 @@ func (c *Client) clientHandshakeLocked() error {
 	if err != nil {
 		return err
 	}
+	c.hs.static = c.config.KeyPair
 	c.hs.certVerify = &c.config.Verify
 	c.hs.duplex.Absorb([]byte(ProtocolName))
 

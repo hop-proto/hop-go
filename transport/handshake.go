@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"net"
 
 	"zmap.io/portal/certs"
@@ -447,8 +448,11 @@ func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
 	if err != nil {
 		return HeaderLen + SessionIDLen, err
 	}
-	hs.duplex.Encrypt(b[:encCertLen], encCerts)
-	b = b[DHLen:]
+	if len(encCerts) != encCertLen {
+		return HeaderLen + SessionIDLen, fmt.Errorf("certificates encrypted to unexpected length %d, expected %d", len(encCerts), encCertLen)
+	}
+	copy(b, encCerts)
+	b = b[encCertLen:]
 
 	// Tag
 	hs.duplex.Squeeze(b[:MacLen])
@@ -458,7 +462,7 @@ func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
 	hs.se, err = hs.static.DH(hs.remoteEphemeral[:])
 	if err != nil {
 		logrus.Debugf("client: unable to calculate se: %s", err)
-		return HeaderLen + SessionIDLen + DHLen + MacLen, err
+		return HeaderLen + SessionIDLen + encCertLen + MacLen, err
 	}
 	logrus.Debugf("client: se: %x", hs.se)
 	hs.duplex.Absorb(hs.se)
