@@ -127,6 +127,17 @@ func (c *HopClient) Start() error {
 	return nil
 }
 
+//Wait blocks until the client has finished (usually used when waiting for a session tied to cmd/shell to finish)
+func (c *HopClient) Wait() {
+	c.Primarywg.Wait()
+}
+
+//Close explicitly closes down hop session (usually used after PF is down and can be terminated)
+func (c *HopClient) Close() error {
+	panic("not implemented")
+	//close all remote and local port forwarding relationships
+}
+
 //LoadKeys reads keys from provided file location and stores them in sess.Config.KeyPair
 func (c *HopClient) LoadKeys(keypath string) error {
 	logrus.Infof("C: Using key-file at %v for auth.", keypath)

@@ -136,14 +136,14 @@ func (sess *hopSession) start() {
 		//TODO(baumanl): Check closing behavior. how to end session completely
 	}
 
-	logrus.Info("STARTING CHANNEL LOOP")
+	logrus.Info("STARTING TUBE LOOP")
 	go func() {
 		for {
-			serverChan, err := sess.tubeMuxer.Accept()
+			tube, err := sess.tubeMuxer.Accept()
 			if err != nil {
-				logrus.Fatalf("S: ERROR ACCEPTING CHANNEL: %v", err)
+				logrus.Fatalf("S: ERROR ACCEPTING TUBE: %v", err)
 			}
-			sess.tubeQueue <- serverChan
+			sess.tubeQueue <- tube
 		}
 	}()
 
@@ -153,22 +153,21 @@ func (sess *hopSession) start() {
 			logrus.Info("Closing everything")
 			sess.close()
 			return
-		case serverChan := <-sess.tubeQueue:
-			logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", serverChan.Type())
-			switch serverChan.Type() {
+		case tube := <-sess.tubeQueue:
+			logrus.Infof("S: ACCEPTED NEW TUBE (%v)", tube.Type())
+			switch tube.Type() {
 			case ExecTube:
-				go sess.startCodex(serverChan)
+				go sess.startCodex(tube)
 			case AuthGrantTube:
-				go sess.handleAgc(serverChan)
+				go sess.handleAgc(tube)
 			case NetProxyTube:
-				//TODO(baumanl): different tube types for local/remote/ag forwarding?
-				go sess.startNetProxy(serverChan)
+				go sess.startNetProxy(tube)
 			case RemotePFTube:
-				go sess.startRemote(serverChan)
+				go sess.startRemote(tube)
 			case LocalPFTube:
-				go sess.startLocal(serverChan)
+				go sess.startLocal(tube)
 			default:
-				serverChan.Close()
+				tube.Close() //Close unrecognized tube types
 			}
 		}
 
@@ -182,7 +181,7 @@ func (sess *hopSession) close() error {
 	}
 
 	sess.tubeMuxer.Stop()
-	//err2 = sess.transportConn.Close() (not implemented yet)
+	//err2 = sess.transportConn.Close() //(not implemented yet)
 	if err != nil {
 		return err
 	}
@@ -242,8 +241,8 @@ func (sess *hopSession) checkAction(action string, actionType byte) error {
 
 }
 
-func (sess *hopSession) startCodex(ch *tubes.Reliable) {
-	cmd, shell, _ := codex.GetCmd(ch)
+func (sess *hopSession) startCodex(tube *tubes.Reliable) {
+	cmd, shell, _ := codex.GetCmd(tube)
 	logrus.Info("CMD: ", cmd)
 	if !sess.isPrincipal {
 		err := sess.checkAction(cmd, authgrants.CommandAction)
@@ -252,7 +251,7 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 		}
 		if err != nil {
 			logrus.Error(err)
-			codex.SendFailure(ch, err)
+			codex.SendFailure(tube, err)
 			return
 		}
 	}
@@ -260,7 +259,7 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 	if err != nil {
 		err := errors.New("issue loading /etc/passwd")
 		logrus.Error(err)
-		codex.SendFailure(ch, err)
+		codex.SendFailure(tube, err)
 		return
 	}
 	if user, ok := cache.LookupUserByName(sess.user); ok {
@@ -297,13 +296,13 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 		f, err := pty.Start(c)
 		if err != nil {
 			logrus.Errorf("S: error starting pty %v", err)
-			codex.SendFailure(ch, err)
+			codex.SendFailure(tube, err)
 			return
 		}
-		codex.SendSuccess(ch)
+		codex.SendSuccess(tube)
 		go func() {
 			c.Wait()
-			ch.Close()
+			tube.Close()
 			logrus.Info("closed chan")
 		}()
 
@@ -316,14 +315,14 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 		}
 		sess.server.m.Unlock()
 		go func() {
-			codex.Server(ch, f)
+			codex.Server(tube, f)
 			logrus.Info("signaling done")
 			sess.done <- 1
 		}()
 	} else {
 		err := errors.New("could not find entry for user " + sess.user)
 		logrus.Error(err)
-		codex.SendFailure(ch, err)
+		codex.SendFailure(tube, err)
 		return
 	}
 }
@@ -346,29 +345,60 @@ func (sess *hopSession) startLocal(ch *tubes.Reliable) {
 	sess.LocalServer(ch, string(arg))
 }
 
-func (sess *hopSession) startRemote(ch *tubes.Reliable) {
+func (sess *hopSession) startRemote(tube *tubes.Reliable) {
 	buf := make([]byte, 4)
-	ch.Read(buf)
+	tube.Read(buf)
 	l := binary.BigEndian.Uint32(buf[0:4])
 	arg := make([]byte, l)
-	ch.Read(arg)
+	tube.Read(arg)
 	//Check authorization
 	if !sess.isPrincipal {
 		err := sess.checkAction(string(arg), authgrants.RemotePFAction)
 		if err != nil {
 			logrus.Error(err)
-			ch.Write([]byte{netproxy.NpcDen})
+			tube.Write([]byte{netproxy.NpcDen})
 			return
 		}
 	}
-	sess.RemoteServer(ch, string(arg))
+	sess.RemoteServer(tube, string(arg))
 }
 
 func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
 	netproxy.Server(ch)
 }
 
-func (sess *hopSession) RemoteServer(ch *tubes.Reliable, arg string) {
+/*
+SSH doc on -R option
+     -R [bind_address:]port:host:hostport
+     -R [bind_address:]port:local_socket
+     -R remote_socket:host:hostport
+     -R [bind_address:]port:local_socket
+     -R remote_socket:host:hostport
+     -R remote_socket:local_socket
+     -R [bind_address:]port
+             Specifies that connections to the given TCP port or Unix socket on the remote (server) host are to be
+             forwarded to the local side.
+
+             This works by allocating a socket to listen to either a TCP port or to a Unix socket on the remote side.
+             Whenever a connection is made to this port or Unix socket, the connection is forwarded over the secure
+             channel, and a connection is made from the local machine to either an explicit destination specified by
+             host port hostport, or local_socket, or, if no explicit destina tion was specified, ssh will act as a
+             SOCKS 4/5 proxy and forward connections to the destinations requested by the remote SOCKS client.
+
+             Port forwardings can also be specified in the configuration file.  Privileged ports can be forwarded
+             only when logging in as root on the remote machine.  IPv6 addresses can be specified by enclosing the
+             address in square brackets.
+
+             By default, TCP listening sockets on the server will be bound to the loopback interface only.  This may
+             be overridden by specifying a bind_address.  An empty bind_address, or the address ‘*’, indicates that
+             the remote socket should listen on all interfaces.  Specifying a remote bind_address will only succeed
+             if the server's GatewayPorts option is enabled (see sshd_config(5)).
+
+             If the port argument is ‘0’, the listen port will be dynamically allocated on the server and reported to
+             the client at run time.  When used together with -O forward the allocated port will be printed to the
+             standard output.
+*/
+func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
 	sock := "@remotesock"
 	//RemoteServer starts listening on given port and pipes the traffic back over the tube
 	parts := strings.Split(arg, ":") //assuming port:host:hostport
@@ -376,13 +406,13 @@ func (sess *hopSession) RemoteServer(ch *tubes.Reliable, arg string) {
 	curUser, err := user.Current()
 	if err != nil {
 		logrus.Error("couldn't find current user")
-		ch.Write([]byte{netproxy.NpcDen})
+		tube.Write([]byte{netproxy.NpcDen})
 	}
 	logrus.Infof("Currently running as: %v. With UID: %v GID: %v", curUser.Username, curUser.Uid, curUser.Gid)
 	cache, err := etcpwdparse.NewLoadedEtcPasswdCache()
 	if err != nil {
 		logrus.Error("couln't load passwd cache")
-		ch.Write([]byte{netproxy.NpcDen})
+		tube.Write([]byte{netproxy.NpcDen})
 	}
 	args := []string{"remotePF", parts[0]}
 	c := exec.Command(args[0], args[1:]...)
@@ -390,7 +420,7 @@ func (sess *hopSession) RemoteServer(ch *tubes.Reliable, arg string) {
 	user, ok := cache.LookupUserByName(sess.user)
 	if !ok {
 		logrus.Error("couldn't find session user")
-		ch.Write([]byte{netproxy.NpcDen})
+		tube.Write([]byte{netproxy.NpcDen})
 	}
 	if curUser.Uid == "0" { //remove check (for testing purposes)
 		c.SysProcAttr = &syscall.SysProcAttr{}
@@ -407,7 +437,7 @@ func (sess *hopSession) RemoteServer(ch *tubes.Reliable, arg string) {
 	err = os.RemoveAll(sock)
 	if err != nil {
 		logrus.Error("couln't remove other process listening on UDS socket")
-		ch.Write([]byte{netproxy.NpcDen})
+		tube.Write([]byte{netproxy.NpcDen})
 	}
 
 	//set socket options and start listening to socket
@@ -415,7 +445,7 @@ func (sess *hopSession) RemoteServer(ch *tubes.Reliable, arg string) {
 	uds, err := net.Listen("unix", sock)
 	if err != nil {
 		logrus.Error("error listening on socket")
-		ch.Write([]byte{netproxy.NpcDen})
+		tube.Write([]byte{netproxy.NpcDen})
 	}
 	defer uds.Close()
 	logrus.Infof("address: %v", uds.Addr())
@@ -424,7 +454,7 @@ func (sess *hopSession) RemoteServer(ch *tubes.Reliable, arg string) {
 	control, err := net.Listen("unix", "@control")
 	if err != nil {
 		logrus.Error("error listening on control socket")
-		ch.Write([]byte{netproxy.NpcDen})
+		tube.Write([]byte{netproxy.NpcDen})
 	}
 	defer uds.Close()
 	logrus.Infof("control address: %v", control.Addr())
@@ -432,7 +462,7 @@ func (sess *hopSession) RemoteServer(ch *tubes.Reliable, arg string) {
 	err = c.Start()
 	if err != nil {
 		logrus.Error("error starting child process: ", err)
-		ch.Write([]byte{netproxy.NpcDen})
+		tube.Write([]byte{netproxy.NpcDen})
 	}
 
 	controlChan, _ := control.Accept()
@@ -440,10 +470,10 @@ func (sess *hopSession) RemoteServer(ch *tubes.Reliable, arg string) {
 	logrus.Info("S: accepted Control channel")
 
 	logrus.Info("started child process")
-	ch.Write([]byte{netproxy.NpcConf})
+	tube.Write([]byte{netproxy.NpcConf})
 	defer func() {
-		ch.Write([]byte{netproxy.NpcDen}) //tell it something went wrong
-		ch.Close()
+		tube.Write([]byte{netproxy.NpcDen}) //tell it something went wrong
+		tube.Close()
 	}()
 
 	for {
@@ -475,6 +505,61 @@ func (sess *hopSession) RemoteServer(ch *tubes.Reliable, arg string) {
 
 }
 
-func (sess *hopSession) LocalServer(ch *tubes.Reliable, arg string) {
+/*
+-L [bind_address:]port:host:hostport
+     -L [bind_address:]port:remote_socket
+     -L local_socket:host:hostport
+     -L local_socket:remote_socket
+             Specifies that connections to the given TCP port or Unix socket on the local (client) host are to be
+             forwarded to the given host and port, or Unix socket, on the remote side.  This works by allocating a
+             socket to listen to either a TCP port on the local side, optionally bound to the specified bind_address,
+             or to a Unix socket.  Whenever a connection is made to the local port or socket, the connection is for‐
+             warded over the secure channel, and a connection is made to either host port hostport, or the Unix
+             socket remote_socket, from the remote machine.
 
+             Port forwardings can also be specified in the configuration file.  Only the superuser can forward privi‐
+             leged ports.  IPv6 addresses can be specified by enclosing the address in square brackets.
+
+             By default, the local port is bound in accordance with the GatewayPorts setting.  However, an explicit
+             bind_address may be used to bind the connection to a specific address.  The bind_address of “localhost”
+             indicates that the listening port be bound for local use only, while an empty address or ‘*’ indicates
+             that the port should be available from all interfaces.
+*/
+
+//LocalServer starts a TCP Conn with remote addr and proxies traffic from ch -> tcp and tcp -> ch
+func (sess *hopSession) LocalServer(tube *tubes.Reliable, arg string) {
+	//dest := fromBytes(init)
+	//TODO: more flexible parsing of arg
+	parts := strings.Split(arg, ":") //assuming port:host:hostport
+	addr := net.JoinHostPort(parts[1], parts[2])
+	if _, err := net.LookupAddr(addr); err != nil {
+		//Couldn't resolve address with local resolver
+		h, p, e := net.SplitHostPort(addr)
+		if e != nil {
+			logrus.Error(e)
+			tube.Write([]byte{netproxy.NpcDen})
+			return
+		}
+		if ip, ok := hostToIPAddr[h]; ok {
+			addr = ip + ":" + p
+		}
+	}
+	logrus.Infof("dialing dest: %v", addr)
+	tconn, err := net.Dial("tcp", addr)
+	if err != nil {
+		logrus.Errorf("C: error dialing server: %v", err)
+		tube.Write([]byte{netproxy.NpcDen})
+		return
+	}
+	defer tconn.Close()
+	logrus.Info("connected to: ", arg)
+	tube.Write([]byte{netproxy.NpcConf})
+	logrus.Infof("wrote confirmation that NPC ready")
+	//could net.Pipe() be useful here?
+	go func() {
+		//Handles all traffic from principal to server 2
+		io.Copy(tconn, tube)
+	}()
+	//handles all traffic from server 2 back to principal
+	io.Copy(tube, tconn)
 }

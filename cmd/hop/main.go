@@ -117,5 +117,5 @@ func main() {
 	}
 	//handle incoming tubes
 	go client.HandleTubes()
-	client.Primarywg.Wait() //client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
+	client.Wait() //client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
 }
