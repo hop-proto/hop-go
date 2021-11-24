@@ -33,7 +33,7 @@ type Server struct {
 	handshakeBuf []byte
 
 	udpConn *net.UDPConn
-	config  *ServerConfig
+	config  ServerConfig
 
 	closed atomicBool
 
@@ -169,7 +169,7 @@ func (s *Server) readPacket() error {
 			logrus.Debug("client ack had extra data")
 			return ErrInvalidMessage
 		}
-		// TODO(dadrian): Don't use .String() for this
+		hs.certVerify = s.config.ClientVerify
 		if !s.setHandshakeState(addr, hs) {
 			logrus.Debugf("server: already have handshake in progress with %s", addr.String())
 			return ErrUnexpectedMessage
@@ -581,6 +581,11 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 	}
 }
 
+// ListenAddress returns the net.UDPAddr used by the underlying connection.
+func (s *Server) ListenAddress() net.Addr {
+	return s.udpConn.LocalAddr()
+}
+
 // Close stops the server, causing Serve() to return.
 //
 // TODO(dadrian): What does it do to writes?
@@ -592,7 +597,7 @@ func (s *Server) Close() error {
 
 // NewServer returns a Server listening on the provided UDP connection. The
 // returned Server object is a valid net.Listener.
-func NewServer(conn *net.UDPConn, config *ServerConfig) (*Server, error) {
+func NewServer(conn *net.UDPConn, config ServerConfig) (*Server, error) {
 	if config.KeyPair == nil {
 		return nil, errors.New("config.KeyPair must be set")
 	}

@@ -42,7 +42,7 @@ func TestMultipleHandshakes(t *testing.T) {
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
 	serverConfig, verifyConfig := newTestServerConfig(t)
-	s, err := NewServer(pc.(*net.UDPConn), serverConfig)
+	s, err := NewServer(pc.(*net.UDPConn), *serverConfig)
 	assert.NilError(t, err)
 	wg := sync.WaitGroup{}
 	go func() {
@@ -97,7 +97,7 @@ func TestServerRead(t *testing.T) {
 	config.StartingReadTimeout = 10 * time.Second
 	config.MaxPendingConnections = 1
 	config.MaxBufferedPacketsPerConnection = 5
-	server, err := NewServer(pc.(*net.UDPConn), config)
+	server, err := NewServer(pc.(*net.UDPConn), *config)
 	assert.NilError(t, err)
 	go func() {
 		server.Serve()
@@ -171,7 +171,7 @@ func TestServerWrite(t *testing.T) {
 	config.StartingReadTimeout = 10 * time.Second
 	config.MaxPendingConnections = 1
 	config.MaxBufferedPacketsPerConnection = 5
-	server, err := NewServer(pc.(*net.UDPConn), config)
+	server, err := NewServer(pc.(*net.UDPConn), *config)
 	assert.NilError(t, err)
 	go func() {
 		server.Serve()

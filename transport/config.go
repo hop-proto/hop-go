@@ -58,6 +58,10 @@ type ServerConfig struct {
 	KeyPair      *keys.X25519KeyPair
 	Certificate  *certs.Certificate
 	Intermediate *certs.Certificate
+
+	ClientVerify *VerifyConfig
+
+	// TODO(dadrian): How does this change with Names?
 }
 
 func (c *ServerConfig) maxPendingConnections() int {

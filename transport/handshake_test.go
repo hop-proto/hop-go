@@ -18,7 +18,7 @@ func TestClientServerCompatibilityHandshake(t *testing.T) {
 	assert.NilError(t, err)
 	udpC := pc.(*net.UDPConn)
 	serverConfig, verifyConfig := newTestServerConfig(t)
-	s, err := NewServer(udpC, serverConfig)
+	s, err := NewServer(udpC, *serverConfig)
 	assert.NilError(t, err)
 	go s.Serve()
 	keyPair, err := keys.ReadDHKeyFromPEMFile("testdata/leaf-key.pem")
