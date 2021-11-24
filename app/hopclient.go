@@ -42,8 +42,8 @@ type HopClientConfig struct {
 	Username      string
 	Hostname      string
 	Port          string
-	LocalArg      string
-	RemoteArg     string
+	LocalArgs     []string
+	RemoteArgs    []string
 	Cmd           string
 }
 
@@ -182,21 +182,25 @@ func (c *HopClient) getAuthorization() error {
 		}
 	}
 	if c.Config.LocalForward { //local forwarding
-		t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
-			c.Config.Port, authgrants.LocalPFAction, c.Config.LocalArg)
-		if e == nil {
-			logrus.Infof("C: Principal approved request to do local forwarding. Deadline: %v", t)
-		} else if e != authgrants.ErrIntentDenied {
-			return e
+		for _, v := range c.Config.LocalArgs {
+			t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+				c.Config.Port, authgrants.LocalPFAction, v)
+			if e == nil {
+				logrus.Infof("C: Principal approved request to do local forwarding for %v. Deadline: %v", v, t)
+			} else if e != authgrants.ErrIntentDenied {
+				return e
+			}
 		}
 	}
 	if c.Config.RemoteForward { //remote forwarding
-		t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
-			c.Config.Port, authgrants.RemotePFAction, c.Config.RemoteArg)
-		if e == nil {
-			logrus.Infof("C: Principal approved request to do remote forwarding. Deadline: %v", t)
-		} else if e != authgrants.ErrIntentDenied {
-			return e
+		for _, v := range c.Config.RemoteArgs {
+			t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+				c.Config.Port, authgrants.RemotePFAction, v)
+			if e == nil {
+				logrus.Infof("C: Principal approved request to do remote forwarding for %v. Deadline: %v", v, t)
+			} else if e != authgrants.ErrIntentDenied {
+				return e
+			}
 		}
 	}
 	return nil
@@ -246,8 +250,8 @@ func (c *HopClient) userAuthorization() error {
 func (c *HopClient) handleRemote(tube *tubes.Reliable) error {
 	defer tube.Close()
 	//handle another remote pf conn (rewire to dest)
-	logrus.Info("Doing remote with: ", c.Config.RemoteArg)
-	parts := strings.Split(c.Config.RemoteArg, ":")
+	logrus.Info("Doing remote with: ", c.Config.RemoteArgs[0])
+	parts := strings.Split(c.Config.RemoteArgs[0], ":")
 	if len(parts) != 3 {
 		logrus.Error("remote port forwarding currently only supported with port:host:hostport format")
 		return ErrInvalidPortForwardingArgs
@@ -280,8 +284,8 @@ func (c *HopClient) handleRemote(tube *tubes.Reliable) error {
 
 // client initiates remote port forwarding and sends the server the info it needs
 func (c *HopClient) remoteForward() error {
-	logrus.Info("Setting up remote with: ", c.Config.RemoteArg)
-	parts := strings.Split(c.Config.RemoteArg, ":")
+	logrus.Info("Setting up remote with: ", c.Config.RemoteArgs[0])
+	parts := strings.Split(c.Config.RemoteArgs[0], ":")
 	if len(parts) != 3 {
 		logrus.Error("remote port forwarding currently only supported with port:host:hostport format")
 		return ErrInvalidPortForwardingArgs
@@ -291,13 +295,13 @@ func (c *HopClient) remoteForward() error {
 	if e != nil {
 		return e
 	}
-	e = netproxy.Start(npt, c.Config.RemoteArg, netproxy.Remote)
+	e = netproxy.Start(npt, c.Config.RemoteArgs[0], netproxy.Remote)
 	return e
 }
 
 func (c *HopClient) localForward() error {
-	logrus.Info("Doing local with: ", c.Config.LocalArg)
-	parts := strings.Split(c.Config.LocalArg, ":")
+	logrus.Info("Doing local with: ", c.Config.LocalArgs[0])
+	parts := strings.Split(c.Config.LocalArgs[0], ":")
 	if len(parts) != 3 {
 		logrus.Error("local port forwarding currently only supported with port:host:hostport format")
 		return ErrInvalidPortForwardingArgs
@@ -307,7 +311,7 @@ func (c *HopClient) localForward() error {
 	if e != nil {
 		return e
 	}
-	e = netproxy.Start(npt, c.Config.LocalArg, netproxy.Local)
+	e = netproxy.Start(npt, c.Config.LocalArgs[0], netproxy.Local)
 	if e != nil {
 		return e
 	}

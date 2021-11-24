@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -11,7 +12,7 @@ import (
 	"zmap.io/portal/app"
 )
 
-func main() {
+func configFromCmdLineFlags(args []string) (*app.HopClientConfig, error) {
 	_, verify := app.NewTestServerConfig(app.TestDataPathPrefixDef)
 	keypath, _ := os.UserHomeDir()
 	keypath += app.DefaultKeyPath
@@ -38,13 +39,13 @@ func main() {
 
 	fs.Func("R", "perform remote port forwarding", func(s string) error {
 		cConfig.RemoteForward = true
-		cConfig.RemoteArg = s
+		cConfig.RemoteArgs = append(cConfig.RemoteArgs, s)
 		return nil
 	})
 
 	fs.Func("L", "perform local port forwarding", func(s string) error {
 		cConfig.LocalForward = true
-		cConfig.LocalArg = s
+		cConfig.LocalArgs = append(cConfig.LocalArgs, s)
 		return nil
 	})
 
@@ -64,25 +65,25 @@ func main() {
 	//var runCmdInShell bool
 	// fs.BoolVar(&runCmdInShell, "s", false, "run specified command...")
 
-	err := fs.Parse(os.Args[1:])
+	err := fs.Parse(args)
 	if err != nil {
-		return
+		return nil, err
 	}
 	if fs.NArg() < 1 { //there needs to be an argument that is not a flag of the form [user@]host[:port]
-		return
+		return nil, fmt.Errorf("missing [user@]host[:port]")
 	}
 	hoststring := fs.Arg(0)
 	if fs.NArg() > 1 { //still flags after the hoststring that need to be parsed
 		err = fs.Parse(fs.Args()[1:])
 		if err != nil || fs.NArg() > 0 {
-			return
+			return nil, fmt.Errorf("incorrect arguments")
 		}
 	}
 
 	url, err := url.Parse("//" + hoststring) //double slashes necessary since there is never a scheme
 	if err != nil {
 		logrus.Error(err)
-		return
+		return nil, err
 	}
 
 	cConfig.Hostname = url.Hostname()
@@ -95,11 +96,19 @@ func main() {
 	if username == "" && cConfig.Username == "" { //if no username is entered use local client username
 		u, e := user.Current()
 		if e != nil {
-			return
+			return nil, err
 		}
 		cConfig.Username = u.Username
 	}
+	return cConfig, nil
+}
 
+func main() {
+	cConfig, err := configFromCmdLineFlags(os.Args[1:])
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
 	client, err := app.NewHopClient(cConfig)
 	if err != nil {
 		logrus.Error(err)
