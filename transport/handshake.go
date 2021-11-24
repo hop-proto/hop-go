@@ -14,22 +14,6 @@ import (
 	"zmap.io/portal/cyclist"
 )
 
-// MessageType is a single-byte-wide enum used as the first byte of every message. It can be used to differentiate message types.
-type MessageType byte
-
-// MessageType constants for each type of handshake and transport message.
-const (
-	MessageTypeClientHello MessageType = 0x01
-	MessageTypeServerHello MessageType = 0x02
-	MessageTypeClientAck   MessageType = 0x03
-	MessageTypeServerAuth  MessageType = 0x04
-	MessageTypeClientAuth  MessageType = 0x05
-	MessageTypeTransport   MessageType = 0x10
-)
-
-// IsHandshakeType returns true if the message type is part of the handshake, not the transport.
-func (mt MessageType) IsHandshakeType() bool { return (byte(mt) & byte(0x0F)) != 0 }
-
 // AddressHashKey returns a string suitable for use as a key in Golang map (e.g.
 // of handshakes) that identifies the remote address.
 func AddressHashKey(addr *net.UDPAddr) string {
