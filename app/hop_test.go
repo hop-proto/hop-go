@@ -21,7 +21,7 @@ var akMutex = sync.Mutex{}
 var portMutex = sync.Mutex{}
 
 //go tests run in parallel so each one needs to be on different ports
-var portNumbers = []string{"17778", "17779", "17780", "17781", "17782", "17783", "17784", "17785", "17786"}
+var portNumbers = []string{"17778", "17779", "17780", "17781", "17782", "17783", "17784", "17785", "17786", "17787", "17788", "17789", "17790"}
 
 func getPortNumber() string {
 	portMutex.Lock()
@@ -480,7 +480,7 @@ func TestRemotePF(t *testing.T) {
 
 	logrus.Info("simulating a tcp conn")
 
-	parts := strings.Split(clientConfig.RemoteArgs[0], ":") //assuming port:host:hostport
+	parts := strings.Split(client.Config.RemoteArgs[0], ":") //assuming port:host:hostport
 
 	go func() {
 		//simulate program listening on local (target port)
