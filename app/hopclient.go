@@ -88,34 +88,37 @@ func (c *HopClient) Connect() error {
 func (c *HopClient) Start() error {
 	//TODO(baumanl): fix how session duration tied to cmd duration or port forwarding duration depending on options
 	if c.Config.RemoteForward {
-		if c.Config.Headless {
-			c.Primarywg.Add(1)
-		}
-		go func() {
+		for _, v := range c.Config.RemoteArgs {
 			if c.Config.Headless {
-				defer c.Primarywg.Done()
+				c.Primarywg.Add(1)
 			}
-			e := c.remoteForward()
-			if e != nil {
-				logrus.Error(e)
-			}
+			go func(arg string) {
+				if c.Config.Headless {
+					defer c.Primarywg.Done()
+				}
+				e := c.remoteForward(arg)
+				if e != nil {
+					logrus.Error(e)
+				}
 
-		}()
+			}(v)
+		}
 	}
 	if c.Config.LocalForward {
-		if c.Config.Headless {
-			c.Primarywg.Add(1)
-		}
-		go func() {
+		for _, v := range c.Config.LocalArgs {
 			if c.Config.Headless {
-				defer c.Primarywg.Done()
+				c.Primarywg.Add(1)
 			}
-			e := c.localForward()
-			if e != nil {
-				logrus.Error(e)
-			}
-		}()
-
+			go func(arg string) {
+				if c.Config.Headless {
+					defer c.Primarywg.Done()
+				}
+				e := c.localForward(arg)
+				if e != nil {
+					logrus.Error(e)
+				}
+			}(v)
+		}
 	}
 	if !c.Config.Headless {
 		err := c.startExecTube()
@@ -283,9 +286,9 @@ func (c *HopClient) handleRemote(tube *tubes.Reliable) error {
 }
 
 // client initiates remote port forwarding and sends the server the info it needs
-func (c *HopClient) remoteForward() error {
-	logrus.Info("Setting up remote with: ", c.Config.RemoteArgs[0])
-	parts := strings.Split(c.Config.RemoteArgs[0], ":")
+func (c *HopClient) remoteForward(arg string) error {
+	logrus.Info("Setting up remote with: ", arg)
+	parts := strings.Split(arg, ":")
 	if len(parts) != 3 {
 		logrus.Error("remote port forwarding currently only supported with port:host:hostport format")
 		return ErrInvalidPortForwardingArgs
@@ -295,13 +298,13 @@ func (c *HopClient) remoteForward() error {
 	if e != nil {
 		return e
 	}
-	e = netproxy.Start(npt, c.Config.RemoteArgs[0], netproxy.Remote)
+	e = netproxy.Start(npt, arg, netproxy.Remote)
 	return e
 }
 
-func (c *HopClient) localForward() error {
-	logrus.Info("Doing local with: ", c.Config.LocalArgs[0])
-	parts := strings.Split(c.Config.LocalArgs[0], ":")
+func (c *HopClient) localForward(arg string) error {
+	logrus.Info("Doing local with: ", arg)
+	parts := strings.Split(arg, ":")
 	if len(parts) != 3 {
 		logrus.Error("local port forwarding currently only supported with port:host:hostport format")
 		return ErrInvalidPortForwardingArgs
@@ -311,7 +314,7 @@ func (c *HopClient) localForward() error {
 	if e != nil {
 		return e
 	}
-	e = netproxy.Start(npt, c.Config.LocalArgs[0], netproxy.Local)
+	e = netproxy.Start(npt, arg, netproxy.Local)
 	if e != nil {
 		return e
 	}

@@ -463,7 +463,7 @@ func TestRemotePF(t *testing.T) {
 		Username:      u.Username,
 		Principal:     true,
 		RemoteForward: true,
-		RemoteArg:     remoteport1 + ":localhost:" + remoteport2,
+		RemoteArgs:    []string{remoteport1 + ":localhost:" + remoteport2},
 		LocalForward:  false,
 		Cmd:           "",
 		Quiet:         false,
@@ -475,12 +475,12 @@ func TestRemotePF(t *testing.T) {
 	err = client.Connect()
 	assert.NilError(t, err)
 
-	err = client.remoteForward()
+	err = client.remoteForward(client.Config.RemoteArgs[0])
 	assert.NilError(t, err)
 
 	logrus.Info("simulating a tcp conn")
 
-	parts := strings.Split(clientConfig.RemoteArg, ":") //assuming port:host:hostport
+	parts := strings.Split(clientConfig.RemoteArgs[0], ":") //assuming port:host:hostport
 
 	go func() {
 		//simulate program listening on local (target port)
