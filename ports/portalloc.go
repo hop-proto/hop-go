@@ -1,13 +1,10 @@
+//Package ports gives functions for dynamically allocating ports for testing purposes
 package ports
 
 import (
 	"net"
 	"strconv"
-	"sync"
 )
-
-var Mutex = sync.Mutex{}
-var PortMutex = sync.Mutex{}
 
 //go tests run in parallel so each one needs to be on different ports
 //var LastPort = 17000

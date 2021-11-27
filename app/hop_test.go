@@ -42,9 +42,9 @@ func TestClientServer(t *testing.T) {
 	keyname := "key1"
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
-	ports.Mutex.Lock()
+	portMutex.Lock()
 	KeyGen("/.hop", keyname, true)
-	ports.Mutex.Unlock()
+	portMutex.Unlock()
 	port := getPort()
 	//start hop server
 	tconf, verify := NewTestServerConfig("../certs/")
@@ -90,9 +90,9 @@ func TestAuthgrantOneHop(t *testing.T) {
 	keyname := "key2"
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
-	ports.Mutex.Lock()
+	portMutex.Lock()
 	KeyGen("/.hop", keyname, true)
-	ports.Mutex.Unlock()
+	portMutex.Unlock()
 	port1 := getPort()
 	//start hop server 1
 	tconf, verify := NewTestServerConfig("../certs/")
@@ -238,9 +238,9 @@ func TestClientNotAuthorized(t *testing.T) {
 	keyname := "key3"
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//DON'T put public key in /home/user/.hop/authorized_keys
-	ports.Mutex.Lock()
+	portMutex.Lock()
 	KeyGen("/.hop", keyname, false)
-	ports.Mutex.Unlock()
+	portMutex.Unlock()
 	port1 := getPort()
 	//start hop server
 	tconf, verify := NewTestServerConfig("../certs/")
@@ -286,9 +286,9 @@ func TestAuthgrantTimeOut(t *testing.T) {
 	keyname := "key4"
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
-	ports.Mutex.Lock()
+	portMutex.Lock()
 	KeyGen("/.hop", keyname, true)
-	ports.Mutex.Unlock()
+	portMutex.Unlock()
 	port1 := getPort()
 	//start hop server 1
 	tconf, verify := NewTestServerConfig("../certs/")
@@ -435,9 +435,9 @@ func TestRemotePF(t *testing.T) {
 	keyname := "key7"
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
-	ports.Mutex.Lock()
+	portMutex.Lock()
 	KeyGen("/.hop", keyname, true)
-	ports.Mutex.Unlock()
+	portMutex.Unlock()
 	port := getPort()
 	//start hop server
 	tconf, verify := NewTestServerConfig("../certs/")
