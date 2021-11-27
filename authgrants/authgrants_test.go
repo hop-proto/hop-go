@@ -2,6 +2,7 @@ package authgrants
 
 import (
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -9,11 +10,24 @@ import (
 	"gotest.tools/assert"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/keys"
+	"zmap.io/portal/ports"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
 )
 
 const testDataPathPrefix = "../transport/"
+
+var start = 17000
+
+var portMutex = sync.Mutex{}
+
+func port() string {
+	portMutex.Lock()
+	port, next := ports.GetPortNumber(start)
+	start = next
+	portMutex.Unlock()
+	return port
+}
 
 //NewTestServerConfig populates server config and verify config with sample cert data
 func newTestServerConfig(testDataPathPrefix string) (*transport.ServerConfig, *transport.VerifyConfig) {
@@ -68,7 +82,8 @@ func getInsecureClientConfig() transport.ClientConfig {
 
 func TestIntentRequest(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
-	pktConn, err := net.ListenPacket("udp", "localhost:1234")
+	port := port()
+	pktConn, err := net.ListenPacket("udp", net.JoinHostPort("localhost", port))
 	assert.NilError(t, err)
 	// It's actually a UDP conn
 	udpConn := pktConn.(*net.UDPConn)

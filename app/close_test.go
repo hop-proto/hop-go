@@ -9,7 +9,7 @@ import (
 )
 
 func TestTransportServerClose(t *testing.T) {
-	port := getPortNumber()
+	port := getPort()
 	tconf, _ := NewTestServerConfig("../certs/")
 	serverConfig := &HopServerConfig{
 		Port:                     port,
@@ -33,7 +33,7 @@ func TestTransportServerClose(t *testing.T) {
 }
 
 func TestTransportClientClose(t *testing.T) {
-	port := getPortNumber()
+	port := getPort()
 	tconf, verifyConfig := NewTestServerConfig("../certs/")
 	serverConfig := &HopServerConfig{
 		Port:                     port,

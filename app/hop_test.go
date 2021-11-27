@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"os/user"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -13,22 +14,27 @@ import (
 	"gotest.tools/assert"
 	"zmap.io/portal/authgrants"
 	"zmap.io/portal/keys"
+	"zmap.io/portal/ports"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
 )
 
-var akMutex = sync.Mutex{}
+var start = 18000
+
 var portMutex = sync.Mutex{}
 
-//go tests run in parallel so each one needs to be on different ports
-var portNumbers = []string{"17778", "17779", "17780", "17781", "17782", "17783", "17784", "17785", "17786", "17787", "17788", "17789", "17790"}
-
-func getPortNumber() string {
+func getPort() string {
 	portMutex.Lock()
-	port := portNumbers[0]
-	portNumbers = portNumbers[1:]
+	port, next := ports.GetPortNumber(start)
+	start = next
 	portMutex.Unlock()
 	return port
+}
+func TestPortNumbers(t *testing.T) {
+	logrus.Info("starting. Init Port number: ", strconv.Itoa(start))
+	port1 := getPort()
+	logrus.Info("port1: ", port1)
+	logrus.Info("ended. Last Port number: ", strconv.Itoa(start))
 }
 
 func TestClientServer(t *testing.T) {
@@ -36,10 +42,10 @@ func TestClientServer(t *testing.T) {
 	keyname := "key1"
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
-	akMutex.Lock()
+	ports.Mutex.Lock()
 	KeyGen("/.hop", keyname, true)
-	akMutex.Unlock()
-	port := getPortNumber()
+	ports.Mutex.Unlock()
+	port := getPort()
 	//start hop server
 	tconf, verify := NewTestServerConfig("../certs/")
 	serverConfig := &HopServerConfig{
@@ -84,14 +90,14 @@ func TestAuthgrantOneHop(t *testing.T) {
 	keyname := "key2"
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
-	akMutex.Lock()
+	ports.Mutex.Lock()
 	KeyGen("/.hop", keyname, true)
-	akMutex.Unlock()
-	port := getPortNumber()
+	ports.Mutex.Unlock()
+	port1 := getPort()
 	//start hop server 1
 	tconf, verify := NewTestServerConfig("../certs/")
 	serverConfig := &HopServerConfig{
-		Port:                     port,
+		Port:                     port1,
 		Host:                     "localhost",
 		SockAddr:                 DefaultHopAuthSocket + "2",
 		TransportConfig:          tconf,
@@ -111,7 +117,7 @@ func TestAuthgrantOneHop(t *testing.T) {
 		SockAddr:      "",
 		Keypath:       keypath,
 		Hostname:      "127.0.0.1",
-		Port:          port,
+		Port:          port1,
 		Username:      u.Username,
 		Principal:     true,
 		RemoteForward: false,
@@ -172,7 +178,7 @@ func TestAuthgrantOneHop(t *testing.T) {
 		s.proxyAuthGrantRequest(psess, c)
 	}()
 
-	port2 := getPortNumber()
+	port2 := getPort()
 	//start hop server 2
 	serverConfig2 := &HopServerConfig{
 		Port:                     port2,
@@ -232,14 +238,14 @@ func TestClientNotAuthorized(t *testing.T) {
 	keyname := "key3"
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//DON'T put public key in /home/user/.hop/authorized_keys
-	akMutex.Lock()
+	ports.Mutex.Lock()
 	KeyGen("/.hop", keyname, false)
-	akMutex.Unlock()
-	port := getPortNumber()
+	ports.Mutex.Unlock()
+	port1 := getPort()
 	//start hop server
 	tconf, verify := NewTestServerConfig("../certs/")
 	serverConfig := &HopServerConfig{
-		Port:                     port,
+		Port:                     port1,
 		Host:                     "localhost",
 		SockAddr:                 DefaultHopAuthSocket + "4",
 		TransportConfig:          tconf,
@@ -259,7 +265,7 @@ func TestClientNotAuthorized(t *testing.T) {
 		SockAddr:      DefaultHopAuthSocket + "4",
 		Keypath:       keypath,
 		Hostname:      "127.0.0.1",
-		Port:          port,
+		Port:          port1,
 		Username:      u.Username,
 		Principal:     true,
 		RemoteForward: false,
@@ -280,14 +286,14 @@ func TestAuthgrantTimeOut(t *testing.T) {
 	keyname := "key4"
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
-	akMutex.Lock()
+	ports.Mutex.Lock()
 	KeyGen("/.hop", keyname, true)
-	akMutex.Unlock()
-	port := getPortNumber()
+	ports.Mutex.Unlock()
+	port1 := getPort()
 	//start hop server 1
 	tconf, verify := NewTestServerConfig("../certs/")
 	serverConfig := &HopServerConfig{
-		Port:                     port,
+		Port:                     port1,
 		Host:                     "localhost",
 		SockAddr:                 DefaultHopAuthSocket + "5",
 		TransportConfig:          tconf,
@@ -307,7 +313,7 @@ func TestAuthgrantTimeOut(t *testing.T) {
 		SockAddr:      "",
 		Keypath:       keypath,
 		Hostname:      "127.0.0.1",
-		Port:          port,
+		Port:          port1,
 		Username:      u.Username,
 		Principal:     true,
 		RemoteForward: false,
@@ -367,7 +373,7 @@ func TestAuthgrantTimeOut(t *testing.T) {
 		assert.NilError(t, err)
 		s.proxyAuthGrantRequest(psess, c)
 	}()
-	port2 := getPortNumber()
+	port2 := getPort()
 	//start hop server 2
 	serverConfig2 := &HopServerConfig{
 		Port:                     port2,
@@ -429,10 +435,10 @@ func TestRemotePF(t *testing.T) {
 	keyname := "key7"
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
-	akMutex.Lock()
+	ports.Mutex.Lock()
 	KeyGen("/.hop", keyname, true)
-	akMutex.Unlock()
-	port := getPortNumber()
+	ports.Mutex.Unlock()
+	port := getPort()
 	//start hop server
 	tconf, verify := NewTestServerConfig("../certs/")
 	serverConfig := &HopServerConfig{
@@ -449,8 +455,8 @@ func TestRemotePF(t *testing.T) {
 	keypath, _ := os.UserHomeDir()
 	keypath += "/.hop/" + keyname
 
-	remoteport1 := getPortNumber()
-	remoteport2 := getPortNumber()
+	remoteport1 := getPort()
+	remoteport2 := getPort()
 
 	u, e := user.Current()
 	assert.NilError(t, e)
