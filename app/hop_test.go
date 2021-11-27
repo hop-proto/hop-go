@@ -488,10 +488,14 @@ func TestRemotePF(t *testing.T) {
 
 	parts := strings.Split(client.Config.RemoteArgs[0], ":") //assuming port:host:hostport
 
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
 	go func() {
 		//simulate program listening on local (target port)
 		li, err := net.Listen("tcp", ":"+parts[2])
 		logrus.Info("simulating listening program on target: port ", parts[2])
+		wg.Done()
 		assert.NilError(t, err)
 		liconn, err := li.Accept()
 		assert.NilError(t, err)
@@ -528,7 +532,9 @@ func TestRemotePF(t *testing.T) {
 		liconn.Close()
 	}()
 
+	wg.Wait()
 	go func() {
+		//simulate a TCP conn to remote port
 		logrus.Info("attempting to dial port ", parts[0])
 		ctconn, err := net.Dial("tcp", ":"+parts[0])
 		assert.NilError(t, err)
@@ -549,7 +555,7 @@ func TestRemotePF(t *testing.T) {
 	}()
 
 	go func() {
-		//simulate TCP conn to remote port
+		//simulate another TCP conn to remote port
 		logrus.Info("attempting to dial port ", parts[0])
 		ctconn, err := net.Dial("tcp", ":"+parts[0])
 		assert.NilError(t, err)
