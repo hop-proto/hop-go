@@ -16,7 +16,7 @@ import (
 
 const testDataPathPrefix = "../cmd/"
 
-func newTestServerConfig() (*transport.ServerConfig, *transport.VerifyConfig) {
+func newTestServerConfig() (transport.ServerConfig, transport.VerifyConfig) {
 	keyPair, err := keys.ReadDHKeyFromPEMFile(testDataPathPrefix + "testdata/leaf-key.pem")
 	if err != nil {
 		logrus.Fatalf("S: ERROR WITH KEYPAIR %v", err)
@@ -45,7 +45,7 @@ func newTestServerConfig() (*transport.ServerConfig, *transport.VerifyConfig) {
 		Store: certs.Store{},
 	}
 	verify.Store.AddCertificate(root)
-	return &server, &verify
+	return server, verify
 }
 
 func getInsecureClientConfig() transport.ClientConfig {
