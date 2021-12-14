@@ -10,6 +10,8 @@ run:
     - reliable
     - channels
     - sessions
+    - app
+    - cmd/hop
   skip-files:
     - .*keccakf_amd64.s
     - .*keccakf_amd64.go
