@@ -54,7 +54,7 @@ func NewHopServer(hconfig *HopServerConfig) (*HopServer, error) {
 	logrus.Infof("listening on %v:%v", hconfig.Host, hconfig.Port)
 	// It's actually a UDP conn
 	udpConn := pktConn.(*net.UDPConn)
-	transportServer, err := transport.NewServer(udpConn, hconfig.TransportConfig)
+	transportServer, err := transport.NewServer(udpConn, *hconfig.TransportConfig)
 	if err != nil {
 		logrus.Errorf("S: ERROR STARTING TRANSPORT CONN: %v", err)
 		return nil, err
