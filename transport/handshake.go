@@ -23,12 +23,6 @@ func AddressHashKey(addr *net.UDPAddr) string {
 	return key
 }
 
-// A Handshake Identity is a name and two serialized certificates.
-type HandshakeIdentity struct {
-	Name               certs.Name
-	Leaf, Intermediate []byte
-}
-
 // HandshakeState tracks state across the lifetime of a handshake, starting with
 // the ClientHello. A HandshakeState may be allocated on ClientHello, it does
 // not need to be stored until after the ClientAck since enough state is
@@ -46,8 +40,7 @@ type HandshakeState struct {
 
 	cookieKey *[KeyLen]byte // server only
 
-	cookie   []byte // client only
-	identity IdentityConfig
+	cookie []byte // client only
 
 	// TODO(dadrian): Rework APIs to make these arrays and avoid copies with the curve25519 API.
 	ee []byte
