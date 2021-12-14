@@ -103,10 +103,16 @@ func TestClientCertificates(t *testing.T) {
 		client, err := Dial("udp", server.ListenAddress().String(), clientConfig)
 		assert.NilError(t, err)
 
+		go func() {
+			_, err := server.AcceptTimeout(time.Second * 1)
+			assert.Check(t, err != nil)
+		}()
+
+		// TODO(dadrian): We should have a better way of detecting handshake failure.
 		err = client.Handshake()
-		assert.Check(t, err != nil)
+		assert.Check(t, err)
 		err = client.Close()
-		assert.NilError(t, err)
+		assert.Check(t, err)
 	}
 
 	t.Run("username with no auth", func(t *testing.T) {
