@@ -15,14 +15,14 @@ import (
 	"zmap.io/portal/transport"
 )
 
-func newTestServerConfig(t *testing.T) *transport.ServerConfig {
+func newTestServerConfig(t *testing.T) transport.ServerConfig {
 	keyPair, err := keys.ReadDHKeyFromPEMFile("./testdata/leaf-key.pem")
 	assert.NilError(t, err)
 	certificate, err := certs.ReadCertificatePEMFile("testdata/leaf.pem")
 	assert.NilError(t, err)
 	intermediate, err := certs.ReadCertificatePEMFile("testdata/intermediate.pem")
 	assert.NilError(t, err)
-	return &transport.ServerConfig{
+	return transport.ServerConfig{
 		KeyPair:      keyPair,
 		Certificate:  certificate,
 		Intermediate: intermediate,

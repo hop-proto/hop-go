@@ -25,11 +25,6 @@ jobs:
             ${{ runner.os }}-go-
       - name: build
         run: make build
-      - name: lint
-        uses: golangci/golangci-lint-action@v2
-        with:
-          version: v1.33.0
-          args: --deadline 1m
       # Tests disabled since channels don't pass in CI
       # - name: test
       #   run: make test
