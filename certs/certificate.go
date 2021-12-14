@@ -335,7 +335,7 @@ func (name *Name) WriteTo(w io.Writer) (int64, error) {
 	if err != nil {
 		return written, err
 	}
-	n, err = w.Write([]byte(name.Label))
+	n, err = w.Write(name.Label)
 	written += int64(n)
 	if err != nil {
 		return written, err
