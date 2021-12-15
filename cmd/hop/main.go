@@ -18,12 +18,10 @@ func configFromCmdLineFlags(args []string) (*app.HopClientConfig, error) {
 	keypath += app.DefaultKeyPath
 
 	cConfig := &app.HopClientConfig{
-		Verify:        *verify,
-		SockAddr:      app.DefaultHopAuthSocket,
-		Principal:     false,
-		Keypath:       keypath,
-		RemoteForward: false,
-		LocalForward:  false,
+		Verify:    *verify,
+		SockAddr:  app.DefaultHopAuthSocket,
+		Principal: false,
+		Keypath:   keypath,
 	}
 
 	//******PROCESS CMD LINE ARGUMENTS******
@@ -38,13 +36,11 @@ func configFromCmdLineFlags(args []string) (*app.HopClientConfig, error) {
 	fs.BoolVar(&cConfig.Principal, "K", cConfig.Principal, "indicates principal with default key location: $HOME/.hop/key")
 
 	fs.Func("R", "perform remote port forwarding", func(s string) error {
-		cConfig.RemoteForward = true
 		cConfig.RemoteArgs = append(cConfig.RemoteArgs, s)
 		return nil
 	})
 
 	fs.Func("L", "perform local port forwarding", func(s string) error {
-		cConfig.LocalForward = true
 		cConfig.LocalArgs = append(cConfig.LocalArgs, s)
 		return nil
 	})

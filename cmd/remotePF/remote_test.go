@@ -15,12 +15,13 @@ import (
 )
 
 func TestRemote(t *testing.T) {
+	remotePort := "7779"
 	curUser, err := user.Current()
 	assert.NilError(t, err)
 	logrus.Infof("Currently running as: %v. With UID: %v GID: %v", curUser.Username, curUser.Uid, curUser.Gid)
 	cache, err := etcpwdparse.NewLoadedEtcPasswdCache()
 	assert.NilError(t, err)
-	args := []string{"remotePF", "7779"}
+	args := []string{"remotePF", remotePort}
 	c := exec.Command(args[0], args[1:]...)
 	if curUser.Uid == "0" {
 		logrus.Info("running as root, configuring to run as 'baumanl'")
@@ -35,18 +36,20 @@ func TestRemote(t *testing.T) {
 	}
 	//set up UDS socket
 	//make sure the socket does not already exist.
-	err = os.RemoveAll(sock)
+	contentSockAddr := "@content" + remotePort
+	err = os.RemoveAll(contentSockAddr)
 	assert.NilError(t, err)
 
 	//set socket options and start listening to socket
 	//sockconfig := &net.ListenConfig{Control: setListenerOptions}
-	uds, err := net.Listen("unix", sock)
+	uds, err := net.Listen("unix", contentSockAddr)
 	assert.NilError(t, err)
 	defer uds.Close()
 	logrus.Infof("address: %v", uds.Addr())
 
 	//control socket
-	control, err := net.Listen("unix", "@control")
+	controlSockAddr := "@control" + remotePort
+	control, err := net.Listen("unix", controlSockAddr)
 	assert.NilError(t, err)
 	defer uds.Close()
 	logrus.Infof("control address: %v", control.Addr())

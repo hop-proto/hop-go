@@ -10,9 +10,10 @@ import (
 	"zmap.io/portal/netproxy"
 )
 
-const sock = "@remotesock"
-
 func main() {
+	remotePort := os.Args[1]
+	contentSockAddr := "@content" + remotePort
+	controlSockAddr := "@control" + remotePort
 	//set up logging to file
 	f, e := os.Create("/tmp/log.txt")
 	if e != nil {
@@ -34,17 +35,20 @@ func main() {
 	logrus.Infof("Child running as: %v. With UID: %v GID: %v", curUser.Username, curUser.Uid, curUser.Gid)
 
 	//set up tcplistener on remote port
-	tcpListener, tcperr := net.Listen("tcp", ":"+os.Args[1])
+	tcpListener, tcperr := net.Listen("tcp", "127.0.0.1:"+remotePort)
 	if tcperr != nil {
-		cudsconn, err := net.Dial("unix", sock)
+		control, err := net.Dial("unix", controlSockAddr)
 		if err != nil {
-			logrus.Fatal("error dialing socket", err)
+			logrus.Error("error dialing control sock", err)
+			return
 		}
-		cudsconn.Write([]byte{netproxy.NpcDen})
-		logrus.Fatal(tcperr)
+		logrus.Info("Dialed control socket")
+		control.Write([]byte{netproxy.NpcDen})
+		control.Close()
+		logrus.Fatal()
 	}
 	defer tcpListener.Close()
-	logrus.Infof("Started TCP listener on port: %v", os.Args[1])
+	logrus.Infof("Started TCP listener on port: %v", remotePort)
 
 	//all accepted tcp conns will go to this go chan
 	regchan := make(chan net.Conn)
@@ -60,12 +64,13 @@ func main() {
 		}
 	}()
 
-	control, err := net.Dial("unix", "@control")
+	control, err := net.Dial("unix", controlSockAddr)
 	if err != nil {
 		logrus.Error("error dialing control sock", err)
 		return
 	}
 	logrus.Info("Dialed control socket")
+	control.Write([]byte{netproxy.NpcConf})
 	defer control.Close()
 
 	controlChan := make(chan byte)
@@ -82,7 +87,7 @@ func main() {
 			return
 		case tconn := <-regchan:
 			go func() {
-				cudsconn, err := net.Dial("unix", sock)
+				cudsconn, err := net.Dial("unix", contentSockAddr)
 				if err != nil {
 					logrus.Fatal("error dialing socket", err)
 				}
@@ -90,12 +95,12 @@ func main() {
 				go func() {
 					n, _ := io.Copy(cudsconn, tconn)
 					cudsconn.Close()
-					logrus.Infof("Copied %v bytes from tconn to cudsconn", n)
+					logrus.Debugf("Copied %v bytes from tconn to cudsconn", n)
 					logrus.Info("tconn ended")
 				}()
 				n, _ := io.Copy(tconn, cudsconn)
 				tconn.Close()
-				logrus.Infof("Copied %v bytes from cudsconn to tconn", n)
+				logrus.Debugf("Copied %v bytes from cudsconn to tconn", n)
 			}()
 		}
 	}

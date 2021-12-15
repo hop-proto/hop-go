@@ -2,6 +2,7 @@
 package app
 
 import (
+	"encoding/binary"
 	"io"
 	"net"
 	"strings"
@@ -31,20 +32,18 @@ type HopClient struct {
 
 //HopClientConfig holds configuration options for hop client
 type HopClientConfig struct {
-	Principal     bool
-	RemoteForward bool
-	LocalForward  bool
-	Quiet         bool
-	Headless      bool
-	Verify        transport.VerifyConfig
-	SockAddr      string
-	Keypath       string
-	Username      string
-	Hostname      string
-	Port          string
-	LocalArgs     []string
-	RemoteArgs    []string
-	Cmd           string
+	Principal  bool
+	Quiet      bool
+	Headless   bool
+	Verify     transport.VerifyConfig
+	SockAddr   string
+	Keypath    string
+	Username   string
+	Hostname   string
+	Port       string
+	LocalArgs  []string
+	RemoteArgs []string
+	Cmd        string
 }
 
 //NewHopClient creates a new client object and loads keys from file or auth grant protocol
@@ -87,7 +86,7 @@ func (c *HopClient) Connect() error {
 //Start starts any port forwarding/cmds/shells from the client
 func (c *HopClient) Start() error {
 	//TODO(baumanl): fix how session duration tied to cmd duration or port forwarding duration depending on options
-	if c.Config.RemoteForward {
+	if len(c.Config.RemoteArgs) > 0 {
 		for _, v := range c.Config.RemoteArgs {
 			if c.Config.Headless {
 				c.Primarywg.Add(1)
@@ -96,6 +95,7 @@ func (c *HopClient) Start() error {
 				if c.Config.Headless {
 					defer c.Primarywg.Done()
 				}
+				logrus.Info("Calling remote forward with arg: ", arg)
 				e := c.remoteForward(arg)
 				if e != nil {
 					logrus.Error(e)
@@ -104,7 +104,7 @@ func (c *HopClient) Start() error {
 			}(v)
 		}
 	}
-	if c.Config.LocalForward {
+	if len(c.Config.LocalArgs) > 0 {
 		for _, v := range c.Config.LocalArgs {
 			if c.Config.Headless {
 				c.Primarywg.Add(1)
@@ -184,7 +184,7 @@ func (c *HopClient) getAuthorization() error {
 			return e
 		}
 	}
-	if c.Config.LocalForward { //local forwarding
+	if len(c.Config.LocalArgs) > 0 { //local forwarding
 		for _, v := range c.Config.LocalArgs {
 			t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
 				c.Config.Port, authgrants.LocalPFAction, v)
@@ -195,7 +195,7 @@ func (c *HopClient) getAuthorization() error {
 			}
 		}
 	}
-	if c.Config.RemoteForward { //remote forwarding
+	if len(c.Config.RemoteArgs) > 0 { //remote forwarding
 		for _, v := range c.Config.RemoteArgs {
 			t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
 				c.Config.Port, authgrants.RemotePFAction, v)
@@ -252,9 +252,28 @@ func (c *HopClient) userAuthorization() error {
 // TODO(baumanl): add ability to handle multiple PF relationships
 func (c *HopClient) handleRemote(tube *tubes.Reliable) error {
 	defer tube.Close()
+	//if multiple remote pf relationships, figure out which one this corresponds to
+	b := make([]byte, 4)
+	tube.Read(b)
+	l := binary.BigEndian.Uint32(b[0:4])
+	logrus.Infof("Expecting %v bytes", l)
+	init := make([]byte, l)
+	tube.Read(init)
+	arg := string(init)
+	found := false
+	for _, v := range c.Config.RemoteArgs {
+		if v == arg {
+			found = true
+		}
+	}
+	if !found {
+		logrus.Error()
+	}
+	tube.Write([]byte{netproxy.NpcConf})
+
 	//handle another remote pf conn (rewire to dest)
-	logrus.Info("Doing remote with: ", c.Config.RemoteArgs[0])
-	parts := strings.Split(c.Config.RemoteArgs[0], ":")
+	logrus.Info("Doing remote with: ", arg)
+	parts := strings.Split(arg, ":")
 	if len(parts) != 3 {
 		logrus.Error("remote port forwarding currently only supported with port:host:hostport format")
 		return ErrInvalidPortForwardingArgs

@@ -31,10 +31,10 @@ type npcInitMsg struct {
 	info   string
 }
 
-func newNPCInitMsg(address string, t byte) *npcInitMsg {
+func newNPCInitMsg(arg string, t byte) *npcInitMsg {
 	return &npcInitMsg{
-		msgLen: uint32(len(address)),
-		info:   address,
+		msgLen: uint32(len(arg)),
+		info:   arg,
 	}
 }
 

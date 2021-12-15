@@ -65,18 +65,16 @@ func TestClientServer(t *testing.T) {
 	u, e := user.Current()
 	assert.NilError(t, e)
 	clientConfig := &HopClientConfig{
-		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket + "1",
-		Keypath:       keypath,
-		Hostname:      "127.0.0.1",
-		Port:          port,
-		Username:      u.Username,
-		Principal:     true,
-		RemoteForward: false,
-		LocalForward:  false,
-		Cmd:           "echo hello world",
-		Quiet:         false,
-		Headless:      false,
+		Verify:    *verify,
+		SockAddr:  DefaultHopAuthSocket + "1",
+		Keypath:   keypath,
+		Hostname:  "127.0.0.1",
+		Port:      port,
+		Username:  u.Username,
+		Principal: true,
+		Cmd:       "echo hello world",
+		Quiet:     false,
+		Headless:  false,
 	}
 	client, err := NewHopClient(clientConfig)
 	assert.NilError(t, err)
@@ -113,18 +111,16 @@ func TestAuthgrantOneHop(t *testing.T) {
 	u, e := user.Current()
 	assert.NilError(t, e)
 	principalConfig := &HopClientConfig{
-		Verify:        *verify,
-		SockAddr:      "",
-		Keypath:       keypath,
-		Hostname:      "127.0.0.1",
-		Port:          port1,
-		Username:      u.Username,
-		Principal:     true,
-		RemoteForward: false,
-		LocalForward:  false,
-		Cmd:           "",
-		Quiet:         false,
-		Headless:      false,
+		Verify:    *verify,
+		SockAddr:  "",
+		Keypath:   keypath,
+		Hostname:  "127.0.0.1",
+		Port:      port1,
+		Username:  u.Username,
+		Principal: true,
+		Cmd:       "",
+		Quiet:     false,
+		Headless:  false,
 	}
 	principal, err := NewHopClient(principalConfig)
 	assert.NilError(t, err)
@@ -193,18 +189,16 @@ func TestAuthgrantOneHop(t *testing.T) {
 
 	//set up delegate client
 	delegateConfig := &HopClientConfig{
-		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket + "2",
-		Keypath:       "",
-		Hostname:      "127.0.0.1",
-		Port:          port2,
-		Username:      u.Username,
-		Principal:     false,
-		RemoteForward: false,
-		LocalForward:  false,
-		Cmd:           "echo hello world",
-		Quiet:         false,
-		Headless:      false,
+		Verify:    *verify,
+		SockAddr:  DefaultHopAuthSocket + "2",
+		Keypath:   "",
+		Hostname:  "127.0.0.1",
+		Port:      port2,
+		Username:  u.Username,
+		Principal: false,
+		Cmd:       "echo hello world",
+		Quiet:     false,
+		Headless:  false,
 	}
 
 	delegate := &HopClient{
@@ -261,18 +255,16 @@ func TestClientNotAuthorized(t *testing.T) {
 	u, e := user.Current()
 	assert.NilError(t, e)
 	clientConfig := &HopClientConfig{
-		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket + "4",
-		Keypath:       keypath,
-		Hostname:      "127.0.0.1",
-		Port:          port1,
-		Username:      u.Username,
-		Principal:     true,
-		RemoteForward: false,
-		LocalForward:  false,
-		Cmd:           "echo hello world",
-		Quiet:         false,
-		Headless:      false,
+		Verify:    *verify,
+		SockAddr:  DefaultHopAuthSocket + "4",
+		Keypath:   keypath,
+		Hostname:  "127.0.0.1",
+		Port:      port1,
+		Username:  u.Username,
+		Principal: true,
+		Cmd:       "echo hello world",
+		Quiet:     false,
+		Headless:  false,
 	}
 	client, err := NewHopClient(clientConfig)
 	assert.NilError(t, err)
@@ -309,18 +301,16 @@ func TestAuthgrantTimeOut(t *testing.T) {
 	u, e := user.Current()
 	assert.NilError(t, e)
 	principalConfig := &HopClientConfig{
-		Verify:        *verify,
-		SockAddr:      "",
-		Keypath:       keypath,
-		Hostname:      "127.0.0.1",
-		Port:          port1,
-		Username:      u.Username,
-		Principal:     true,
-		RemoteForward: false,
-		LocalForward:  false,
-		Cmd:           "",
-		Quiet:         false,
-		Headless:      false,
+		Verify:    *verify,
+		SockAddr:  "",
+		Keypath:   keypath,
+		Hostname:  "127.0.0.1",
+		Port:      port1,
+		Username:  u.Username,
+		Principal: true,
+		Cmd:       "",
+		Quiet:     false,
+		Headless:  false,
 	}
 	principal, err := NewHopClient(principalConfig)
 	assert.NilError(t, err)
@@ -388,18 +378,16 @@ func TestAuthgrantTimeOut(t *testing.T) {
 
 	//set up delegate client
 	delegateConfig := &HopClientConfig{
-		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket + "5",
-		Keypath:       "",
-		Hostname:      "127.0.0.1",
-		Port:          port2,
-		Username:      u.Username,
-		Principal:     false,
-		RemoteForward: false,
-		LocalForward:  false,
-		Cmd:           "echo hello world",
-		Quiet:         false,
-		Headless:      false,
+		Verify:    *verify,
+		SockAddr:  DefaultHopAuthSocket + "5",
+		Keypath:   "",
+		Hostname:  "127.0.0.1",
+		Port:      port2,
+		Username:  u.Username,
+		Principal: false,
+		Cmd:       "echo hello world",
+		Quiet:     false,
+		Headless:  false,
 	}
 
 	delegate := &HopClient{
@@ -461,19 +449,17 @@ func TestRemotePF(t *testing.T) {
 	u, e := user.Current()
 	assert.NilError(t, e)
 	clientConfig := &HopClientConfig{
-		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket + "7",
-		Keypath:       keypath,
-		Hostname:      "127.0.0.1",
-		Port:          port,
-		Username:      u.Username,
-		Principal:     true,
-		RemoteForward: true,
-		RemoteArgs:    []string{remoteport1 + ":localhost:" + remoteport2},
-		LocalForward:  false,
-		Cmd:           "",
-		Quiet:         false,
-		Headless:      false,
+		Verify:     *verify,
+		SockAddr:   DefaultHopAuthSocket + "7",
+		Keypath:    keypath,
+		Hostname:   "127.0.0.1",
+		Port:       port,
+		Username:   u.Username,
+		Principal:  true,
+		RemoteArgs: []string{remoteport1 + ":localhost:" + remoteport2},
+		Cmd:        "",
+		Quiet:      false,
+		Headless:   false,
 	}
 	client, err := NewHopClient(clientConfig)
 	assert.NilError(t, err)
@@ -580,5 +566,160 @@ func TestRemotePF(t *testing.T) {
 
 	err = client.handleRemote(crft)
 	assert.NilError(t, err)
+
+}
+
+func TestTwoRemotePF(t *testing.T) {
+	logrus.SetLevel(logrus.ErrorLevel)
+	keyname := "key7"
+	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
+	//put public key in /home/user/.hop/authorized_keys
+	portMutex.Lock()
+	KeyGen("/.hop", keyname, true)
+	portMutex.Unlock()
+	port := getPort()
+	//start hop server
+	tconf, verify := NewTestServerConfig("../certs/")
+	serverConfig := &HopServerConfig{
+		Port:                     port,
+		Host:                     "localhost",
+		SockAddr:                 DefaultHopAuthSocket + "8",
+		TransportConfig:          tconf,
+		MaxOutstandingAuthgrants: 50,
+	}
+	s, err := NewHopServer(serverConfig)
+	assert.NilError(t, err)
+	go s.Serve() //starts transport layer server, authgrant server, and listens for hop conns
+
+	keypath, _ := os.UserHomeDir()
+	keypath += "/.hop/" + keyname
+
+	remoteport1 := getPort()
+	remoteport2 := getPort()
+
+	remoteport3 := getPort()
+	remoteport4 := getPort()
+
+	u, e := user.Current()
+	assert.NilError(t, e)
+	clientConfig := &HopClientConfig{
+		Verify:     *verify,
+		SockAddr:   DefaultHopAuthSocket + "8",
+		Keypath:    keypath,
+		Hostname:   "127.0.0.1",
+		Port:       port,
+		Username:   u.Username,
+		Principal:  true,
+		RemoteArgs: []string{remoteport1 + ":localhost:" + remoteport2, remoteport3 + ":localhost:" + remoteport4},
+		Cmd:        "",
+		Quiet:      false,
+		Headless:   false,
+	}
+	client, err := NewHopClient(clientConfig)
+	assert.NilError(t, err)
+
+	err = client.Connect()
+	assert.NilError(t, err)
+
+	err = client.remoteForward(client.Config.RemoteArgs[0])
+	assert.NilError(t, err)
+
+	err = client.remoteForward(client.Config.RemoteArgs[1])
+	assert.NilError(t, err)
+
+	logrus.Info("simulating a tcp conn")
+
+	parts := strings.Split(client.Config.RemoteArgs[0], ":")    //assuming port:host:hostport
+	partsTwo := strings.Split(client.Config.RemoteArgs[1], ":") //assuming port:host:hostport
+
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	go func() {
+		//simulate program listening on local (target port)
+		li, err := net.Listen("tcp", ":"+parts[2])
+		logrus.Info("simulating listening program on target: port ", parts[2])
+		assert.NilError(t, err)
+		wg.Done()
+		liconn, err := li.Accept()
+		assert.NilError(t, err)
+		buf := make([]byte, 39)
+		n := 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on target got: ", string(buf[:]))
+		liconn.Close()
+	}()
+
+	go func() {
+		//simulate program listening on local (target port) (for second arg)
+		li, err := net.Listen("tcp", ":"+partsTwo[2])
+		logrus.Info("simulating listening program on target: port ", partsTwo[2])
+		assert.NilError(t, err)
+		wg.Done()
+		liconn, err := li.Accept()
+		assert.NilError(t, err)
+		buf := make([]byte, 39)
+		n := 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on target got: ", string(buf[:]))
+		liconn.Close()
+	}()
+
+	wg.Wait()
+
+	go func() {
+		//simulate a TCP conn to remote port
+		logrus.Info("attempting to dial port ", parts[0])
+		ctconn, err := net.Dial("tcp", ":"+parts[0])
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn./n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn", n)
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	go func() {
+		//simulate a TCP conn to remote port (2)
+		logrus.Info("attempting to dial port ", partsTwo[0])
+		ctconn, err := net.Dial("tcp", ":"+partsTwo[0])
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("HI THERE! THIS IS THE FIRST TCP CONN./n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn", n)
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	wg.Add(1)
+	go func() {
+
+		crft, err := client.TubeMuxer.Accept()
+		assert.NilError(t, err)
+		assert.Equal(t, crft.Type(), RemotePFTube)
+
+		err = client.handleRemote(crft)
+		assert.NilError(t, err)
+		logrus.Info("First tube done")
+		wg.Done()
+	}()
+
+	crft, err := client.TubeMuxer.Accept()
+	assert.NilError(t, err)
+	assert.Equal(t, crft.Type(), RemotePFTube)
+
+	err = client.handleRemote(crft)
+	assert.NilError(t, err)
+	wg.Wait()
 
 }
