@@ -370,51 +370,37 @@ func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
 //RemoteServer starts listening on given port and pipes the traffic back over the tube
 func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
 	parts := strings.Split(arg, ":") //assuming port:host:hostport
-
-	curUser, err := user.Current()
-	if err != nil {
-		logrus.Error("couldn't find current user")
-		tube.Write([]byte{netproxy.NpcDen})
-	}
-	logrus.Infof("Currently running as: %v. With UID: %v GID: %v", curUser.Username, curUser.Uid, curUser.Gid)
 	cache, err := etcpwdparse.NewLoadedEtcPasswdCache()
 	if err != nil {
 		logrus.Error("couln't load passwd cache")
 		tube.Write([]byte{netproxy.NpcDen})
+		return
 	}
 	remotePort := parts[0]
 	args := []string{"remotePF", remotePort}
 	c := exec.Command(args[0], args[1:]...)
-	logrus.Infof("running as %v, configuring to run as %v", curUser.Username, sess.user)
-	user, ok := cache.LookupUserByName(sess.user)
+	logrus.Infof("configuring child to run as %v", sess.user)
+	userEntry, ok := cache.LookupUserByName(sess.user)
 	if !ok {
 		logrus.Error("couldn't find session user")
 		tube.Write([]byte{netproxy.NpcDen})
+		return
 	}
-	if curUser.Uid == "0" { //remove check (for testing purposes)
+	curUser, _ := user.Current()
+	if curUser.Username != sess.user || curUser.Uid == "0" { //TODO: necessary because in tests it doesn't run as root so trying to do this causes an error
 		c.SysProcAttr = &syscall.SysProcAttr{}
 		c.SysProcAttr.Credential = &syscall.Credential{
-			Uid:    uint32(user.Uid()),
-			Gid:    uint32(user.Gid()),
-			Groups: []uint32{uint32(user.Gid())},
+			Uid:    uint32(userEntry.Uid()),
+			Gid:    uint32(userEntry.Gid()),
+			Groups: []uint32{uint32(userEntry.Gid())},
 		}
 	}
 
-	//TODO: dynamically generate sock address and put it as an argument to child process
-	//set up authgrantServer (UDS socket)
-	//make sure the socket does not already exist.
-	contentSockAddr := "@content" + remotePort
-	err = os.RemoveAll(contentSockAddr)
-	if err != nil {
-		logrus.Error("couln't remove other process listening on UDS socket")
-		tube.Write([]byte{netproxy.NpcDen})
-	}
-
-	//set socket options and start listening to socket
-	//sockconfig := &net.ListenConfig{Control: setListenerOptions}
+	//set up content socket (UDS socket)
+	contentSockAddr := "@content" + remotePort //TODO: improve robustness of abstract socket address names
 	uds, err := net.Listen("unix", contentSockAddr)
 	if err != nil {
-		logrus.Error("error listening on socket")
+		logrus.Error("error listening on content socket")
 		tube.Write([]byte{netproxy.NpcDen})
 		return
 	}
@@ -495,7 +481,7 @@ func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
 
 //LocalServer starts a TCP Conn with remote addr and proxies traffic from ch -> tcp and tcp -> ch
 func (sess *hopSession) LocalServer(tube *tubes.Reliable, arg string) {
-	//dest := fromBytes(init)
+	defer tube.Close()
 	//TODO: more flexible parsing of arg
 	parts := strings.Split(arg, ":") //assuming port:host:hostport
 	addr := net.JoinHostPort(parts[1], parts[2])
@@ -522,11 +508,10 @@ func (sess *hopSession) LocalServer(tube *tubes.Reliable, arg string) {
 	logrus.Info("connected to: ", arg)
 	tube.Write([]byte{netproxy.NpcConf})
 	logrus.Infof("wrote confirmation that NPC ready")
-	//could net.Pipe() be useful here?
 	go func() {
-		//Handles all traffic from principal to server 2
+		//Handles all traffic from local port to end dest
 		io.Copy(tconn, tube)
 	}()
-	//handles all traffic from server 2 back to principal
+	//handles all traffic from end dest back to local port
 	io.Copy(tube, tconn)
 }

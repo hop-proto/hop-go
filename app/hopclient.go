@@ -329,35 +329,58 @@ func (c *HopClient) localForward(arg string) error {
 		return ErrInvalidPortForwardingArgs
 	}
 	logrus.Info("Forwarding traffic from local port ", parts[0], " to remote port ", parts[2], " on host ", parts[1])
-	npt, e := c.TubeMuxer.CreateTube(LocalPFTube)
+
+	//bind to local address
+	local, e := net.Listen("tcp", ":"+strings.Trim(parts[0], ":"))
 	if e != nil {
+		logrus.Error(e)
 		return e
 	}
-	e = netproxy.Start(npt, arg, netproxy.Local)
-	if e != nil {
-		return e
-	}
-	if c.Config.Headless {
-		c.Primarywg.Add(1)
-	}
-	//do local port forwarding
+
 	go func() {
+		//do local port forwarding
 		if c.Config.Headless {
 			defer c.Primarywg.Done()
 		}
-
-		local, e := net.Listen("tcp", ":"+strings.Trim(parts[0], ":"))
-		if e != nil {
-			logrus.Error(e)
-			return
-		}
-		for {
-			localConn, e := local.Accept()
-			if e != nil {
-				logrus.Error(e)
-				break
+		//accept incoming connections
+		regchan := make(chan net.Conn)
+		go func() {
+			for {
+				localConn, e := local.Accept()
+				if e != nil {
+					logrus.Error(e)
+					break
+				}
+				logrus.Info("Accepted TCPConn...")
+				regchan <- localConn
 			}
-			go io.Copy(npt, localConn)
+		}()
+
+		for {
+			lconn := <-regchan
+			go func() { //start tube with server for new connection
+				npt, e := c.TubeMuxer.CreateTube(LocalPFTube)
+				if e != nil {
+					return
+				}
+				defer npt.Close()
+				e = netproxy.Start(npt, arg, netproxy.Local)
+				if e != nil {
+					return
+				}
+				if c.Config.Headless {
+					c.Primarywg.Add(1)
+				}
+				go func() {
+					n, _ := io.Copy(npt, lconn)
+					npt.Close()
+					logrus.Debugf("Copied %v bytes from lconn to npt", n)
+					logrus.Info("tconn ended")
+				}()
+				n, _ := io.Copy(lconn, npt)
+				lconn.Close()
+				logrus.Debugf("Copied %v bytes from npt to lconn", n)
+			}()
 		}
 	}()
 	return nil

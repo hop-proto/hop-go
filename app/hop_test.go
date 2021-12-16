@@ -494,7 +494,7 @@ func TestRemotePF(t *testing.T) {
 			n += x
 		}
 		logrus.Info("program listening on target got: ", string(buf[:]))
-		if string(buf) == "Howdy! This is connection number two./n" {
+		if string(buf) == "Howdy! This is connection numero two./n" {
 			logrus.Info("writing Hello")
 			liconn.Write([]byte("Hello/n"))
 		}
@@ -511,7 +511,7 @@ func TestRemotePF(t *testing.T) {
 			n += x
 		}
 		logrus.Info("program listening on target got: ", string(buf[:]))
-		if string(buf) == "Howdy! This is connection number two./n" {
+		if string(buf) == "Howdy! This is connection numero two./n" {
 			logrus.Info("writing Hello")
 			liconn.Write([]byte("Hello/n"))
 		}
@@ -524,7 +524,7 @@ func TestRemotePF(t *testing.T) {
 		logrus.Info("attempting to dial port ", parts[0])
 		ctconn, err := net.Dial("tcp", ":"+parts[0])
 		assert.NilError(t, err)
-		n, err := ctconn.Write([]byte("Howdy! This is connection number two./n"))
+		n, err := ctconn.Write([]byte("Howdy! This is connection numero two./n"))
 		assert.NilError(t, err)
 		logrus.Infof("sent %v bytes over tcpconn. Waiting for response...", n)
 		buf := make([]byte, 7)
@@ -571,7 +571,7 @@ func TestRemotePF(t *testing.T) {
 
 func TestTwoRemotePF(t *testing.T) {
 	logrus.SetLevel(logrus.ErrorLevel)
-	keyname := "key7"
+	keyname := "key8"
 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
 	//put public key in /home/user/.hop/authorized_keys
 	portMutex.Lock()
@@ -720,6 +720,281 @@ func TestTwoRemotePF(t *testing.T) {
 
 	err = client.handleRemote(crft)
 	assert.NilError(t, err)
+	wg.Wait()
+
+}
+
+func TestLocalPF(t *testing.T) {
+	logrus.SetLevel(logrus.ErrorLevel)
+	keyname := "key9"
+	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
+	//put public key in /home/user/.hop/authorized_keys
+	portMutex.Lock()
+	KeyGen("/.hop", keyname, true)
+	portMutex.Unlock()
+	port := getPort()
+	//start hop server
+	tconf, verify := NewTestServerConfig("../certs/")
+	serverConfig := &HopServerConfig{
+		Port:                     port,
+		Host:                     "localhost",
+		SockAddr:                 DefaultHopAuthSocket + "9",
+		TransportConfig:          tconf,
+		MaxOutstandingAuthgrants: 50,
+	}
+	s, err := NewHopServer(serverConfig)
+	assert.NilError(t, err)
+	go s.Serve() //starts transport layer server, authgrant server, and listens for hop conns
+
+	keypath, _ := os.UserHomeDir()
+	keypath += "/.hop/" + keyname
+
+	localport1 := getPort()
+	localport2 := getPort()
+
+	u, e := user.Current()
+	assert.NilError(t, e)
+	clientConfig := &HopClientConfig{
+		Verify:    *verify,
+		SockAddr:  DefaultHopAuthSocket + "9",
+		Keypath:   keypath,
+		Hostname:  "127.0.0.1",
+		Port:      port,
+		Username:  u.Username,
+		Principal: true,
+		LocalArgs: []string{localport1 + ":127.0.0.1:" + localport2},
+		Cmd:       "",
+		Quiet:     false,
+		Headless:  false,
+	}
+	client, err := NewHopClient(clientConfig)
+	assert.NilError(t, err)
+
+	err = client.Connect()
+	assert.NilError(t, err)
+
+	err = client.localForward(client.Config.LocalArgs[0]) //client listening on localport1
+	assert.NilError(t, err)
+
+	parts := strings.Split(client.Config.LocalArgs[0], ":") //assuming port:host:hostport
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		//simulate program listening on end dest (host:hostport)
+		li, err := net.Listen("tcp", parts[1]+":"+parts[2])
+		logrus.Infof("simulating listening program on end dest: addr %v & port %v", parts[1], parts[2])
+		wg.Done()
+		assert.NilError(t, err)
+		liconn, err := li.Accept()
+		assert.NilError(t, err)
+		buf := make([]byte, 39)
+		n := 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on end dest got: ", string(buf[:]))
+		if string(buf) == "Howdy! This is connection number two./n" {
+			logrus.Info("writing Hello")
+			liconn.Write([]byte("Hello/n"))
+		}
+		liconn.Close()
+
+		logrus.Info("expecting second conn")
+		liconn, err = li.Accept()
+		assert.NilError(t, err)
+		n = 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on end dest got: ", string(buf[:]))
+		if string(buf) == "Howdy! This is connection number two./n" {
+			logrus.Info("writing Hello")
+			liconn.Write([]byte("Hello/n"))
+		}
+		liconn.Close()
+	}()
+
+	wg.Wait()
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		//simulate another TCP conn to localport1
+		logrus.Info("attempting to dial port ", parts[0])
+		ctconn, err := net.Dial("tcp", ":"+parts[0])
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn./n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn", n)
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	go func() {
+		defer wg.Done()
+		//simulate a TCP conn to localport
+		logrus.Info("simulating a tcp conn to localport1, ", parts[0])
+		ctconn, err := net.Dial("tcp", "127.0.0.1:"+parts[0])
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("Howdy! This is connection number two./n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn. Waiting for response...", n)
+		buf := make([]byte, 7)
+		n = 0
+		for n < 7 {
+			x, err := ctconn.Read(buf[n:])
+			logrus.Infof("response read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("2nd tcp initiator got: ", string(buf))
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	wg.Wait()
+}
+
+func TestTwoLocalPF(t *testing.T) {
+	logrus.SetLevel(logrus.ErrorLevel)
+	keyname := "key10"
+	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
+	//put public key in /home/user/.hop/authorized_keys
+	portMutex.Lock()
+	KeyGen("/.hop", keyname, true)
+	portMutex.Unlock()
+	port := getPort()
+	//start hop server
+	tconf, verify := NewTestServerConfig("../certs/")
+	serverConfig := &HopServerConfig{
+		Port:                     port,
+		Host:                     "localhost",
+		SockAddr:                 DefaultHopAuthSocket + "10",
+		TransportConfig:          tconf,
+		MaxOutstandingAuthgrants: 50,
+	}
+	s, err := NewHopServer(serverConfig)
+	assert.NilError(t, err)
+	go s.Serve() //starts transport layer server, authgrant server, and listens for hop conns
+
+	keypath, _ := os.UserHomeDir()
+	keypath += "/.hop/" + keyname
+
+	localport1 := getPort()
+	localport2 := getPort()
+
+	localport3 := getPort()
+	localport4 := getPort()
+
+	u, e := user.Current()
+	assert.NilError(t, e)
+	clientConfig := &HopClientConfig{
+		Verify:    *verify,
+		SockAddr:  DefaultHopAuthSocket + "10",
+		Keypath:   keypath,
+		Hostname:  "127.0.0.1",
+		Port:      port,
+		Username:  u.Username,
+		Principal: true,
+		LocalArgs: []string{localport1 + ":localhost:" + localport2, localport3 + ":localhost:" + localport4},
+		Cmd:       "",
+		Quiet:     false,
+		Headless:  false,
+	}
+	client, err := NewHopClient(clientConfig)
+	assert.NilError(t, err)
+
+	err = client.Connect()
+	assert.NilError(t, err)
+
+	err = client.localForward(client.Config.LocalArgs[0])
+	assert.NilError(t, err)
+
+	err = client.localForward(client.Config.LocalArgs[1])
+	assert.NilError(t, err)
+
+	parts := strings.Split(client.Config.LocalArgs[0], ":")    //assuming port:host:hostport
+	partsTwo := strings.Split(client.Config.LocalArgs[1], ":") //assuming port:host:hostport
+
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	go func() {
+		//simulate program listening on end dest (target port)
+		li, err := net.Listen("tcp", parts[1]+":"+parts[2])
+		logrus.Info("simulating listening program on target: port ", parts[2])
+		assert.NilError(t, err)
+		wg.Done()
+		liconn, err := li.Accept()
+		assert.NilError(t, err)
+		buf := make([]byte, 39)
+		n := 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on end dest got: ", string(buf[:]))
+		liconn.Close()
+	}()
+
+	go func() {
+		//simulate program listening on end dest (target port) (for second arg)
+		li, err := net.Listen("tcp", partsTwo[1]+":"+partsTwo[2])
+		logrus.Info("simulating listening program on target: port ", partsTwo[2])
+		assert.NilError(t, err)
+		wg.Done()
+		liconn, err := li.Accept()
+		assert.NilError(t, err)
+		buf := make([]byte, 39)
+		n := 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on end dest got: ", string(buf[:]))
+		liconn.Close()
+	}()
+
+	wg.Wait()
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		//simulate a TCP conn to localport1
+		logrus.Info("attempting to dial port ", parts[0])
+		ctconn, err := net.Dial("tcp", ":"+parts[0])
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn./n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn", n)
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	go func() {
+		defer wg.Done()
+		//simulate a TCP conn to localport3
+		logrus.Info("attempting to dial port ", partsTwo[0])
+		ctconn, err := net.Dial("tcp", ":"+partsTwo[0])
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("HI THERE! THIS IS THE FIRST TCP CONN./n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn", n)
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
 	wg.Wait()
 
 }
