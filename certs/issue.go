@@ -149,3 +149,8 @@ func IssueIntermediate(root *Certificate, intermediate *Identity) (*Certificate,
 	}
 	return issue(root, intermediate, Intermediate, time.Hour*24*366)
 }
+
+// SelfSignLeaf issues self-signed leaf certificate using only a key.
+func SelfSignLeaf(identity *Identity) (*Certificate, error) {
+	return selfSign(identity, Leaf, nil)
+}

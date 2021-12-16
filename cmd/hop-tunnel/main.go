@@ -129,7 +129,7 @@ func main() {
 		}
 		logrus.Infof("listening on %s", pktConn.LocalAddr().String())
 		udpConn := pktConn.(*net.UDPConn)
-		s, err := transport.NewServer(udpConn, &config)
+		s, err := transport.NewServer(udpConn, config)
 		go s.Serve()
 		if err != nil {
 			logrus.Fatalf("unable to launch server: %s", err)

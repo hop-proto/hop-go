@@ -19,10 +19,20 @@ type VerifyConfig struct {
 	Name certs.Name
 }
 
+// IdentityConfig associates a certificate chain with a Name.
+type IdentityConfig struct {
+	// TODO(dadrian): Wildcards?
+	Name         certs.Name
+	Leaf         *certs.Certificate
+	Intermediate *certs.Certificate
+}
+
 // ClientConfig contains client-specific configuration settings.
 type ClientConfig struct {
-	KeyPair *keys.X25519KeyPair
-	Verify  VerifyConfig
+	KeyPair            *keys.X25519KeyPair
+	Verify             VerifyConfig
+	UseCertificate     bool
+	Leaf, Intermediate *certs.Certificate
 }
 
 const (
@@ -48,6 +58,10 @@ type ServerConfig struct {
 	KeyPair      *keys.X25519KeyPair
 	Certificate  *certs.Certificate
 	Intermediate *certs.Certificate
+
+	ClientVerify *VerifyConfig
+
+	// TODO(dadrian): How does this change with Names?
 }
 
 func (c *ServerConfig) maxPendingConnections() int {

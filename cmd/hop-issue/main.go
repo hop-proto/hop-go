@@ -73,12 +73,7 @@ func main() {
 		}
 		identity := certs.Identity{
 			PublicKey: *pubKey,
-			Names: []certs.Name{
-				{
-					Type:  certs.TypeDNSName,
-					Label: dnsName,
-				},
-			},
+			Names:     []certs.Name{certs.DNSName(dnsName)},
 		}
 		leaf, err := certs.IssueLeaf(parent, &identity)
 		if err != nil {
@@ -112,12 +107,7 @@ func main() {
 		}
 		identity := certs.Identity{
 			PublicKey: *pubKey,
-			Names: []certs.Name{
-				{
-					Type:  certs.TypeDNSName,
-					Label: dnsName,
-				},
-			},
+			Names:     []certs.Name{certs.DNSName(dnsName)},
 		}
 		intermediate, err := certs.IssueIntermediate(parent, &identity)
 		if err != nil {
@@ -131,12 +121,7 @@ func main() {
 	case certs.Root:
 		identity := certs.Identity{
 			PublicKey: signingKeyPair.Public,
-			Names: []certs.Name{
-				{
-					Type:  certs.TypeDNSName,
-					Label: dnsName,
-				},
-			},
+			Names:     []certs.Name{certs.DNSName(dnsName)},
 		}
 		root, err := certs.SelfSignRoot(&identity, signingKeyPair)
 		if err != nil {

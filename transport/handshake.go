@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"net"
 
 	"zmap.io/portal/certs"
@@ -12,22 +13,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/cyclist"
 )
-
-// MessageType is a single-byte-wide enum used as the first byte of every message. It can be used to differentiate message types.
-type MessageType byte
-
-// MessageType constants for each type of handshake and transport message.
-const (
-	MessageTypeClientHello MessageType = 0x01
-	MessageTypeServerHello MessageType = 0x02
-	MessageTypeClientAck   MessageType = 0x03
-	MessageTypeServerAuth  MessageType = 0x04
-	MessageTypeClientAuth  MessageType = 0x05
-	MessageTypeTransport   MessageType = 0x10
-)
-
-// IsHandshakeType returns true if the message type is part of the handshake, not the transport.
-func (mt MessageType) IsHandshakeType() bool { return (byte(mt) & byte(0x0F)) != 0 }
 
 // AddressHashKey returns a string suitable for use as a key in Golang map (e.g.
 // of handshakes) that identifies the remote address.
@@ -63,7 +48,8 @@ type HandshakeState struct {
 	se []byte
 
 	// Certificate Stuff
-	clientVerify *VerifyConfig
+	certVerify         *VerifyConfig
+	leaf, intermediate []byte
 
 	remoteAddr *net.UDPAddr
 }
@@ -295,7 +281,7 @@ func (hs *HandshakeState) writeClientAck(b []byte) (int, error) {
 	b = b[CookieLen:]
 
 	// Encrypted SNI
-	err := hs.EncryptSNI(b, hs.clientVerify.Name)
+	err := hs.EncryptSNI(b, hs.certVerify.Name)
 	if err != nil {
 		return HeaderLen + DHLen + CookieLen, ErrInvalidMessage
 	}
@@ -360,7 +346,7 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 
 	// Parse the certificate
 	opts := certs.VerifyOptions{
-		Name: hs.clientVerify.Name,
+		Name: hs.certVerify.Name,
 	}
 	leaf := certs.Certificate{}
 	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
@@ -383,8 +369,8 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 		opts.PresentedIntermediate = &intermediate
 	}
 
-	if !hs.clientVerify.InsecureSkipVerify {
-		err := hs.clientVerify.Store.VerifyLeaf(&leaf, opts)
+	if !hs.certVerify.InsecureSkipVerify {
+		err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
 		if err != nil {
 			logrus.Errorf("client: failed to verify certificate: %s", err)
 			return 0, err
@@ -412,7 +398,8 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 }
 
 func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
-	length := HeaderLen + SessionIDLen + DHLen + MacLen + MacLen
+	encCertLen := EncryptedCertificatesLength(hs.leaf, hs.intermediate)
+	length := HeaderLen + SessionIDLen + encCertLen + MacLen + MacLen
 	if len(b) < length {
 		return 0, ErrBufUnderflow
 	}
@@ -420,8 +407,8 @@ func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
 	// Header
 	b[0] = byte(MessageTypeClientAuth)
 	b[1] = 0
-	b[2] = 0
-	b[3] = 0
+	b[2] = byte(encCertLen >> 8)
+	b[3] = byte(encCertLen)
 	hs.duplex.Absorb(b[:HeaderLen])
 	b = b[HeaderLen:]
 
@@ -430,20 +417,29 @@ func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
 	hs.duplex.Absorb(hs.sessionID[:])
 	b = b[SessionIDLen:]
 
-	// Encrypted Static
-	hs.duplex.Encrypt(b[:DHLen], hs.static.Public[:])
-	b = b[DHLen:]
+	// Encrypted Certificates
+	if len(hs.leaf) == 0 {
+		return HeaderLen + SessionIDLen, errors.New("client did not set leaf certificate")
+	}
+	encCerts, err := EncryptCertificates(&hs.duplex, hs.leaf, hs.intermediate)
+	if err != nil {
+		return HeaderLen + SessionIDLen, err
+	}
+	if len(encCerts) != encCertLen {
+		return HeaderLen + SessionIDLen, fmt.Errorf("certificates encrypted to unexpected length %d, expected %d", len(encCerts), encCertLen)
+	}
+	copy(b, encCerts)
+	b = b[encCertLen:]
 
 	// Tag
 	hs.duplex.Squeeze(b[:MacLen])
 	b = b[MacLen:]
 
 	// DH (se)
-	var err error
 	hs.se, err = hs.static.DH(hs.remoteEphemeral[:])
 	if err != nil {
 		logrus.Debugf("client: unable to calculate se: %s", err)
-		return HeaderLen + SessionIDLen + DHLen + MacLen, err
+		return HeaderLen + SessionIDLen + encCertLen + MacLen, err
 	}
 	logrus.Debugf("client: se: %x", hs.se)
 	hs.duplex.Absorb(hs.se)

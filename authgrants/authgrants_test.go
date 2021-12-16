@@ -30,7 +30,7 @@ func port() string {
 }
 
 //NewTestServerConfig populates server config and verify config with sample cert data
-func newTestServerConfig(testDataPathPrefix string) (*transport.ServerConfig, *transport.VerifyConfig) {
+func newTestServerConfig(testDataPathPrefix string) (transport.ServerConfig, transport.VerifyConfig) {
 	keyPair, err := keys.ReadDHKeyFromPEMFile(testDataPathPrefix + "testdata/leaf-key.pem")
 	if err != nil {
 		logrus.Fatalf("S: ERROR WITH KEYPAIR %v", err)
@@ -69,7 +69,7 @@ func newTestServerConfig(testDataPathPrefix string) (*transport.ServerConfig, *t
 		Store: certs.Store{},
 	}
 	verify.Store.AddCertificate(root)
-	return &server, &verify
+	return server, verify
 }
 
 func getInsecureClientConfig() transport.ClientConfig {

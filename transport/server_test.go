@@ -42,14 +42,15 @@ func TestMultipleHandshakes(t *testing.T) {
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
 	serverConfig, verifyConfig := newTestServerConfig(t)
-	s, err := NewServer(pc.(*net.UDPConn), serverConfig)
+	s, err := NewServer(pc.(*net.UDPConn), *serverConfig)
 	assert.NilError(t, err)
 	wg := sync.WaitGroup{}
 	go func() {
 		s.Serve()
 	}()
 	clientConfig := ClientConfig{
-		Verify: *verifyConfig,
+		Verify:  *verifyConfig,
+		KeyPair: keys.GenerateNewX25519KeyPair(),
 	}
 	wg.Add(3)
 	var zero [KeyLen]byte
@@ -96,14 +97,14 @@ func TestServerRead(t *testing.T) {
 	config.StartingReadTimeout = 10 * time.Second
 	config.MaxPendingConnections = 1
 	config.MaxBufferedPacketsPerConnection = 5
-	server, err := NewServer(pc.(*net.UDPConn), config)
+	server, err := NewServer(pc.(*net.UDPConn), *config)
 	assert.NilError(t, err)
 	go func() {
 		server.Serve()
 	}()
 
 	t.Run("test client write", func(t *testing.T) {
-		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify})
+		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, KeyPair: keys.GenerateNewX25519KeyPair()})
 		assert.NilError(t, err)
 		err = c.Handshake()
 		assert.NilError(t, err)
@@ -117,7 +118,7 @@ func TestServerRead(t *testing.T) {
 	})
 
 	t.Run("test client write triggers handshake", func(t *testing.T) {
-		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify})
+		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, KeyPair: keys.GenerateNewX25519KeyPair()})
 		assert.NilError(t, err)
 		s := "Another splinter under the skin. Another season of loneliness."
 		n, err := c.Write([]byte(s))
@@ -129,7 +130,7 @@ func TestServerRead(t *testing.T) {
 	})
 
 	t.Run("test big client writes", func(t *testing.T) {
-		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify})
+		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, KeyPair: keys.GenerateNewX25519KeyPair()})
 		assert.NilError(t, err)
 		data := make([]byte, 3100)
 		n, err := rand.Read(data)
@@ -170,14 +171,14 @@ func TestServerWrite(t *testing.T) {
 	config.StartingReadTimeout = 10 * time.Second
 	config.MaxPendingConnections = 1
 	config.MaxBufferedPacketsPerConnection = 5
-	server, err := NewServer(pc.(*net.UDPConn), config)
+	server, err := NewServer(pc.(*net.UDPConn), *config)
 	assert.NilError(t, err)
 	go func() {
 		server.Serve()
 	}()
 
 	t.Run("server echo", func(t *testing.T) {
-		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify})
+		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, KeyPair: keys.GenerateNewX25519KeyPair()})
 		assert.NilError(t, err)
 		c.Handshake()
 		h, err := server.AcceptTimeout(5 * time.Second)
@@ -212,7 +213,7 @@ func TestServerWrite(t *testing.T) {
 			"Just wanted to love everyone",
 		}
 
-		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify})
+		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, KeyPair: keys.GenerateNewX25519KeyPair()})
 		assert.NilError(t, err)
 
 		wg := sync.WaitGroup{}
