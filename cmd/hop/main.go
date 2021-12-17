@@ -10,6 +10,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/app"
+	"zmap.io/portal/transport"
 )
 
 func configFromCmdLineFlags(args []string) (*app.HopClientConfig, error) {
@@ -17,11 +18,15 @@ func configFromCmdLineFlags(args []string) (*app.HopClientConfig, error) {
 	keypath, _ := os.UserHomeDir()
 	keypath += app.DefaultKeyPath
 
+	transportClientConfig := &transport.ClientConfig{
+		Verify: *verify,
+	}
+
 	cConfig := &app.HopClientConfig{
-		Verify:    *verify,
-		SockAddr:  app.DefaultHopAuthSocket,
-		Principal: false,
-		Keypath:   keypath,
+		TransportConfig: transportClientConfig,
+		SockAddr:        app.DefaultHopAuthSocket,
+		Principal:       false,
+		Keypath:         keypath,
 	}
 
 	//******PROCESS CMD LINE ARGUMENTS******

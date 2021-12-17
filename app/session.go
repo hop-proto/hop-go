@@ -20,6 +20,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/authgrants"
 	"zmap.io/portal/codex"
+	"zmap.io/portal/keys"
 	"zmap.io/portal/netproxy"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
@@ -64,7 +65,8 @@ func (sess *hopSession) checkAuthorization() bool {
 	seemed strange to rely on the client to send the same key that it used during the handshake.
 	Instead I modified the transport layer code so that the client static is stored in the session state.
 	This way the server directly grabs the key that was used in the handshake.*/
-	k := sess.server.server.FetchClientStatic(sess.transportConn) //server fetches client static key that was used in handshake
+	leaf := sess.server.server.FetchClientLeaf(sess.transportConn) //server fetches client static key that was used in handshake
+	k := keys.PublicKey(leaf.PublicKey)
 	logrus.Info("got userauth init message: ", k.String())
 	sess.user = username
 

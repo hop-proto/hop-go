@@ -10,6 +10,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/authgrants"
+	"zmap.io/portal/certs"
 	"zmap.io/portal/codex"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/netproxy"
@@ -20,42 +21,40 @@ import (
 
 //HopClient holds state for client's perspective of session
 type HopClient struct {
-	TransportConn   *transport.Client
-	ProxyConn       *tubes.Reliable
-	TubeMuxer       *tubes.Muxer
-	ExecTube        *codex.ExecTube
-	Config          *HopClientConfig
-	TransportConfig transport.ClientConfig
-	Proxied         bool
-	Primarywg       sync.WaitGroup
+	TransportConn *transport.Client
+	ProxyConn     *tubes.Reliable
+	TubeMuxer     *tubes.Muxer
+	ExecTube      *codex.ExecTube
+	Config        *HopClientConfig
+	Proxied       bool
+	Primarywg     sync.WaitGroup
 }
 
 //HopClientConfig holds configuration options for hop client
 type HopClientConfig struct {
-	Principal  bool
-	Quiet      bool
-	Headless   bool
-	Verify     transport.VerifyConfig
-	SockAddr   string
-	Keypath    string
-	Username   string
-	Hostname   string
-	Port       string
-	LocalArgs  []string
-	RemoteArgs []string
-	Cmd        string
+	Principal       bool
+	Quiet           bool
+	Headless        bool
+	TransportConfig *transport.ClientConfig
+	SockAddr        string
+	Keypath         string
+	Username        string
+	Hostname        string
+	Port            string
+	LocalArgs       []string
+	RemoteArgs      []string
+	Cmd             string
 }
 
 //NewHopClient creates a new client object and loads keys from file or auth grant protocol
 func NewHopClient(cConfig *HopClientConfig) (*HopClient, error) {
 	client := &HopClient{
-		TransportConfig: transport.ClientConfig{Verify: cConfig.Verify},
-		Config:          cConfig,
-		Primarywg:       sync.WaitGroup{},
-		Proxied:         false,
+		Config:    cConfig,
+		Primarywg: sync.WaitGroup{},
+		Proxied:   false,
 	}
 	if cConfig.Principal {
-		err := client.LoadKeys(cConfig.Keypath)
+		err := client.LoadKeys(cConfig.Keypath) //read keys and generate a self signed cert
 		if err != nil {
 			return nil, err
 		}
@@ -148,15 +147,25 @@ func (c *HopClient) LoadKeys(keypath string) error {
 	if e != nil {
 		return e
 	}
-	c.TransportConfig.KeyPair = pair
+	names := []certs.Name{certs.RawStringName(c.Config.Username)}
+	clientLeafIdentity := certs.Identity{
+		PublicKey: pair.Public,
+		Names:     names,
+	}
+	clientLeaf, err := certs.SelfSignLeaf(&clientLeafIdentity)
+	if err != nil {
+		return err
+	}
+	c.Config.TransportConfig.KeyPair = pair
+	c.Config.TransportConfig.Leaf = clientLeaf
+	c.Config.TransportConfig.Intermediate = nil
 	return nil
 }
 
 func (c *HopClient) getAuthorization() error {
-	c.TransportConfig.KeyPair = new(keys.X25519KeyPair)
-	c.TransportConfig.KeyPair.Generate()
+	c.Config.TransportConfig.KeyPair = keys.GenerateNewX25519KeyPair()
 
-	logrus.Infof("Client generated: %v", c.TransportConfig.KeyPair.Public.String())
+	logrus.Infof("Client generated: %v", c.Config.TransportConfig.KeyPair.Public.String())
 	logrus.Infof("C: Initiating AGC Protocol.")
 
 	udsconn, err := net.Dial("unix", c.Config.SockAddr)
@@ -167,7 +176,7 @@ func (c *HopClient) getAuthorization() error {
 	agc := authgrants.NewAuthGrantConn(udsconn)
 	defer agc.Close()
 	if !c.Config.Headless && c.Config.Cmd == "" { //shell
-		t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+		t, e := agc.GetAuthGrant(c.Config.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
 			c.Config.Port, authgrants.ShellAction, "")
 		if e == nil {
 			logrus.Infof("C: Principal approved request to open a shell. Deadline: %v", t)
@@ -176,7 +185,7 @@ func (c *HopClient) getAuthorization() error {
 		}
 	}
 	if !c.Config.Headless && c.Config.Cmd != "" { //cmd
-		t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+		t, e := agc.GetAuthGrant(c.Config.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
 			c.Config.Port, authgrants.CommandAction, c.Config.Cmd)
 		if e == nil {
 			logrus.Infof("C: Principal approved request to run cmd: %v. Deadline: %v", c.Config.Cmd, t)
@@ -186,7 +195,7 @@ func (c *HopClient) getAuthorization() error {
 	}
 	if len(c.Config.LocalArgs) > 0 { //local forwarding
 		for _, v := range c.Config.LocalArgs {
-			t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+			t, e := agc.GetAuthGrant(c.Config.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
 				c.Config.Port, authgrants.LocalPFAction, v)
 			if e == nil {
 				logrus.Infof("C: Principal approved request to do local forwarding for %v. Deadline: %v", v, t)
@@ -197,7 +206,7 @@ func (c *HopClient) getAuthorization() error {
 	}
 	if len(c.Config.RemoteArgs) > 0 { //remote forwarding
 		for _, v := range c.Config.RemoteArgs {
-			t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+			t, e := agc.GetAuthGrant(c.Config.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
 				c.Config.Port, authgrants.RemotePFAction, v)
 			if e == nil {
 				logrus.Infof("C: Principal approved request to do remote forwarding for %v. Deadline: %v", v, t)
@@ -221,9 +230,9 @@ func (c *HopClient) startUnderlying() error {
 	}
 	var err error
 	if !c.Proxied {
-		c.TransportConn, err = transport.Dial("udp", addr, c.TransportConfig) //There seem to be limits on Dial() and addr format
+		c.TransportConn, err = transport.Dial("udp", addr, *c.Config.TransportConfig) //There seem to be limits on Dial() and addr format
 	} else {
-		c.TransportConn, err = transport.DialNP("netproxy", addr, c.ProxyConn, c.TransportConfig)
+		c.TransportConn, err = transport.DialNP("netproxy", addr, c.ProxyConn, *c.Config.TransportConfig)
 	}
 	if err != nil {
 		logrus.Errorf("C: error dialing server: %v", err)
