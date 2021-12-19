@@ -1,5 +1,13 @@
 package app
 
+import (
+	"fmt"
+	"net"
+	"syscall"
+
+	"golang.org/x/sys/unix"
+)
+
 //Callback function that sets the appropriate socket options
 func setListenerOptions(proto, addr string, c syscall.RawConn) error {
 	return c.Control(func(fd uintptr) {
@@ -19,12 +27,12 @@ func readCreds(c net.Conn) (int, error) {
 	//should only have *net.UnixConn types
 	uc, ok := c.(*net.UnixConn)
 	if !ok {
-		return nil, fmt.Errorf("unexpected socket type")
+		return -1, fmt.Errorf("unexpected socket type")
 	}
 
 	raw, err := uc.SyscallConn()
 	if err != nil {
-		return nil, fmt.Errorf("error opening raw connection: %s", err)
+		return -1, fmt.Errorf("error opening raw connection: %s", err)
 	}
 
 	// The raw.Control() callback does not return an error directly.
@@ -38,11 +46,11 @@ func readCreds(c net.Conn) (int, error) {
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf(" GetsockoptUcred() error: %s", err)
+		return -1, fmt.Errorf(" GetsockoptUcred() error: %s", err)
 	}
 
 	if err2 != nil {
-		return nil, fmt.Errorf(" Control() error: %s", err2)
+		return -1, fmt.Errorf(" Control() error: %s", err2)
 	}
 
 	return cred.Pid, nil
