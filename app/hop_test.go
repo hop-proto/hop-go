@@ -6,13 +6,15 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
+	"zmap.io/portal/authgrants"
 	"zmap.io/portal/certs"
-	"zmap.io/portal/keys"
 	"zmap.io/portal/ports"
 	"zmap.io/portal/transport"
+	"zmap.io/portal/tubes"
 )
 
 var start = 18000
@@ -40,103 +42,172 @@ func TestSelfSignedCert(t *testing.T) {
 	transportConfig := *baseConfig
 	transportConfig.ClientVerify = nil //no certificate verification at all
 	//hop server set up
-	port := getPort()
-	serverConfig := &HopServerConfig{
-		Port:            port,
-		Host:            "localhost",
-		SockAddr:        DefaultHopAuthSocket + port,
-		TransportConfig: &transportConfig,
+	serverSetup := func(t *testing.T, p string) *HopServer {
+		serverConfig := &HopServerConfig{
+			Port:                     p,
+			Host:                     "localhost",
+			SockAddr:                 DefaultHopAuthSocket + p,
+			TransportConfig:          &transportConfig,
+			MaxOutstandingAuthgrants: 50,
+		}
+		s, err := NewHopServer(serverConfig)
+		assert.NilError(t, err)
+		return s
 	}
-	s, err := NewHopServer(serverConfig)
-	assert.NilError(t, err)
-	go s.Serve() //starts transport layer server, authgrant server, and listens for hop conns
-	//create client cert
-	keyname := "key1"
-	u, e := user.Current()
-	clientKey := keys.GenerateNewX25519KeyPair()
-	clientLeafIdentity := certs.Identity{
-		PublicKey: clientKey.Public,
-		Names:     []certs.Name{certs.RawStringName(u.Username)},
-	}
-	clientLeaf, err := certs.SelfSignLeaf(&clientLeafIdentity)
-	assert.NilError(t, err)
 
-	transportClientConfig := &transport.ClientConfig{
-		KeyPair:      clientKey,
-		Leaf:         clientLeaf,
-		Intermediate: nil,
-		Verify:       *verify,
+	principalSetup := func(t *testing.T, p string, auth bool) *HopClient {
+		keyname := "key" + p
+		u, e := user.Current()
+		assert.NilError(t, e)
+		clientKey, e := KeyGen("/.hop", keyname, auth)
+		assert.NilError(t, e)
+		clientLeafIdentity := certs.Identity{
+			PublicKey: clientKey.Public,
+			Names:     []certs.Name{certs.RawStringName(u.Username)},
+		}
+		clientLeaf, err := certs.SelfSignLeaf(&clientLeafIdentity)
+		assert.NilError(t, err)
+
+		transportClientConfig := &transport.ClientConfig{
+			KeyPair:        clientKey,
+			Leaf:           clientLeaf,
+			UseCertificate: true,
+			Intermediate:   nil,
+			Verify:         *verify,
+		}
+		//set up Hop client
+		keypath, _ := os.UserHomeDir()
+		keypath += "/.hop/" + keyname
+		assert.NilError(t, e)
+		clientConfig := &HopClientConfig{
+			TransportConfig: transportClientConfig,
+			Keypath:         keypath,
+			Hostname:        "127.0.0.1",
+			Port:            p,
+			Username:        u.Username,
+			Principal:       true,
+		}
+		client, err := NewHopClient(clientConfig)
+		assert.NilError(t, err)
+		return client
 	}
-	//set up Hop client
-	keypath, _ := os.UserHomeDir()
-	keypath += "/.hop/" + keyname
-	assert.NilError(t, e)
-	clientConfig := &HopClientConfig{
-		TransportConfig: transportClientConfig,
-		SockAddr:        DefaultHopAuthSocket + port,
-		Keypath:         keypath,
-		Hostname:        "127.0.0.1",
-		Port:            port,
-		Username:        u.Username,
-		Principal:       true,
-		Cmd:             "echo hello world",
-		Quiet:           false,
-		Headless:        false,
+
+	delegateSetup := func(t *testing.T, p string, auth_sock_id string) *HopClient {
+		u, e := user.Current()
+		assert.NilError(t, e)
+
+		transportClientConfig := &transport.ClientConfig{
+			KeyPair:        nil,
+			Leaf:           nil,
+			UseCertificate: true,
+			Intermediate:   nil,
+			Verify:         *verify,
+		}
+		//set up Hop client
+		clientConfig := &HopClientConfig{
+			TransportConfig: transportClientConfig,
+			SockAddr:        DefaultHopAuthSocket + auth_sock_id,
+			Hostname:        "127.0.0.1",
+			Port:            p,
+			Username:        u.Username,
+		}
+		client, err := NewHopClient(clientConfig)
+		assert.NilError(t, err)
+		return client
 	}
-	client, err := NewHopClient(clientConfig)
-	assert.NilError(t, err)
-	//handshake + user authorization
-	err = client.Connect()
-	assert.NilError(t, err)
-	//close
+
+	t.Run("simple client server connect", func(t *testing.T) {
+		port := getPort()
+		server := serverSetup(t, port)
+		go server.Serve()
+		client := principalSetup(t, port, true)
+
+		//handshake + user authorization
+		err := client.Connect()
+		assert.NilError(t, err)
+		//close
+		//err = client.Close() TODO: implement
+		//assert.NilError(t, err)
+	})
+
+	t.Run("connect fail when key not in authorized_keys", func(t *testing.T) {
+		port := getPort()
+		server := serverSetup(t, port)
+		go server.Serve()
+		client := principalSetup(t, port, false)
+
+		//handshake + user authorization
+		err := client.Connect()
+		assert.Error(t, err, "client not authorized")
+		//close
+		//err = client.Close() TODO: implement
+		//assert.NilError(t, err)
+	})
+
+	t.Run("authgrant one hop", func(t *testing.T) {
+		port1 := getPort()               //port server 1 (delegate) will listen on
+		port2 := getPort()               //port server 2 (target) will listen on
+		server1 := serverSetup(t, port1) //server 1 (delegate)
+		server2 := serverSetup(t, port2) //server 2 (target)
+		principal := principalSetup(t, port1, true)
+
+		//start hop server 2
+		go server2.Serve()        //starts transport layer server, authgrant server, and listens for hop conns
+		go server1.server.Serve() //start delgate transport layer server (manually handle incoming connection because I can't simulate the delegate client actually being a child process)
+
+		go func() {
+			//principal starts session with server 1
+			err := principal.Connect()
+			assert.NilError(t, err)
+
+			//principal handles intent request from delegate
+			agreqtube, err := principal.TubeMuxer.Accept()
+			assert.NilError(t, err)
+
+			agt := authgrants.NewAuthGrantConn(agreqtube)
+			intent, err := agt.GetIntentRequest()
+			assert.NilError(t, err)
+			logrus.Info("assuming user approves prompt")
+
+			//ask remote
+			remoteSession, err := principal.setupRemoteSession(intent)
+			assert.NilError(t, err)
+			targetAgt, err := authgrants.NewAuthGrantConnFromMux(remoteSession.TubeMuxer)
+			assert.NilError(t, err)
+			response, err := remoteSession.confirmWithRemote(intent, targetAgt, agt)
+			assert.NilError(t, err)
+			err = agt.WriteRawBytes(response)
+			assert.NilError(t, err)
+			agt.Close()
+			targetAgt.Close()
+		}()
+
+		//server 1 accepts principal connection and starts hopsession
+		psconn, err := server1.server.AcceptTimeout(1 * time.Minute)
+		assert.NilError(t, err)
+		psess := &hopSession{
+			transportConn: psconn,
+			tubeMuxer:     tubes.NewMuxer(psconn, psconn),
+			tubeQueue:     make(chan *tubes.Reliable),
+			done:          make(chan int),
+			server:        server1,
+		}
+		go psess.start()
+
+		// server 1 listens on authsock for Intent requests
+		// proxies them to the principal
+		go func() {
+			c, err := server1.authsock.Accept()
+			assert.NilError(t, err)
+			server1.proxyAuthGrantRequest(psess, c)
+		}()
+
+		delegate := delegateSetup(t, port2, port1)
+		err = delegate.Connect()
+		assert.NilError(t, err)
+	})
+
 }
-
-// func TestClientServer(t *testing.T) {
-// 	logrus.SetLevel(logrus.ErrorLevel)
-// 	keyname := "key1"
-// 	//put keys in /home/user/.hop/key + /home/user/.hop/key.pub
-// 	//put public key in /home/user/.hop/authorized_keys
-// 	portMutex.Lock()
-// 	KeyGen("/.hop", keyname, true)
-// 	portMutex.Unlock()
-// 	port := getPort()
-// 	//start hop server
-// 	baseConfig, verify := NewTestServerConfig("../certs/")
-
-// 	serverConfig := &HopServerConfig{
-// 		Port:                     port,
-// 		Host:                     "localhost",
-// 		SockAddr:                 DefaultHopAuthSocket + "1",
-// 		TransportConfig:          baseConfig,
-// 		MaxOutstandingAuthgrants: 50,
-// 	}
-// 	s, err := NewHopServer(serverConfig)
-// 	assert.NilError(t, err)
-// 	go s.Serve() //starts transport layer server, authgrant server, and listens for hop conns
-
-// 	keypath, _ := os.UserHomeDir()
-// 	keypath += "/.hop/" + keyname
-
-// 	u, e := user.Current()
-// 	assert.NilError(t, e)
-// 	clientConfig := &HopClientConfig{
-// 		TransportConfig: transportClientConfig
-// 		SockAddr:        DefaultHopAuthSocket + "1",
-// 		Keypath:         keypath,
-// 		Hostname:        "127.0.0.1",
-// 		Port:            port,
-// 		Username:        u.Username,
-// 		Principal:       true,
-// 		Cmd:             "echo hello world",
-// 		Quiet:           false,
-// 		Headless:        false,
-// 	}
-// 	client, err := NewHopClient(clientConfig)
-// 	assert.NilError(t, err)
-
-// 	err = client.Connect()
-// 	assert.NilError(t, err)
-// }
 
 // func TestAuthgrantOneHop(t *testing.T) {
 // 	logrus.SetLevel(logrus.ErrorLevel)

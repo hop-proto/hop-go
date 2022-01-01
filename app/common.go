@@ -102,23 +102,23 @@ func NewTestServerConfig(testDataPathPrefix string) (*transport.ServerConfig, *t
 }
 
 //KeyGen generates a new key pair and adds it to local authorized keys file
-func KeyGen(dir string, filename string, addToAuthKeys bool) {
+func KeyGen(dir string, filename string, addToAuthKeys bool) (*keys.X25519KeyPair, error) {
 	suffix := dir + "/" + filename
-	pair := new(keys.X25519KeyPair)
-	pair.Generate()
+	pair := keys.GenerateNewX25519KeyPair()
 	path, _ := os.UserHomeDir()
 	path += dir
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		err := os.Mkdir(path, fs.ModeDir|0700)
 		if err != nil {
 			logrus.Error(err)
-			return
+			return nil, err
 		}
 	}
 	path += "/" + filename
 	f, e := os.Create(path)
 	if e != nil {
-		logrus.Fatalf("error opening default key file: %v", e)
+		logrus.Errorf("error opening default key file: %v", e)
+		return nil, e
 	}
 	logrus.Infof("adding private to ~%v: %v", suffix, pair.Private.String())
 	f.WriteString(pair.Private.String())
@@ -128,7 +128,8 @@ func KeyGen(dir string, filename string, addToAuthKeys bool) {
 	path += suffix + ".pub"
 	f, e = os.Create(path)
 	if e != nil {
-		logrus.Fatalf("error opening default key file: %v", e)
+		logrus.Errorf("error opening default key file: %v", e)
+		return nil, e
 	}
 	logrus.Infof("adding public to ~%v.pub: %v", suffix, pair.Public.String())
 	f.WriteString(pair.Public.String())
@@ -143,16 +144,19 @@ func KeyGen(dir string, filename string, addToAuthKeys bool) {
 			f, e := os.Create(path)
 			if e != nil {
 				logrus.Error(e)
+				return nil, e
 			}
 			f.Close()
 		}
 		auth, e := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
 		if e != nil {
-			logrus.Fatalf("error opening auth key file: %v", e)
+			logrus.Errorf("error opening auth key file: %v", e)
+			return nil, e
 		}
 		defer auth.Close()
 		logrus.Infof("adding public to auth keys: %v", pair.Public.String())
 		auth.WriteString(pair.Public.String())
 		auth.WriteString("\n")
 	}
+	return pair, nil
 }

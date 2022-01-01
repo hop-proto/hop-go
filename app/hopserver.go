@@ -106,7 +106,7 @@ func (s *HopServer) Serve() {
 		if err != nil {
 			logrus.Fatalf("S: SERVER TIMEOUT: %v", err)
 		}
-		logrus.Debugf("S: ACCEPTED NEW CONNECTION with authgrant")
+		logrus.Debugf("S: ACCEPTED NEW CONNECTION")
 		go s.newSession(serverConn)
 	}
 }

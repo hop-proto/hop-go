@@ -163,7 +163,17 @@ func (c *HopClient) LoadKeys(keypath string) error {
 }
 
 func (c *HopClient) getAuthorization() error {
-	c.Config.TransportConfig.KeyPair = keys.GenerateNewX25519KeyPair()
+	clientKey := keys.GenerateNewX25519KeyPair()
+	c.Config.TransportConfig.KeyPair = clientKey
+	clientLeafIdentity := certs.Identity{
+		PublicKey: clientKey.Public,
+		Names:     []certs.Name{certs.RawStringName(c.Config.Username)},
+	}
+	clientLeaf, err := certs.SelfSignLeaf(&clientLeafIdentity)
+	c.Config.TransportConfig.Leaf = clientLeaf
+	if err != nil {
+		return nil
+	}
 
 	logrus.Infof("Client generated: %v", c.Config.TransportConfig.KeyPair.Public.String())
 	logrus.Infof("C: Initiating AGC Protocol.")
@@ -219,6 +229,7 @@ func (c *HopClient) getAuthorization() error {
 }
 
 func (c *HopClient) startUnderlying() error {
+	//logrus.SetLevel(logrus.DebugLevel)
 	//******ESTABLISH HOP SESSION******
 	//TODO(baumanl): figure out addr format requirements + check for them above
 	addr := c.Config.Hostname + ":" + c.Config.Port

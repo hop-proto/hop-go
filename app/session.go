@@ -120,7 +120,7 @@ func (sess *hopSession) checkAuthorization() bool {
 	sess.isPrincipal = false
 	delete(sess.server.authgrants, k)
 	sess.server.outstandingAuthgrants--
-	logrus.Info("USER AUTHORIZED")
+	logrus.Info("USER AUTHORIZED VIA AUTHGRANT")
 	uaTube.Write([]byte{userauth.UserAuthConf})
 	return true
 }
