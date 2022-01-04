@@ -50,6 +50,8 @@ type hopSession struct {
 	server *HopServer
 	user   string
 
+	authorizedKeysLocation string
+
 	isPrincipal bool
 	authgrant   *authGrant
 }
@@ -75,15 +77,15 @@ func (sess *hopSession) checkAuthorization() bool {
 		err := errors.New("issue loading /etc/passwd")
 		logrus.Error(err)
 	}
-	path := "/home/" + username + "/.hop/authorized_keys"
+	path := "/home/" + username + sess.authorizedKeysLocation
 	if user, ok := cache.LookupUserByName(sess.user); ok {
-		path = user.Homedir() + "/.hop/authorized_keys"
+		path = user.Homedir() + sess.authorizedKeysLocation
 	}
 	f, e := os.Open(path)
 	if e != nil {
 		logrus.Error("Could not open file at path: ", path)
 	} else {
-		logrus.Info("opened keys file")
+		logrus.Info("opened keys file at path: ", path)
 		defer f.Close()
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {

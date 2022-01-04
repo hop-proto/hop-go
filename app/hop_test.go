@@ -47,6 +47,7 @@ func serverSetup(t *testing.T, p string) *HopServer {
 		SockAddr:                 DefaultHopAuthSocket + p,
 		TransportConfig:          &transportConfig,
 		MaxOutstandingAuthgrants: 50,
+		AuthorizedKeysLocation:   "/.hop_test/authorized_keys",
 	}
 	s, err := NewHopServer(serverConfig)
 	assert.NilError(t, err)
@@ -58,7 +59,7 @@ func principalSetup(t *testing.T, p string, auth bool) *HopClient {
 	keyname := "key" + p
 	u, e := user.Current()
 	assert.NilError(t, e)
-	clientKey, e := KeyGen("/.hop", keyname, auth)
+	clientKey, e := KeyGen("/.hop_test", keyname, auth)
 	assert.NilError(t, e)
 	clientLeafIdentity := certs.Identity{
 		PublicKey: clientKey.Public,
@@ -76,7 +77,7 @@ func principalSetup(t *testing.T, p string, auth bool) *HopClient {
 	}
 	//set up Hop client
 	keypath, _ := os.UserHomeDir()
-	keypath += "/.hop/" + keyname
+	keypath += "/.hop_test/" + keyname
 	assert.NilError(t, e)
 	clientConfig := &HopClientConfig{
 		TransportConfig: transportClientConfig,
@@ -182,11 +183,12 @@ func TestAuthgrantOneHop(t *testing.T) {
 	psconn, err := server1.server.AcceptTimeout(1 * time.Minute)
 	assert.NilError(t, err)
 	psess := &hopSession{
-		transportConn: psconn,
-		tubeMuxer:     tubes.NewMuxer(psconn, psconn),
-		tubeQueue:     make(chan *tubes.Reliable),
-		done:          make(chan int),
-		server:        server1,
+		transportConn:          psconn,
+		tubeMuxer:              tubes.NewMuxer(psconn, psconn),
+		tubeQueue:              make(chan *tubes.Reliable),
+		done:                   make(chan int),
+		server:                 server1,
+		authorizedKeysLocation: server1.config.AuthorizedKeysLocation,
 	}
 	go psess.start()
 

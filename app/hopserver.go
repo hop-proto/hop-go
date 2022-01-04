@@ -39,6 +39,7 @@ type HopServerConfig struct {
 	SockAddr                 string
 	TransportConfig          *transport.ServerConfig
 	MaxOutstandingAuthgrants int
+	AuthorizedKeysLocation   string //defaults to /.hop/authorized_keys
 }
 
 //NewHopServer returns a Hop Server containing a transport server running on the host/port
@@ -106,7 +107,7 @@ func (s *HopServer) Serve() {
 		if err != nil {
 			logrus.Fatalf("S: SERVER TIMEOUT: %v", err)
 		}
-		logrus.Debugf("S: ACCEPTED NEW CONNECTION")
+		logrus.Infof("S: ACCEPTED NEW CONNECTION")
 		go s.newSession(serverConn)
 	}
 }
@@ -114,12 +115,18 @@ func (s *HopServer) Serve() {
 //Starts a new hop session
 func (s *HopServer) newSession(serverConn *transport.Handle) {
 	sess := &hopSession{
-		transportConn:   serverConn,
-		tubeMuxer:       tubes.NewMuxer(serverConn, serverConn),
-		tubeQueue:       make(chan *tubes.Reliable),
-		done:            make(chan int),
-		controlChannels: []net.Conn{},
-		server:          s,
+		transportConn:          serverConn,
+		tubeMuxer:              tubes.NewMuxer(serverConn, serverConn),
+		tubeQueue:              make(chan *tubes.Reliable),
+		done:                   make(chan int),
+		controlChannels:        []net.Conn{},
+		server:                 s,
+		authorizedKeysLocation: s.config.AuthorizedKeysLocation,
+	}
+	if sess.authorizedKeysLocation != sess.server.config.AuthorizedKeysLocation {
+		logrus.Error("Authorized Keys location mismatch")
+	} else {
+		logrus.Info("ALL GOOD AUTH KEYS LOCATION")
 	}
 	sess.start()
 }

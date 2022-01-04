@@ -137,7 +137,8 @@ func KeyGen(dir string, filename string, addToAuthKeys bool) (*keys.X25519KeyPai
 	if addToAuthKeys {
 		logrus.Info("adding to authorized keys")
 		path, _ = os.UserHomeDir()
-		path += "/.hop/authorized_keys" //adds the key to its own authorized key file so that localhost operations will work
+		path += dir
+		path += "/authorized_keys" //adds the key to its own authorized key file so that localhost operations will work
 		_, err := os.Stat(path)
 		if errors.Is(err, os.ErrNotExist) {
 			logrus.Info("file does not exist, creating...")
