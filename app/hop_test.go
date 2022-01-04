@@ -249,11 +249,12 @@ func TestAuthgrantTimeout(t *testing.T) {
 	psconn, err := server1.server.AcceptTimeout(1 * time.Minute)
 	assert.NilError(t, err)
 	psess := &hopSession{
-		transportConn: psconn,
-		tubeMuxer:     tubes.NewMuxer(psconn, psconn),
-		tubeQueue:     make(chan *tubes.Reliable),
-		done:          make(chan int),
-		server:        server1,
+		transportConn:          psconn,
+		tubeMuxer:              tubes.NewMuxer(psconn, psconn),
+		tubeQueue:              make(chan *tubes.Reliable),
+		done:                   make(chan int),
+		server:                 server1,
+		authorizedKeysLocation: server1.config.AuthorizedKeysLocation,
 	}
 	go psess.start()
 
