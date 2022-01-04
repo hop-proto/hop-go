@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/certs"
@@ -160,4 +161,45 @@ func KeyGen(dir string, filename string, addToAuthKeys bool) (*keys.X25519KeyPai
 		auth.WriteString("\n")
 	}
 	return pair, nil
+}
+
+//parse next part of arg, return new part
+func parsePart(arg string) (string, error) {
+	if arg[0] == '[' {
+		if i := strings.Index(arg, "]"); i == -1 || i != len(arg)-1 {
+			return "", errors.New("invalid bracket expression")
+		}
+		return arg[1 : len(arg)-1], nil
+	}
+	return "", nil
+}
+
+type fwd struct {
+	listenhost        string
+	listenportorpath  string
+	connecthost       string
+	connectportorpath string
+}
+
+/*
+[listenhost:]listenport|listenpath:connecthost:connectport|connectpath
+ *	listenpath:connectpath
+*/
+func parseForward(arg string, argt string) error {
+	//TODO: expand env vars
+	//skip leading/trailing whitespace
+	arg = strings.TrimSpace(arg)
+
+	rawParts := strings.Split(arg, ":")
+	parts := []string{}
+
+	for _, part := range rawParts {
+		p, e := parsePart(part)
+		if e != nil {
+			return e
+		}
+		parts = append(parts, p)
+	}
+
+	return nil
 }

@@ -18,5 +18,4 @@ func TestFlags(t *testing.T) {
 	assert.Equal(t, len(config.RemoteArgs), 2)
 	assert.Equal(t, config.RemoteArgs[0], "3000:other:4000")
 	assert.Equal(t, config.RemoteArgs[1], "1111:127.0.0.1:2222")
-
 }
