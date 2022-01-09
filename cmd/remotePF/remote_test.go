@@ -16,12 +16,13 @@ import (
 
 func TestRemote(t *testing.T) {
 	remotePort := "7779"
+	arg := remotePort + ":connect_host:connect_port"
 	curUser, err := user.Current()
 	assert.NilError(t, err)
 	logrus.Infof("Currently running as: %v. With UID: %v GID: %v", curUser.Username, curUser.Uid, curUser.Gid)
 	cache, err := etcpwdparse.NewLoadedEtcPasswdCache()
 	assert.NilError(t, err)
-	args := []string{"remotePF", remotePort}
+	args := []string{"remotePF", arg}
 	c := exec.Command(args[0], args[1:]...)
 	if curUser.Uid == "0" {
 		logrus.Info("running as root, configuring to run as 'baumanl'")

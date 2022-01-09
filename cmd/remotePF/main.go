@@ -23,8 +23,8 @@ func main() {
 	}
 	app.ParseForward(arg, &fwdStruct)
 
-	contentSockAddr := "@content" + fwdStruct.Connectportorpath
-	controlSockAddr := "@control" + fwdStruct.Connectportorpath
+	contentSockAddr := "@content" + fwdStruct.Listenportorpath
+	controlSockAddr := "@control" + fwdStruct.Listenportorpath
 	//set up logging to file
 	f, e := os.Create("/tmp/log.txt")
 	if e != nil {
