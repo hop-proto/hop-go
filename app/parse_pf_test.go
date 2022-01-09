@@ -7,14 +7,13 @@ import (
 )
 
 func TestParse(t *testing.T) {
-
 	//valid formats
 	A := "listen_port:connect_host:connect_port"
 	fwdStruct := Fwd{}
 	correctStruct := Fwd{
 		Listensock:        false,
 		Connectsock:       false,
-		Listenhost:        "*",
+		Listenhost:        "",
 		Listenportorpath:  "listen_port",
 		Connecthost:       "connect_host",
 		Connectportorpath: "connect_port",
@@ -28,7 +27,7 @@ func TestParse(t *testing.T) {
 	correctStruct = Fwd{
 		Listensock:        false,
 		Connectsock:       true,
-		Listenhost:        "*",
+		Listenhost:        "",
 		Listenportorpath:  "listen_port",
 		Connecthost:       "",
 		Connectportorpath: "/connect_socket",
@@ -90,6 +89,48 @@ func TestParse(t *testing.T) {
 		Connectportorpath: "/connect_socket",
 	}
 	err = parseForward(F, &fwdStruct)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, fwdStruct, correctStruct)
+
+	G := "[2001:db8::1]:listen_port:/connect_socket" //leading IPv6 address
+	fwdStruct = Fwd{}
+	correctStruct = Fwd{
+		Listensock:        false,
+		Connectsock:       true,
+		Listenhost:        "2001:db8::1",
+		Listenportorpath:  "listen_port",
+		Connecthost:       "",
+		Connectportorpath: "/connect_socket",
+	}
+	err = parseForward(G, &fwdStruct)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, fwdStruct, correctStruct)
+
+	H := "listen_port:[2001:db8::1]:connect_port" //connect IPv6 address
+	fwdStruct = Fwd{}
+	correctStruct = Fwd{
+		Listensock:        false,
+		Connectsock:       false,
+		Listenhost:        "",
+		Listenportorpath:  "listen_port",
+		Connecthost:       "2001:db8::1",
+		Connectportorpath: "connect_port",
+	}
+	err = parseForward(H, &fwdStruct)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, fwdStruct, correctStruct)
+
+	I := "[2001:db8:3333:4444:5555:6666:7777:8888]:listen_port:[2001:db8::1]:connect_port" //listen and connect IPv6 address
+	fwdStruct = Fwd{}
+	correctStruct = Fwd{
+		Listensock:        false,
+		Connectsock:       false,
+		Listenhost:        "2001:db8:3333:4444:5555:6666:7777:8888",
+		Listenportorpath:  "listen_port",
+		Connecthost:       "2001:db8::1",
+		Connectportorpath: "connect_port",
+	}
+	err = parseForward(I, &fwdStruct)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, fwdStruct, correctStruct)
 

@@ -342,67 +342,78 @@ func (c *HopClient) remoteForward(arg string) error {
 }
 
 func (c *HopClient) localForward(arg string) error {
-	logrus.Info("Doing local with: ", arg)
-	parts := strings.Split(arg, ":")
-	if len(parts) != 3 {
-		logrus.Error("local port forwarding currently only supported with port:host:hostport format")
-		return ErrInvalidPortForwardingArgs
-	}
-	logrus.Info("Forwarding traffic from local port ", parts[0], " to remote port ", parts[2], " on host ", parts[1])
+	// logrus.Info("Doing local with: ", arg)
+	// fwdStruct := Fwd{
+	// 	Listensock: false,
+	// 	Connectsock: false,
+	// 	Listenhost: "",
+	// 	Listenportorpath: "",
+	// 	Connecthost: "",
+	// 	Connectportorpath: "",
+	// }
+	// err := parseForward(arg, &fwdStruct)
+	// if err != nil {
+	// 	return err
+	// }
+	// if !fwdStruct.Listensock { //bind to local address
+	// 	//local, e := net.Listen("tcp", ":"+strings.Trim(parts[0], ":"))
+	// 	// if fwdStruct.Listenhost ==  {
 
-	//bind to local address
-	local, e := net.Listen("tcp", ":"+strings.Trim(parts[0], ":"))
-	if e != nil {
-		logrus.Error(e)
-		return e
-	}
+	// 	// }
+	// 	net.JoinHostPort(fwdStruct.Listenhost, fwdStruct.Listenportorpath)
+	// 	//local, err := net.Listen("tcp", fwdS)
+	// 	if e != nil {
+	// 		logrus.Error(e)
+	// 		return e
+	// 	}
+	// }
 
-	go func() {
-		//do local port forwarding
-		if c.Config.Headless {
-			defer c.Primarywg.Done()
-		}
-		//accept incoming connections
-		regchan := make(chan net.Conn)
-		go func() {
-			for {
-				localConn, e := local.Accept()
-				if e != nil {
-					logrus.Error(e)
-					break
-				}
-				logrus.Info("Accepted TCPConn...")
-				regchan <- localConn
-			}
-		}()
+	// go func() {
+	// 	//do local port forwarding
+	// 	if c.Config.Headless {
+	// 		defer c.Primarywg.Done()
+	// 	}
+	// 	//accept incoming connections
+	// 	regchan := make(chan net.Conn)
+	// 	go func() {
+	// 		for {
+	// 			localConn, e := local.Accept()
+	// 			if e != nil {
+	// 				logrus.Error(e)
+	// 				break
+	// 			}
+	// 			logrus.Info("Accepted TCPConn...")
+	// 			regchan <- localConn
+	// 		}
+	// 	}()
 
-		for {
-			lconn := <-regchan
-			go func() { //start tube with server for new connection
-				npt, e := c.TubeMuxer.CreateTube(LocalPFTube)
-				if e != nil {
-					return
-				}
-				defer npt.Close()
-				e = netproxy.Start(npt, arg, netproxy.Local)
-				if e != nil {
-					return
-				}
-				if c.Config.Headless {
-					c.Primarywg.Add(1)
-				}
-				go func() {
-					n, _ := io.Copy(npt, lconn)
-					npt.Close()
-					logrus.Debugf("Copied %v bytes from lconn to npt", n)
-					logrus.Info("tconn ended")
-				}()
-				n, _ := io.Copy(lconn, npt)
-				lconn.Close()
-				logrus.Debugf("Copied %v bytes from npt to lconn", n)
-			}()
-		}
-	}()
+	// 	for {
+	// 		lconn := <-regchan
+	// 		go func() { //start tube with server for new connection
+	// 			npt, e := c.TubeMuxer.CreateTube(LocalPFTube)
+	// 			if e != nil {
+	// 				return
+	// 			}
+	// 			defer npt.Close()
+	// 			e = netproxy.Start(npt, arg, netproxy.Local)
+	// 			if e != nil {
+	// 				return
+	// 			}
+	// 			if c.Config.Headless {
+	// 				c.Primarywg.Add(1)
+	// 			}
+	// 			go func() {
+	// 				n, _ := io.Copy(npt, lconn)
+	// 				npt.Close()
+	// 				logrus.Debugf("Copied %v bytes from lconn to npt", n)
+	// 				logrus.Info("tconn ended")
+	// 			}()
+	// 			n, _ := io.Copy(lconn, npt)
+	// 			lconn.Close()
+	// 			logrus.Debugf("Copied %v bytes from npt to lconn", n)
+	// 		}()
+	// 	}
+	// }()
 	return nil
 }
 

@@ -1,3 +1,6 @@
+# Resources
+## OpenSSH parsing code for portforwarding flags: https://github.com/openssh/openssh-portable/blob/master/readconf.c#L2880
+## https://datatracker.ietf.org/doc/html/rfc4254#section-7
 #  Remote Port Forwarding
 ## Current Hop Support
 - -R port:host:hostport
@@ -26,7 +29,7 @@
 9. The server makes a new tube back to the local side and sends across the arg corresponding to that RPF relationship (i.e. port:host:hostport) so that the client can check that it actually asked for such a connection and so it knows where to forward the data to. TODO: SSH also sends the originator IP/port should hop do this?
 10. Local side checks that it asked for this RPF (arg matches one of it's requested) and then establishes a TCP connection to host:hostport. 
 
-## OpenSSH parsing code for portforwarding flags: https://github.com/openssh/openssh-portable/blob/master/readconf.c#L2880
+
 
 ## SSH doc on -R option
 - -R [bind_address:]port:host:hostport

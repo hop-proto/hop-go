@@ -14,7 +14,6 @@ import (
 
 //Defaults and constants for starting a hop session
 const (
-	DefaultListenHost     = "*"
 	DefaultHopPort        = "7777"
 	DefaultKeyPath        = "/.hop/key"
 	clientUsage           = "hop [user@]host[:port] [-K or -k path] [-L port:host:hostport] [-R port:host:hostport] [-N] [-c cmd] [-q] [-h]"
@@ -168,15 +167,16 @@ func KeyGen(dir string, filename string, addToAuthKeys bool) (*keys.X25519KeyPai
 }
 
 //parse next part of arg, return new part
-func parsePart(arg string) (string, error) {
-	if arg[0] == '[' {
-		if i := strings.Index(arg, "]"); i == -1 || i != len(arg)-1 {
-			return "", errors.New("invalid bracket expression")
-		}
-		return arg[1 : len(arg)-1], nil
-	}
-	return arg, nil
-}
+// func parsePart(arg string) (string, error) {
+// 	if arg[0] == '[' {
+// 		if i := strings.Index(arg, "]"); i == -1 || i != len(arg)-1 {
+// 			logrus.Error("invalid bracket expression")
+// 			return "", errors.New("invalid bracket expression")
+// 		}
+// 		return arg[1 : len(arg)-1], nil
+// 	}
+// 	return arg, nil
+// }
 
 //Fwd holds state related to portforwarding parsed from cmdline or config
 type Fwd struct {
@@ -188,11 +188,6 @@ type Fwd struct {
 	Connectportorpath string // final dest port or socket path
 }
 
-/*
-if Remote: listen is on the remote peer (hop server) and connect is contacted by the local peer
-if Local: listen is on the local peer (hop client) and connect is contacted by the remote peer
-*/
-
 /*-R port (ssh acts as a SOCKS 4/5 proxy) HOP NOT SUPPORTED -R
 A. (3) -R port:host:hostport or 				-L port:host:hostport 				--> listen_port:connect_host:connect_port (3 no sock)
 B. (2) -R port:local_socket or 					-L port:remote_socket 				--> listen_port:connect_socket				(1 no sock)
@@ -203,33 +198,6 @@ D. (3) -R bind_address:port:local_socket or 	-L bind_address:port:remote_socket 
 E. (3) -R remote_socket:host:hostport or 		-L local_socket:host:hostport 		--> listen_socket:connect_host:connect_port (2 no sock)
 F. (2) -R remote_socket:local_socket or 		-L local_socket:remote_socket 		--> listen_socket:connect_socket (0 no sock)
 
-listensock = false
-connectsock = false
-
-if parts[0] is a path --> E, F {
-	//deal with parts[0] being a listen_socket:
-	listenportorpath= parts[0]
-	parts = parts[1:]
-	listensock = true
-}
-else {
-	if parts[0] is an address --> C, D {
-		//deal with parts[0] being a bind_address:
-		listenhost = parts[0]
-		parts = parts[1:]
-	}
-	//now have A, B
-	//deal with parts[0] being port:
-	listenportorpath = parts[0]
-	parts = parts[1:]
-}
-//now have connect_host:connect_port or connect_socket left
-if length = 1: --> connect_socket
-	connectsock = true
-	connectportorpath = parts[0] (connecthost not used)
-else:
-	connecthost = parts[0]
-	connectportorpath = parts[1]
 */
 
 //returns true if a forward slash exists
@@ -237,7 +205,24 @@ func checkPath(arg string) bool {
 	return strings.Contains(arg, "/")
 }
 
+// Bind address meanings
+//o  "" means that connections are to be accepted on all protocol
+// families supported by the SSH implementation.
+
+// o  "0.0.0.0" means to listen on all IPv4 addresses.
+
+// o  "::" means to listen on all IPv6 addresses.
+
+// o  "localhost" means to listen on all protocol families supported by
+// the SSH implementation on loopback addresses only ([RFC3330] and
+// [RFC3513]).
+
+// o  "127.0.0.1" and "::1" indicate listening on the loopback
+// interfaces for IPv4 and IPv6, respectively.
+
 /*
+if Remote: listen is on the remote peer (hop server) and connect is contacted by the local peer
+if Local: listen is on the local peer (hop client) and connect is contacted by the remote peer
 [listenhost:]listenport|listenpath:connecthost:connectport|connectpath
  *	listenpath:connectpath
 */
@@ -245,18 +230,59 @@ func parseForward(arg string, fwdStruct *Fwd) error {
 	//TODO: expand env vars
 	//skip leading/trailing whitespace
 	arg = strings.TrimSpace(arg)
-
-	rawParts := strings.Split(arg, ":")
 	parts := []string{}
 
-	for _, part := range rawParts {
-		p, e := parsePart(part)
-		if e != nil {
+	nleft := strings.Count(arg, "[")
+	nright := strings.Count(arg, "]")
+	if nleft > 2 || nleft != nright {
+		return ErrInvalidPFArgs
+	}
+	// 1 bracketed address (first)
+	// 1 bracketed address (middle)
+	// both bracketed addresses
+
+	//at least 1 bracketed expression
+	if strings.Index(arg, "[") == 0 {
+		logrus.Info("first brackets found")
+		//first address is IPv6
+		end := strings.Index(arg, "]")
+		logrus.Info("end is: ", end)
+		if end <= 0 {
+			logrus.Error("end less than or eq to 0")
 			return ErrInvalidPFArgs
 		}
-		parts = append(parts, p)
-		logrus.Info("appending: ", p)
+		parts = append(parts, arg[1:end])
+		if arg[end+1] != ':' { //must be followed by a colon to have a port number at a minimum
+			logrus.Errorf("next char is not a colon: %v", arg)
+			return ErrInvalidPFArgs
+		}
+		arg = arg[end+2:] //skip past trailing colon
 	}
+	if strings.Contains(arg, "[") {
+		logrus.Info("second brackets found")
+		start := strings.Index(arg, "[")
+		end := strings.Index(arg, "]")
+		if end <= start {
+			return ErrInvalidPFArgs
+		}
+		if start > 0 {
+			//check colon right before it
+			if arg[start-1] != ':' { //must be preceded by a colon
+				return ErrInvalidPFArgs
+			}
+			rawParts := strings.Split(arg[:start-1], ":")
+			parts = append(parts, rawParts...)
+		}
+		parts = append(parts, arg[start+1:end])
+		if arg[end+1] != ':' { //must be followed by a colon to have a port number at a minimum
+			return ErrInvalidPFArgs
+		}
+		arg = arg[end+2:] //skip past trailing colon
+	}
+	//split and append whatever is left to parts
+	rawParts := strings.Split(arg, ":")
+	parts = append(parts, rawParts...)
+
 	if len(parts) < 2 {
 		return ErrInvalidPFArgs
 	}
@@ -279,7 +305,6 @@ func parseForward(arg string, fwdStruct *Fwd) error {
 		return nil
 	case 1: // all that remains is listen_port (connect_socket already parsed)
 		//listen_port:connect_socket				(1 no sock)
-		fwdStruct.Listenhost = DefaultListenHost
 		fwdStruct.Listenportorpath = parts[0]
 
 	case 2: // listen or connect was a socket. 2 args remain
@@ -291,7 +316,6 @@ func parseForward(arg string, fwdStruct *Fwd) error {
 			fwdStruct.Listenportorpath = parts[1]
 		}
 	case 3: //listen_port:connect_host:connect_port (3 no sock)
-		fwdStruct.Listenhost = DefaultListenHost
 		fwdStruct.Listenportorpath = parts[0]
 		fwdStruct.Connecthost = parts[1]
 		fwdStruct.Connectportorpath = parts[2]
