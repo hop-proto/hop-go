@@ -60,6 +60,9 @@ var ErrClientUnauthorized = errors.New("client not authorized")
 //ErrClientStartingExecTube is returned by client when cmd execution and/or I/O redirection fails
 var ErrClientStartingExecTube = errors.New("failed to start session")
 
+//ErrInvalidPFArgs is returned when there is a problem parsing portfowarding argument
+var ErrInvalidPFArgs = errors.New("error parsing portforwarding argument")
+
 //NewTestServerConfig populates server config and verify config with sample cert data
 func NewTestServerConfig(testDataPathPrefix string) (*transport.ServerConfig, *transport.VerifyConfig) {
 	keyPair, err := keys.ReadDHKeyFromPEMFile(testDataPathPrefix + "testdata/leaf-key.pem")
@@ -197,7 +200,7 @@ B. (2) -R port:local_socket or 					-L port:remote_socket 				--> listen_port:co
 C. (4) -R bind_address:port:host:hostport or 	-L bind_address:port:host:hostport 	--> listen_address:listen_port:connect_host:connect_port (4 no sock)
 D. (3) -R bind_address:port:local_socket or 	-L bind_address:port:remote_socket 	--> listen_address:listen_port:connect_socket (2 no sock)
 
-E. (3) -R remote_socket:host:hostport or 		-L local_socket:host:hostport 		--> listen_socket:host:hostport (2 no sock)
+E. (3) -R remote_socket:host:hostport or 		-L local_socket:host:hostport 		--> listen_socket:connect_host:connect_port (2 no sock)
 F. (2) -R remote_socket:local_socket or 		-L local_socket:remote_socket 		--> listen_socket:connect_socket (0 no sock)
 
 listensock = false
@@ -249,16 +252,16 @@ func parseForward(arg string, fwdStruct *Fwd) error {
 	for _, part := range rawParts {
 		p, e := parsePart(part)
 		if e != nil {
-			return e
+			return ErrInvalidPFArgs
 		}
 		parts = append(parts, p)
 		logrus.Info("appending: ", p)
 	}
 	if len(parts) < 2 {
-		return errors.New("incorrect args")
+		return ErrInvalidPFArgs
 	}
 
-	fwdStruct.Listensock = true
+	fwdStruct.Listensock = false
 	fwdStruct.Connectsock = false
 
 	if checkPath(parts[0]) {
@@ -272,6 +275,8 @@ func parseForward(arg string, fwdStruct *Fwd) error {
 		parts = parts[:len(parts)-1]
 	}
 	switch len(parts) {
+	case 0: //both listen and connect were sockets
+		return nil
 	case 1: // all that remains is listen_port (connect_socket already parsed)
 		//listen_port:connect_socket				(1 no sock)
 		fwdStruct.Listenhost = DefaultListenHost
@@ -296,7 +301,7 @@ func parseForward(arg string, fwdStruct *Fwd) error {
 		fwdStruct.Connecthost = parts[2]
 		fwdStruct.Connectportorpath = parts[3]
 	default:
-		return errors.New("invalid pf args")
+		return ErrInvalidPFArgs
 	}
 
 	return nil
