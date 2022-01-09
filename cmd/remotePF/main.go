@@ -7,13 +7,24 @@ import (
 	"os/user"
 
 	"github.com/sirupsen/logrus"
+	"zmap.io/portal/app"
 	"zmap.io/portal/netproxy"
 )
 
 func main() {
-	remotePort := os.Args[1]
-	contentSockAddr := "@content" + remotePort
-	controlSockAddr := "@control" + remotePort
+	arg := os.Args[1]
+	fwdStruct := app.Fwd{
+		Listensock:        false,
+		Connectsock:       false,
+		Listenhost:        "",
+		Listenportorpath:  "",
+		Connecthost:       "",
+		Connectportorpath: "",
+	}
+	app.ParseForward(arg, &fwdStruct)
+
+	contentSockAddr := "@content" + fwdStruct.Connectportorpath
+	controlSockAddr := "@control" + fwdStruct.Connectportorpath
 	//set up logging to file
 	f, e := os.Create("/tmp/log.txt")
 	if e != nil {
@@ -35,8 +46,14 @@ func main() {
 	logrus.Infof("Child running as: %v. With UID: %v GID: %v", curUser.Username, curUser.Uid, curUser.Gid)
 
 	//set up tcplistener on remote port
-	tcpListener, tcperr := net.Listen("tcp", "127.0.0.1:"+remotePort)
-	if tcperr != nil {
+	var tcpListener net.Listener
+	if !fwdStruct.Listensock {
+		addr := net.JoinHostPort(fwdStruct.Listenhost, fwdStruct.Listenportorpath)
+		tcpListener, err = net.Listen("tcp", addr)
+	} else {
+		tcpListener, err = net.Listen("unix", fwdStruct.Listenportorpath)
+	}
+	if err != nil {
 		control, err := net.Dial("unix", controlSockAddr)
 		if err != nil {
 			logrus.Error("error dialing control sock", err)
@@ -47,8 +64,9 @@ func main() {
 		control.Close()
 		logrus.Fatal()
 	}
+
 	defer tcpListener.Close()
-	logrus.Infof("Started TCP listener on port: %v", remotePort)
+	logrus.Infof("Started TCP listener on port/path: %v", fwdStruct.Listenportorpath)
 
 	//all accepted tcp conns will go to this go chan
 	regchan := make(chan net.Conn)

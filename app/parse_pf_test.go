@@ -18,7 +18,7 @@ func TestParse(t *testing.T) {
 		Connecthost:       "connect_host",
 		Connectportorpath: "connect_port",
 	}
-	err := parseForward(A, &fwdStruct)
+	err := ParseForward(A, &fwdStruct)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, fwdStruct, correctStruct)
 
@@ -32,7 +32,7 @@ func TestParse(t *testing.T) {
 		Connecthost:       "",
 		Connectportorpath: "/connect_socket",
 	}
-	err = parseForward(B, &fwdStruct)
+	err = ParseForward(B, &fwdStruct)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, fwdStruct, correctStruct)
 
@@ -46,7 +46,7 @@ func TestParse(t *testing.T) {
 		Connecthost:       "connect_host",
 		Connectportorpath: "connect_port",
 	}
-	err = parseForward(C, &fwdStruct)
+	err = ParseForward(C, &fwdStruct)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, fwdStruct, correctStruct)
 
@@ -60,7 +60,7 @@ func TestParse(t *testing.T) {
 		Connecthost:       "",
 		Connectportorpath: "/connect_socket",
 	}
-	err = parseForward(D, &fwdStruct)
+	err = ParseForward(D, &fwdStruct)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, fwdStruct, correctStruct)
 
@@ -74,7 +74,7 @@ func TestParse(t *testing.T) {
 		Connecthost:       "connect_host",
 		Connectportorpath: "connect_port",
 	}
-	err = parseForward(E, &fwdStruct)
+	err = ParseForward(E, &fwdStruct)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, fwdStruct, correctStruct)
 
@@ -88,7 +88,7 @@ func TestParse(t *testing.T) {
 		Connecthost:       "",
 		Connectportorpath: "/connect_socket",
 	}
-	err = parseForward(F, &fwdStruct)
+	err = ParseForward(F, &fwdStruct)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, fwdStruct, correctStruct)
 
@@ -102,7 +102,7 @@ func TestParse(t *testing.T) {
 		Connecthost:       "",
 		Connectportorpath: "/connect_socket",
 	}
-	err = parseForward(G, &fwdStruct)
+	err = ParseForward(G, &fwdStruct)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, fwdStruct, correctStruct)
 
@@ -116,7 +116,7 @@ func TestParse(t *testing.T) {
 		Connecthost:       "2001:db8::1",
 		Connectportorpath: "connect_port",
 	}
-	err = parseForward(H, &fwdStruct)
+	err = ParseForward(H, &fwdStruct)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, fwdStruct, correctStruct)
 
@@ -130,19 +130,19 @@ func TestParse(t *testing.T) {
 		Connecthost:       "2001:db8::1",
 		Connectportorpath: "connect_port",
 	}
-	err = parseForward(I, &fwdStruct)
+	err = ParseForward(I, &fwdStruct)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, fwdStruct, correctStruct)
 
 	//invalidFormats
 	errOne := "arg1" // too few args
 	fwdStruct = Fwd{}
-	err = parseForward(errOne, &fwdStruct)
+	err = ParseForward(errOne, &fwdStruct)
 	assert.Error(t, err, ErrInvalidPFArgs.Error())
 
 	errTwo := "arg1:arg2:arg3:arg4:arg5" // too many args
 	fwdStruct = Fwd{}
-	err = parseForward(errTwo, &fwdStruct)
+	err = ParseForward(errTwo, &fwdStruct)
 	assert.Error(t, err, ErrInvalidPFArgs.Error())
 
 }

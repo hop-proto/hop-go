@@ -166,18 +166,6 @@ func KeyGen(dir string, filename string, addToAuthKeys bool) (*keys.X25519KeyPai
 	return pair, nil
 }
 
-//parse next part of arg, return new part
-// func parsePart(arg string) (string, error) {
-// 	if arg[0] == '[' {
-// 		if i := strings.Index(arg, "]"); i == -1 || i != len(arg)-1 {
-// 			logrus.Error("invalid bracket expression")
-// 			return "", errors.New("invalid bracket expression")
-// 		}
-// 		return arg[1 : len(arg)-1], nil
-// 	}
-// 	return arg, nil
-// }
-
 //Fwd holds state related to portforwarding parsed from cmdline or config
 type Fwd struct {
 	Listensock        bool   // true if listening on a socket (not a host, port pair)
@@ -220,13 +208,13 @@ func checkPath(arg string) bool {
 // o  "127.0.0.1" and "::1" indicate listening on the loopback
 // interfaces for IPv4 and IPv6, respectively.
 
-/*
+/*ParseForward takes in a PF argument and populates fwdStruct with data
 if Remote: listen is on the remote peer (hop server) and connect is contacted by the local peer
 if Local: listen is on the local peer (hop client) and connect is contacted by the remote peer
 [listenhost:]listenport|listenpath:connecthost:connectport|connectpath
  *	listenpath:connectpath
 */
-func parseForward(arg string, fwdStruct *Fwd) error {
+func ParseForward(arg string, fwdStruct *Fwd) error {
 	//TODO: expand env vars
 	//skip leading/trailing whitespace
 	arg = strings.TrimSpace(arg)

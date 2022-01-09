@@ -373,15 +373,28 @@ func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
 
 //RemoteServer starts listening on given port and pipes the traffic back over the tube
 func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
-	parts := strings.Split(arg, ":") //assuming port:host:hostport
+	//parts := strings.Split(arg, ":") //assuming port:host:hostport
+	fwdStruct := Fwd{
+		Listensock:        false,
+		Connectsock:       false,
+		Listenhost:        "",
+		Listenportorpath:  "",
+		Connecthost:       "",
+		Connectportorpath: "",
+	}
+	err := ParseForward(arg, &fwdStruct)
+	if err != nil {
+		logrus.Error(err)
+		tube.Write([]byte{netproxy.NpcDen})
+		return
+	}
 	cache, err := etcpwdparse.NewLoadedEtcPasswdCache()
 	if err != nil {
 		logrus.Error("couln't load passwd cache")
 		tube.Write([]byte{netproxy.NpcDen})
 		return
 	}
-	remotePort := parts[0]
-	args := []string{"remotePF", remotePort}
+	args := []string{"remotePF", arg}
 	c := exec.Command(args[0], args[1:]...)
 	logrus.Infof("configuring child to run as %v", sess.user)
 	userEntry, ok := cache.LookupUserByName(sess.user)
@@ -401,7 +414,7 @@ func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
 	}
 
 	//set up content socket (UDS socket)
-	contentSockAddr := "@content" + remotePort //TODO: improve robustness of abstract socket address names
+	contentSockAddr := "@content" + fwdStruct.Connectportorpath //TODO: improve robustness of abstract socket address names
 	uds, err := net.Listen("unix", contentSockAddr)
 	if err != nil {
 		logrus.Error("error listening on content socket")
@@ -412,7 +425,7 @@ func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
 	logrus.Infof("address: %v", uds.Addr())
 
 	//control socket
-	controlSockAddr := "@control" + remotePort
+	controlSockAddr := "@control" + fwdStruct.Connectportorpath
 	control, err := net.Listen("unix", controlSockAddr)
 	if err != nil {
 		logrus.Error("error listening on control socket")

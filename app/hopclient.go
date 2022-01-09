@@ -327,12 +327,6 @@ func (c *HopClient) handleRemote(tube *tubes.Reliable) error {
 // client initiates remote port forwarding and sends the server the info it needs
 func (c *HopClient) remoteForward(arg string) error {
 	logrus.Info("Setting up remote with: ", arg)
-	parts := strings.Split(arg, ":")
-	if len(parts) != 3 {
-		logrus.Error("remote port forwarding currently only supported with port:host:hostport format")
-		return ErrInvalidPortForwardingArgs
-	}
-	logrus.Info("Asking remote to forward traffic from remote port ", parts[0], " to localhost port ", parts[2])
 	npt, e := c.TubeMuxer.CreateTube(RemotePFTube)
 	if e != nil {
 		return e
@@ -351,7 +345,7 @@ func (c *HopClient) localForward(arg string) error {
 		Connecthost:       "",
 		Connectportorpath: "",
 	}
-	err := parseForward(arg, &fwdStruct)
+	err := ParseForward(arg, &fwdStruct)
 	if err != nil {
 		return err
 	}
