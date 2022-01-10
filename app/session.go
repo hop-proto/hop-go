@@ -499,23 +499,43 @@ func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
 //LocalServer starts a TCP Conn with remote addr and proxies traffic from ch -> tcp and tcp -> ch
 func (sess *hopSession) LocalServer(tube *tubes.Reliable, arg string) {
 	defer tube.Close()
-	//TODO: more flexible parsing of arg
-	parts := strings.Split(arg, ":") //assuming port:host:hostport
-	addr := net.JoinHostPort(parts[1], parts[2])
-	if _, err := net.LookupAddr(addr); err != nil {
-		//Couldn't resolve address with local resolver
-		h, p, e := net.SplitHostPort(addr)
-		if e != nil {
-			logrus.Error(e)
-			tube.Write([]byte{netproxy.NpcDen})
-			return
-		}
-		if ip, ok := hostToIPAddr[h]; ok {
-			addr = ip + ":" + p
-		}
+
+	fwdStruct := Fwd{
+		Listensock:        false,
+		Connectsock:       false,
+		Listenhost:        "",
+		Listenportorpath:  "",
+		Connecthost:       "",
+		Connectportorpath: "",
 	}
-	logrus.Infof("dialing dest: %v", addr)
-	tconn, err := net.Dial("tcp", addr)
+	err := ParseForward(arg, &fwdStruct)
+	if err != nil {
+		logrus.Error(err)
+		tube.Write([]byte{netproxy.NpcDen})
+		return
+	}
+
+	var tconn net.Conn
+	if !fwdStruct.Connectsock {
+		addr := net.JoinHostPort(fwdStruct.Connecthost, fwdStruct.Connectportorpath)
+		if _, err := net.LookupAddr(addr); err != nil {
+			//Couldn't resolve address with local resolver
+			h, p, e := net.SplitHostPort(addr)
+			if e != nil {
+				logrus.Error(e)
+				tube.Write([]byte{netproxy.NpcDen})
+				return
+			}
+			if ip, ok := hostToIPAddr[h]; ok {
+				addr = ip + ":" + p
+			}
+		}
+		logrus.Infof("dialing dest: %v", addr)
+		tconn, err = net.Dial("tcp", addr)
+	} else {
+		logrus.Infof("dialing dest: %v", fwdStruct.Connectportorpath)
+		tconn, err = net.Dial("unix", fwdStruct.Connectportorpath)
+	}
 	if err != nil {
 		logrus.Errorf("C: error dialing server: %v", err)
 		tube.Write([]byte{netproxy.NpcDen})
