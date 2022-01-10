@@ -21,6 +21,8 @@ import (
 
 var start = 18000
 
+const howdy = "Howdy! This is connection numero two./n"
+
 var portMutex = sync.Mutex{}
 
 func getPort() string {
@@ -312,7 +314,7 @@ func TestRemotePF(t *testing.T) {
 			n += x
 		}
 		logrus.Info("program listening on target got: ", string(buf[:]))
-		if string(buf) == "Howdy! This is connection numero two./n" {
+		if string(buf) == howdy {
 			logrus.Info("writing Hello")
 			liconn.Write([]byte("Hello/n"))
 		}
@@ -329,7 +331,7 @@ func TestRemotePF(t *testing.T) {
 			n += x
 		}
 		logrus.Info("program listening on target got: ", string(buf[:]))
-		if string(buf) == "Howdy! This is connection numero two./n" {
+		if string(buf) == howdy {
 			logrus.Info("writing Hello")
 			liconn.Write([]byte("Hello/n"))
 		}
@@ -342,7 +344,7 @@ func TestRemotePF(t *testing.T) {
 		logrus.Info("attempting to dial port ", parts[0])
 		ctconn, err := net.Dial("tcp", ":"+parts[0])
 		assert.NilError(t, err)
-		n, err := ctconn.Write([]byte("Howdy! This is connection numero two./n"))
+		n, err := ctconn.Write([]byte(howdy))
 		assert.NilError(t, err)
 		logrus.Infof("sent %v bytes over tcpconn. Waiting for response...", n)
 		buf := make([]byte, 7)
@@ -504,6 +506,133 @@ func TestTwoRemotePF(t *testing.T) {
 	err = client.handleRemote(crft)
 	assert.NilError(t, err)
 	wg.Wait()
+
+}
+
+func TestRemotePFListenSocket(t *testing.T) {
+	port := getPort()
+	server := serverSetup(t, port)
+	go server.Serve()
+
+	remoteport1 := getPort()
+	listensocket := "/tmp/sock" + remoteport1 //just using remoteport1 as a unique id to avoid conflicts in testing
+	remoteport2 := getPort()
+
+	client := principalSetup(t, port, true)
+	client.Config.RemoteArgs = []string{listensocket + ":localhost:" + remoteport2}
+
+	err := client.Connect()
+	assert.NilError(t, err)
+
+	err = client.remoteForward(client.Config.RemoteArgs[0])
+	assert.NilError(t, err)
+
+	logrus.Info("simulating a tcp conn")
+
+	fwdStruct := Fwd{
+		Listensock:        false,
+		Connectsock:       false,
+		Listenhost:        "",
+		Listenportorpath:  "",
+		Connecthost:       "",
+		Connectportorpath: "",
+	}
+	err = ParseForward(client.Config.RemoteArgs[0], &fwdStruct)
+	assert.NilError(t, err)
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		//simulate program listening on Connecthost:Connectport
+		addr := net.JoinHostPort(fwdStruct.Connecthost, fwdStruct.Connectportorpath)
+		li, err := net.Listen("tcp", addr)
+		logrus.Info("simulating listening program on target: ", addr)
+		wg.Done()
+		assert.NilError(t, err)
+		liconn, err := li.Accept()
+		assert.NilError(t, err)
+		buf := make([]byte, 39)
+		n := 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on target got: ", string(buf[:]))
+		if string(buf) == howdy {
+			logrus.Info("writing Hello")
+			liconn.Write([]byte("Hello/n"))
+		}
+		liconn.Close()
+
+		logrus.Info("expecting second conn")
+		liconn, err = li.Accept()
+		assert.NilError(t, err)
+		n = 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on target got: ", string(buf[:]))
+		if string(buf) == howdy {
+			logrus.Info("writing Hello")
+			liconn.Write([]byte("Hello/n"))
+		}
+		liconn.Close()
+	}()
+
+	wg.Wait()
+	go func() {
+		//simulate a conn to listening socket
+		logrus.Info("attempting to dial socket ", listensocket)
+		ctconn, err := net.Dial("unix", listensocket)
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte(howdy))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn. Waiting for response...", n)
+		buf := make([]byte, 7)
+		n = 0
+		for n < 7 {
+			x, err := ctconn.Read(buf[n:])
+			logrus.Infof("response read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("2nd tcp initiator got: ", string(buf))
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	go func() {
+		//simulate another conn to listening socket
+		logrus.Info("attempting to dial port ", listensocket)
+		ctconn, err := net.Dial("unix", listensocket)
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn./n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn", n)
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	crft, err := client.TubeMuxer.Accept()
+	assert.NilError(t, err)
+	assert.Equal(t, crft.Type(), RemotePFTube)
+
+	err = client.handleRemote(crft)
+	assert.NilError(t, err)
+	logrus.Info("First tube done")
+
+	crft, err = client.TubeMuxer.Accept()
+	assert.NilError(t, err)
+	assert.Equal(t, crft.Type(), RemotePFTube)
+
+	err = client.handleRemote(crft)
+	assert.NilError(t, err)
 
 }
 

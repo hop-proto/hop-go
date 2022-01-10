@@ -377,13 +377,13 @@ func (c *HopClient) localForward(arg string) error {
 		localAddr := net.JoinHostPort(fwdStruct.Listenhost, fwdStruct.Listenportorpath)
 		local, err = net.Listen("tcp", localAddr)
 		if err != nil {
-			logrus.Error(err)
+			logrus.Error("host:port listen error: ", err)
 			return err
 		}
 	} else {
 		local, err = net.Listen("unix", fwdStruct.Listenportorpath)
 		if err != nil {
-			logrus.Error(err)
+			logrus.Error("socket listen error: ", err)
 			return err
 		}
 	}

@@ -54,6 +54,7 @@ func main() {
 		tcpListener, err = net.Listen("unix", fwdStruct.Listenportorpath)
 	}
 	if err != nil {
+		logrus.Error(err)
 		control, err := net.Dial("unix", controlSockAddr)
 		if err != nil {
 			logrus.Error("error dialing control sock", err)
