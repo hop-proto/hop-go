@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
-	"strings"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -293,21 +292,45 @@ func (c *HopClient) handleRemote(tube *tubes.Reliable) error {
 
 	//handle another remote pf conn (rewire to dest)
 	logrus.Info("Doing remote with: ", arg)
-	parts := strings.Split(arg, ":")
-	if len(parts) != 3 {
-		logrus.Error("remote port forwarding currently only supported with port:host:hostport format")
-		return ErrInvalidPortForwardingArgs
-	}
-	logrus.Info("Forwarding traffic from remote port ", parts[0], " to localhost port ", parts[2])
-	localPort := parts[2]
 
-	//TODO: fix address (not just local host)
-	//TODO: add bind address options
-	tconn, e := net.Dial("tcp", "localhost:"+localPort)
-	if e != nil {
-		logrus.Error(e)
-		return e
+	fwdStruct := Fwd{
+		Listensock:        false,
+		Connectsock:       false,
+		Listenhost:        "",
+		Listenportorpath:  "",
+		Connecthost:       "",
+		Connectportorpath: "",
 	}
+	err := ParseForward(arg, &fwdStruct)
+	if err != nil {
+		return err
+	}
+
+	var tconn net.Conn
+	if !fwdStruct.Connectsock {
+		addr := net.JoinHostPort(fwdStruct.Connecthost, fwdStruct.Connectportorpath)
+		if _, err := net.LookupAddr(addr); err != nil {
+			//Couldn't resolve address with local resolver
+			h, p, e := net.SplitHostPort(addr)
+			if e != nil {
+				logrus.Error(e)
+				return e
+			}
+			if ip, ok := hostToIPAddr[h]; ok {
+				addr = ip + ":" + p
+			}
+		}
+		logrus.Infof("dialing dest: %v", addr)
+		tconn, err = net.Dial("tcp", addr)
+	} else {
+		logrus.Infof("dialing dest: %v", fwdStruct.Connectportorpath)
+		tconn, err = net.Dial("unix", fwdStruct.Connectportorpath)
+	}
+	if err != nil {
+		logrus.Error(err)
+		return err
+	}
+
 	wg := sync.WaitGroup{}
 	//do remote port forwarding
 	wg.Add(1)
