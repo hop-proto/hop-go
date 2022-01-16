@@ -82,7 +82,7 @@ func TestClientCertificates(t *testing.T) {
 		return ClientConfig{
 			KeyPair:      clientKey,
 			Leaf:         clientLeaf,
-			Intermediate: clientIntermediate,
+			Intermediate: nil,
 			Verify:       *verify,
 		}
 	}
@@ -167,6 +167,12 @@ func TestClientCertificates(t *testing.T) {
 		clientConfig := selfSignClientLeaf(t, names...)
 		server := startServer(t, verify)
 		assertNoHandshake(t, clientConfig, server)
+	})
+
+	t.Run("self-signed with username when expecting self-signed", func(t *testing.T) {
+		clientConfig := selfSignClientLeaf(t, certs.RawStringName("username"))
+		server := startServer(t, nil)
+		assertHandshake(t, clientConfig, server)
 	})
 
 }

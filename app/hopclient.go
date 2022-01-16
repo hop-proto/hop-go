@@ -2,13 +2,14 @@
 package app
 
 import (
+	"encoding/binary"
 	"io"
 	"net"
-	"strings"
 	"sync"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/authgrants"
+	"zmap.io/portal/certs"
 	"zmap.io/portal/codex"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/netproxy"
@@ -19,44 +20,40 @@ import (
 
 //HopClient holds state for client's perspective of session
 type HopClient struct {
-	TransportConn   *transport.Client
-	ProxyConn       *tubes.Reliable
-	TubeMuxer       *tubes.Muxer
-	ExecTube        *codex.ExecTube
-	Config          *HopClientConfig
-	TransportConfig transport.ClientConfig
-	Proxied         bool
-	Primarywg       sync.WaitGroup
+	TransportConn *transport.Client
+	ProxyConn     *tubes.Reliable
+	TubeMuxer     *tubes.Muxer
+	ExecTube      *codex.ExecTube
+	Config        *HopClientConfig
+	Proxied       bool
+	Primarywg     sync.WaitGroup
 }
 
 //HopClientConfig holds configuration options for hop client
 type HopClientConfig struct {
-	Principal     bool
-	RemoteForward bool
-	LocalForward  bool
-	Quiet         bool
-	Headless      bool
-	Verify        transport.VerifyConfig
-	SockAddr      string
-	Keypath       string
-	Username      string
-	Hostname      string
-	Port          string
-	LocalArg      string
-	RemoteArg     string
-	Cmd           string
+	Principal       bool
+	Quiet           bool
+	Headless        bool
+	TransportConfig *transport.ClientConfig
+	SockAddr        string
+	Keypath         string
+	Username        string
+	Hostname        string
+	Port            string
+	LocalArgs       []string
+	RemoteArgs      []string
+	Cmd             string
 }
 
 //NewHopClient creates a new client object and loads keys from file or auth grant protocol
 func NewHopClient(cConfig *HopClientConfig) (*HopClient, error) {
 	client := &HopClient{
-		TransportConfig: transport.ClientConfig{Verify: cConfig.Verify},
-		Config:          cConfig,
-		Primarywg:       sync.WaitGroup{},
-		Proxied:         false,
+		Config:    cConfig,
+		Primarywg: sync.WaitGroup{},
+		Proxied:   false,
 	}
 	if cConfig.Principal {
-		err := client.LoadKeys(cConfig.Keypath)
+		err := client.LoadKeys(cConfig.Keypath) //read keys and generate a self signed cert
 		if err != nil {
 			return nil, err
 		}
@@ -87,30 +84,39 @@ func (c *HopClient) Connect() error {
 //Start starts any port forwarding/cmds/shells from the client
 func (c *HopClient) Start() error {
 	//TODO(baumanl): fix how session duration tied to cmd duration or port forwarding duration depending on options
-	if c.Config.RemoteForward {
-		if c.Config.Headless {
-			c.Primarywg.Add(1)
-		}
-		go func() {
+	if len(c.Config.RemoteArgs) > 0 {
+		for _, v := range c.Config.RemoteArgs {
 			if c.Config.Headless {
-				defer c.Primarywg.Done()
+				c.Primarywg.Add(1)
 			}
-			e := c.remoteForward()
-			logrus.Error(e)
-		}()
-	}
-	if c.Config.LocalForward {
-		if c.Config.Headless {
-			c.Primarywg.Add(1)
-		}
-		go func() {
-			if c.Config.Headless {
-				defer c.Primarywg.Done()
-			}
-			e := c.localForward()
-			logrus.Error(e)
-		}()
+			go func(arg string) {
+				if c.Config.Headless {
+					defer c.Primarywg.Done()
+				}
+				logrus.Info("Calling remote forward with arg: ", arg)
+				e := c.remoteForward(arg)
+				if e != nil {
+					logrus.Error(e)
+				}
 
+			}(v)
+		}
+	}
+	if len(c.Config.LocalArgs) > 0 {
+		for _, v := range c.Config.LocalArgs {
+			if c.Config.Headless {
+				c.Primarywg.Add(1)
+			}
+			go func(arg string) {
+				if c.Config.Headless {
+					defer c.Primarywg.Done()
+				}
+				e := c.localForward(arg)
+				if e != nil {
+					logrus.Error(e)
+				}
+			}(v)
+		}
 	}
 	if !c.Config.Headless {
 		err := c.startExecTube()
@@ -122,6 +128,17 @@ func (c *HopClient) Start() error {
 	return nil
 }
 
+//Wait blocks until the client has finished (usually used when waiting for a session tied to cmd/shell to finish)
+func (c *HopClient) Wait() {
+	c.Primarywg.Wait()
+}
+
+//Close explicitly closes down hop session (usually used after PF is down and can be terminated)
+func (c *HopClient) Close() error {
+	panic("not implemented")
+	//close all remote and local port forwarding relationships
+}
+
 //LoadKeys reads keys from provided file location and stores them in sess.Config.KeyPair
 func (c *HopClient) LoadKeys(keypath string) error {
 	logrus.Infof("C: Using key-file at %v for auth.", keypath)
@@ -129,15 +146,35 @@ func (c *HopClient) LoadKeys(keypath string) error {
 	if e != nil {
 		return e
 	}
-	c.TransportConfig.KeyPair = pair
+	names := []certs.Name{certs.RawStringName(c.Config.Username)}
+	clientLeafIdentity := certs.Identity{
+		PublicKey: pair.Public,
+		Names:     names,
+	}
+	clientLeaf, err := certs.SelfSignLeaf(&clientLeafIdentity)
+	if err != nil {
+		return err
+	}
+	c.Config.TransportConfig.KeyPair = pair
+	c.Config.TransportConfig.Leaf = clientLeaf
+	c.Config.TransportConfig.Intermediate = nil
 	return nil
 }
 
 func (c *HopClient) getAuthorization() error {
-	c.TransportConfig.KeyPair = new(keys.X25519KeyPair)
-	c.TransportConfig.KeyPair.Generate()
+	clientKey := keys.GenerateNewX25519KeyPair()
+	c.Config.TransportConfig.KeyPair = clientKey
+	clientLeafIdentity := certs.Identity{
+		PublicKey: clientKey.Public,
+		Names:     []certs.Name{certs.RawStringName(c.Config.Username)},
+	}
+	clientLeaf, err := certs.SelfSignLeaf(&clientLeafIdentity)
+	c.Config.TransportConfig.Leaf = clientLeaf
+	if err != nil {
+		return nil
+	}
 
-	logrus.Infof("Client generated: %v", c.TransportConfig.KeyPair.Public.String())
+	logrus.Infof("Client generated: %v", c.Config.TransportConfig.KeyPair.Public.String())
 	logrus.Infof("C: Initiating AGC Protocol.")
 
 	udsconn, err := net.Dial("unix", c.Config.SockAddr)
@@ -148,7 +185,7 @@ func (c *HopClient) getAuthorization() error {
 	agc := authgrants.NewAuthGrantConn(udsconn)
 	defer agc.Close()
 	if !c.Config.Headless && c.Config.Cmd == "" { //shell
-		t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+		t, e := agc.GetAuthGrant(c.Config.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
 			c.Config.Port, authgrants.ShellAction, "")
 		if e == nil {
 			logrus.Infof("C: Principal approved request to open a shell. Deadline: %v", t)
@@ -157,7 +194,7 @@ func (c *HopClient) getAuthorization() error {
 		}
 	}
 	if !c.Config.Headless && c.Config.Cmd != "" { //cmd
-		t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+		t, e := agc.GetAuthGrant(c.Config.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
 			c.Config.Port, authgrants.CommandAction, c.Config.Cmd)
 		if e == nil {
 			logrus.Infof("C: Principal approved request to run cmd: %v. Deadline: %v", c.Config.Cmd, t)
@@ -165,28 +202,33 @@ func (c *HopClient) getAuthorization() error {
 			return e
 		}
 	}
-	if c.Config.LocalForward { //local forwarding
-		t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
-			c.Config.Port, authgrants.LocalPFAction, c.Config.LocalArg)
-		if e == nil {
-			logrus.Infof("C: Principal approved request to do local forwarding. Deadline: %v", t)
-		} else if e != authgrants.ErrIntentDenied {
-			return e
+	if len(c.Config.LocalArgs) > 0 { //local forwarding
+		for _, v := range c.Config.LocalArgs {
+			t, e := agc.GetAuthGrant(c.Config.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+				c.Config.Port, authgrants.LocalPFAction, v)
+			if e == nil {
+				logrus.Infof("C: Principal approved request to do local forwarding for %v. Deadline: %v", v, t)
+			} else if e != authgrants.ErrIntentDenied {
+				return e
+			}
 		}
 	}
-	if c.Config.RemoteForward { //remote forwarding
-		t, e := agc.GetAuthGrant(c.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
-			c.Config.Port, authgrants.RemotePFAction, c.Config.RemoteArg)
-		if e == nil {
-			logrus.Infof("C: Principal approved request to do remote forwarding. Deadline: %v", t)
-		} else if e != authgrants.ErrIntentDenied {
-			return e
+	if len(c.Config.RemoteArgs) > 0 { //remote forwarding
+		for _, v := range c.Config.RemoteArgs {
+			t, e := agc.GetAuthGrant(c.Config.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+				c.Config.Port, authgrants.RemotePFAction, v)
+			if e == nil {
+				logrus.Infof("C: Principal approved request to do remote forwarding for %v. Deadline: %v", v, t)
+			} else if e != authgrants.ErrIntentDenied {
+				return e
+			}
 		}
 	}
 	return nil
 }
 
 func (c *HopClient) startUnderlying() error {
+	//logrus.SetLevel(logrus.DebugLevel)
 	//******ESTABLISH HOP SESSION******
 	//TODO(baumanl): figure out addr format requirements + check for them above
 	addr := c.Config.Hostname + ":" + c.Config.Port
@@ -198,9 +240,9 @@ func (c *HopClient) startUnderlying() error {
 	}
 	var err error
 	if !c.Proxied {
-		c.TransportConn, err = transport.Dial("udp", addr, c.TransportConfig) //There seem to be limits on Dial() and addr format
+		c.TransportConn, err = transport.Dial("udp", addr, *c.Config.TransportConfig) //There seem to be limits on Dial() and addr format
 	} else {
-		c.TransportConn, err = transport.DialNP("netproxy", addr, c.ProxyConn, c.TransportConfig)
+		c.TransportConn, err = transport.DialNP("netproxy", addr, c.ProxyConn, *c.Config.TransportConfig)
 	}
 	if err != nil {
 		logrus.Errorf("C: error dialing server: %v", err)
@@ -216,7 +258,7 @@ func (c *HopClient) startUnderlying() error {
 
 func (c *HopClient) userAuthorization() error {
 	//*****PERFORM USER AUTHORIZATION******
-	uaCh, _ := c.TubeMuxer.CreateTube(tubes.UserAuthTube)
+	uaCh, _ := c.TubeMuxer.CreateTube(UserAuthTube)
 	defer uaCh.Close()
 	if ok := userauth.RequestAuthorization(uaCh, c.Config.Username); !ok {
 		return ErrClientUnauthorized
@@ -225,76 +267,171 @@ func (c *HopClient) userAuthorization() error {
 	return nil
 }
 
-func (c *HopClient) remoteForward() error {
-	logrus.Info("Doing remote with: ", c.Config.RemoteArg)
-	parts := strings.Split(c.Config.RemoteArg, ":")
-	if len(parts) != 3 {
-		logrus.Error("remote port forwarding currently only supported with port:host:hostport format")
-		return ErrInvalidPortForwardingArgs
+// reroutes remote port forwarding connections to the appropriate destination
+// TODO(baumanl): add ability to handle multiple PF relationships
+func (c *HopClient) handleRemote(tube *tubes.Reliable) error {
+	defer tube.Close()
+	//if multiple remote pf relationships, figure out which one this corresponds to
+	b := make([]byte, 4)
+	tube.Read(b)
+	l := binary.BigEndian.Uint32(b[0:4])
+	logrus.Infof("Expecting %v bytes", l)
+	init := make([]byte, l)
+	tube.Read(init)
+	arg := string(init)
+	found := false
+	for _, v := range c.Config.RemoteArgs {
+		if v == arg {
+			found = true
+		}
 	}
-	logrus.Info("Forwarding traffic from remote port ", parts[0], " to localhost port ", parts[2])
-	localPort := parts[2]
-	npt, e := c.TubeMuxer.CreateTube(tubes.NetProxyTube)
-	if e != nil {
-		return e
+	if !found {
+		logrus.Error()
 	}
-	e = netproxy.Start(npt, c.Config.RemoteArg, netproxy.Remote)
-	if e != nil {
-		return e
+	tube.Write([]byte{netproxy.NpcConf})
+
+	//handle another remote pf conn (rewire to dest)
+	logrus.Info("Doing remote with: ", arg)
+
+	fwdStruct := Fwd{
+		Listensock:        false,
+		Connectsock:       false,
+		Listenhost:        "",
+		Listenportorpath:  "",
+		Connecthost:       "",
+		Connectportorpath: "",
+	}
+	err := ParseForward(arg, &fwdStruct)
+	if err != nil {
+		return err
 	}
 
-	//TODO: fix address (not just local host)
-	//TODO: add bind address options
-	tconn, e := net.Dial("tcp", "localhost:"+localPort)
-	if e != nil {
-		logrus.Error(e)
-		return e
+	var tconn net.Conn
+	if !fwdStruct.Connectsock {
+		addr := net.JoinHostPort(fwdStruct.Connecthost, fwdStruct.Connectportorpath)
+		if _, err := net.LookupAddr(addr); err != nil {
+			//Couldn't resolve address with local resolver
+			h, p, e := net.SplitHostPort(addr)
+			if e != nil {
+				logrus.Error(e)
+				return e
+			}
+			if ip, ok := hostToIPAddr[h]; ok {
+				addr = ip + ":" + p
+			}
+		}
+		logrus.Infof("dialing dest: %v", addr)
+		tconn, err = net.Dial("tcp", addr)
+	} else {
+		logrus.Infof("dialing dest: %v", fwdStruct.Connectportorpath)
+		tconn, err = net.Dial("unix", fwdStruct.Connectportorpath)
 	}
+	if err != nil {
+		logrus.Error(err)
+		return err
+	}
+
+	wg := sync.WaitGroup{}
 	//do remote port forwarding
+	wg.Add(1)
 	go func() {
-		io.Copy(tconn, npt)
+		defer wg.Done()
+		n, _ := io.Copy(tube, tconn)
+		logrus.Infof("Copied %v bytes from tconn to tube", n)
 	}()
-	io.Copy(npt, tconn)
+
+	n, _ := io.Copy(tconn, tube)
+	tconn.Close()
+	logrus.Infof("Copied %v bytes from tube to tconn", n)
+	wg.Wait()
 	return nil
 }
 
-func (c *HopClient) localForward() error {
-	logrus.Info("Doing local with: ", c.Config.LocalArg)
-	parts := strings.Split(c.Config.LocalArg, ":")
-	if len(parts) != 3 {
-		logrus.Error("local port forwarding currently only supported with port:host:hostport format")
-		return ErrInvalidPortForwardingArgs
-	}
-	logrus.Info("Forwarding traffic from local port ", parts[0], " to remote port ", parts[2], " on host ", parts[1])
-	npt, e := c.TubeMuxer.CreateTube(tubes.NetProxyTube)
+// client initiates remote port forwarding and sends the server the info it needs
+func (c *HopClient) remoteForward(arg string) error {
+	logrus.Info("Setting up remote with: ", arg)
+	npt, e := c.TubeMuxer.CreateTube(RemotePFTube)
 	if e != nil {
 		return e
 	}
-	e = netproxy.Start(npt, c.Config.LocalArg, netproxy.Local)
-	if e != nil {
-		return e
+	e = netproxy.Start(npt, arg, netproxy.Remote)
+	return e
+}
+
+func (c *HopClient) localForward(arg string) error {
+	logrus.Info("Doing local with: ", arg)
+	fwdStruct := Fwd{
+		Listensock:        false,
+		Connectsock:       false,
+		Listenhost:        "",
+		Listenportorpath:  "",
+		Connecthost:       "",
+		Connectportorpath: "",
 	}
-	if c.Config.Headless {
-		c.Primarywg.Add(1)
+	err := ParseForward(arg, &fwdStruct)
+	if err != nil {
+		return err
 	}
-	//do local port forwarding
+	var local net.Listener
+	if !fwdStruct.Listensock { //bind to local address
+		localAddr := net.JoinHostPort(fwdStruct.Listenhost, fwdStruct.Listenportorpath)
+		local, err = net.Listen("tcp", localAddr)
+		if err != nil {
+			logrus.Error("host:port listen error: ", err)
+			return err
+		}
+	} else {
+		local, err = net.Listen("unix", fwdStruct.Listenportorpath)
+		if err != nil {
+			logrus.Error("socket listen error: ", err)
+			return err
+		}
+	}
+
 	go func() {
+		//do local port forwarding
 		if c.Config.Headless {
 			defer c.Primarywg.Done()
 		}
-
-		local, e := net.Listen("tcp", ":"+strings.Trim(parts[0], ":"))
-		if e != nil {
-			logrus.Error(e)
-			return
-		}
-		for {
-			localConn, e := local.Accept()
-			if e != nil {
-				logrus.Error(e)
-				break
+		//accept incoming connections
+		regchan := make(chan net.Conn)
+		go func() {
+			for {
+				localConn, e := local.Accept()
+				if e != nil {
+					logrus.Error(e)
+					break
+				}
+				logrus.Info("Accepted TCPConn...")
+				regchan <- localConn
 			}
-			go io.Copy(npt, localConn)
+		}()
+
+		for {
+			lconn := <-regchan
+			go func() { //start tube with server for new connection
+				npt, e := c.TubeMuxer.CreateTube(LocalPFTube)
+				if e != nil {
+					return
+				}
+				defer npt.Close()
+				e = netproxy.Start(npt, arg, netproxy.Local)
+				if e != nil {
+					return
+				}
+				if c.Config.Headless {
+					c.Primarywg.Add(1)
+				}
+				go func() {
+					n, _ := io.Copy(npt, lconn)
+					npt.Close()
+					logrus.Debugf("Copied %v bytes from lconn to npt", n)
+					logrus.Info("tconn ended")
+				}()
+				n, _ := io.Copy(lconn, npt)
+				lconn.Close()
+				logrus.Debugf("Copied %v bytes from npt to lconn", n)
+			}()
 		}
 	}()
 	return nil
@@ -304,7 +441,7 @@ func (c *HopClient) startExecTube() error {
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	//Hop Session is tied to the life of this code execution tube.
 	logrus.Infof("Performing action: %v", c.Config.Cmd)
-	ch, err := c.TubeMuxer.CreateTube(tubes.ExecTube)
+	ch, err := c.TubeMuxer.CreateTube(ExecTube)
 	if err != nil {
 		logrus.Error(err)
 		return err
@@ -325,8 +462,10 @@ func (c *HopClient) HandleTubes() {
 			continue
 		}
 		logrus.Infof("ACCEPTED NEW CHANNEL of TYPE: %v", t.Type())
-		if t.Type() == tubes.AuthGrantTube && c.Config.Headless {
+		if t.Type() == AuthGrantTube && c.Config.Headless {
 			go c.principal(t)
+		} else if t.Type() == RemotePFTube {
+			go c.handleRemote(t)
 		} else {
 			//Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
 			e := t.Close()
@@ -401,10 +540,10 @@ func (c *HopClient) principal(tube *tubes.Reliable) {
 
 //start session between principal and target proxied through the delegate
 func (c *HopClient) setupRemoteSession(req *authgrants.Intent) (*HopClient, error) {
-	logrus.Debug("C: USER CONFIRMED FIRST INTENT_REQUEST. CONTACTING S2...")
+	logrus.Info("C: USER CONFIRMED FIRST INTENT_REQUEST. CONTACTING S2...")
 
 	//create netproxy with server
-	npt, e := c.TubeMuxer.CreateTube(tubes.NetProxyTube)
+	npt, e := c.TubeMuxer.CreateTube(NetProxyTube)
 	logrus.Info("started netproxy tube from principal")
 	if e != nil {
 		logrus.Fatal("C: Error starting netproxy tube")

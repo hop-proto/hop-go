@@ -5,9 +5,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -16,6 +20,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/authgrants"
 	"zmap.io/portal/codex"
+	"zmap.io/portal/keys"
 	"zmap.io/portal/netproxy"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
@@ -36,13 +41,16 @@ type authGrant struct {
 }
 
 type hopSession struct {
-	transportConn *transport.Handle
-	tubeMuxer     *tubes.Muxer
-	tubeQueue     chan *tubes.Reliable
-	done          chan int
+	transportConn   *transport.Handle
+	tubeMuxer       *tubes.Muxer
+	tubeQueue       chan *tubes.Reliable
+	done            chan int
+	controlChannels []net.Conn
 
 	server *HopServer
 	user   string
+
+	authorizedKeysLocation string
 
 	isPrincipal bool
 	authgrant   *authGrant
@@ -59,7 +67,8 @@ func (sess *hopSession) checkAuthorization() bool {
 	seemed strange to rely on the client to send the same key that it used during the handshake.
 	Instead I modified the transport layer code so that the client static is stored in the session state.
 	This way the server directly grabs the key that was used in the handshake.*/
-	k := sess.server.server.FetchClientStatic(sess.transportConn) //server fetches client static key that was used in handshake
+	leaf := sess.server.server.FetchClientLeaf(sess.transportConn) //server fetches client static key that was used in handshake
+	k := keys.PublicKey(leaf.PublicKey)
 	logrus.Info("got userauth init message: ", k.String())
 	sess.user = username
 
@@ -68,15 +77,15 @@ func (sess *hopSession) checkAuthorization() bool {
 		err := errors.New("issue loading /etc/passwd")
 		logrus.Error(err)
 	}
-	path := "/home/" + username + "/.hop/authorized_keys"
+	path := "/home/" + username + sess.authorizedKeysLocation
 	if user, ok := cache.LookupUserByName(sess.user); ok {
-		path = user.Homedir() + "/.hop/authorized_keys"
+		path = user.Homedir() + sess.authorizedKeysLocation
 	}
 	f, e := os.Open(path)
 	if e != nil {
 		logrus.Error("Could not open file at path: ", path)
 	} else {
-		logrus.Info("opened keys file")
+		logrus.Info("opened keys file at path: ", path)
 		defer f.Close()
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
@@ -113,7 +122,7 @@ func (sess *hopSession) checkAuthorization() bool {
 	sess.isPrincipal = false
 	delete(sess.server.authgrants, k)
 	sess.server.outstandingAuthgrants--
-	logrus.Info("USER AUTHORIZED")
+	logrus.Info("USER AUTHORIZED VIA AUTHGRANT")
 	uaTube.Write([]byte{userauth.UserAuthConf})
 	return true
 }
@@ -131,14 +140,14 @@ func (sess *hopSession) start() {
 		//TODO(baumanl): Check closing behavior. how to end session completely
 	}
 
-	logrus.Info("STARTING CHANNEL LOOP")
+	logrus.Info("STARTING TUBE LOOP")
 	go func() {
 		for {
-			serverChan, err := sess.tubeMuxer.Accept()
+			tube, err := sess.tubeMuxer.Accept()
 			if err != nil {
-				logrus.Fatalf("S: ERROR ACCEPTING CHANNEL: %v", err)
+				logrus.Fatalf("S: ERROR ACCEPTING TUBE: %v", err)
 			}
-			sess.tubeQueue <- serverChan
+			sess.tubeQueue <- tube
 		}
 	}()
 
@@ -148,18 +157,21 @@ func (sess *hopSession) start() {
 			logrus.Info("Closing everything")
 			sess.close()
 			return
-		case serverChan := <-sess.tubeQueue:
-			logrus.Infof("S: ACCEPTED NEW CHANNEL (%v)", serverChan.Type())
-			switch serverChan.Type() {
-			case tubes.ExecTube:
-				go sess.startCodex(serverChan)
-			case tubes.AuthGrantTube:
-				go sess.handleAgc(serverChan)
-			case tubes.NetProxyTube:
-				//TODO(baumanl): different tube types for local/remote/ag forwarding?
-				go sess.startNetProxy(serverChan)
+		case tube := <-sess.tubeQueue:
+			logrus.Infof("S: ACCEPTED NEW TUBE (%v)", tube.Type())
+			switch tube.Type() {
+			case ExecTube:
+				go sess.startCodex(tube)
+			case AuthGrantTube:
+				go sess.handleAgc(tube)
+			case NetProxyTube:
+				go sess.startNetProxy(tube)
+			case RemotePFTube:
+				go sess.startRemote(tube)
+			case LocalPFTube:
+				go sess.startLocal(tube)
 			default:
-				serverChan.Close()
+				tube.Close() //Close unrecognized tube types
 			}
 		}
 
@@ -171,8 +183,9 @@ func (sess *hopSession) close() error {
 	if !sess.isPrincipal {
 		err = sess.authgrant.principalSession.close() //TODO: move where principalSession stored?
 	}
+
 	sess.tubeMuxer.Stop()
-	//err2 = sess.transportConn.Close() (not implemented yet)
+	//err2 = sess.transportConn.Close() //(not implemented yet)
 	if err != nil {
 		return err
 	}
@@ -232,8 +245,8 @@ func (sess *hopSession) checkAction(action string, actionType byte) error {
 
 }
 
-func (sess *hopSession) startCodex(ch *tubes.Reliable) {
-	cmd, shell, _ := codex.GetCmd(ch)
+func (sess *hopSession) startCodex(tube *tubes.Reliable) {
+	cmd, shell, _ := codex.GetCmd(tube)
 	logrus.Info("CMD: ", cmd)
 	if !sess.isPrincipal {
 		err := sess.checkAction(cmd, authgrants.CommandAction)
@@ -242,7 +255,7 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 		}
 		if err != nil {
 			logrus.Error(err)
-			codex.SendFailure(ch, err)
+			codex.SendFailure(tube, err)
 			return
 		}
 	}
@@ -250,7 +263,7 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 	if err != nil {
 		err := errors.New("issue loading /etc/passwd")
 		logrus.Error(err)
-		codex.SendFailure(ch, err)
+		codex.SendFailure(tube, err)
 		return
 	}
 	if user, ok := cache.LookupUserByName(sess.user); ok {
@@ -287,13 +300,13 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 		f, err := pty.Start(c)
 		if err != nil {
 			logrus.Errorf("S: error starting pty %v", err)
-			codex.SendFailure(ch, err)
+			codex.SendFailure(tube, err)
 			return
 		}
-		codex.SendSuccess(ch)
+		codex.SendSuccess(tube)
 		go func() {
 			c.Wait()
-			ch.Close()
+			tube.Close()
 			logrus.Info("closed chan")
 		}()
 
@@ -306,53 +319,236 @@ func (sess *hopSession) startCodex(ch *tubes.Reliable) {
 		}
 		sess.server.m.Unlock()
 		go func() {
-			codex.Server(ch, f)
+			codex.Server(tube, f)
 			logrus.Info("signaling done")
 			sess.done <- 1
 		}()
 	} else {
 		err := errors.New("could not find entry for user " + sess.user)
 		logrus.Error(err)
-		codex.SendFailure(ch, err)
+		codex.SendFailure(tube, err)
 		return
 	}
 }
 
+func (sess *hopSession) startLocal(ch *tubes.Reliable) {
+	buf := make([]byte, 4)
+	ch.Read(buf)
+	l := binary.BigEndian.Uint32(buf[0:4])
+	arg := make([]byte, l)
+	ch.Read(arg)
+	//Check authorization
+	if !sess.isPrincipal {
+		err := sess.checkAction(string(arg), authgrants.LocalPFAction)
+		if err != nil {
+			logrus.Error(err)
+			ch.Write([]byte{netproxy.NpcDen})
+			return
+		}
+	}
+	sess.LocalServer(ch, string(arg))
+}
+
+func (sess *hopSession) startRemote(tube *tubes.Reliable) {
+	buf := make([]byte, 4)
+	tube.Read(buf)
+	l := binary.BigEndian.Uint32(buf[0:4])
+	arg := make([]byte, l)
+	tube.Read(arg)
+	//Check authorization
+	if !sess.isPrincipal {
+		err := sess.checkAction(string(arg), authgrants.RemotePFAction)
+		if err != nil {
+			logrus.Error(err)
+			tube.Write([]byte{netproxy.NpcDen})
+			return
+		}
+	}
+	sess.RemoteServer(tube, string(arg))
+}
+
 func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
-	b := make([]byte, 1)
-	ch.Read(b)
-	if b[0] == netproxy.AG {
-		netproxy.Server(ch)
+	netproxy.Server(ch)
+}
+
+//RemoteServer starts listening on given port and pipes the traffic back over the tube
+func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
+	//parts := strings.Split(arg, ":") //assuming port:host:hostport
+	fwdStruct := Fwd{
+		Listensock:        false,
+		Connectsock:       false,
+		Listenhost:        "",
+		Listenportorpath:  "",
+		Connecthost:       "",
+		Connectportorpath: "",
+	}
+	err := ParseForward(arg, &fwdStruct)
+	if err != nil {
+		logrus.Error(err)
+		tube.Write([]byte{netproxy.NpcDen})
 		return
 	}
-	if b[0] == netproxy.Local || b[0] == netproxy.Remote {
-		actionType := authgrants.LocalPFAction
-		if b[0] == netproxy.Remote {
-			actionType = authgrants.RemotePFAction
+	cache, err := etcpwdparse.NewLoadedEtcPasswdCache()
+	if err != nil {
+		logrus.Error("couln't load passwd cache")
+		tube.Write([]byte{netproxy.NpcDen})
+		return
+	}
+	args := []string{"remotePF", arg}
+	c := exec.Command(args[0], args[1:]...)
+	logrus.Infof("configuring child to run as %v", sess.user)
+	userEntry, ok := cache.LookupUserByName(sess.user)
+	if !ok {
+		logrus.Error("couldn't find session user")
+		tube.Write([]byte{netproxy.NpcDen})
+		return
+	}
+	curUser, _ := user.Current()
+	if curUser.Username != sess.user || curUser.Uid == "0" { //TODO: necessary because in tests it doesn't run as root so trying to do this causes an error
+		c.SysProcAttr = &syscall.SysProcAttr{}
+		c.SysProcAttr.Credential = &syscall.Credential{
+			Uid:    uint32(userEntry.Uid()),
+			Gid:    uint32(userEntry.Gid()),
+			Groups: []uint32{uint32(userEntry.Gid())},
 		}
-		buf := make([]byte, 4)
-		ch.Read(buf)
-		l := binary.BigEndian.Uint32(buf[0:4])
-		arg := make([]byte, l)
-		ch.Read(arg)
-		//Check authorization
-		if !sess.isPrincipal {
-			err := sess.checkAction(string(arg), actionType)
-			if err != nil {
-				logrus.Error(err)
-				ch.Write([]byte{netproxy.NpcDen})
+	}
+
+	//set up content socket (UDS socket)
+	contentSockAddr := "@content" + fwdStruct.Listenportorpath //TODO: improve robustness of abstract socket address names
+	uds, err := net.Listen("unix", contentSockAddr)
+	if err != nil {
+		logrus.Error("error listening on content socket")
+		tube.Write([]byte{netproxy.NpcDen})
+		return
+	}
+	defer uds.Close()
+	logrus.Infof("address: %v", uds.Addr())
+
+	//control socket
+	controlSockAddr := "@control" + fwdStruct.Listenportorpath
+	control, err := net.Listen("unix", controlSockAddr)
+	if err != nil {
+		logrus.Error("error listening on control socket")
+		tube.Write([]byte{netproxy.NpcDen})
+		return
+	}
+	defer control.Close()
+	logrus.Infof("control address: %v", control.Addr())
+
+	err = c.Start()
+	if err != nil {
+		logrus.Error("error starting child process: ", err)
+		tube.Write([]byte{netproxy.NpcDen})
+		return
+	}
+
+	//TODO: add timeout so this doesn't hang forever if something goes wrong
+	controlChan, _ := control.Accept()
+	buf := make([]byte, 1)
+	controlChan.Read(buf)
+	if buf[0] != netproxy.NpcConf {
+		logrus.Error("error binding to remote port")
+		tube.Write([]byte{netproxy.NpcDen})
+		return
+	}
+	sess.controlChannels = append(sess.controlChannels, controlChan)
+	logrus.Info("S: accepted Control channel")
+
+	logrus.Info("started child process")
+	tube.Write([]byte{netproxy.NpcConf})
+	defer func() {
+		tube.Write([]byte{netproxy.NpcDen}) //tell it something went wrong
+		tube.Close()
+	}()
+
+	for {
+		udsconn, err := uds.Accept() //TODO: add some timer so if child can't connect for some reason it doesn't hang forever
+		wg := sync.WaitGroup{}
+		if err != nil {
+			logrus.Error("error accepting uds conn")
+			return
+		}
+		logrus.Info("server got a uds conn from child")
+		t, err := sess.tubeMuxer.CreateTube(RemotePFTube)
+		if err != nil {
+			logrus.Error("error creating tube", err)
+			return
+		}
+		//send arg across tube
+		err = netproxy.Start(t, arg, netproxy.Remote)
+		if err != nil {
+			logrus.Error("Local refused forwarded connection: ", arg)
+			return
+		}
+		logrus.Info("S: started new RPF tube")
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			n, _ := io.Copy(udsconn, t)
+			logrus.Infof("Copied %v bytes from t to udsconn", n)
+			udsconn.Close()
+		}()
+		n, _ := io.Copy(t, udsconn)
+		logrus.Infof("Copied %v bytes from udsconn to t", n)
+		t.Close()
+		wg.Wait()
+	}
+
+}
+
+//LocalServer starts a TCP Conn with remote addr and proxies traffic from ch -> tcp and tcp -> ch
+func (sess *hopSession) LocalServer(tube *tubes.Reliable, arg string) {
+	defer tube.Close()
+
+	fwdStruct := Fwd{
+		Listensock:        false,
+		Connectsock:       false,
+		Listenhost:        "",
+		Listenportorpath:  "",
+		Connecthost:       "",
+		Connectportorpath: "",
+	}
+	err := ParseForward(arg, &fwdStruct)
+	if err != nil {
+		logrus.Error(err)
+		tube.Write([]byte{netproxy.NpcDen})
+		return
+	}
+
+	var tconn net.Conn
+	if !fwdStruct.Connectsock {
+		addr := net.JoinHostPort(fwdStruct.Connecthost, fwdStruct.Connectportorpath)
+		if _, err := net.LookupAddr(addr); err != nil {
+			//Couldn't resolve address with local resolver
+			h, p, e := net.SplitHostPort(addr)
+			if e != nil {
+				logrus.Error(e)
+				tube.Write([]byte{netproxy.NpcDen})
 				return
 			}
+			if ip, ok := hostToIPAddr[h]; ok {
+				addr = ip + ":" + p
+			}
 		}
-		switch b[0] {
-		case netproxy.Local:
-			netproxy.LocalServer(ch, string(arg))
-			return
-		case netproxy.Remote:
-			netproxy.RemoteServer(ch, string(arg))
-			return
-		}
-		logrus.Error("undefined netproxy type")
-		ch.Write([]byte{netproxy.NpcDen})
+		logrus.Infof("dialing dest: %v", addr)
+		tconn, err = net.Dial("tcp", addr)
+	} else {
+		logrus.Infof("dialing dest: %v", fwdStruct.Connectportorpath)
+		tconn, err = net.Dial("unix", fwdStruct.Connectportorpath)
 	}
+	if err != nil {
+		logrus.Errorf("C: error dialing server: %v", err)
+		tube.Write([]byte{netproxy.NpcDen})
+		return
+	}
+	defer tconn.Close()
+	logrus.Info("connected to: ", arg)
+	tube.Write([]byte{netproxy.NpcConf})
+	logrus.Infof("wrote confirmation that NPC ready")
+	go func() {
+		//Handles all traffic from local port to end dest
+		io.Copy(tconn, tube)
+	}()
+	//handles all traffic from end dest back to local port
+	io.Copy(tube, tconn)
 }

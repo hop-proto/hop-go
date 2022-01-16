@@ -52,12 +52,12 @@ type Server struct {
 	intermediate []byte
 }
 
-//FetchClientStatic returns the client static key used in handshake with associated handle's sessionID
-func (s *Server) FetchClientStatic(h *Handle) keys.PublicKey {
+//FetchClientLeaf returns the client leaf certificate used in handshake with associated handle's sessionID
+func (s *Server) FetchClientLeaf(h *Handle) certs.Certificate {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	ss := s.sessions[h.sessionID]
-	return ss.clientStatic
+	return ss.clientLeaf
 }
 
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
@@ -385,6 +385,7 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	if int(leafLen) != len(rawLeaf) {
 		return pos, nil, errors.New("extra bytes after leaf certificate")
 	}
+	hs.clientLeaf = leaf
 
 	intermediate := certs.Certificate{}
 	if len(rawIntermediate) > 0 {
@@ -517,7 +518,8 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	if err != nil {
 		return err
 	}
-	ss.clientStatic = hs.clientStatic
+	ss.clientLeaf = hs.clientLeaf
+	//hs.leaf
 	// TODO(dadrian): Create this earlier on so that the handshake fails earlier
 	// if the queue is full.
 	h := s.createHandleLocked(ss)

@@ -4,6 +4,8 @@ import (
 	"net"
 	"os"
 	"os/user"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,92 +13,150 @@ import (
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 	"zmap.io/portal/authgrants"
-	"zmap.io/portal/keys"
+	"zmap.io/portal/certs"
+	"zmap.io/portal/ports"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
 )
 
-func TestClientServer(t *testing.T) {
-	//start hop server
-	tconf, verify := NewTestServerConfig("../certs/")
+var start = 18000
+
+const howdy = "Howdy! This is connection numero two./n"
+
+var portMutex = sync.Mutex{}
+
+func getPort() string {
+	portMutex.Lock()
+	port, next := ports.GetPortNumber(start)
+	start = next
+	portMutex.Unlock()
+	return port
+}
+func TestPortNumbers(t *testing.T) {
+	logrus.Info("starting. Init Port number: ", strconv.Itoa(start))
+	port1 := getPort()
+	logrus.Info("port1: ", port1)
+	logrus.Info("ended. Last Port number: ", strconv.Itoa(start))
+}
+
+func serverSetup(t *testing.T, p string) *HopServer {
+	baseConfig, _ := NewTestServerConfig("../certs/")
+	transportConfig := *baseConfig
+	transportConfig.ClientVerify = nil //no certificate verification at all
 	serverConfig := &HopServerConfig{
-		Port:                     DefaultHopPort,
+		Port:                     p,
 		Host:                     "localhost",
-		SockAddr:                 DefaultHopAuthSocket,
-		TransportConfig:          tconf,
+		SockAddr:                 DefaultHopAuthSocket + p,
+		TransportConfig:          &transportConfig,
 		MaxOutstandingAuthgrants: 50,
+		AuthorizedKeysLocation:   "/.hop_test/authorized_keys",
 	}
 	s, err := NewHopServer(serverConfig)
 	assert.NilError(t, err)
-	go s.Serve() //starts transport layer server, authgrant server, and listens for hop conns
+	return s
+}
 
-	keypath, _ := os.UserHomeDir()
-	keypath += DefaultKeyPath
-
+func principalSetup(t *testing.T, p string, auth bool) *HopClient {
+	_, verify := NewTestServerConfig("../certs/")
+	keyname := "key" + p
 	u, e := user.Current()
 	assert.NilError(t, e)
+	clientKey, e := KeyGen("/.hop_test", keyname, auth)
+	assert.NilError(t, e)
+	clientLeafIdentity := certs.Identity{
+		PublicKey: clientKey.Public,
+		Names:     []certs.Name{certs.RawStringName(u.Username)},
+	}
+	clientLeaf, err := certs.SelfSignLeaf(&clientLeafIdentity)
+	assert.NilError(t, err)
+
+	transportClientConfig := &transport.ClientConfig{
+		KeyPair:        clientKey,
+		Leaf:           clientLeaf,
+		UseCertificate: true,
+		Intermediate:   nil,
+		Verify:         *verify,
+	}
+	//set up Hop client
+	keypath, _ := os.UserHomeDir()
+	keypath += "/.hop_test/" + keyname
+	assert.NilError(t, e)
 	clientConfig := &HopClientConfig{
-		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket,
-		Keypath:       keypath,
-		Hostname:      "127.0.0.1",
-		Port:          DefaultHopPort,
-		Username:      u.Username,
-		Principal:     true,
-		RemoteForward: false,
-		LocalForward:  false,
-		Cmd:           "echo hello world",
-		Quiet:         false,
-		Headless:      false,
+		TransportConfig: transportClientConfig,
+		Keypath:         keypath,
+		Hostname:        "127.0.0.1",
+		Port:            p,
+		Username:        u.Username,
+		Principal:       true,
 	}
 	client, err := NewHopClient(clientConfig)
 	assert.NilError(t, err)
+	return client
+}
 
-	err = client.Connect()
+func delegateSetup(t *testing.T, p string, authSockID string) *HopClient {
+	_, verify := NewTestServerConfig("../certs/")
+	u, e := user.Current()
+	assert.NilError(t, e)
+
+	transportClientConfig := &transport.ClientConfig{
+		KeyPair:        nil,
+		Leaf:           nil,
+		UseCertificate: true,
+		Intermediate:   nil,
+		Verify:         *verify,
+	}
+	//set up Hop client
+	clientConfig := &HopClientConfig{
+		TransportConfig: transportClientConfig,
+		SockAddr:        DefaultHopAuthSocket + authSockID,
+		Hostname:        "127.0.0.1",
+		Port:            p,
+		Username:        u.Username,
+	}
+	client, err := NewHopClient(clientConfig)
 	assert.NilError(t, err)
+	return client
+}
+
+//simple client server connect
+func TestSimpleClientServer(t *testing.T) {
+	port := getPort()
+	server := serverSetup(t, port)
+	go server.Serve()
+	client := principalSetup(t, port, true)
+
+	//handshake + user authorization
+	err := client.Connect()
+	assert.NilError(t, err)
+}
+
+//connect fail when key not in authorized_keys
+func TestUnauthorizedFail(t *testing.T) {
+	port := getPort()
+	server := serverSetup(t, port)
+	go server.Serve()
+	client := principalSetup(t, port, false)
+
+	//handshake + user authorization
+	err := client.Connect()
+	assert.Error(t, err, "client not authorized")
 }
 
 func TestAuthgrantOneHop(t *testing.T) {
-	//start hop server 1
-	tconf, verify := NewTestServerConfig("../certs/")
-	serverConfig := &HopServerConfig{
-		Port:                     DefaultHopPort,
-		Host:                     "localhost",
-		SockAddr:                 DefaultHopAuthSocket,
-		TransportConfig:          tconf,
-		MaxOutstandingAuthgrants: 50,
-	}
-	s, err := NewHopServer(serverConfig)
-	assert.NilError(t, err)
+	port1 := getPort()               //port server 1 (delegate) will listen on
+	port2 := getPort()               //port server 2 (target) will listen on
+	server1 := serverSetup(t, port1) //server 1 (delegate)
+	server2 := serverSetup(t, port2) //server 2 (target)
+	principal := principalSetup(t, port1, true)
 
-	//start principal
-	keypath, _ := os.UserHomeDir()
-	keypath += DefaultKeyPath
-
-	u, e := user.Current()
-	assert.NilError(t, e)
-	principalConfig := &HopClientConfig{
-		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket,
-		Keypath:       keypath,
-		Hostname:      "127.0.0.1",
-		Port:          DefaultHopPort,
-		Username:      u.Username,
-		Principal:     true,
-		RemoteForward: false,
-		LocalForward:  false,
-		Cmd:           "",
-		Quiet:         false,
-		Headless:      false,
-	}
-	principal, err := NewHopClient(principalConfig)
-	assert.NilError(t, err)
-
-	go s.server.Serve()
+	//start hop server 2
+	go server2.Serve()        //starts transport layer server, authgrant server, and listens for hop conns
+	go server1.server.Serve() //start delgate transport layer server (manually handle incoming connection because I can't simulate the delegate client actually being a child process)
 
 	go func() {
 		//principal starts session with server 1
-		err = principal.Connect()
+		err := principal.Connect()
 		assert.NilError(t, err)
 
 		//principal handles intent request from delegate
@@ -122,160 +182,45 @@ func TestAuthgrantOneHop(t *testing.T) {
 	}()
 
 	//server 1 accepts principal connection and starts hopsession
-	psconn, err := s.server.AcceptTimeout(1 * time.Minute)
+	psconn, err := server1.server.AcceptTimeout(1 * time.Minute)
 	assert.NilError(t, err)
 	psess := &hopSession{
-		transportConn: psconn,
-		tubeMuxer:     tubes.NewMuxer(psconn, psconn),
-		tubeQueue:     make(chan *tubes.Reliable),
-		done:          make(chan int),
-		server:        s,
+		transportConn:          psconn,
+		tubeMuxer:              tubes.NewMuxer(psconn, psconn),
+		tubeQueue:              make(chan *tubes.Reliable),
+		done:                   make(chan int),
+		server:                 server1,
+		authorizedKeysLocation: server1.config.AuthorizedKeysLocation,
 	}
 	go psess.start()
 
 	// server 1 listens on authsock for Intent requests
 	// proxies them to the principal
 	go func() {
-		c, err := s.authsock.Accept()
+		c, err := server1.authsock.Accept()
 		assert.NilError(t, err)
-		s.proxyAuthGrantRequest(psess, c)
+		server1.proxyAuthGrantRequest(psess, c)
 	}()
 
-	//start hop server 2
-	serverConfig2 := &HopServerConfig{
-		Port:                     "8888",
-		Host:                     "localhost",
-		SockAddr:                 "@authsock2",
-		TransportConfig:          tconf,
-		MaxOutstandingAuthgrants: 50,
-	}
-	s2, err := NewHopServer(serverConfig2)
-	assert.NilError(t, err)
-	go s2.Serve() //starts transport layer server, authgrant server, and listens for hop conns
-
-	//set up delegate client
-	delegateConfig := &HopClientConfig{
-		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket,
-		Keypath:       "",
-		Hostname:      "127.0.0.1",
-		Port:          "8888",
-		Username:      u.Username,
-		Principal:     false,
-		RemoteForward: false,
-		LocalForward:  false,
-		Cmd:           "echo hello world",
-		Quiet:         false,
-		Headless:      false,
-	}
-
-	delegate := &HopClient{
-		TransportConfig: transport.ClientConfig{Verify: delegateConfig.Verify},
-		Config:          delegateConfig,
-		Primarywg:       sync.WaitGroup{},
-	}
-
-	//delegate gets authorization
-	delegate.TransportConfig.KeyPair = new(keys.X25519KeyPair)
-	delegate.TransportConfig.KeyPair.Generate()
-
-	logrus.Infof("Client generated: %v", delegate.TransportConfig.KeyPair.Public.String())
-	logrus.Infof("C: Initiating AGC Protocol.")
-
-	udsconn, err := net.Dial("unix", delegate.Config.SockAddr)
-	assert.NilError(t, err)
-	logrus.Infof("C: CONNECTED TO UDS: [%v]", udsconn.RemoteAddr().String())
-	agc := authgrants.NewAuthGrantConn(udsconn)
-	_, err = agc.GetAuthGrant(delegate.TransportConfig.KeyPair.Public, delegate.Config.Username, delegate.Config.Hostname,
-		delegate.Config.Port, authgrants.ShellAction, "")
-	assert.NilError(t, err)
-
-	//delegate connects to server2
+	delegate := delegateSetup(t, port2, port1)
 	err = delegate.Connect()
 	assert.NilError(t, err)
 }
 
-func TestClientNotAuthorized(t *testing.T) {
-	//start hop server
-	tconf, verify := NewTestServerConfig("../certs/")
-	serverConfig := &HopServerConfig{
-		Port:                     DefaultHopPort,
-		Host:                     "localhost",
-		SockAddr:                 DefaultHopAuthSocket,
-		TransportConfig:          tconf,
-		MaxOutstandingAuthgrants: 50,
-	}
-	s, err := NewHopServer(serverConfig)
-	assert.NilError(t, err)
-	go s.Serve() //starts transport layer server, authgrant server, and listens for hop conns
+func TestAuthgrantTimeout(t *testing.T) {
+	port1 := getPort()               //port server 1 (delegate) will listen on
+	port2 := getPort()               //port server 2 (target) will listen on
+	server1 := serverSetup(t, port1) //server 1 (delegate)
+	server2 := serverSetup(t, port2) //server 2 (target)
+	principal := principalSetup(t, port1, true)
 
-	keypath, _ := os.UserHomeDir()
-	keypath += "/.hop/mykey" //mykey is not in authorized keys file
-
-	u, e := user.Current()
-	assert.NilError(t, e)
-	clientConfig := &HopClientConfig{
-		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket,
-		Keypath:       keypath,
-		Hostname:      "127.0.0.1",
-		Port:          DefaultHopPort,
-		Username:      u.Username,
-		Principal:     true,
-		RemoteForward: false,
-		LocalForward:  false,
-		Cmd:           "echo hello world",
-		Quiet:         false,
-		Headless:      false,
-	}
-	client, err := NewHopClient(clientConfig)
-	assert.NilError(t, err)
-
-	err = client.Connect()
-	assert.Error(t, err, ErrClientUnauthorized.Error())
-}
-
-func TestAuthgrantTimeOut(t *testing.T) {
-	//start hop server 1
-	tconf, verify := NewTestServerConfig("../certs/")
-	serverConfig := &HopServerConfig{
-		Port:                     DefaultHopPort,
-		Host:                     "localhost",
-		SockAddr:                 DefaultHopAuthSocket,
-		TransportConfig:          tconf,
-		MaxOutstandingAuthgrants: 50,
-	}
-	s, err := NewHopServer(serverConfig)
-	assert.NilError(t, err)
-
-	//start principal
-	keypath, _ := os.UserHomeDir()
-	keypath += DefaultKeyPath
-
-	u, e := user.Current()
-	assert.NilError(t, e)
-	principalConfig := &HopClientConfig{
-		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket,
-		Keypath:       keypath,
-		Hostname:      "127.0.0.1",
-		Port:          DefaultHopPort,
-		Username:      u.Username,
-		Principal:     true,
-		RemoteForward: false,
-		LocalForward:  false,
-		Cmd:           "",
-		Quiet:         false,
-		Headless:      false,
-	}
-	principal, err := NewHopClient(principalConfig)
-	assert.NilError(t, err)
-
-	go s.server.Serve()
+	//start hop server 2
+	go server2.Serve()        //starts transport layer server, authgrant server, and listens for hop conns
+	go server1.server.Serve() //start delgate transport layer server (manually handle incoming connection because I can't simulate the delegate client actually being a child process)
 
 	go func() {
 		//principal starts session with server 1
-		err = principal.Connect()
+		err := principal.Connect()
 		assert.NilError(t, err)
 
 		//principal handles intent request from delegate
@@ -294,6 +239,8 @@ func TestAuthgrantTimeOut(t *testing.T) {
 		assert.NilError(t, err)
 		response, err := remoteSession.confirmWithRemote(intent, targetAgt, agt)
 		assert.NilError(t, err)
+		//pause to add delay
+		time.Sleep(6 * time.Second) //max set to 5 seconds
 		err = agt.WriteRawBytes(response)
 		assert.NilError(t, err)
 		agt.Close()
@@ -301,77 +248,593 @@ func TestAuthgrantTimeOut(t *testing.T) {
 	}()
 
 	//server 1 accepts principal connection and starts hopsession
-	psconn, err := s.server.AcceptTimeout(1 * time.Minute)
+	psconn, err := server1.server.AcceptTimeout(1 * time.Minute)
 	assert.NilError(t, err)
 	psess := &hopSession{
-		transportConn: psconn,
-		tubeMuxer:     tubes.NewMuxer(psconn, psconn),
-		tubeQueue:     make(chan *tubes.Reliable),
-		done:          make(chan int),
-		server:        s,
+		transportConn:          psconn,
+		tubeMuxer:              tubes.NewMuxer(psconn, psconn),
+		tubeQueue:              make(chan *tubes.Reliable),
+		done:                   make(chan int),
+		server:                 server1,
+		authorizedKeysLocation: server1.config.AuthorizedKeysLocation,
 	}
 	go psess.start()
 
 	// server 1 listens on authsock for Intent requests
 	// proxies them to the principal
 	go func() {
-		c, err := s.authsock.Accept()
+		c, err := server1.authsock.Accept()
 		assert.NilError(t, err)
-		s.proxyAuthGrantRequest(psess, c)
+		server1.proxyAuthGrantRequest(psess, c)
 	}()
 
-	//start hop server 2
-	serverConfig2 := &HopServerConfig{
-		Port:                     "8888",
-		Host:                     "localhost",
-		SockAddr:                 "@authsock2",
-		TransportConfig:          tconf,
-		MaxOutstandingAuthgrants: 50,
-	}
-	s2, err := NewHopServer(serverConfig2)
-	assert.NilError(t, err)
-	go s2.Serve() //starts transport layer server, authgrant server, and listens for hop conns
-
-	//set up delegate client
-	delegateConfig := &HopClientConfig{
-		Verify:        *verify,
-		SockAddr:      DefaultHopAuthSocket,
-		Keypath:       "",
-		Hostname:      "127.0.0.1",
-		Port:          "8888",
-		Username:      u.Username,
-		Principal:     false,
-		RemoteForward: false,
-		LocalForward:  false,
-		Cmd:           "echo hello world",
-		Quiet:         false,
-		Headless:      false,
-	}
-
-	delegate := &HopClient{
-		TransportConfig: transport.ClientConfig{Verify: delegateConfig.Verify},
-		Config:          delegateConfig,
-		Primarywg:       sync.WaitGroup{},
-	}
-
-	//delegate gets authorization
-	delegate.TransportConfig.KeyPair = new(keys.X25519KeyPair)
-	delegate.TransportConfig.KeyPair.Generate()
-
-	logrus.Infof("Client generated: %v", delegate.TransportConfig.KeyPair.Public.String())
-	logrus.Infof("C: Initiating AGC Protocol.")
-
-	udsconn, err := net.Dial("unix", delegate.Config.SockAddr)
-	assert.NilError(t, err)
-	logrus.Infof("C: CONNECTED TO UDS: [%v]", udsconn.RemoteAddr().String())
-	agc := authgrants.NewAuthGrantConn(udsconn)
-	_, err = agc.GetAuthGrant(delegate.TransportConfig.KeyPair.Public, delegate.Config.Username, delegate.Config.Hostname,
-		delegate.Config.Port, authgrants.ShellAction, "")
-	assert.NilError(t, err)
-
-	time.Sleep(6 * time.Second) //max is set to 5 seconds
-
-	//delegate connects to server2
+	delegate := delegateSetup(t, port2, port1)
 	err = delegate.Connect()
 	assert.Error(t, err, ErrClientUnauthorized.Error())
+}
+
+func TestRemotePF(t *testing.T) {
+	port := getPort()
+	server := serverSetup(t, port)
+	go server.Serve()
+
+	remoteport1 := getPort()
+	remoteport2 := getPort()
+
+	client := principalSetup(t, port, true)
+	client.Config.RemoteArgs = []string{remoteport1 + ":localhost:" + remoteport2}
+
+	err := client.Connect()
+	assert.NilError(t, err)
+
+	err = client.remoteForward(client.Config.RemoteArgs[0])
+	assert.NilError(t, err)
+
+	logrus.Info("simulating a tcp conn")
+
+	parts := strings.Split(client.Config.RemoteArgs[0], ":") //assuming port:host:hostport
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		//simulate program listening on local (target port)
+		li, err := net.Listen("tcp", ":"+parts[2])
+		logrus.Info("simulating listening program on target: port ", parts[2])
+		wg.Done()
+		assert.NilError(t, err)
+		liconn, err := li.Accept()
+		assert.NilError(t, err)
+		buf := make([]byte, 39)
+		n := 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on target got: ", string(buf[:]))
+		if string(buf) == howdy {
+			logrus.Info("writing Hello")
+			liconn.Write([]byte("Hello/n"))
+		}
+		liconn.Close()
+
+		logrus.Info("expecting second conn")
+		liconn, err = li.Accept()
+		assert.NilError(t, err)
+		n = 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on target got: ", string(buf[:]))
+		if string(buf) == howdy {
+			logrus.Info("writing Hello")
+			liconn.Write([]byte("Hello/n"))
+		}
+		liconn.Close()
+	}()
+
+	wg.Wait()
+	go func() {
+		//simulate a TCP conn to remote port
+		logrus.Info("attempting to dial port ", parts[0])
+		ctconn, err := net.Dial("tcp", ":"+parts[0])
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte(howdy))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn. Waiting for response...", n)
+		buf := make([]byte, 7)
+		n = 0
+		for n < 7 {
+			x, err := ctconn.Read(buf[n:])
+			logrus.Infof("response read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("2nd tcp initiator got: ", string(buf))
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	go func() {
+		//simulate another TCP conn to remote port
+		logrus.Info("attempting to dial port ", parts[0])
+		ctconn, err := net.Dial("tcp", ":"+parts[0])
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn./n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn", n)
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	crft, err := client.TubeMuxer.Accept()
+	assert.NilError(t, err)
+	assert.Equal(t, crft.Type(), RemotePFTube)
+
+	err = client.handleRemote(crft)
+	assert.NilError(t, err)
+	logrus.Info("First tube done")
+
+	crft, err = client.TubeMuxer.Accept()
+	assert.NilError(t, err)
+	assert.Equal(t, crft.Type(), RemotePFTube)
+
+	err = client.handleRemote(crft)
+	assert.NilError(t, err)
+
+}
+
+func TestTwoRemotePF(t *testing.T) {
+	port := getPort()
+	server := serverSetup(t, port)
+	go server.Serve()
+
+	remoteport1 := getPort()
+	remoteport2 := getPort()
+
+	remoteport3 := getPort()
+	remoteport4 := getPort()
+
+	client := principalSetup(t, port, true)
+	client.Config.RemoteArgs = []string{remoteport1 + ":localhost:" + remoteport2, remoteport3 + ":localhost:" + remoteport4}
+
+	err := client.Connect()
+	assert.NilError(t, err)
+
+	err = client.remoteForward(client.Config.RemoteArgs[0])
+	assert.NilError(t, err)
+
+	err = client.remoteForward(client.Config.RemoteArgs[1])
+	assert.NilError(t, err)
+
+	logrus.Info("simulating a tcp conn")
+
+	parts := strings.Split(client.Config.RemoteArgs[0], ":")    //assuming port:host:hostport
+	partsTwo := strings.Split(client.Config.RemoteArgs[1], ":") //assuming port:host:hostport
+
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	go func() {
+		//simulate program listening on local (target port)
+		li, err := net.Listen("tcp", ":"+parts[2])
+		logrus.Info("simulating listening program on target: port ", parts[2])
+		assert.NilError(t, err)
+		wg.Done()
+		liconn, err := li.Accept()
+		assert.NilError(t, err)
+		buf := make([]byte, 39)
+		n := 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on target got: ", string(buf[:]))
+		liconn.Close()
+	}()
+
+	go func() {
+		//simulate program listening on local (target port) (for second arg)
+		li, err := net.Listen("tcp", ":"+partsTwo[2])
+		logrus.Info("simulating listening program on target: port ", partsTwo[2])
+		assert.NilError(t, err)
+		wg.Done()
+		liconn, err := li.Accept()
+		assert.NilError(t, err)
+		buf := make([]byte, 39)
+		n := 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on target got: ", string(buf[:]))
+		liconn.Close()
+	}()
+
+	wg.Wait()
+
+	go func() {
+		//simulate a TCP conn to remote port
+		logrus.Info("attempting to dial port ", parts[0])
+		ctconn, err := net.Dial("tcp", ":"+parts[0])
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn./n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn", n)
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	go func() {
+		//simulate a TCP conn to remote port (2)
+		logrus.Info("attempting to dial port ", partsTwo[0])
+		ctconn, err := net.Dial("tcp", ":"+partsTwo[0])
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("HI THERE! THIS IS THE FIRST TCP CONN./n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn", n)
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	wg.Add(1)
+	go func() {
+
+		crft, err := client.TubeMuxer.Accept()
+		assert.NilError(t, err)
+		assert.Equal(t, crft.Type(), RemotePFTube)
+
+		err = client.handleRemote(crft)
+		assert.NilError(t, err)
+		logrus.Info("First tube done")
+		wg.Done()
+	}()
+
+	crft, err := client.TubeMuxer.Accept()
+	assert.NilError(t, err)
+	assert.Equal(t, crft.Type(), RemotePFTube)
+
+	err = client.handleRemote(crft)
+	assert.NilError(t, err)
+	wg.Wait()
+
+}
+
+func TestRemotePFListenSocket(t *testing.T) {
+	port := getPort()
+	server := serverSetup(t, port)
+	go server.Serve()
+
+	remoteport1 := getPort()
+	listensocket := "/tmp/sock" + remoteport1 //just using remoteport1 as a unique id to avoid conflicts in testing
+	remoteport2 := getPort()
+
+	client := principalSetup(t, port, true)
+	client.Config.RemoteArgs = []string{listensocket + ":localhost:" + remoteport2}
+
+	err := client.Connect()
+	assert.NilError(t, err)
+
+	err = client.remoteForward(client.Config.RemoteArgs[0])
+	assert.NilError(t, err)
+
+	logrus.Info("simulating a tcp conn")
+
+	fwdStruct := Fwd{
+		Listensock:        false,
+		Connectsock:       false,
+		Listenhost:        "",
+		Listenportorpath:  "",
+		Connecthost:       "",
+		Connectportorpath: "",
+	}
+	err = ParseForward(client.Config.RemoteArgs[0], &fwdStruct)
+	assert.NilError(t, err)
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		//simulate program listening on Connecthost:Connectport
+		addr := net.JoinHostPort(fwdStruct.Connecthost, fwdStruct.Connectportorpath)
+		li, err := net.Listen("tcp", addr)
+		logrus.Info("simulating listening program on target: ", addr)
+		wg.Done()
+		assert.NilError(t, err)
+		liconn, err := li.Accept()
+		assert.NilError(t, err)
+		buf := make([]byte, 39)
+		n := 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on target got: ", string(buf[:]))
+		if string(buf) == howdy {
+			logrus.Info("writing Hello")
+			liconn.Write([]byte("Hello/n"))
+		}
+		liconn.Close()
+
+		logrus.Info("expecting second conn")
+		liconn, err = li.Accept()
+		assert.NilError(t, err)
+		n = 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on target got: ", string(buf[:]))
+		if string(buf) == howdy {
+			logrus.Info("writing Hello")
+			liconn.Write([]byte("Hello/n"))
+		}
+		liconn.Close()
+	}()
+
+	wg.Wait()
+	go func() {
+		//simulate a conn to listening socket
+		logrus.Info("attempting to dial socket ", listensocket)
+		ctconn, err := net.Dial("unix", listensocket)
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte(howdy))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn. Waiting for response...", n)
+		buf := make([]byte, 7)
+		n = 0
+		for n < 7 {
+			x, err := ctconn.Read(buf[n:])
+			logrus.Infof("response read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("2nd tcp initiator got: ", string(buf))
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	go func() {
+		//simulate another conn to listening socket
+		logrus.Info("attempting to dial port ", listensocket)
+		ctconn, err := net.Dial("unix", listensocket)
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn./n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn", n)
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	crft, err := client.TubeMuxer.Accept()
+	assert.NilError(t, err)
+	assert.Equal(t, crft.Type(), RemotePFTube)
+
+	err = client.handleRemote(crft)
+	assert.NilError(t, err)
+	logrus.Info("First tube done")
+
+	crft, err = client.TubeMuxer.Accept()
+	assert.NilError(t, err)
+	assert.Equal(t, crft.Type(), RemotePFTube)
+
+	err = client.handleRemote(crft)
+	assert.NilError(t, err)
+
+}
+
+func TestLocalPF(t *testing.T) {
+	port := getPort()
+	server := serverSetup(t, port)
+	go server.Serve()
+	localport1 := getPort()
+	localport2 := getPort()
+
+	client := principalSetup(t, port, true)
+	client.Config.LocalArgs = []string{localport1 + ":127.0.0.1:" + localport2}
+
+	err := client.Connect()
+	assert.NilError(t, err)
+
+	err = client.localForward(client.Config.LocalArgs[0]) //client listening on localport1
+	assert.NilError(t, err)
+
+	parts := strings.Split(client.Config.LocalArgs[0], ":") //assuming port:host:hostport
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		//simulate program listening on end dest (host:hostport)
+		li, err := net.Listen("tcp", parts[1]+":"+parts[2])
+		logrus.Infof("simulating listening program on end dest: addr %v & port %v", parts[1], parts[2])
+		wg.Done()
+		assert.NilError(t, err)
+		liconn, err := li.Accept()
+		assert.NilError(t, err)
+		buf := make([]byte, 39)
+		n := 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on end dest got: ", string(buf[:]))
+		if string(buf) == "Howdy! This is connection number two./n" {
+			logrus.Info("writing Hello")
+			liconn.Write([]byte("Hello/n"))
+		}
+		liconn.Close()
+
+		logrus.Info("expecting second conn")
+		liconn, err = li.Accept()
+		assert.NilError(t, err)
+		n = 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on end dest got: ", string(buf[:]))
+		if string(buf) == "Howdy! This is connection number two./n" {
+			logrus.Info("writing Hello")
+			liconn.Write([]byte("Hello/n"))
+		}
+		liconn.Close()
+	}()
+
+	wg.Wait()
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		//simulate another TCP conn to localport1
+		logrus.Info("attempting to dial port ", parts[0])
+		ctconn, err := net.Dial("tcp", ":"+parts[0])
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn./n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn", n)
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	go func() {
+		defer wg.Done()
+		//simulate a TCP conn to localport
+		logrus.Info("simulating a tcp conn to localport1, ", parts[0])
+		ctconn, err := net.Dial("tcp", "127.0.0.1:"+parts[0])
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("Howdy! This is connection number two./n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn. Waiting for response...", n)
+		buf := make([]byte, 7)
+		n = 0
+		for n < 7 {
+			x, err := ctconn.Read(buf[n:])
+			logrus.Infof("response read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("2nd tcp initiator got: ", string(buf))
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	wg.Wait()
+}
+
+func TestTwoLocalPF(t *testing.T) {
+	port := getPort()
+	server := serverSetup(t, port)
+	go server.Serve()
+
+	localport1 := getPort()
+	localport2 := getPort()
+
+	localport3 := getPort()
+	localport4 := getPort()
+
+	client := principalSetup(t, port, true)
+	client.Config.LocalArgs = []string{localport1 + ":localhost:" + localport2, localport3 + ":localhost:" + localport4}
+
+	err := client.Connect()
+	assert.NilError(t, err)
+
+	err = client.localForward(client.Config.LocalArgs[0])
+	assert.NilError(t, err)
+
+	err = client.localForward(client.Config.LocalArgs[1])
+	assert.NilError(t, err)
+
+	parts := strings.Split(client.Config.LocalArgs[0], ":")    //assuming port:host:hostport
+	partsTwo := strings.Split(client.Config.LocalArgs[1], ":") //assuming port:host:hostport
+
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	go func() {
+		//simulate program listening on end dest (target port)
+		li, err := net.Listen("tcp", parts[1]+":"+parts[2])
+		logrus.Info("simulating listening program on target: port ", parts[2])
+		assert.NilError(t, err)
+		wg.Done()
+		liconn, err := li.Accept()
+		assert.NilError(t, err)
+		buf := make([]byte, 39)
+		n := 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on end dest got: ", string(buf[:]))
+		liconn.Close()
+	}()
+
+	go func() {
+		//simulate program listening on end dest (target port) (for second arg)
+		li, err := net.Listen("tcp", partsTwo[1]+":"+partsTwo[2])
+		logrus.Info("simulating listening program on target: port ", partsTwo[2])
+		assert.NilError(t, err)
+		wg.Done()
+		liconn, err := li.Accept()
+		assert.NilError(t, err)
+		buf := make([]byte, 39)
+		n := 0
+		for n < 39 {
+			x, err := liconn.Read(buf[n:])
+			logrus.Infof("listening program read %v bytes", x)
+			assert.NilError(t, err)
+			n += x
+		}
+		logrus.Info("program listening on end dest got: ", string(buf[:]))
+		liconn.Close()
+	}()
+
+	wg.Wait()
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		//simulate a TCP conn to localport1
+		logrus.Info("attempting to dial port ", parts[0])
+		ctconn, err := net.Dial("tcp", ":"+parts[0])
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn./n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn", n)
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+
+	go func() {
+		defer wg.Done()
+		//simulate a TCP conn to localport3
+		logrus.Info("attempting to dial port ", partsTwo[0])
+		ctconn, err := net.Dial("tcp", ":"+partsTwo[0])
+		assert.NilError(t, err)
+		n, err := ctconn.Write([]byte("HI THERE! THIS IS THE FIRST TCP CONN./n"))
+		assert.NilError(t, err)
+		logrus.Infof("sent %v bytes over tcpconn", n)
+		err = ctconn.Close()
+		assert.NilError(t, err)
+	}()
+	wg.Wait()
 }

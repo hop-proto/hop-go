@@ -35,8 +35,9 @@ type HandshakeState struct {
 	macBuf          [MacLen]byte
 	remoteEphemeral [DHLen]byte
 	handshakeKey    [KeyLen]byte
-	clientStatic    [DHLen]byte
-	sessionID       [SessionIDLen]byte
+	//clientStatic    [DHLen]byte
+	clientLeaf certs.Certificate
+	sessionID  [SessionIDLen]byte
 
 	cookieKey *[KeyLen]byte // server only
 

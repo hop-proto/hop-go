@@ -6,7 +6,7 @@ import (
 	"net"
 
 	"github.com/sirupsen/logrus"
-	"zmap.io/portal/keys"
+	"zmap.io/portal/certs"
 	"zmap.io/portal/kravatte"
 )
 
@@ -26,7 +26,8 @@ type SessionState struct {
 
 	handle *Handle
 
-	clientStatic keys.PublicKey //needed after handshake for user authorization step
+	//clientStatic keys.PublicKey //needed after handshake for user authorization step
+	clientLeaf certs.Certificate
 
 	rawWrite bytes.Buffer
 }

@@ -58,11 +58,11 @@ func TestStateAddByte(t *testing.T) {
 	c.stateAddByte(0x08, fB-8)
 	c.stateAddByte(0x09, fB-9)
 	assertLeadingStateEquals(t, c.s[:], make([]uint64, 23))
-	var expected23 uint64 = binary.LittleEndian.Uint64([]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09})
+	var expected23 = binary.LittleEndian.Uint64([]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09})
 	if c.s[23] != expected23 {
 		t.Errorf("expected c.s[fb-8] = %.16x, got %.16x", expected23, c.s[23])
 	}
-	var expected24 uint64 = binary.LittleEndian.Uint64([]byte{0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x01})
+	var expected24 = binary.LittleEndian.Uint64([]byte{0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x01})
 	if c.s[24] != expected24 {
 		t.Errorf("expected c.s[fb-1] = %.16x, got %.16x", expected24, c.s[24])
 	}

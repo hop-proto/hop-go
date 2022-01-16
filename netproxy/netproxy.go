@@ -27,16 +27,14 @@ const (
 )
 
 type npcInitMsg struct {
-	msgLen  uint32
-	tunType byte
-	info    string
+	msgLen uint32
+	info   string
 }
 
-func newNPCInitMsg(address string, t byte) *npcInitMsg {
+func newNPCInitMsg(arg string, t byte) *npcInitMsg {
 	return &npcInitMsg{
-		msgLen:  uint32(len(address)),
-		tunType: t,
-		info:    address,
+		msgLen: uint32(len(arg)),
+		info:   arg,
 	}
 }
 
@@ -45,9 +43,8 @@ func (n *npcInitMsg) Addr() string {
 }
 
 func (n *npcInitMsg) toBytes() []byte {
-	r := make([]byte, 5)
-	r[0] = n.tunType
-	binary.BigEndian.PutUint32(r[1:], n.msgLen)
+	r := make([]byte, 4)
+	binary.BigEndian.PutUint32(r[0:], n.msgLen)
 	return append(r, []byte(n.info)...)
 }
 
@@ -72,6 +69,11 @@ func Start(npTube *tubes.Reliable, arg string, t byte) error {
 		return errors.New("denied")
 	}
 	logrus.Info("Receieved NPC Conf")
+	// exit := make([]byte, 1) //TODO(baumanl): replace this with a better soln that doesn't block
+	// _, err = npTube.Read(exit) //wait for server to say if there is a problem
+	// if err != nil {
+	// 	return err
+	// }
 	return nil
 }
 

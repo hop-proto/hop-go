@@ -36,6 +36,7 @@ type HopServerConfig struct {
 	SockAddr                 string
 	TransportConfig          *transport.ServerConfig
 	MaxOutstandingAuthgrants int
+	AuthorizedKeysLocation   string //defaults to /.hop/authorized_keys
 }
 
 //NewHopServer returns a Hop Server containing a transport server running on the host/port
@@ -66,11 +67,11 @@ func NewHopServer(hconfig *HopServerConfig) (*HopServer, error) {
 	//set socket options and start listening to socket
 	sockconfig := &net.ListenConfig{Control: setListenerOptions}
 	authgrantServer, err := sockconfig.Listen(context.Background(), "unix", hconfig.SockAddr)
-	logrus.Infof("address: %v", authgrantServer.Addr())
 	if err != nil {
 		logrus.Error("S: UDS LISTEN ERROR:", err)
 		return nil, err
 	}
+	logrus.Infof("address: %v", authgrantServer.Addr())
 
 	principals := make(map[int32]*hopSession)         //PID -> principal hop session
 	authgrants := make(map[keys.PublicKey]*authGrant) //static key -> authgrant
@@ -103,7 +104,7 @@ func (s *HopServer) Serve() {
 		if err != nil {
 			logrus.Fatalf("S: SERVER TIMEOUT: %v", err)
 		}
-		logrus.Debugf("S: ACCEPTED NEW CONNECTION with authgrant")
+		logrus.Infof("S: ACCEPTED NEW CONNECTION")
 		go s.newSession(serverConn)
 	}
 }
@@ -111,11 +112,18 @@ func (s *HopServer) Serve() {
 //Starts a new hop session
 func (s *HopServer) newSession(serverConn *transport.Handle) {
 	sess := &hopSession{
-		transportConn: serverConn,
-		tubeMuxer:     tubes.NewMuxer(serverConn, serverConn),
-		tubeQueue:     make(chan *tubes.Reliable),
-		done:          make(chan int),
-		server:        s,
+		transportConn:          serverConn,
+		tubeMuxer:              tubes.NewMuxer(serverConn, serverConn),
+		tubeQueue:              make(chan *tubes.Reliable),
+		done:                   make(chan int),
+		controlChannels:        []net.Conn{},
+		server:                 s,
+		authorizedKeysLocation: s.config.AuthorizedKeysLocation,
+	}
+	if sess.authorizedKeysLocation != sess.server.config.AuthorizedKeysLocation {
+		logrus.Error("Authorized Keys location mismatch")
+	} else {
+		logrus.Info("ALL GOOD AUTH KEYS LOCATION")
 	}
 	sess.start()
 }
