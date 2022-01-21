@@ -11,12 +11,14 @@ import (
 	"zmap.io/portal/keys"
 )
 
+// Data is the data access object for all of the Agent.
 type Data struct {
-	Keys map[string]keys.PrivateKey
+	Keys map[string]*keys.X25519KeyPair
 }
 
+// Init loads keys into the data object from the Hop configuration directory.
 func (d *Data) Init() error {
-	d.Keys = make(map[string]keys.PrivateKey)
+	d.Keys = make(map[string]*keys.X25519KeyPair)
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -38,7 +40,7 @@ func (d *Data) Init() error {
 			logrus.Errorf("%s: %s", path, err)
 			return nil
 		}
-		d.Keys[path] = k.Private
+		d.Keys[path] = k
 		return nil
 	})
 	if err != nil {
