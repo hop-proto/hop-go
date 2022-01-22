@@ -38,6 +38,7 @@ const (
 	Leaf         CertificateType = 1
 	Intermediate CertificateType = 2
 	Root         CertificateType = 3
+	Ephemeral    CertificateType = 4 // ?????
 )
 
 // String implements Stringer for CertificateType.
