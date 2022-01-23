@@ -16,20 +16,3 @@ type HostConfig struct {
 	Key          string
 	Certificate  string
 }
-
-type TokenFlag uint64
-
-const (
-	TokenFlagCaseInsensitive = iota
-)
-
-type Token struct {
-	Value string
-	Flags TokenFlag
-}
-
-//go:generate go run ./gen tokens_gen.go
-
-func Tokenize(b []byte) []Token {
-	return nil
-}

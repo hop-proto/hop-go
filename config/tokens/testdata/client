@@ -7,6 +7,6 @@ Host example.localhost {
     Key /path/to/key.pem
     Certificate /path/to/cert.pem
     AutoSelfSign false
-    Hostname 127.0.0.1
+    Address 127.0.0.1
     Port 1234
 }
