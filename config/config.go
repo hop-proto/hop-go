@@ -1,6 +1,10 @@
 // Package config contains structures for parsing Hop client, agent, and server configurations.
 package config
 
+import (
+	"zmap.io/portal/config/tokens"
+)
+
 // ClientConfig represents a parsed client configuration.
 type ClientConfig struct {
 	CAFiles []string
@@ -15,4 +19,7 @@ type HostConfig struct {
 	AutoSelfSign bool
 	Key          string
 	Certificate  string
+}
+
+func Parse(toks []tokens.Token) {
 }

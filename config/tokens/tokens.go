@@ -28,7 +28,43 @@ type Token struct {
 	Value string
 }
 
+// Control contains all control Tokens
+var Control = struct {
+	End    Token
+	LBrace Token
+	RBrace Token
+}{
+	End: Token{
+		Type:  TokenTypeEnd,
+		Value: ";",
+	},
+	LBrace: Token{
+		Type:  TokenTypeScope,
+		Value: "{",
+	},
+	RBrace: Token{
+		Type:  TokenTypeScope,
+		Value: "}",
+	},
+}
+
 //go:generate go run ./gen tokens_gen.go
+
+type config struct {
+	globals []directive
+	hosts   []block
+}
+
+type block struct {
+	name   string
+	locals []directive
+}
+
+type directive struct {
+	name, value string
+}
+
+const ()
 
 // Tokenize takes as input a configuration and returns the set of tokens in the file.
 func Tokenize(b []byte) ([]Token, error) {
@@ -50,6 +86,7 @@ func Tokenize(b []byte) ([]Token, error) {
 		}
 		return false
 	}
+
 	for r := s.Scan(); r != scanner.EOF; r = s.Scan() {
 		value := s.TokenText()
 		var tt TokenType
@@ -78,7 +115,8 @@ func Tokenize(b []byte) ([]Token, error) {
 		default:
 			panic(value)
 		}
-		tokens = append(tokens, Token{Type: tt, Value: value})
+		t := Token{Type: tt, Value: value}
+		tokens = append(tokens, t)
 	}
 	return tokens, nil
 }
