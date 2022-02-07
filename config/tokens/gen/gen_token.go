@@ -18,7 +18,7 @@ package tokens
 // Keyword contains definitions for all Tokens with TokenTypeKeyword. They can
 // be safely compared by value.
 var Keyword = struct {
-	{{ range .Keywords}}
+	{{ range .Keywords }}
 	{{ .Name }} Token
 	{{- end }}
 }{
@@ -30,38 +30,61 @@ var Keyword = struct {
 	{{- end }}
 }
 
-// Keywords is an array containing all values from Keyword.
+// Keywords is an array containing all values from Setting
 var Keywords = []Token{
 {{- range .Keywords }}
 	Keyword.{{ .Name }},
 {{- end }}
 }
+
+// Setting contains definitions for all Tokens with TokenTypeKeyword. They can
+// be safely compared by value.
+var Setting = struct {
+	{{ range .Settings}}
+	{{ .Name }} Token
+	{{- end }}
+}{
+	{{- range .Settings }}
+	{{ .Name }}: Token{
+		Type: TokenTypeSetting,
+		Value: {{ printf "%q" .Name }},
+	},
+	{{- end }}
+}
+
+// Settings is an array containing all values from Setting
+var Settings = []Token{
+{{- range .Settings }}
+	Setting.{{ .Name }},
+{{- end }}
+}
 `
 
-type keyword struct {
+type typeDefinition struct {
 	Name string
 }
 
 type tokenCtx struct {
-	Keywords []keyword
+	Keywords []typeDefinition
+	Settings []typeDefinition
 }
 
-type keywordSlice []keyword
+type typeSlice []typeDefinition
 
-var _ sort.Interface = keywordSlice{}
+var _ sort.Interface = typeSlice{}
 
-func (k keywordSlice) Len() int {
-	return len(k)
+func (s typeSlice) Len() int {
+	return len(s)
 }
 
-func (k keywordSlice) Less(i, j int) bool {
-	return strings.Compare(k[i].Name, k[j].Name) < 0
+func (s typeSlice) Less(i, j int) bool {
+	return strings.Compare(s[i].Name, s[j].Name) < 0
 }
 
-func (k keywordSlice) Swap(i, j int) {
-	tmp := k[i]
-	k[i] = k[j]
-	k[j] = tmp
+func (s typeSlice) Swap(i, j int) {
+	tmp := s[i]
+	s[i] = s[j]
+	s[j] = tmp
 }
 
 func main() {
@@ -75,10 +98,8 @@ func main() {
 		}
 		f = fd
 	}
-	keywords := []keyword{
-		{Name: "Include"},
+	settings := []typeDefinition{
 		{Name: "CAFile"},
-		{Name: "Host"},
 		{Name: "Key"},
 		{Name: "Certificate"},
 		{Name: "AutoSelfSign"},
@@ -87,7 +108,18 @@ func main() {
 		{Name: "Number"},
 		{Name: "Word"},
 	}
-	sort.Sort(keywordSlice(keywords))
+	sort.Sort(typeSlice(settings))
+
+	keywords := []typeDefinition{
+		{Name: "Host"},
+		{Name: "Include"},
+	}
+	sort.Sort(typeSlice(keywords))
+
+	data := tokenCtx{
+		Keywords: keywords,
+		Settings: settings,
+	}
 
 	t := template.New("tokens")
 	_, err := t.Parse(tmpl)
@@ -95,7 +127,7 @@ func main() {
 		logrus.Fatalf("unable to parse template: %s", err)
 	}
 	buf := bytes.Buffer{}
-	err = t.Execute(&buf, tokenCtx{Keywords: keywords})
+	err = t.Execute(&buf, data)
 	if err != nil {
 		logrus.Fatalf("unable to execute template: %s", err)
 	}

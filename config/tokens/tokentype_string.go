@@ -9,16 +9,18 @@ func _() {
 	// Re-run the stringer command to generate them again.
 	var x [1]struct{}
 	_ = x[TokenTypeKeyword-0]
-	_ = x[TokenTypeInt-1]
-	_ = x[TokenTypeFloat-2]
-	_ = x[TokenTypeScope-3]
-	_ = x[TokenTypeEnd-4]
-	_ = x[TokenTypeString-5]
+	_ = x[TokenTypeSetting-1]
+	_ = x[TokenTypeInt-2]
+	_ = x[TokenTypeFloat-3]
+	_ = x[TokenTypeScope-4]
+	_ = x[TokenTypeEnd-5]
+	_ = x[TokenTypeString-6]
+	_ = x[TokenTypeSentinal-7]
 }
 
-const _TokenType_name = "TokenTypeKeywordTokenTypeIntTokenTypeFloatTokenTypeScopeTokenTypeEndTokenTypeString"
+const _TokenType_name = "TokenTypeKeywordTokenTypeSettingTokenTypeIntTokenTypeFloatTokenTypeScopeTokenTypeEndTokenTypeStringTokenTypeSentinal"
 
-var _TokenType_index = [...]uint8{0, 16, 28, 42, 56, 68, 83}
+var _TokenType_index = [...]uint8{0, 16, 32, 44, 58, 72, 84, 99, 116}
 
 func (i TokenType) String() string {
 	if i < 0 || i >= TokenType(len(_TokenType_index)-1) {

@@ -2,6 +2,7 @@ package tokens
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"text/scanner"
 	"unicode"
@@ -13,11 +14,13 @@ type TokenType int
 // Known values of TokenType
 const (
 	TokenTypeKeyword TokenType = iota
+	TokenTypeSetting
 	TokenTypeInt
 	TokenTypeFloat
 	TokenTypeScope
 	TokenTypeEnd
 	TokenTypeString
+	TokenTypeSentinal
 )
 
 //go:generate go run golang.org/x/tools/cmd/stringer -type TokenType .
@@ -33,6 +36,7 @@ var Control = struct {
 	End    Token
 	LBrace Token
 	RBrace Token
+	EOF    Token
 }{
 	End: Token{
 		Type:  TokenTypeEnd,
@@ -46,25 +50,35 @@ var Control = struct {
 		Type:  TokenTypeScope,
 		Value: "}",
 	},
+	EOF: Token{
+		Type:  TokenTypeSentinal,
+		Value: "EOF",
+	},
 }
 
 //go:generate go run ./gen tokens_gen.go
 
-type config struct {
-	globals []directive
-	hosts   []block
+// IsKeyword returns the canonical keyword value for a Token if the string is a
+// keyword.
+func IsKeyword(s string) string {
+	for _, k := range Keywords {
+		if strings.EqualFold(k.Value, s) {
+			return k.Value
+		}
+	}
+	return ""
 }
 
-type block struct {
-	name   string
-	locals []directive
+// IsSetting returns the canonical setting value for a Token if the string is a
+// setting.
+func IsSetting(s string) string {
+	for _, k := range Settings {
+		if strings.EqualFold(k.Value, s) {
+			return k.Value
+		}
+	}
+	return ""
 }
-
-type directive struct {
-	name, value string
-}
-
-const ()
 
 // Tokenize takes as input a configuration and returns the set of tokens in the file.
 func Tokenize(b []byte) ([]Token, error) {
@@ -96,15 +110,13 @@ func Tokenize(b []byte) ([]Token, error) {
 		case scanner.Float:
 			tt = TokenTypeInt
 		case scanner.Ident:
-			found := false
-			for _, k := range Keywords {
-				if strings.EqualFold(k.Value, value) {
-					tt = TokenTypeKeyword
-					found = true
-					break
-				}
-			}
-			if !found {
+			if tv := IsKeyword(value); tv != "" {
+				tt = TokenTypeKeyword
+				value = tv
+			} else if tv := IsSetting(value); tv != "" {
+				tt = TokenTypeSetting
+				value = tv
+			} else {
 				tt = TokenTypeString
 			}
 		case '{', '}':
@@ -119,4 +131,208 @@ func Tokenize(b []byte) ([]Token, error) {
 		tokens = append(tokens, t)
 	}
 	return tokens, nil
+}
+
+type parser struct {
+	tokens []Token
+
+	current int
+	inBlock bool
+
+	ast *Node
+}
+
+// NodeType defines which fields will be set on a Node.
+type NodeType int
+
+// Known values of NodeType
+const (
+	NodeTypeFile NodeType = iota
+	NodeTypeSetting
+	NodeTypeBlock
+)
+
+//go:generate go run golang.org/x/tools/cmd/stringer -type NodeType .
+
+// Node represents a node in the AST for a config file. ASTs are rooted by a
+// Node with NodeTypeFile. Nodes will either be a block or a setting. Settings
+// with a parent set to the root node are global. Settings with a parent set to
+// a block node are specific to that block.
+type Node struct {
+	Type   NodeType
+	Parent *Node
+
+	// Setting
+	SettingKey   string
+	SettingValue string
+
+	// Block
+	BlockType string
+	BlockName string
+
+	Children []*Node
+}
+
+func newParser(tokens []Token) parser {
+	return parser{
+		tokens: tokens,
+		ast: &Node{
+			Type: NodeTypeFile,
+		},
+	}
+}
+
+func (p parser) peekToken() Token {
+	if len(p.tokens) > p.current {
+		return p.tokens[p.current]
+	}
+	return Control.EOF
+}
+
+func (p *parser) consumeToken() Token {
+	out := p.peekToken()
+	p.current++
+	return out
+}
+
+func (p *parser) unadvance() {
+	p.current--
+}
+
+func (p *parser) consumeTokenOfType(tt TokenType) (Token, error) {
+	t := p.consumeToken()
+	if t.Type != tt {
+		return Control.EOF, fmt.Errorf("unexpected Token: wanted %q, got %q", tt, t.Type)
+	}
+	return t, nil
+}
+
+func (p *parser) consumeMatchingToken(expected Token) (Token, error) {
+	t := p.consumeToken()
+	if t == expected {
+		return t, nil
+	}
+	return t, fmt.Errorf("unexpected Token: wanted %v, got %v", expected, t)
+}
+
+func (p *parser) parse() error {
+	p.inBlock = false
+	children, err := p.parseBlock(p.ast)
+	if err != nil {
+		return err
+	}
+	p.ast.Children = children
+	return nil
+}
+
+func (p *parser) parseNode(parent *Node) (*Node, error) {
+	for {
+		t := p.peekToken()
+		switch t.Type {
+		case TokenTypeSetting:
+			return p.parseSetting(parent)
+		case TokenTypeKeyword:
+			return p.parseKeyword(parent)
+		default:
+			return nil, fmt.Errorf("unimplemented %s: %s", t.Type, t.Value)
+		}
+	}
+}
+
+func (p *parser) parseBlock(parent *Node) (statements []*Node, err error) {
+	for {
+		t := p.consumeToken()
+		if t == Control.End {
+			continue
+		}
+		if p.inBlock {
+			if t == Control.RBrace {
+				p.inBlock = false
+				return
+			}
+			if t == Control.EOF {
+				err = fmt.Errorf("file ended before %q block ended", parent.BlockType)
+				return
+			}
+		}
+		if !p.inBlock && t == Control.EOF {
+			return
+		}
+		p.unadvance()
+		var n *Node
+		n, err = p.parseNode(parent)
+		if err != nil {
+			return
+		}
+		statements = append(statements, n)
+	}
+}
+
+func (p *parser) parseSetting(parent *Node) (*Node, error) {
+	ts := p.consumeToken()
+	if ts.Type != TokenTypeSetting {
+		return nil, fmt.Errorf("expected TokenTypeSetting, got %s", ts.Type)
+	}
+	tv, err := p.consumeTokenOfType(TokenTypeString)
+	if err != nil {
+		return nil, fmt.Errorf("a setting must be followed by a string value: %w", err)
+	}
+	te := p.consumeToken()
+	if te != Control.End {
+		return nil, fmt.Errorf("setting did not under with %s", Control.End.Type)
+	}
+	n := &Node{
+		Type:         NodeTypeSetting,
+		Parent:       parent,
+		SettingKey:   ts.Value,
+		SettingValue: tv.Value,
+	}
+	return n, nil
+}
+
+func (p *parser) parseKeyword(parent *Node) (*Node, error) {
+	tk := p.consumeToken()
+	if tk.Type != TokenTypeKeyword {
+		return nil, fmt.Errorf("expected TokenTypeKeyword, got %s", tk.Type)
+	}
+	switch tk {
+	case Keyword.Host:
+		if p.inBlock {
+			return nil, fmt.Errorf("cannot define a Host in a block")
+		}
+		s, err := p.consumeTokenOfType(TokenTypeString)
+		if err != nil {
+			return nil, fmt.Errorf("%q must be followed by a host pattern: %w", tk.Value, err)
+		}
+		_, err = p.consumeMatchingToken(Control.LBrace)
+		if err != nil {
+			return nil, fmt.Errorf("%q pattern was not followed by a lbrace: %w", Keyword.Host, err)
+		}
+		n := &Node{
+			Type:      NodeTypeBlock,
+			Parent:    parent,
+			BlockType: "Host",
+			BlockName: s.Value,
+		}
+		p.inBlock = true
+		children, err := p.parseBlock(n)
+		if err != nil {
+			return nil, err
+		}
+		n.Children = children
+		return n, nil
+	case Keyword.Include:
+		s, err := p.consumeTokenOfType(TokenTypeString)
+		if err != nil {
+			return nil, fmt.Errorf("%q must be followed by a host pattern: %w", tk.Value, err)
+		}
+		return &Node{
+			Type:      NodeTypeBlock,
+			Parent:    parent,
+			BlockType: "Include",
+			BlockName: s.Value,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unimplemented Keyword %q", tk.Value)
+	}
 }

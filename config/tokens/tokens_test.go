@@ -13,6 +13,10 @@ func TestTokenizer(t *testing.T) {
 	b, _ := io.ReadAll(f)
 	tokens, err := Tokenize(b)
 	assert.NilError(t, err)
-	t.Fail()
 	t.Log(tokens)
+	p := newParser(tokens)
+	err = p.parse()
+	assert.NilError(t, err)
+	t.Log(*p.ast)
+	t.Fail()
 }
