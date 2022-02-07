@@ -1,4 +1,4 @@
-package tokens
+package ast
 
 import (
 	"io"
@@ -14,9 +14,8 @@ func TestTokenizer(t *testing.T) {
 	tokens, err := Tokenize(b)
 	assert.NilError(t, err)
 	t.Log(tokens)
-	p := newParser(tokens)
-	err = p.parse()
+	p := NewParser(tokens)
+	err = p.Parse()
 	assert.NilError(t, err)
 	t.Log(*p.ast)
-	t.Fail()
 }

@@ -1,4 +1,4 @@
-package tokens
+package ast
 
 import (
 	"bytes"
@@ -80,7 +80,7 @@ func IsSetting(s string) string {
 	return ""
 }
 
-// Tokenize takes as input a configuration and returns the set of tokens in the file.
+// Tokenize takes as input a configuration and returns the set of ast in the file.
 func Tokenize(b []byte) ([]Token, error) {
 	var tokens []Token
 	buf := bytes.NewBuffer(b)
@@ -133,7 +133,8 @@ func Tokenize(b []byte) ([]Token, error) {
 	return tokens, nil
 }
 
-type parser struct {
+// Parser turns a list of Tokens into an AST.
+type Parser struct {
 	tokens []Token
 
 	current int
@@ -173,8 +174,9 @@ type Node struct {
 	Children []*Node
 }
 
-func newParser(tokens []Token) parser {
-	return parser{
+// NewParser returns an initialized Parser with a root AST.
+func NewParser(tokens []Token) Parser {
+	return Parser{
 		tokens: tokens,
 		ast: &Node{
 			Type: NodeTypeFile,
@@ -182,40 +184,46 @@ func newParser(tokens []Token) parser {
 	}
 }
 
-func (p parser) peekToken() Token {
+// PeekToken returns the next token without advancing the cursor. If there is no
+// next Token, this returns Control.EOF.
+func (p Parser) PeekToken() Token {
 	if len(p.tokens) > p.current {
 		return p.tokens[p.current]
 	}
 	return Control.EOF
 }
 
-func (p *parser) consumeToken() Token {
-	out := p.peekToken()
+// ConsumeToken returns the next Token and advances the cursor. If there is no
+// next Token, this returns Control.EOF.
+func (p *Parser) ConsumeToken() Token {
+	out := p.PeekToken()
 	p.current++
 	return out
 }
 
-func (p *parser) unadvance() {
+// Rollback moves the cursor back one token.
+func (p *Parser) Rollback() {
 	p.current--
 }
 
-func (p *parser) consumeTokenOfType(tt TokenType) (Token, error) {
-	t := p.consumeToken()
+// ConsumeTokenOfType consumes the next Token. If the next Token does not have the expected TokenType, this returns an error.
+func (p *Parser) ConsumeTokenOfType(tt TokenType) (Token, error) {
+	t := p.ConsumeToken()
 	if t.Type != tt {
 		return Control.EOF, fmt.Errorf("unexpected Token: wanted %q, got %q", tt, t.Type)
 	}
 	return t, nil
 }
 
-func (p *parser) consumeMatchingToken(expected Token) (Token, error) {
-	t := p.consumeToken()
+func (p *Parser) ConsumeMatchingToken(expected Token) (Token, error) {
+	t := p.ConsumeToken()
 	if t == expected {
 		return t, nil
 	}
 	return t, fmt.Errorf("unexpected Token: wanted %v, got %v", expected, t)
 }
 
-func (p *parser) parse() error {
+func (p *Parser) Parse() error {
 	p.inBlock = false
 	children, err := p.parseBlock(p.ast)
 	if err != nil {
@@ -225,9 +233,9 @@ func (p *parser) parse() error {
 	return nil
 }
 
-func (p *parser) parseNode(parent *Node) (*Node, error) {
+func (p *Parser) ParseNode(parent *Node) (*Node, error) {
 	for {
-		t := p.peekToken()
+		t := p.PeekToken()
 		switch t.Type {
 		case TokenTypeSetting:
 			return p.parseSetting(parent)
@@ -239,9 +247,9 @@ func (p *parser) parseNode(parent *Node) (*Node, error) {
 	}
 }
 
-func (p *parser) parseBlock(parent *Node) (statements []*Node, err error) {
+func (p *Parser) parseBlock(parent *Node) (statements []*Node, err error) {
 	for {
-		t := p.consumeToken()
+		t := p.ConsumeToken()
 		if t == Control.End {
 			continue
 		}
@@ -258,9 +266,9 @@ func (p *parser) parseBlock(parent *Node) (statements []*Node, err error) {
 		if !p.inBlock && t == Control.EOF {
 			return
 		}
-		p.unadvance()
+		p.Rollback()
 		var n *Node
-		n, err = p.parseNode(parent)
+		n, err = p.ParseNode(parent)
 		if err != nil {
 			return
 		}
@@ -268,16 +276,16 @@ func (p *parser) parseBlock(parent *Node) (statements []*Node, err error) {
 	}
 }
 
-func (p *parser) parseSetting(parent *Node) (*Node, error) {
-	ts := p.consumeToken()
+func (p *Parser) parseSetting(parent *Node) (*Node, error) {
+	ts := p.ConsumeToken()
 	if ts.Type != TokenTypeSetting {
 		return nil, fmt.Errorf("expected TokenTypeSetting, got %s", ts.Type)
 	}
-	tv, err := p.consumeTokenOfType(TokenTypeString)
+	tv, err := p.ConsumeTokenOfType(TokenTypeString)
 	if err != nil {
 		return nil, fmt.Errorf("a setting must be followed by a string value: %w", err)
 	}
-	te := p.consumeToken()
+	te := p.ConsumeToken()
 	if te != Control.End {
 		return nil, fmt.Errorf("setting did not under with %s", Control.End.Type)
 	}
@@ -290,8 +298,8 @@ func (p *parser) parseSetting(parent *Node) (*Node, error) {
 	return n, nil
 }
 
-func (p *parser) parseKeyword(parent *Node) (*Node, error) {
-	tk := p.consumeToken()
+func (p *Parser) parseKeyword(parent *Node) (*Node, error) {
+	tk := p.ConsumeToken()
 	if tk.Type != TokenTypeKeyword {
 		return nil, fmt.Errorf("expected TokenTypeKeyword, got %s", tk.Type)
 	}
@@ -300,11 +308,11 @@ func (p *parser) parseKeyword(parent *Node) (*Node, error) {
 		if p.inBlock {
 			return nil, fmt.Errorf("cannot define a Host in a block")
 		}
-		s, err := p.consumeTokenOfType(TokenTypeString)
+		s, err := p.ConsumeTokenOfType(TokenTypeString)
 		if err != nil {
 			return nil, fmt.Errorf("%q must be followed by a host pattern: %w", tk.Value, err)
 		}
-		_, err = p.consumeMatchingToken(Control.LBrace)
+		_, err = p.ConsumeMatchingToken(Control.LBrace)
 		if err != nil {
 			return nil, fmt.Errorf("%q pattern was not followed by a lbrace: %w", Keyword.Host, err)
 		}
@@ -322,7 +330,7 @@ func (p *parser) parseKeyword(parent *Node) (*Node, error) {
 		n.Children = children
 		return n, nil
 	case Keyword.Include:
-		s, err := p.consumeTokenOfType(TokenTypeString)
+		s, err := p.ConsumeTokenOfType(TokenTypeString)
 		if err != nil {
 			return nil, fmt.Errorf("%q must be followed by a host pattern: %w", tk.Value, err)
 		}

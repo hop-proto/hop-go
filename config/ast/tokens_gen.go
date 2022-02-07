@@ -1,5 +1,5 @@
 // Code generated DO NOT EDIT.
-package tokens
+package ast
 
 // Keyword contains definitions for all Tokens with TokenTypeKeyword. They can
 // be safely compared by value.

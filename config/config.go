@@ -2,7 +2,7 @@
 package config
 
 import (
-	"zmap.io/portal/config/tokens"
+	"zmap.io/portal/config/ast"
 )
 
 // ClientConfig represents a parsed client configuration.
@@ -21,5 +21,5 @@ type HostConfig struct {
 	Certificate  string
 }
 
-func Parse(toks []tokens.Token) {
+func Parse(toks []ast.Token) {
 }

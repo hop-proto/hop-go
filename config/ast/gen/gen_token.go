@@ -13,7 +13,7 @@ import (
 )
 
 var tmpl = `// Code generated DO NOT EDIT.
-package tokens
+package ast
 
 // Keyword contains definitions for all Tokens with TokenTypeKeyword. They can
 // be safely compared by value.
@@ -121,7 +121,7 @@ func main() {
 		Settings: settings,
 	}
 
-	t := template.New("tokens")
+	t := template.New("ast")
 	_, err := t.Parse(tmpl)
 	if err != nil {
 		logrus.Fatalf("unable to parse template: %s", err)
