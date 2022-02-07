@@ -12,15 +12,16 @@ func _() {
 	_ = x[TokenTypeSetting-1]
 	_ = x[TokenTypeInt-2]
 	_ = x[TokenTypeFloat-3]
-	_ = x[TokenTypeScope-4]
-	_ = x[TokenTypeEnd-5]
-	_ = x[TokenTypeString-6]
-	_ = x[TokenTypeSentinal-7]
+	_ = x[TokenTypeLBrace-4]
+	_ = x[TokenTypeRBrace-5]
+	_ = x[TokenTypeEnd-6]
+	_ = x[TokenTypeString-7]
+	_ = x[TokenTypeSentinal-8]
 }
 
-const _TokenType_name = "TokenTypeKeywordTokenTypeSettingTokenTypeIntTokenTypeFloatTokenTypeScopeTokenTypeEndTokenTypeStringTokenTypeSentinal"
+const _TokenType_name = "TokenTypeKeywordTokenTypeSettingTokenTypeIntTokenTypeFloatTokenTypeLBraceTokenTypeRBraceTokenTypeEndTokenTypeStringTokenTypeSentinal"
 
-var _TokenType_index = [...]uint8{0, 16, 32, 44, 58, 72, 84, 99, 116}
+var _TokenType_index = [...]uint8{0, 16, 32, 44, 58, 73, 88, 100, 115, 132}
 
 func (i TokenType) String() string {
 	if i < 0 || i >= TokenType(len(_TokenType_index)-1) {

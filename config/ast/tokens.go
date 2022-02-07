@@ -11,13 +11,21 @@ import (
 // TokenType is a broad classifer of a Token
 type TokenType int
 
+// Position is the offset, row (line), and column of a Token. Offset is
+// zero-indexed, row and column are 1-indexed.
+type Position struct {
+	Offset   int
+	Row, Col int
+}
+
 // Known values of TokenType
 const (
 	TokenTypeKeyword TokenType = iota
 	TokenTypeSetting
 	TokenTypeInt
 	TokenTypeFloat
-	TokenTypeScope
+	TokenTypeLBrace
+	TokenTypeRBrace
 	TokenTypeEnd
 	TokenTypeString
 	TokenTypeSentinal
@@ -29,32 +37,12 @@ const (
 type Token struct {
 	Type  TokenType
 	Value string
+
+	Position
 }
 
-// Control contains all control Tokens
-var Control = struct {
-	End    Token
-	LBrace Token
-	RBrace Token
-	EOF    Token
-}{
-	End: Token{
-		Type:  TokenTypeEnd,
-		Value: ";",
-	},
-	LBrace: Token{
-		Type:  TokenTypeScope,
-		Value: "{",
-	},
-	RBrace: Token{
-		Type:  TokenTypeScope,
-		Value: "}",
-	},
-	EOF: Token{
-		Type:  TokenTypeSentinal,
-		Value: "EOF",
-	},
-}
+// TokenEOF is a Token with TokenTypeSentinal.
+var TokenEOF = Token{Type: TokenTypeSentinal}
 
 //go:generate go run ./gen tokens_gen.go
 
@@ -119,15 +107,26 @@ func Tokenize(b []byte) ([]Token, error) {
 			} else {
 				tt = TokenTypeString
 			}
-		case '{', '}':
-			tt = TokenTypeScope
+		case '{':
+			tt = TokenTypeLBrace
+		case '}':
+			tt = TokenTypeRBrace
 		case '\n', ';':
 			tt = TokenTypeEnd
 			value = ";"
 		default:
 			panic(value)
 		}
-		t := Token{Type: tt, Value: value}
+		pos := s.Pos()
+		t := Token{
+			Type:  tt,
+			Value: value,
+
+			Position: Position{
+				Offset: pos.Offset,
+				Row:    pos.Line, Col: pos.Column,
+			},
+		}
 		tokens = append(tokens, t)
 	}
 	return tokens, nil
@@ -135,12 +134,13 @@ func Tokenize(b []byte) ([]Token, error) {
 
 // Parser turns a list of Tokens into an AST.
 type Parser struct {
-	tokens []Token
+	Raw    []byte
+	Tokens []Token
 
 	current int
 	inBlock bool
 
-	ast *Node
+	AST *Node
 }
 
 // NodeType defines which fields will be set on a Node.
@@ -174,11 +174,25 @@ type Node struct {
 	Children []*Node
 }
 
+// Walk visits all nodes in a depth-first top-down order
+func (n *Node) Walk(visitor func(Node) error) error {
+	if err := visitor(*n); err != nil {
+		return err
+	}
+	for _, c := range n.Children {
+		if err := c.Walk(visitor); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // NewParser returns an initialized Parser with a root AST.
-func NewParser(tokens []Token) Parser {
+func NewParser(raw []byte, tokens []Token) Parser {
 	return Parser{
-		tokens: tokens,
-		ast: &Node{
+		Raw:    raw,
+		Tokens: tokens,
+		AST: &Node{
 			Type: NodeTypeFile,
 		},
 	}
@@ -187,10 +201,10 @@ func NewParser(tokens []Token) Parser {
 // PeekToken returns the next token without advancing the cursor. If there is no
 // next Token, this returns Control.EOF.
 func (p Parser) PeekToken() Token {
-	if len(p.tokens) > p.current {
-		return p.tokens[p.current]
+	if len(p.Tokens) > p.current {
+		return p.Tokens[p.current]
 	}
-	return Control.EOF
+	return TokenEOF
 }
 
 // ConsumeToken returns the next Token and advances the cursor. If there is no
@@ -206,33 +220,28 @@ func (p *Parser) Rollback() {
 	p.current--
 }
 
-// ConsumeTokenOfType consumes the next Token. If the next Token does not have the expected TokenType, this returns an error.
+// ConsumeTokenOfType consumes the next Token. If the next Token does not have
+// the expected TokenType, this returns an error. The Token is always consumed.
 func (p *Parser) ConsumeTokenOfType(tt TokenType) (Token, error) {
 	t := p.ConsumeToken()
 	if t.Type != tt {
-		return Control.EOF, fmt.Errorf("unexpected Token: wanted %q, got %q", tt, t.Type)
+		return TokenEOF, fmt.Errorf("unexpected Token: wanted %q, got %q", tt, t.Type)
 	}
 	return t, nil
 }
 
-func (p *Parser) ConsumeMatchingToken(expected Token) (Token, error) {
-	t := p.ConsumeToken()
-	if t == expected {
-		return t, nil
-	}
-	return t, fmt.Errorf("unexpected Token: wanted %v, got %v", expected, t)
-}
-
+// Parse runs the parser on the Tokens to populate the AST.
 func (p *Parser) Parse() error {
 	p.inBlock = false
-	children, err := p.parseBlock(p.ast)
+	children, err := p.ParseBlock(p.AST)
 	if err != nil {
 		return err
 	}
-	p.ast.Children = children
+	p.AST.Children = children
 	return nil
 }
 
+// ParseNode parses a single Node at the current token. If the token cannot being a node or the expected Tokens are not found, this errors.
 func (p *Parser) ParseNode(parent *Node) (*Node, error) {
 	for {
 		t := p.PeekToken()
@@ -240,30 +249,33 @@ func (p *Parser) ParseNode(parent *Node) (*Node, error) {
 		case TokenTypeSetting:
 			return p.parseSetting(parent)
 		case TokenTypeKeyword:
-			return p.parseKeyword(parent)
+			return p.ParseKeyword(parent)
 		default:
 			return nil, fmt.Errorf("unimplemented %s: %s", t.Type, t.Value)
 		}
 	}
 }
 
-func (p *Parser) parseBlock(parent *Node) (statements []*Node, err error) {
+// ParseBlock parses a block of Nodes. If the current Token cannot begin a
+// block, this errors. Blocks cannot be nested, and block state is tracked on
+// the parser.
+func (p *Parser) ParseBlock(parent *Node) (statements []*Node, err error) {
 	for {
 		t := p.ConsumeToken()
-		if t == Control.End {
+		if t.Type == TokenTypeEnd {
 			continue
 		}
 		if p.inBlock {
-			if t == Control.RBrace {
+			switch t.Type {
+			case TokenTypeRBrace:
 				p.inBlock = false
 				return
-			}
-			if t == Control.EOF {
+			case TokenTypeSentinal:
 				err = fmt.Errorf("file ended before %q block ended", parent.BlockType)
 				return
 			}
 		}
-		if !p.inBlock && t == Control.EOF {
+		if !p.inBlock && t.Type == TokenTypeSentinal {
 			return
 		}
 		p.Rollback()
@@ -276,6 +288,7 @@ func (p *Parser) parseBlock(parent *Node) (statements []*Node, err error) {
 	}
 }
 
+// ParseSetting parses [Setting String End] into a Node.
 func (p *Parser) parseSetting(parent *Node) (*Node, error) {
 	ts := p.ConsumeToken()
 	if ts.Type != TokenTypeSetting {
@@ -285,9 +298,9 @@ func (p *Parser) parseSetting(parent *Node) (*Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("a setting must be followed by a string value: %w", err)
 	}
-	te := p.ConsumeToken()
-	if te != Control.End {
-		return nil, fmt.Errorf("setting did not under with %s", Control.End.Type)
+	_, err = p.ConsumeTokenOfType(TokenTypeEnd)
+	if err != nil {
+		return nil, fmt.Errorf("setting did not end with token %s", TokenTypeEnd)
 	}
 	n := &Node{
 		Type:         NodeTypeSetting,
@@ -298,13 +311,14 @@ func (p *Parser) parseSetting(parent *Node) (*Node, error) {
 	return n, nil
 }
 
-func (p *Parser) parseKeyword(parent *Node) (*Node, error) {
+// ParseKeyword parses all Keywords. Certain keywords may involve parsing a block.
+func (p *Parser) ParseKeyword(parent *Node) (*Node, error) {
 	tk := p.ConsumeToken()
 	if tk.Type != TokenTypeKeyword {
 		return nil, fmt.Errorf("expected TokenTypeKeyword, got %s", tk.Type)
 	}
-	switch tk {
-	case Keyword.Host:
+	switch tk.Value {
+	case Keyword.Host.Value:
 		if p.inBlock {
 			return nil, fmt.Errorf("cannot define a Host in a block")
 		}
@@ -312,7 +326,7 @@ func (p *Parser) parseKeyword(parent *Node) (*Node, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%q must be followed by a host pattern: %w", tk.Value, err)
 		}
-		_, err = p.ConsumeMatchingToken(Control.LBrace)
+		_, err = p.ConsumeTokenOfType(TokenTypeLBrace)
 		if err != nil {
 			return nil, fmt.Errorf("%q pattern was not followed by a lbrace: %w", Keyword.Host, err)
 		}
@@ -323,13 +337,13 @@ func (p *Parser) parseKeyword(parent *Node) (*Node, error) {
 			BlockName: s.Value,
 		}
 		p.inBlock = true
-		children, err := p.parseBlock(n)
+		children, err := p.ParseBlock(n)
 		if err != nil {
 			return nil, err
 		}
 		n.Children = children
 		return n, nil
-	case Keyword.Include:
+	case Keyword.Include.Value:
 		s, err := p.ConsumeTokenOfType(TokenTypeString)
 		if err != nil {
 			return nil, fmt.Errorf("%q must be followed by a host pattern: %w", tk.Value, err)
