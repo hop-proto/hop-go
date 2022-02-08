@@ -3,59 +3,52 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"os/user"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/app"
-	"zmap.io/portal/transport"
+	"zmap.io/portal/config"
 )
 
+// Flags holds CLI arguments for the Hop client.
+//
+// TODO(dadrian): This structure probably needs to get moved to another package.
+type Flags struct {
+	// TODO(dadrian): What are these args?
+	ConfigPath string
+	Cmd        string
+	RemoteArgs []string
+	LocalArgs  []string
+	Headless   bool
+}
+
 func configFromCmdLineFlags(args []string) (*app.HopClientConfig, error) {
-	_, verify := app.NewTestServerConfig(app.TestDataPathPrefixDef)
-	keypath, _ := os.UserHomeDir()
-	keypath += app.DefaultKeyPath
-
-	transportClientConfig := &transport.ClientConfig{
-		Verify: *verify,
-	}
-
 	cConfig := &app.HopClientConfig{
-		TransportConfig: transportClientConfig,
+		TransportConfig: nil, // XXX
 		SockAddr:        app.DefaultHopAuthSocket,
 		Principal:       false,
-		Keypath:         keypath,
+		Keypath:         "path", // XXX
 	}
 
-	//******PROCESS CMD LINE ARGUMENTS******
+	var f Flags
 	var fs flag.FlagSet
 
-	fs.Func("k", "indicates principal with specific key location", func(s string) error {
-		cConfig.Principal = true
-		cConfig.Keypath = s
-		return nil
-	})
-
-	fs.BoolVar(&cConfig.Principal, "K", cConfig.Principal, "indicates principal with default key location: $HOME/.hop/key")
-
 	fs.Func("R", "perform remote port forwarding", func(s string) error {
-		cConfig.RemoteArgs = append(cConfig.RemoteArgs, s)
+		f.RemoteArgs = append(f.RemoteArgs, s)
 		return nil
 	})
 
 	fs.Func("L", "perform local port forwarding", func(s string) error {
-		cConfig.LocalArgs = append(cConfig.LocalArgs, s)
+		f.LocalArgs = append(f.LocalArgs, s)
 		return nil
 	})
 
-	fs.StringVar(&cConfig.Cmd, "c", "", "specific command to execute on remote server")
-	fs.BoolVar(&cConfig.Quiet, "q", false, "turn off logging")
-	if cConfig.Quiet {
-		logrus.SetOutput(io.Discard)
-	}
-	fs.BoolVar(&cConfig.Headless, "N", false, "don't execute a remote command. Useful for just port forwarding.")
+	fs.StringVar(&f.ConfigPath, "C", "", "path to client config (uses ~/.hop/config when unspecified)")
+
+	fs.StringVar(&f.Cmd, "c", "", "specific command to execute on remote server")
+	fs.BoolVar(&f.Headless, "N", false, "don't execute a remote command. Useful for just port forwarding.")
 
 	/*TODO(baumanl): Right now all explicit commands are run within the context of a shell using "$SHELL -c <cmd>"
 	(this allows for expanding env variables, piping, etc.) However, there may be instances where this is undesirable.
@@ -74,29 +67,32 @@ func configFromCmdLineFlags(args []string) (*app.HopClientConfig, error) {
 		return nil, fmt.Errorf("missing [user@]host[:port]")
 	}
 	hoststring := fs.Arg(0)
-	if fs.NArg() > 1 { //still flags after the hoststring that need to be parsed
-		err = fs.Parse(fs.Args()[1:])
-		if err != nil || fs.NArg() > 0 {
-			return nil, fmt.Errorf("incorrect arguments")
-		}
+
+	// Load the config
+	err = config.InitClient(f.ConfigPath)
+	if err != nil {
+		logrus.Fatalf("invalid client config: %s", err)
 	}
 
-	url, err := url.Parse("//" + hoststring) //double slashes necessary since there is never a scheme
+	// TODO(dadrian): This should probably be a libraary function
+	inputURL, err := url.Parse("//" + hoststring) //double slashes necessary since there is never a scheme
 	if err != nil {
 		logrus.Error(err)
 		return nil, err
 	}
 
-	cConfig.Hostname = url.Hostname()
-	cConfig.Port = url.Port()
-	if cConfig.Port == "" {
-		cConfig.Port = app.DefaultHopPort
+	matchedURL, err := config.GetClient().MatchURL(inputURL)
+	if err != nil {
+		logrus.Fatalf("bad url %q: %s", inputURL.String(), err)
 	}
 
-	username := url.User.Username()
-	if username == "" && cConfig.Username == "" { //if no username is entered use local client username
-		u, e := user.Current()
-		if e != nil {
+	cConfig.Hostname = matchedURL.Hostname()
+	cConfig.Port = matchedURL.Port()
+
+	username := matchedURL.User.Username()
+	if username == "" { //if no username is entered use local client username
+		u, err := user.Current()
+		if err != nil {
 			return nil, err
 		}
 		cConfig.Username = u.Username
