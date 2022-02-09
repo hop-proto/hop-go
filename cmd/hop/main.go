@@ -3,13 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
-	"net/url"
-	"os"
-	"os/user"
 
-	"github.com/sirupsen/logrus"
 	"zmap.io/portal/app"
 	"zmap.io/portal/config"
+	"zmap.io/portal/core"
 )
 
 // Flags holds CLI arguments for the Hop client.
@@ -24,7 +21,7 @@ type Flags struct {
 	Headless   bool
 }
 
-func configFromCmdLineFlags(args []string) (*app.HopClientConfig, error) {
+func configFromCmdLineFlags(args []string) (*core.Address, error) {
 	cConfig := &app.HopClientConfig{
 		TransportConfig: nil, // XXX
 		SockAddr:        app.DefaultHopAuthSocket,
@@ -64,64 +61,49 @@ func configFromCmdLineFlags(args []string) (*app.HopClientConfig, error) {
 		return nil, err
 	}
 	if fs.NArg() < 1 { //there needs to be an argument that is not a flag of the form [user@]host[:port]
-		return nil, fmt.Errorf("missing [user@]host[:port]")
+		return nil, fmt.Errorf("missing [hop://][user@]host[:port]")
 	}
 	hoststring := fs.Arg(0)
+	inputAddress, err := core.ParseAddress(hoststring)
+	if err != nil {
+		return nil, err
+	}
 
 	// Load the config
 	err = config.InitClient(f.ConfigPath)
 	if err != nil {
-		logrus.Fatalf("invalid client config: %s", err)
-	}
-
-	// TODO(dadrian): This should probably be a libraary function
-	inputURL, err := url.Parse("//" + hoststring) //double slashes necessary since there is never a scheme
-	if err != nil {
-		logrus.Error(err)
 		return nil, err
 	}
 
-	matchedURL, err := config.GetClient().MatchURL(inputURL)
-	if err != nil {
-		logrus.Fatalf("bad url %q: %s", inputURL.String(), err)
-	}
-
-	cConfig.Hostname = matchedURL.Hostname()
-	cConfig.Port = matchedURL.Port()
-
-	username := matchedURL.User.Username()
-	if username == "" { //if no username is entered use local client username
-		u, err := user.Current()
-		if err != nil {
-			return nil, err
-		}
-		cConfig.Username = u.Username
-	}
-	return cConfig, nil
+	hc := config.GetClient().MatchHost(inputAddress.Host)
+	address := core.MergeAddresses(hc.Address(), *inputAddress)
+	return &address, nil
 }
 
 func main() {
-	cConfig, err := configFromCmdLineFlags(os.Args[1:])
-	if err != nil {
-		logrus.Error(err)
-		return
-	}
-	client, err := app.NewHopClient(cConfig)
-	if err != nil {
-		logrus.Error(err)
-		return
-	}
-	err = client.Connect()
-	if err != nil {
-		logrus.Error(err)
-		return
-	}
-	err = client.Start()
-	if err != nil {
-		logrus.Error(err)
-		return
-	}
-	//handle incoming tubes
-	go client.HandleTubes()
-	client.Wait() //client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
+	/*
+		cConfig, err := configFromCmdLineFlags(os.Args[1:])
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+		client, err := app.NewHopClient(cConfig)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+		err = client.Connect()
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+		err = client.Start()
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+		//handle incoming tubes
+		go client.HandleTubes()
+		client.Wait() //client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
+	*/
 }

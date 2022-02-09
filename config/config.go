@@ -3,15 +3,13 @@ package config
 
 import (
 	"fmt"
-	"net"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
 
-	"zmap.io/portal/common"
 	"zmap.io/portal/config/ast"
+	"zmap.io/portal/core"
 	"zmap.io/portal/pkg/glob"
 )
 
@@ -24,7 +22,7 @@ type ClientConfig struct {
 // HostConfig contains a definition of a host pattern.
 type HostConfig struct {
 	Pattern      string
-	Address      string
+	Hostname     string
 	User         string // TODO(dadrian): Implement this setting in the grammar
 	Port         int
 	AutoSelfSign bool
@@ -67,7 +65,7 @@ func loadConfig(c *ClientConfig, root *ast.Node) (*ClientConfig, error) {
 			} else {
 				switch n.SettingKey {
 				case ast.Setting.Address.Value:
-					hc.Address = n.SettingValue
+					hc.Hostname = n.SettingValue
 				case ast.Setting.Port.Value:
 					port, err := strconv.Atoi(n.SettingValue)
 					if err != nil {
@@ -166,67 +164,39 @@ func MatchHostPattern(pattern string, input string) bool {
 	return glob.Glob(pattern, input)
 }
 
-// MatchURL takes a user-specified url, and turns it into a connectable URL in
-// the hop:// protocol by matching the host against Host blocks in the
-// configuration. Anything user-specified in the input will override any setting
-// from the Host block itself (e.g. username, port).
-func (c *ClientConfig) MatchURL(in *url.URL) (*url.URL, error) {
-	if in.Path != "" || in.RawPath != "" {
-		return nil, fmt.Errorf("hop URLs cannot contain a path: %q", in.String())
-	}
-	if in.RawQuery != "" {
-		return nil, fmt.Errorf("hop URLs cannot contain a query: %q", in.String())
-	}
-	if in.Fragment != "" || in.RawFragment != "" {
-		return nil, fmt.Errorf("hop URLs cannot contain a query: %q", in.String())
-	}
-
-	var hc *HostConfig
+// MatchHost returns the host block that matches the input host.
+func (c *ClientConfig) MatchHost(inputHost string) *HostConfig {
 	for i := range c.Hosts {
-		if MatchHostPattern(c.Hosts[i].Pattern, in.Host) {
-			hc = &c.Hosts[i]
-			break
+		if MatchHostPattern(c.Hosts[i].Pattern, inputHost) {
+			return &c.Hosts[i]
 		}
 	}
+	//TODO(dadrian): Should this return a default host config? Yes.
+	return nil
+}
 
-	inHost, inPort, portErr := net.SplitHostPort(in.Host)
-	if portErr != nil {
-		inHost = in.Host
-		inPort = ""
+// ApplyConfigToInputAddress updates the input address with the Host, Port, and
+// User from the HostConfig. It only replaces Port and User if they are empty in
+// the input address.
+func (hc *HostConfig) ApplyConfigToInputAddress(address core.Address) core.Address {
+	if hc.Hostname != "" {
+		address.Host = hc.Hostname
 	}
+	if address.Port == "" {
+		address.Port = strconv.Itoa(hc.Port)
+	}
+	if address.User == "" {
+		address.User = hc.User
+	}
+	return address
+}
 
-	var host string
-	if hc != nil && hc.Address != "" {
-		host = hc.Address
-	} else {
-		host = inHost
+// Address extracts the Hostname, Port, and User from the HostConfig into an
+// Address.
+func (hc HostConfig) Address() core.Address {
+	return core.Address{
+		Host: hc.Hostname,
+		Port: strconv.Itoa(hc.Port),
+		User: hc.User,
 	}
-
-	var port string
-	if inPort != "" {
-		port = inPort
-	} else if hc != nil && hc.Port != 0 {
-		port = fmt.Sprintf("%d", hc.Port)
-	} else {
-		port = common.DefaultListenPortString
-	}
-
-	var username string
-	if in.User != nil {
-		if _, ok := in.User.Password(); ok {
-			return nil, fmt.Errorf("input URL %s contains a password, only usernames are allowed", in.String())
-		}
-		username = in.User.Username()
-	} else if hc != nil {
-		username = hc.User
-	}
-
-	out := &url.URL{
-		Scheme: "hop",
-		Host:   net.JoinHostPort(host, port),
-	}
-	if username != "" {
-		out.User = url.User(username)
-	}
-	return out, nil
 }
