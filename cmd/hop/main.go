@@ -3,7 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 
+	"github.com/sirupsen/logrus"
 	"zmap.io/portal/app"
 	"zmap.io/portal/config"
 	"zmap.io/portal/core"
@@ -22,13 +24,6 @@ type Flags struct {
 }
 
 func configFromCmdLineFlags(args []string) (*core.Address, error) {
-	cConfig := &app.HopClientConfig{
-		TransportConfig: nil, // XXX
-		SockAddr:        app.DefaultHopAuthSocket,
-		Principal:       false,
-		Keypath:         "path", // XXX
-	}
-
 	var f Flags
 	var fs flag.FlagSet
 
@@ -81,29 +76,36 @@ func configFromCmdLineFlags(args []string) (*core.Address, error) {
 }
 
 func main() {
-	/*
-		cConfig, err := configFromCmdLineFlags(os.Args[1:])
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-		client, err := app.NewHopClient(cConfig)
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-		err = client.Connect()
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-		err = client.Start()
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-		//handle incoming tubes
-		go client.HandleTubes()
-		client.Wait() //client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
-	*/
+	address, err := configFromCmdLineFlags(os.Args[1:])
+	if err != nil {
+		logrus.Fatalf("unable to handle CLI args: %s", err)
+	}
+	cConfig := &app.HopClientConfig{
+		TransportConfig: nil, // XXX
+		SockAddr:        app.DefaultHopAuthSocket,
+		Principal:       false,
+		Keypath:         "path", // XXX
+		Username:        address.User,
+		Hostname:        address.Host,
+		Port:            address.Port,
+	}
+
+	client, err := app.NewHopClient(cConfig)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	err = client.Connect()
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	err = client.Start()
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	//handle incoming tubes
+	go client.HandleTubes()
+	client.Wait() //client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
 }
