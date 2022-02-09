@@ -123,7 +123,8 @@ func locateHopConfigDirectory() {
 	// Using the ".hop" folder on Windows doesn't make sense.
 	home, err := os.UserHomeDir()
 	if err != nil {
-		home = ""
+		configDirectory = ""
+		return
 	}
 	configDirectory = filepath.Join(home, ".hop")
 }
@@ -132,6 +133,12 @@ func locateHopConfigDirectory() {
 func UserDirectory() string {
 	configOnce.Do(locateHopConfigDirectory)
 	return configDirectory
+}
+
+// DefaultKeyPath returns UserDirectory()/id_hop.pem.
+func DefaultKeyPath() string {
+	d := UserDirectory()
+	return filepath.Join(d, "id_hop.pem")
 }
 
 var userConfig ClientConfig
