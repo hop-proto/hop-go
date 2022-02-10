@@ -15,6 +15,22 @@ type Identity struct {
 	Names     []Name
 }
 
+// SigningIdentity returns an Identity pointing to a public key with no name.
+func SigningIdentity(key *keys.SigningKeyPair) *Identity {
+	return &Identity{
+		PublicKey: key.Public,
+	}
+}
+
+// LeafIdentity returns an Identity bound to a X25519 public key with a set of
+// names.
+func LeafIdentity(key *keys.X25519KeyPair, names ...Name) *Identity {
+	return &Identity{
+		PublicKey: key.Public,
+		Names:     names,
+	}
+}
+
 // VerifyParent returns nil if parent issued child. An error is returned on any
 // processing error (mismatched cert types, etc.), as well as for signature
 // failures.

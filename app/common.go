@@ -25,7 +25,7 @@ const (
 const (
 	ExecTube      = byte(1)
 	AuthGrantTube = byte(2)
-	NetProxyTube  = byte(3) //Net Proxy should maybe be unreliable tube?
+	NetProxyTube  = byte(3) // Net Proxy should maybe be unreliable tube?
 	UserAuthTube  = byte(4)
 	LocalPFTube   = byte(5)
 	RemotePFTube  = byte(6)

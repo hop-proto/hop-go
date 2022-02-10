@@ -2,52 +2,24 @@ package app
 
 import (
 	"net"
-	"os"
-	"os/user"
-	"strconv"
-	"strings"
-	"sync"
 	"testing"
-	"time"
 
-	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
-	"zmap.io/portal/authgrants"
 	"zmap.io/portal/certs"
-	"zmap.io/portal/ports"
+	"zmap.io/portal/core"
+	"zmap.io/portal/keys"
 	"zmap.io/portal/transport"
-	"zmap.io/portal/tubes"
 )
 
-var start = 18000
-
+/*
 const howdy = "Howdy! This is connection numero two./n"
-
-var portMutex = sync.Mutex{}
-
-func getPort() string {
-	portMutex.Lock()
-	port, next := ports.GetPortNumber(start)
-	start = next
-	portMutex.Unlock()
-	return port
-}
-func TestPortNumbers(t *testing.T) {
-	logrus.Info("starting. Init Port number: ", strconv.Itoa(start))
-	port1 := getPort()
-	logrus.Info("port1: ", port1)
-	logrus.Info("ended. Last Port number: ", strconv.Itoa(start))
-}
 
 func serverSetup(t *testing.T, p string) *HopServer {
 	baseConfig, _ := NewTestServerConfig("../certs/")
 	transportConfig := *baseConfig
 	transportConfig.ClientVerify = nil //no certificate verification at all
 	serverConfig := &HopServerConfig{
-		Port:                     p,
-		Host:                     "localhost",
 		SockAddr:                 DefaultHopAuthSocket + p,
-		TransportConfig:          &transportConfig,
 		MaxOutstandingAuthgrants: 50,
 		AuthorizedKeysLocation:   "/.hop_test/authorized_keys",
 	}
@@ -282,17 +254,17 @@ func TestRemotePF(t *testing.T) {
 	remoteport2 := getPort()
 
 	client := principalSetup(t, port, true)
-	client.Config.RemoteArgs = []string{remoteport1 + ":localhost:" + remoteport2}
+	client.config.RemoteArgs = []string{remoteport1 + ":localhost:" + remoteport2}
 
 	err := client.Connect()
 	assert.NilError(t, err)
 
-	err = client.remoteForward(client.Config.RemoteArgs[0])
+	err = client.remoteForward(client.config.RemoteArgs[0])
 	assert.NilError(t, err)
 
 	logrus.Info("simulating a tcp conn")
 
-	parts := strings.Split(client.Config.RemoteArgs[0], ":") //assuming port:host:hostport
+	parts := strings.Split(client.config.RemoteArgs[0], ":") //assuming port:host:hostport
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
@@ -401,21 +373,21 @@ func TestTwoRemotePF(t *testing.T) {
 	remoteport4 := getPort()
 
 	client := principalSetup(t, port, true)
-	client.Config.RemoteArgs = []string{remoteport1 + ":localhost:" + remoteport2, remoteport3 + ":localhost:" + remoteport4}
+	client.config.RemoteArgs = []string{remoteport1 + ":localhost:" + remoteport2, remoteport3 + ":localhost:" + remoteport4}
 
 	err := client.Connect()
 	assert.NilError(t, err)
 
-	err = client.remoteForward(client.Config.RemoteArgs[0])
+	err = client.remoteForward(client.config.RemoteArgs[0])
 	assert.NilError(t, err)
 
-	err = client.remoteForward(client.Config.RemoteArgs[1])
+	err = client.remoteForward(client.config.RemoteArgs[1])
 	assert.NilError(t, err)
 
 	logrus.Info("simulating a tcp conn")
 
-	parts := strings.Split(client.Config.RemoteArgs[0], ":")    //assuming port:host:hostport
-	partsTwo := strings.Split(client.Config.RemoteArgs[1], ":") //assuming port:host:hostport
+	parts := strings.Split(client.config.RemoteArgs[0], ":")    //assuming port:host:hostport
+	partsTwo := strings.Split(client.config.RemoteArgs[1], ":") //assuming port:host:hostport
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)
@@ -519,12 +491,12 @@ func TestRemotePFListenSocket(t *testing.T) {
 	remoteport2 := getPort()
 
 	client := principalSetup(t, port, true)
-	client.Config.RemoteArgs = []string{listensocket + ":localhost:" + remoteport2}
+	client.config.RemoteArgs = []string{listensocket + ":localhost:" + remoteport2}
 
 	err := client.Connect()
 	assert.NilError(t, err)
 
-	err = client.remoteForward(client.Config.RemoteArgs[0])
+	err = client.remoteForward(client.config.RemoteArgs[0])
 	assert.NilError(t, err)
 
 	logrus.Info("simulating a tcp conn")
@@ -537,7 +509,7 @@ func TestRemotePFListenSocket(t *testing.T) {
 		Connecthost:       "",
 		Connectportorpath: "",
 	}
-	err = ParseForward(client.Config.RemoteArgs[0], &fwdStruct)
+	err = ParseForward(client.config.RemoteArgs[0], &fwdStruct)
 	assert.NilError(t, err)
 
 	wg := sync.WaitGroup{}
@@ -644,15 +616,15 @@ func TestLocalPF(t *testing.T) {
 	localport2 := getPort()
 
 	client := principalSetup(t, port, true)
-	client.Config.LocalArgs = []string{localport1 + ":127.0.0.1:" + localport2}
+	client.config.LocalArgs = []string{localport1 + ":127.0.0.1:" + localport2}
 
 	err := client.Connect()
 	assert.NilError(t, err)
 
-	err = client.localForward(client.Config.LocalArgs[0]) //client listening on localport1
+	err = client.localForward(client.config.LocalArgs[0]) //client listening on localport1
 	assert.NilError(t, err)
 
-	parts := strings.Split(client.Config.LocalArgs[0], ":") //assuming port:host:hostport
+	parts := strings.Split(client.config.LocalArgs[0], ":") //assuming port:host:hostport
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
@@ -751,19 +723,19 @@ func TestTwoLocalPF(t *testing.T) {
 	localport4 := getPort()
 
 	client := principalSetup(t, port, true)
-	client.Config.LocalArgs = []string{localport1 + ":localhost:" + localport2, localport3 + ":localhost:" + localport4}
+	client.config.LocalArgs = []string{localport1 + ":localhost:" + localport2, localport3 + ":localhost:" + localport4}
 
 	err := client.Connect()
 	assert.NilError(t, err)
 
-	err = client.localForward(client.Config.LocalArgs[0])
+	err = client.localForward(client.config.LocalArgs[0])
 	assert.NilError(t, err)
 
-	err = client.localForward(client.Config.LocalArgs[1])
+	err = client.localForward(client.config.LocalArgs[1])
 	assert.NilError(t, err)
 
-	parts := strings.Split(client.Config.LocalArgs[0], ":")    //assuming port:host:hostport
-	partsTwo := strings.Split(client.Config.LocalArgs[1], ":") //assuming port:host:hostport
+	parts := strings.Split(client.config.LocalArgs[0], ":")    //assuming port:host:hostport
+	partsTwo := strings.Split(client.config.LocalArgs[1], ":") //assuming port:host:hostport
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)
@@ -837,4 +809,84 @@ func TestTwoLocalPF(t *testing.T) {
 		assert.NilError(t, err)
 	}()
 	wg.Wait()
+}
+*/
+
+// Suite is a helper type for writing tests
+type Suite struct {
+	ServerSockPath           string
+	LeafKeyPair              *keys.X25519KeyPair
+	IntermediateKeyPair      *keys.SigningKeyPair
+	RootKeyPair              *keys.SigningKeyPair
+	Leaf, Intermediate, Root *certs.Certificate
+	Store                    certs.Store
+
+	UDPConn   *net.UDPConn
+	Transport *transport.Server
+	Server    *HopServer
+}
+
+func NewSuite(t *testing.T) *Suite {
+	s := new(Suite)
+	var err error
+	s.UDPConn, err = net.ListenUDP("udp", nil)
+	assert.NilError(t, err)
+
+	s.LeafKeyPair = keys.GenerateNewX25519KeyPair()
+	s.IntermediateKeyPair = keys.GenerateNewSigningKeyPair()
+	s.RootKeyPair = keys.GenerateNewSigningKeyPair()
+
+	s.Root, err = certs.SelfSignRoot(certs.SigningIdentity(s.RootKeyPair), s.RootKeyPair)
+	s.Root.ProvideKey((*[32]byte)(&s.RootKeyPair.Private))
+	assert.NilError(t, err)
+
+	s.Intermediate, err = certs.IssueIntermediate(s.Root, certs.SigningIdentity(s.IntermediateKeyPair))
+	s.Intermediate.ProvideKey((*[32]byte)(&s.IntermediateKeyPair.Private))
+	assert.NilError(t, err)
+
+	s.Leaf, err = certs.IssueLeaf(s.Intermediate, certs.LeafIdentity(s.LeafKeyPair, certs.DNSName("example.local")))
+	assert.NilError(t, err)
+
+	s.Store = certs.Store{}
+	s.Store.AddCertificate(s.Root)
+
+	s.Transport, err = transport.NewServer(s.UDPConn, transport.ServerConfig{
+		Certificate:  s.Leaf,
+		Intermediate: s.Intermediate,
+		KeyPair:      s.LeafKeyPair,
+	})
+	assert.NilError(t, err)
+	config := HopServerConfig{
+		SockAddr: DefaultHopAuthSocket,
+	}
+	s.Server, err = NewHopServer(s.Transport, &config)
+	assert.NilError(t, err)
+	return s
+}
+
+func (s *Suite) NewClient(t *testing.T, config HopClientConfig) *HopClient {
+	c, err := NewHopClient(config)
+	assert.NilError(t, err)
+	return c
+}
+
+func (s *Suite) ChainAuthenticator(t *testing.T) core.Authenticator {
+	return core.InMemoryAuthenticator{
+		KeyPair: keys.GenerateNewX25519KeyPair(),
+		VerifyConfig: transport.VerifyConfig{
+			Store: s.Store,
+		},
+	}
+}
+
+func TestHopClient(t *testing.T) {
+	t.Run("connect", func(t *testing.T) {
+		s := NewSuite(t)
+		c := s.NewClient(t, HopClientConfig{
+			User: "username",
+		})
+		go s.Server.Serve()
+		err := c.Dial(s.Server.ListenAddress().String(), s.ChainAuthenticator(t))
+		assert.NilError(t, err)
+	})
 }

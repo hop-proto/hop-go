@@ -185,7 +185,7 @@ func (c *ClientConfig) MatchHost(inputHost string) *HostConfig {
 // ApplyConfigToInputAddress updates the input address with the Host, Port, and
 // User from the HostConfig. It only replaces Port and User if they are empty in
 // the input address.
-func (hc *HostConfig) ApplyConfigToInputAddress(address core.Address) core.Address {
+func (hc *HostConfig) ApplyConfigToInputAddress(address core.URL) core.URL {
 	if hc.Hostname != "" {
 		address.Host = hc.Hostname
 	}
@@ -200,8 +200,8 @@ func (hc *HostConfig) ApplyConfigToInputAddress(address core.Address) core.Addre
 
 // Address extracts the Hostname, Port, and User from the HostConfig into an
 // Address.
-func (hc HostConfig) Address() core.Address {
-	return core.Address{
+func (hc HostConfig) Address() core.URL {
+	return core.URL{
 		Host: hc.Hostname,
 		Port: strconv.Itoa(hc.Port),
 		User: hc.User,

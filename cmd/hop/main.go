@@ -26,7 +26,7 @@ type Flags struct {
 	Headless   bool
 }
 
-func parseFlags(args []string) (*core.Address, core.Authenticator, error) {
+func parseFlags(args []string) (*core.URL, core.Authenticator, error) {
 	var f Flags
 	var fs flag.FlagSet
 
@@ -62,7 +62,7 @@ func parseFlags(args []string) (*core.Address, core.Authenticator, error) {
 		return nil, nil, fmt.Errorf("missing [hop://][user@]host[:port]")
 	}
 	hoststring := fs.Arg(0)
-	inputAddress, err := core.ParseAddress(hoststring)
+	inputAddress, err := core.ParseURL(hoststring)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -74,7 +74,7 @@ func parseFlags(args []string) (*core.Address, core.Authenticator, error) {
 	}
 
 	hc := config.GetClient().MatchHost(inputAddress.Host)
-	address := core.MergeAddresses(hc.Address(), *inputAddress)
+	address := core.MergeURLs(hc.Address(), *inputAddress)
 
 	// Set up keys
 	// TODO(dadrian): This logic should probably live somewhere else
@@ -98,10 +98,10 @@ func main() {
 	if err != nil {
 		logrus.Fatalf("unable to handle CLI args: %s", err)
 	}
-	cConfig := &app.HopClientConfig{
-		SockAddr:  app.DefaultHopAuthSocket,
-		Principal: false,
-		Keypath:   "path", // XXX
+	cConfig := app.HopClientConfig{
+		SockAddr:    app.DefaultHopAuthSocket,
+		NonPricipal: false,
+		Keypath:     "path", // XXX
 	}
 
 	client, err := app.NewHopClient(cConfig)
@@ -110,7 +110,7 @@ func main() {
 		return
 	}
 
-	err = client.Dial(*address, authenticator)
+	err = client.Dial(address.Address(), authenticator)
 	if err != nil {
 		logrus.Error(err)
 		return

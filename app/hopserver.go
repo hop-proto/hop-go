@@ -30,33 +30,15 @@ type HopServer struct {
 
 //HopServerConfig contains hop server specific configuration settings
 type HopServerConfig struct {
-	Port string
-	Host string
-
 	SockAddr                 string
-	TransportConfig          *transport.ServerConfig
 	MaxOutstandingAuthgrants int
 	AuthorizedKeysLocation   string //defaults to /.hop/authorized_keys
 }
 
-//NewHopServer returns a Hop Server containing a transport server running on the host/port
-//sepcified in the config file and an authgrant server listening on the provided socket.
-func NewHopServer(hconfig *HopServerConfig) (*HopServer, error) {
-	//set up transportServer
-	//*****TRANSPORT LAYER SET UP*****
-	pktConn, err := net.ListenPacket("udp", net.JoinHostPort(hconfig.Host, hconfig.Port))
-	if err != nil {
-		logrus.Errorf("S: ERROR STARTING UDP CONN: %v", err)
-		return nil, err
-	}
-	logrus.Infof("listening on %v:%v", hconfig.Host, hconfig.Port)
-	// It's actually a UDP conn
-	udpConn := pktConn.(*net.UDPConn)
-	transportServer, err := transport.NewServer(udpConn, *hconfig.TransportConfig)
-	if err != nil {
-		logrus.Errorf("S: ERROR STARTING TRANSPORT CONN: %v", err)
-		return nil, err
-	}
+// NewHopServer returns a Hop Server containing a transport server running on
+// the host/port specified in the config file and an authgrant server listening
+// on the provided socket.
+func NewHopServer(underlying *transport.Server, hconfig *HopServerConfig) (*HopServer, error) {
 	//set up authgrantServer (UDS socket)
 	//make sure the socket does not already exist.
 	if err := os.RemoveAll(hconfig.SockAddr); err != nil {
@@ -83,7 +65,7 @@ func NewHopServer(hconfig *HopServerConfig) (*HopServer, error) {
 		outstandingAuthgrants: 0,
 		config:                hconfig,
 
-		server:   transportServer,
+		server:   underlying,
 		authsock: authgrantServer,
 	}
 
@@ -239,4 +221,14 @@ func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
 		}
 	}
 	return false
+}
+
+// ListenAddress returns the underlying net.UDPAddr of the transport server.
+func (s *HopServer) ListenAddress() net.Addr {
+	s.m.Lock()
+	defer s.m.Unlock()
+	if s.server == nil {
+		return &net.UDPAddr{}
+	}
+	return s.server.ListenAddress()
 }
