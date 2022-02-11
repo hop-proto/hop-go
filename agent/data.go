@@ -2,13 +2,13 @@ package agent
 
 import (
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/common"
 	"zmap.io/portal/keys"
+	"zmap.io/portal/pkg/thunks"
 )
 
 // Data is the data access object for all of the Agent.
@@ -19,7 +19,7 @@ type Data struct {
 // Init loads keys into the data object from the Hop configuration directory.
 func (d *Data) Init() error {
 	d.Keys = make(map[string]*keys.X25519KeyPair)
-	home, err := os.UserHomeDir()
+	home, err := thunks.UserHomeDir()
 	if err != nil {
 		return err
 	}

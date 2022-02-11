@@ -123,7 +123,7 @@ var configOnce sync.Once
 func locateHopConfigDirectory() {
 	// TODO(dadrian): Actually decide where this is on different platforms.
 	// Using the ".hop" folder on Windows doesn't make sense.
-	home, err := os.UserHomeDir()
+	home, err := thunks.UserHomeDir()
 	if err != nil {
 		configDirectory = ""
 		return

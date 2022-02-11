@@ -73,6 +73,8 @@ func NewHopServer(underlying *transport.Server, hconfig *HopServerConfig) (*HopS
 
 		server:   underlying,
 		authsock: authgrantServer,
+
+		fsystem: os.DirFS("/"),
 	}
 
 	return server, nil
