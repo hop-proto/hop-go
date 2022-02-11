@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"sync"
@@ -11,6 +13,8 @@ import (
 	"github.com/sbinet/pstree"
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/authgrants"
+	"zmap.io/portal/config"
+	"zmap.io/portal/core"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
@@ -23,6 +27,8 @@ type HopServer struct {
 	authgrants            map[keys.PublicKey]*authGrant //static key -> authgrant associated with that key
 	outstandingAuthgrants int
 	config                *HopServerConfig
+
+	fsystem fs.FS
 
 	server   *transport.Server
 	authsock net.Listener
@@ -231,4 +237,26 @@ func (s *HopServer) ListenAddress() net.Addr {
 		return &net.UDPAddr{}
 	}
 	return s.server.ListenAddress()
+}
+
+// authorizeKey returns true if the publicKey is in the authorized_keys file for
+// the user.
+func (s *HopServer) authorizeKey(user string, publicKey keys.PublicKey) error {
+	d, err := config.UserDirectoryFor(user)
+	if err != nil {
+		return err
+	}
+	path := core.AuthorizedKeysPath(d)
+	f, err := s.fsystem.Open(path[1:])
+	if err != nil {
+		return err
+	}
+	akeys, err := core.ParseAuthorizedKeys(f)
+	if err != nil {
+		return nil
+	}
+	if akeys.Allowed(publicKey) {
+		return nil
+	}
+	return fmt.Errorf("key %s is not authorized for user %s", publicKey, user)
 }

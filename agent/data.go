@@ -23,7 +23,7 @@ func (d *Data) Init() error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Join(home, common.ConfigDirectory)
+	dir := filepath.Join(home, common.UserConfigDirtory)
 	err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, _ error) error {
 		if path == dir {
 			return nil

@@ -8,9 +8,11 @@ import (
 	"strconv"
 	"sync"
 
+	"zmap.io/portal/common"
 	"zmap.io/portal/config/ast"
 	"zmap.io/portal/core"
 	"zmap.io/portal/pkg/glob"
+	"zmap.io/portal/pkg/thunks"
 )
 
 // ClientConfig represents a parsed client configuration.
@@ -126,7 +128,7 @@ func locateHopConfigDirectory() {
 		configDirectory = ""
 		return
 	}
-	configDirectory = filepath.Join(home, ".hop")
+	configDirectory = filepath.Join(home, common.UserConfigDirtory)
 }
 
 // UserDirectory returns the path to Hop configuration directory for the current user.
@@ -135,10 +137,19 @@ func UserDirectory() string {
 	return configDirectory
 }
 
+// UserDirectoryFor returns the path to the Hop configuration directory for a specific user.
+func UserDirectoryFor(username string) (string, error) {
+	u, err := thunks.LookupUser(username)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(u.HomeDir, common.UserConfigDirtory), nil
+}
+
 // DefaultKeyPath returns UserDirectory()/id_hop.pem.
 func DefaultKeyPath() string {
 	d := UserDirectory()
-	return filepath.Join(d, "id_hop.pem")
+	return filepath.Join(d, common.DefaultKeyFile)
 }
 
 var userConfig ClientConfig

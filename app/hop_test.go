@@ -3,11 +3,13 @@ package app
 import (
 	"net"
 	"testing"
+	"testing/fstest"
 
 	"gotest.tools/assert"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/core"
 	"zmap.io/portal/keys"
+	"zmap.io/portal/pkg/thunks"
 	"zmap.io/portal/transport"
 )
 
@@ -864,15 +866,20 @@ func NewSuite(t *testing.T) *Suite {
 	return s
 }
 
+func (s *Suite) MockServerFS(t *testing.T, fsystem fstest.MapFS) {
+	assert.Assert(t, s.Server != nil)
+	s.Server.fsystem = fsystem
+}
+
 func (s *Suite) NewClient(t *testing.T, config HopClientConfig) *HopClient {
 	c, err := NewHopClient(config)
 	assert.NilError(t, err)
 	return c
 }
 
-func (s *Suite) ChainAuthenticator(t *testing.T) core.Authenticator {
+func (s *Suite) ChainAuthenticator(t *testing.T, clientKey *keys.X25519KeyPair) core.Authenticator {
 	return core.InMemoryAuthenticator{
-		KeyPair: keys.GenerateNewX25519KeyPair(),
+		KeyPair: clientKey,
 		VerifyConfig: transport.VerifyConfig{
 			Store: s.Store,
 		},
@@ -880,13 +887,23 @@ func (s *Suite) ChainAuthenticator(t *testing.T) core.Authenticator {
 }
 
 func TestHopClient(t *testing.T) {
+	thunks.SetUpTest()
 	t.Run("connect", func(t *testing.T) {
 		s := NewSuite(t)
 		c := s.NewClient(t, HopClientConfig{
 			User: "username",
 		})
+		clientKey := keys.GenerateNewX25519KeyPair()
+		mock := fstest.MapFS{
+			"home/username/.hop/authorized_keys": &fstest.MapFile{
+				Data: []byte(clientKey.Public.String() + "\n"),
+				Mode: 0777,
+			},
+		}
+		s.MockServerFS(t, mock)
 		go s.Server.Serve()
-		err := c.Dial(s.Server.ListenAddress().String(), s.ChainAuthenticator(t))
+		err := c.Dial(s.Server.ListenAddress().String(), s.ChainAuthenticator(t, clientKey))
 		assert.NilError(t, err)
 	})
+
 }

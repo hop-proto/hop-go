@@ -11,7 +11,6 @@ import (
 
 func main() {
 	logrus.SetLevel(logrus.InfoLevel)
-	logrus.Warn("hop agent")
 	d := agent.Data{}
 	err := d.Init()
 	if err != nil {
