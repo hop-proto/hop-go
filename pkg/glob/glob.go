@@ -1,3 +1,4 @@
+// Package glob matches shell-style globs against input.
 package glob
 
 type glob struct {
