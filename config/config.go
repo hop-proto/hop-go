@@ -190,7 +190,7 @@ func (c *ClientConfig) MatchHost(inputHost string) *HostConfig {
 		}
 	}
 	//TODO(dadrian): Should this return a default host config? Yes.
-	return nil
+	return &HostConfig{}
 }
 
 // ApplyConfigToInputAddress updates the input address with the Host, Port, and
@@ -209,12 +209,17 @@ func (hc *HostConfig) ApplyConfigToInputAddress(address core.URL) core.URL {
 	return address
 }
 
-// Address extracts the Hostname, Port, and User from the HostConfig into an
-// Address.
-func (hc HostConfig) Address() core.URL {
-	return core.URL{
+// HostURL extracts the Hostname, Port, and User from the HostConfig into an
+// core.URL.
+func (hc HostConfig) HostURL() core.URL {
+	u := core.URL{
 		Host: hc.Hostname,
-		Port: strconv.Itoa(hc.Port),
 		User: hc.User,
 	}
+	if hc.Port != 0 {
+		u.Port = strconv.Itoa(hc.Port)
+	} else {
+		u.Port = common.DefaultListenPortString
+	}
+	return u
 }

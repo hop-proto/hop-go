@@ -21,8 +21,9 @@ type URL struct {
 // URL converts a Hop URL into a url.URL.
 func (a URL) URL() url.URL {
 	return url.URL{
-		Host: net.JoinHostPort(a.Host, a.Port),
-		User: url.User(a.User),
+		Scheme: "hop",
+		Host:   a.Address(),
+		User:   url.User(a.User),
 	}
 }
 
@@ -34,7 +35,10 @@ func (a URL) String() string {
 
 // Address return a string of the form "host:port".
 func (a URL) Address() string {
-	return net.JoinHostPort(a.Host, a.Port)
+	if a.Port != "" {
+		return net.JoinHostPort(a.Host, a.Port)
+	}
+	return a.Host
 }
 
 // parseURL parses a URL of the form [hop://][user@]host[:port] to a url.URL. It
@@ -90,7 +94,7 @@ func ParseURL(in string) (*URL, error) {
 func MergeURLs(fromConfig, fromInput URL) URL {
 	var out URL
 	out.Host = combinators.StringOr(fromConfig.Host, fromInput.Host)
-	out.Port = combinators.StringOr(fromConfig.Port, fromConfig.Port)
-	out.User = combinators.StringOr(fromConfig.User, fromConfig.User)
+	out.Port = combinators.StringOr(fromInput.Port, fromConfig.Port)
+	out.User = combinators.StringOr(fromInput.User, fromConfig.User)
 	return out
 }

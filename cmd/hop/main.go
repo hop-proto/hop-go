@@ -62,7 +62,7 @@ func parseFlags(args []string) (*core.URL, core.Authenticator, error) {
 		return nil, nil, fmt.Errorf("missing [hop://][user@]host[:port]")
 	}
 	hoststring := fs.Arg(0)
-	inputAddress, err := core.ParseURL(hoststring)
+	inputURL, err := core.ParseURL(hoststring)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -73,12 +73,13 @@ func parseFlags(args []string) (*core.URL, core.Authenticator, error) {
 		return nil, nil, err
 	}
 
-	hc := config.GetClient().MatchHost(inputAddress.Host)
-	address := core.MergeURLs(hc.Address(), *inputAddress)
+	hc := config.GetClient().MatchHost(inputURL.Host)
+	address := core.MergeURLs(hc.HostURL(), *inputURL)
 
 	// Set up keys
 	// TODO(dadrian): This logic should probably live somewhere else
 	keyPath := combinators.StringOr(hc.Key, config.DefaultKeyPath())
+	logrus.Info(keyPath)
 	keypair, err := keys.ReadDHKeyFromPEMFile(keyPath)
 	if err != nil {
 		return nil, nil, err
@@ -95,6 +96,7 @@ func parseFlags(args []string) (*core.URL, core.Authenticator, error) {
 
 func main() {
 	address, authenticator, err := parseFlags(os.Args[1:])
+	logrus.Info(address)
 	if err != nil {
 		logrus.Fatalf("unable to handle CLI args: %s", err)
 	}
