@@ -83,7 +83,7 @@ func Tokenize(b []byte) ([]Token, error) {
 		if unicode.IsDigit(ch) {
 			return true
 		}
-		if ch == '.' || ch == '-' || ch == '/' || ch == '*' {
+		if ch == '.' || ch == '-' || ch == '/' || ch == '*' || ch == ':' || ch == '_' {
 			return true
 		}
 		return false

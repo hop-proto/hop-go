@@ -6,6 +6,7 @@ package ast
 var Keyword = struct {
 	Host    Token
 	Include Token
+	Server  Token
 }{
 	Host: Token{
 		Type:  TokenTypeKeyword,
@@ -15,25 +16,31 @@ var Keyword = struct {
 		Type:  TokenTypeKeyword,
 		Value: "Include",
 	},
+	Server: Token{
+		Type:  TokenTypeKeyword,
+		Value: "Server",
+	},
 }
 
 // Keywords is an array containing all values from Setting
 var Keywords = []Token{
 	Keyword.Host,
 	Keyword.Include,
+	Keyword.Server,
 }
 
 // Setting contains definitions for all Tokens with TokenTypeKeyword. They can
 // be safely compared by value.
 var Setting = struct {
-	Address      Token
-	AutoSelfSign Token
-	CAFile       Token
-	Certificate  Token
-	Key          Token
-	Number       Token
-	Port         Token
-	Word         Token
+	Address       Token
+	AutoSelfSign  Token
+	CAFile        Token
+	Certificate   Token
+	Key           Token
+	ListenAddress Token
+	Number        Token
+	Port          Token
+	Word          Token
 }{
 	Address: Token{
 		Type:  TokenTypeSetting,
@@ -54,6 +61,10 @@ var Setting = struct {
 	Key: Token{
 		Type:  TokenTypeSetting,
 		Value: "Key",
+	},
+	ListenAddress: Token{
+		Type:  TokenTypeSetting,
+		Value: "ListenAddress",
 	},
 	Number: Token{
 		Type:  TokenTypeSetting,
@@ -76,6 +87,7 @@ var Settings = []Token{
 	Setting.CAFile,
 	Setting.Certificate,
 	Setting.Key,
+	Setting.ListenAddress,
 	Setting.Number,
 	Setting.Port,
 	Setting.Word,

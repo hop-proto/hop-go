@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -600,7 +601,7 @@ func NewServer(conn *net.UDPConn, config ServerConfig) (*Server, error) {
 	if config.KeyPair == nil {
 		return nil, errors.New("config.KeyPair must be set")
 	}
-	if config.Certificate == nil {
+	if !config.AutoSelfSign && config.Certificate == nil {
 		return nil, errors.New("config.Certificate must be set")
 	}
 
@@ -608,6 +609,16 @@ func NewServer(conn *net.UDPConn, config ServerConfig) (*Server, error) {
 	//
 	// TODO(dadrian): This should happen on-demand.
 	var cert, intermediate bytes.Buffer
+	if config.Certificate == nil && config.AutoSelfSign {
+		identity := certs.Identity{
+			PublicKey: config.KeyPair.Public,
+		}
+		var err error
+		config.Certificate, err = certs.SelfSignLeaf(&identity)
+		if err != nil {
+			return nil, fmt.Errorf("unable to auto self sign key: %s", err)
+		}
+	}
 	if _, err := config.Certificate.WriteTo(&cert); err != nil {
 		return nil, err
 	}

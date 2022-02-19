@@ -59,6 +59,8 @@ type ServerConfig struct {
 	Certificate  *certs.Certificate
 	Intermediate *certs.Certificate
 
+	AutoSelfSign bool
+
 	ClientVerify *VerifyConfig
 
 	// TODO(dadrian): How does this change with Names?

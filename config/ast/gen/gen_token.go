@@ -107,12 +107,14 @@ func main() {
 		{Name: "Port"},
 		{Name: "Number"},
 		{Name: "Word"},
+		{Name: "ListenAddress"},
 	}
 	sort.Sort(typeSlice(settings))
 
 	keywords := []typeDefinition{
 		{Name: "Host"},
 		{Name: "Include"},
+		{Name: "Server"},
 	}
 	sort.Sort(typeSlice(keywords))
 

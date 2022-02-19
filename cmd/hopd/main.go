@@ -9,6 +9,9 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/app"
+	"zmap.io/portal/config"
+	"zmap.io/portal/keys"
+	"zmap.io/portal/pkg/combinators"
 	"zmap.io/portal/transport"
 )
 
@@ -16,8 +19,7 @@ import (
 //
 // TODO(dadrian): Should this be in a non-main package?
 type Flags struct {
-	Host string
-	Port string
+	ConfigPath string
 }
 
 func main() {
@@ -28,43 +30,67 @@ func main() {
 
 	var sockAddr string
 	fs.StringVar(&sockAddr, "s", app.DefaultHopAuthSocket, "indicates custom sockaddr to use for auth grant")
-
-	fs.StringVar(&f.Port, "p", app.DefaultHopPort, "port to listen on")
-
-	fs.StringVar(&f.Host, "h", "localhost", "hostname/ip addr to listen on")
+	fs.StringVar(&f.ConfigPath, "C", "", "path to server config file")
 
 	err := fs.Parse(os.Args[1:])
 	if err != nil {
+		logrus.Fatalf("%s", err)
 		return
 	}
 
-	pktConn, err := net.ListenPacket("udp", net.JoinHostPort(f.Host, f.Port))
+	err = config.InitServer(f.ConfigPath)
 	if err != nil {
-		logrus.Fatalf("unable to open socket for address %s:%s : %s", f.Host, f.Port, err)
+		logrus.Fatalf("error loading config: %s", err)
+	}
+
+	sc := config.GetServer()
+	keyPath := combinators.StringOr(sc.Key, config.DefaultServerKeyPath())
+
+	keyPair, err := keys.ReadDHKeyFromPEMFile(keyPath)
+	if err != nil {
+		logrus.Fatalf("unable to read key %q: %s", keyPath, err)
+	}
+
+	// certificate, err := certs.ReadCertificatePEMFile(f.Certificate)
+	// if err != nil {
+	// 	logrus.Fatalf("unable to read certificate from file %q: %s", f.Certificate, err)
+	// }
+
+	pktConn, err := net.ListenPacket("udp", sc.ListenAddress)
+	if err != nil {
+		logrus.Fatalf("unable to open socket for address %s: %s", sc.ListenAddress, err)
 	}
 	udpConn := pktConn.(*net.UDPConn)
+	logrus.Infof("listening at %s", udpConn.LocalAddr())
 
 	// TODO(dadrian): Parse a config file
-	tconf, _ := app.NewTestServerConfig(app.TestDataPathPrefixDef)
+	tconf := transport.ServerConfig{
+		KeyPair:     keyPair,
+		Certificate: nil, // TODO(dadrian): Read certs from config
+		ClientVerify: &transport.VerifyConfig{
+			InsecureSkipVerify: true, // Do authorized keys instead
+		},
+		AutoSelfSign: true,
+	}
 
-	underlying, err := transport.NewServer(udpConn, *tconf)
+	underlying, err := transport.NewServer(udpConn, tconf)
 	if err != nil {
 		logrus.Fatalf("unable to open transport server: %s", err)
 	}
 
 	serverConfig := &app.HopServerConfig{
 		SockAddr:                 sockAddr,
-		MaxOutstandingAuthgrants: 50,
+		MaxOutstandingAuthgrants: 50, // TODO(dadrian): How was this picked? Is this a setting?
 	}
 	s, err := app.NewHopServer(underlying, serverConfig)
 	if err != nil {
 		logrus.Fatal(err)
 	}
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc, os.Interrupt, syscall.SIGTERM) // TODO(dadrian): Does this work on Windows?
+	sch := make(chan os.Signal, 1)
+	signal.Notify(sch, os.Interrupt, syscall.SIGTERM) // TODO(dadrian): Does this work on Windows?
 	go func() {
-		s.Serve() //starts transport layer server, authgrant server, and listens for hop conns
-		sc <- syscall.SIGTERM
+		s.Serve()
+		sch <- syscall.SIGTERM
 	}()
-	<-sc
+	<-sch
 }

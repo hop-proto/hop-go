@@ -18,4 +18,6 @@ func TestTokenizer(t *testing.T) {
 	err = p.Parse()
 	assert.NilError(t, err)
 	t.Log(*p.AST)
+
+	// TODO(dadrian): Actually check the output
 }

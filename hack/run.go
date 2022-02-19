@@ -66,7 +66,7 @@ func runContainer(ctx context.Context, c *client.Client) error {
 	containerConfig := container.Config{
 		Image:        "hopd-dev",
 		Volumes:      map[string]struct{}{"/app": {}},
-		ExposedPorts: nat.PortSet{"77": {}},
+		ExposedPorts: nat.PortSet{"77/udp": {}},
 	}
 	hostConfig := container.HostConfig{
 		Mounts: []mount.Mount{
@@ -77,7 +77,7 @@ func runContainer(ctx context.Context, c *client.Client) error {
 				ReadOnly: true,
 			},
 		},
-		PortBindings: nat.PortMap{"77": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "7777"}}},
+		PortBindings: nat.PortMap{"77/udp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "7777"}}},
 	}
 	res, err := c.ContainerCreate(ctx, &containerConfig, &hostConfig, nil, nil, "")
 	if err != nil {
