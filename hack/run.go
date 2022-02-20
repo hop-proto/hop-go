@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -17,34 +15,13 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 	"github.com/sirupsen/logrus"
+
+	"zmap.io/portal/hack/data"
 )
-
-var workspaceOnce sync.Once
-var workspaceDir string
-
-func workspace() string {
-	workspaceOnce.Do(func() {
-		d, _ := os.Getwd()
-		for d != "." && d != "" {
-			logrus.Error(d)
-			path := filepath.Join(d, "WORKSPACE")
-			if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-				d = filepath.Dir(d)
-				continue
-			}
-			workspaceDir = d
-			break
-		}
-		if workspaceDir == "" {
-			logrus.Fatalf("unable to find workspace root")
-		}
-	})
-	return workspaceDir
-}
 
 func buildContainer(ctx context.Context, c *client.Client) error {
 	// This only works because the Dockerfile is in the same root as the container.
-	path := filepath.Join(workspace(), "containers")
+	path := filepath.Join(data.Workspace(), "containers")
 	t, err := archive.TarWithOptions(path, &archive.TarOptions{})
 	if err != nil {
 		return err
@@ -72,7 +49,7 @@ func runContainer(ctx context.Context, c *client.Client) error {
 		Mounts: []mount.Mount{
 			{
 				Type:     mount.TypeBind,
-				Source:   workspace(),
+				Source:   data.Workspace(),
 				Target:   "/app",
 				ReadOnly: true,
 			},
@@ -92,6 +69,9 @@ func runContainer(ctx context.Context, c *client.Client) error {
 	}
 	_, err = stdcopy.StdCopy(os.Stdout, os.Stderr, out)
 	return err
+}
+
+func serverResources() {
 }
 
 func main() {
