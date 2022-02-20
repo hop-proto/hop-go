@@ -10,6 +10,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/authgrants"
+	"zmap.io/portal/certs"
 	"zmap.io/portal/codex"
 	"zmap.io/portal/core"
 	"zmap.io/portal/netproxy"
@@ -40,6 +41,7 @@ type HopClient struct { // nolint:maligned
 // HopClientConfig holds configuration options for hop client
 type HopClientConfig struct {
 	User        string
+	Leaf        *certs.Certificate
 	SockAddr    string
 	Keypath     string
 	LocalArgs   []string
@@ -222,9 +224,9 @@ func (c *HopClient) getAuthorization() error {
 func (c *HopClient) startUnderlying(address string, authenticator core.Authenticator) error {
 	// TODO(dadrian): Update this once the authenticator interface is set.
 	transportConfig := transport.ClientConfig{
-		KeyPair:        authenticator.GetKeyPair(),
-		Verify:         authenticator.GetVerifyConfig(),
-		UseCertificate: false, // TODO(dadrian): Pass the certificate down if needed
+		KeyPair: authenticator.GetKeyPair(),
+		Verify:  authenticator.GetVerifyConfig(),
+		Leaf:    c.config.Leaf,
 	}
 	var err error
 	if !c.Proxied {

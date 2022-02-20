@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"zmap.io/portal/certs"
 )
 
 //UDPLike interface standardizes Reliable channels and UDPConn.
@@ -84,21 +83,6 @@ func (c *Client) prepareCertificates() (leaf, intermediate []byte, err error) {
 		return nil, nil, errors.New("ClientConfig.KeyPair must be non-nil")
 	}
 
-	if !c.config.UseCertificate {
-		// Generate a temporary self-signed certificate.
-		identity := certs.Identity{
-			PublicKey: c.config.KeyPair.Public,
-		}
-		var tmp *certs.Certificate
-		tmp, err = certs.SelfSignLeaf(&identity)
-		if err != nil {
-			return nil, nil, err
-		}
-		leaf, err = tmp.Marshal()
-		return
-	}
-
-	// Otherwise, certs have been provided
 	if c.config.Leaf == nil {
 		return nil, nil, errors.New("ClientConfig.Leaf must be non-nil when ClientConfig.UseCertificate is true")
 	}

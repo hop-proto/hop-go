@@ -1,3 +1,6 @@
+// Package data implements a basic dependency system for test artifacts.
+//
+// It is not yet complete.
 package data
 
 import (
@@ -102,14 +105,4 @@ func (d *Data) Gen(res NewResource) error {
 		return err
 	}
 	return res.Generator(f)
-}
-
-type ResourceDefinition interface {
-	Name() string
-	Type() string
-}
-
-type Resource struct {
-	Definition ResourceDefinition
-	DependsOn  []string
 }

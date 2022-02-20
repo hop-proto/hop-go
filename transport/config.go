@@ -31,7 +31,6 @@ type IdentityConfig struct {
 type ClientConfig struct {
 	KeyPair            *keys.X25519KeyPair
 	Verify             VerifyConfig
-	UseCertificate     bool
 	Leaf, Intermediate *certs.Certificate
 }
 

@@ -71,9 +71,6 @@ func runContainer(ctx context.Context, c *client.Client) error {
 	return err
 }
 
-func serverResources() {
-}
-
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "%s\n", "usage: ACTION [args]")

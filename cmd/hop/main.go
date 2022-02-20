@@ -2,11 +2,12 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"os"
+	"os/user"
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/app"
+	"zmap.io/portal/certs"
 	"zmap.io/portal/config"
 	"zmap.io/portal/core"
 	"zmap.io/portal/keys"
@@ -26,7 +27,7 @@ type Flags struct {
 	Headless   bool
 }
 
-func parseFlags(args []string) (*core.URL, core.Authenticator, error) {
+func main() {
 	var f Flags
 	var fs flag.FlagSet
 
@@ -54,27 +55,35 @@ func parseFlags(args []string) (*core.URL, core.Authenticator, error) {
 	//var runCmdInShell bool
 	// fs.BoolVar(&runCmdInShell, "s", false, "run specified command...")
 
-	err := fs.Parse(args)
+	err := fs.Parse(os.Args[1:])
 	if err != nil {
-		return nil, nil, err
+		logrus.Fatalf("%s", err)
 	}
 	if fs.NArg() < 1 { //there needs to be an argument that is not a flag of the form [user@]host[:port]
-		return nil, nil, fmt.Errorf("missing [hop://][user@]host[:port]")
+		logrus.Fatal("missing [hop://][user@]host[:port]")
 	}
 	hoststring := fs.Arg(0)
 	inputURL, err := core.ParseURL(hoststring)
 	if err != nil {
-		return nil, nil, err
+		logrus.Fatalf("invalid input %s: %s", hoststring, err)
 	}
 
 	// Load the config
 	err = config.InitClient(f.ConfigPath)
 	if err != nil {
-		return nil, nil, err
+		logrus.Fatalf("error loading config: %s", err)
 	}
 
 	hc := config.GetClient().MatchHost(inputURL.Host)
 	address := core.MergeURLs(hc.HostURL(), *inputURL)
+
+	if address.User == "" {
+		u, err := user.Current()
+		if err != nil {
+			logrus.Fatalf("user not specified and unable to determine current user: %s", err)
+		}
+		address.User = u.Username
+	}
 
 	// Set up keys
 	// TODO(dadrian): This logic should probably live somewhere else
@@ -82,8 +91,24 @@ func parseFlags(args []string) (*core.URL, core.Authenticator, error) {
 	logrus.Info(keyPath)
 	keypair, err := keys.ReadDHKeyFromPEMFile(keyPath)
 	if err != nil {
-		return nil, nil, err
+		logrus.Fatalf("unable to load key pair %q: %s", keyPath, err)
 	}
+
+	var leaf *certs.Certificate
+	if hc.Certificate != "" {
+		leaf, err = certs.ReadCertificatePEMFile(hc.Certificate)
+		if err != nil {
+			logrus.Fatalf("unable to open certificate: %s", err)
+		}
+	} else {
+		leaf, err = certs.SelfSignLeaf(&certs.Identity{
+			PublicKey: keypair.Public,
+			Names: []certs.Name{
+				certs.RawStringName(address.User),
+			},
+		})
+	}
+
 	authenticator := core.InMemoryAuthenticator{
 		KeyPair: keypair,
 		VerifyConfig: transport.VerifyConfig{
@@ -91,16 +116,13 @@ func parseFlags(args []string) (*core.URL, core.Authenticator, error) {
 		},
 	}
 
-	return &address, authenticator, nil
-}
-
-func main() {
-	address, authenticator, err := parseFlags(os.Args[1:])
 	logrus.Info(address)
 	if err != nil {
 		logrus.Fatalf("unable to handle CLI args: %s", err)
 	}
 	cConfig := app.HopClientConfig{
+		User:        address.User,
+		Leaf:        leaf,
 		SockAddr:    app.DefaultHopAuthSocket,
 		NonPricipal: false,
 		Keypath:     "path", // XXX
