@@ -13,7 +13,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/certs"
-	"zmap.io/portal/keys"
 )
 
 type outgoing struct {
@@ -46,11 +45,6 @@ type Server struct {
 
 	cookieKey    [KeyLen]byte
 	cookieCipher cipher.Block
-
-	// TODO(dadrian): Different keys for different names
-	staticKey    *keys.X25519KeyPair
-	certificate  []byte
-	intermediate []byte
 }
 
 //FetchClientLeaf returns the client leaf certificate used in handshake with associated handle's sessionID
@@ -263,15 +257,19 @@ func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 		return 0, nil, err
 	}
 	logrus.Debugf("server: got name %v", name)
+	hs.sni = name
 
 	return length, hs, err
 }
 
 func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState) (int, error) {
-	logrus.Debugf("server: leaf, inter: %x, %x", s.certificate, s.intermediate)
-	logrus.Debugf("server: leaf public: %x", s.staticKey.Public)
-	encCertLen := EncryptedCertificatesLength(s.certificate, s.intermediate)
-	logrus.Debugf("server: encrypted cert len: %d", encCertLen)
+	c, err := s.config.GetCertificate(ClientHandshakeInfo{
+		ServerName: hs.sni,
+	})
+	if err != nil {
+		return 0, err
+	}
+	encCertLen := EncryptedCertificatesLength(c.RawLeaf, c.RawIntermediate)
 	if len(b) < HeaderLen+SessionIDLen+encCertLen {
 		return 0, ErrBufUnderflow
 	}
@@ -289,7 +287,7 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState)
 	hs.duplex.Absorb(x[:SessionIDLen])
 	x = x[SessionIDLen:]
 	pos += SessionIDLen
-	encCerts, err := EncryptCertificates(&hs.duplex, s.certificate, s.intermediate)
+	encCerts, err := EncryptCertificates(&hs.duplex, c.RawLeaf, c.RawIntermediate)
 	if err != nil {
 		return pos, err
 	}
@@ -303,7 +301,7 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState)
 	logrus.Debugf("server: sa tag %x", x[:MacLen])
 	x = x[MacLen:]
 	pos += MacLen
-	hs.es, err = s.staticKey.DH(hs.remoteEphemeral[:])
+	hs.es, err = c.KeyPair.DH(hs.remoteEphemeral[:])
 	if err != nil {
 		logrus.Debug("could not calculate DH(es)")
 		return pos, err
@@ -595,54 +593,45 @@ func (s *Server) Close() error {
 	return nil
 }
 
-// NewServer returns a Server listening on the provided UDP connection. The
-// returned Server object is a valid net.Listener.
-func NewServer(conn *net.UDPConn, config ServerConfig) (*Server, error) {
-	if config.KeyPair == nil {
-		return nil, errors.New("config.KeyPair must be set")
+func (s *Server) init() error {
+	if s.config.KeyPair == nil && s.config.GetCertificate == nil {
+		return errors.New("config.KeyPair or config.GetCertificate must be set")
 	}
-	if !config.AutoSelfSign && config.Certificate == nil {
-		return nil, errors.New("config.Certificate must be set")
+	if (!s.config.AutoSelfSign && s.config.Certificate == nil) && s.config.GetCertificate == nil {
+		return errors.New("Certificate or AutoSelfSign must be set when GetCertificate is Nil") //nolint:stylecheck
 	}
 
-	// Pre-serialize the certificates.
-	//
-	// TODO(dadrian): This should happen on-demand.
-	var cert, intermediate bytes.Buffer
-	if config.Certificate == nil && config.AutoSelfSign {
-		identity := certs.Identity{
-			PublicKey: config.KeyPair.Public,
+	if s.config.GetCertificate == nil {
+		var cert, intermediate bytes.Buffer
+		if s.config.Certificate == nil && s.config.AutoSelfSign {
+			identity := certs.Identity{
+				PublicKey: s.config.KeyPair.Public,
+			}
+			var err error
+			s.config.Certificate, err = certs.SelfSignLeaf(&identity)
+			if err != nil {
+				return fmt.Errorf("unable to auto self sign key: %s", err)
+			}
 		}
-		var err error
-		config.Certificate, err = certs.SelfSignLeaf(&identity)
-		if err != nil {
-			return nil, fmt.Errorf("unable to auto self sign key: %s", err)
+		if _, err := s.config.Certificate.WriteTo(&cert); err != nil {
+			return err
+		}
+		if s.config.Intermediate != nil {
+			if _, err := s.config.Intermediate.WriteTo(&intermediate); err != nil {
+				return err
+			}
+		}
+		c := &Certificate{
+			RawLeaf:         cert.Bytes(),
+			RawIntermediate: intermediate.Bytes(),
+			KeyPair:         s.config.KeyPair,
+		}
+		s.config.GetCertificate = func(ClientHandshakeInfo) (*Certificate, error) {
+			return c, nil
 		}
 	}
-	if _, err := config.Certificate.WriteTo(&cert); err != nil {
-		return nil, err
-	}
-	if config.Intermediate != nil {
-		if _, err := config.Intermediate.WriteTo(&intermediate); err != nil {
-			return nil, err
-		}
-	}
 
-	s := Server{
-		udpConn: conn,
-		config:  config,
-
-		handshakes: make(map[string]*HandshakeState),
-		sessions:   make(map[SessionID]*SessionState),
-
-		pendingConnections: make(chan *Handle, config.maxPendingConnections()),
-		outgoing:           make(chan outgoing), // TODO(dadrian): Is this the appropriate size?
-
-		staticKey:    config.KeyPair,
-		certificate:  cert.Bytes(),
-		intermediate: intermediate.Bytes(),
-	}
-	// TODO(dadrian): This probably shouldn't happen in this function
+	// TODO(dadrian): Let this be specified or rotated
 	_, err := rand.Read(s.cookieKey[:])
 	if err != nil {
 		panic(err.Error())
@@ -651,5 +640,22 @@ func NewServer(conn *net.UDPConn, config ServerConfig) (*Server, error) {
 	if err != nil {
 		panic(err.Error())
 	}
-	return &s, nil
+
+	s.handshakes = make(map[string]*HandshakeState)
+	s.sessions = make(map[SessionID]*SessionState)
+
+	s.pendingConnections = make(chan *Handle, s.config.maxPendingConnections())
+	s.outgoing = make(chan outgoing) // TODO(dadrian): Is this the appropriate size?
+	return nil
+}
+
+// NewServer returns a Server listening on the provided UDP connection. The
+// returned Server object is a valid net.Listener.
+func NewServer(conn *net.UDPConn, config ServerConfig) (*Server, error) {
+	s := Server{
+		udpConn: conn,
+		config:  config,
+	}
+	err := s.init()
+	return &s, err
 }

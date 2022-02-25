@@ -32,6 +32,7 @@ type ClientConfig struct {
 	KeyPair            *keys.X25519KeyPair
 	Verify             VerifyConfig
 	Leaf, Intermediate *certs.Certificate
+	AutoSelfSign       bool
 }
 
 const (
@@ -45,6 +46,14 @@ const (
 	// Packets after this will dropped until the user calls Read.
 	DefaultMaxBufferedPacketsPerSession = 100
 )
+
+// ClientHandshakeInfo contains information about an attempted handshake. It is
+// used as an argument in certificate callbacks.
+type ClientHandshakeInfo struct {
+
+	// ServerName indicates the name of the server requested by the client.
+	ServerName certs.Name
+}
 
 // ServerConfig contains server-specific configuration settings.
 type ServerConfig struct {
@@ -62,7 +71,7 @@ type ServerConfig struct {
 
 	ClientVerify *VerifyConfig
 
-	// TODO(dadrian): How does this change with Names?
+	GetCertificate func(ClientHandshakeInfo) (*Certificate, error)
 }
 
 func (c *ServerConfig) maxPendingConnections() int {

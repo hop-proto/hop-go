@@ -51,11 +51,6 @@ func main() {
 		logrus.Fatalf("unable to read key %q: %s", keyPath, err)
 	}
 
-	// certificate, err := certs.ReadCertificatePEMFile(f.Certificate)
-	// if err != nil {
-	// 	logrus.Fatalf("unable to read certificate from file %q: %s", f.Certificate, err)
-	// }
-
 	pktConn, err := net.ListenPacket("udp", sc.ListenAddress)
 	if err != nil {
 		logrus.Fatalf("unable to open socket for address %s: %s", sc.ListenAddress, err)
@@ -63,7 +58,6 @@ func main() {
 	udpConn := pktConn.(*net.UDPConn)
 	logrus.Infof("listening at %s", udpConn.LocalAddr())
 
-	// TODO(dadrian): Parse a config file
 	tconf := transport.ServerConfig{
 		KeyPair:     keyPair,
 		Certificate: nil, // TODO(dadrian): Read certs from config
