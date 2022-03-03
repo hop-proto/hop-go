@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/config"
 	"zmap.io/portal/keys"
 )

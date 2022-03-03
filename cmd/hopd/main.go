@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/app"
 	"zmap.io/portal/config"
 	"zmap.io/portal/transport"

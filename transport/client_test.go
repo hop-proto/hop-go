@@ -7,6 +7,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
+
 	"zmap.io/portal/certs"
 	"zmap.io/portal/keys"
 )

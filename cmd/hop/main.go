@@ -6,6 +6,7 @@ import (
 	"os/user"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/app"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/config"

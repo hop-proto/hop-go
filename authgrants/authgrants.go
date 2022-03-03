@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/keys"
 	"zmap.io/portal/tubes"
 )

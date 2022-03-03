@@ -11,6 +11,7 @@ import (
 	"zmap.io/portal/kravatte"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/cyclist"
 )
 

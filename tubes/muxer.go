@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/transport"
 )
 

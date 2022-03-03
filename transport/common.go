@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"golang.org/x/crypto/curve25519"
+
 	"zmap.io/portal/kravatte"
 )
 

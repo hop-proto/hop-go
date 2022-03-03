@@ -6,6 +6,7 @@ import (
 	"net"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/certs"
 	"zmap.io/portal/kravatte"
 )

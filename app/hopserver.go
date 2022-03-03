@@ -47,14 +47,14 @@ type HopServerConfig struct {
 // the host/port specified in the config file and an authgrant server listening
 // on the provided socket.
 func NewHopServer(underlying *transport.Server, hconfig *HopServerConfig) (*HopServer, error) {
-	//set up authgrantServer (UDS socket)
-	//make sure the socket does not already exist.
+	// set up authgrantServer (UDS socket)
+	// make sure the socket does not already exist.
 	if err := os.RemoveAll(hconfig.SockAddr); err != nil {
 		logrus.Error(err)
 		return nil, err
 	}
 
-	//set socket options and start listening to socket
+	// set socket options and start listening to socket
 	sockconfig := &net.ListenConfig{Control: setListenerOptions}
 	authgrantServer, err := sockconfig.Listen(context.Background(), "unix", hconfig.SockAddr)
 	if err != nil {
@@ -78,7 +78,6 @@ func NewHopServer(underlying *transport.Server, hconfig *HopServerConfig) (*HopS
 
 		fsystem: os.DirFS("/"),
 	}
-
 	return server, nil
 }
 
@@ -101,7 +100,7 @@ func (s *HopServer) Serve() {
 	}
 }
 
-//Starts a new hop session
+// Starts a new hop session
 func (s *HopServer) newSession(serverConn *transport.Handle) {
 	sess := &hopSession{
 		transportConn:          serverConn,

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/certs"
 )
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/common"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/pkg/thunks"

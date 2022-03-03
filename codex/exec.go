@@ -15,6 +15,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/term"
+
 	"zmap.io/portal/tubes"
 )
 

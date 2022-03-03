@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/agent"
 	"zmap.io/portal/common"
 )

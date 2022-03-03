@@ -18,6 +18,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
+
 	"zmap.io/portal/keys"
 )
 
