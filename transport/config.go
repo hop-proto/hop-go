@@ -67,8 +67,6 @@ type ServerConfig struct {
 	Certificate  *certs.Certificate
 	Intermediate *certs.Certificate
 
-	AutoSelfSign bool
-
 	ClientVerify *VerifyConfig
 
 	GetCertificate func(ClientHandshakeInfo) (*Certificate, error)

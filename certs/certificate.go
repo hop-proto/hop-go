@@ -492,6 +492,39 @@ func ReadCertificatePEMFile(path string) (*Certificate, error) {
 	return ReadCertificatePEM(b)
 }
 
+// ReadCertificateBytesFromPEMFile reads the first PEM-encoded certificate from
+// a PEM file, and additionally returns the bytes corresponding to the
+// certificate.
+func ReadCertificateBytesFromPEMFile(path string) (*Certificate, []byte, error) {
+	fd, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer fd.Close()
+	b, err := ioutil.ReadAll(fd)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ReadCertificateBytesPEM(b)
+}
+
+// ReadCertificateBytesPEM reads the first PEM-encoded bytes in b as a
+// Certificate. It will only read a single PEM. It returns certificate, and a
+// slice of the bytes parsed.
+func ReadCertificateBytesPEM(b []byte) (*Certificate, []byte, error) {
+	p, _ := pem.Decode(b)
+	if p == nil {
+		return nil, nil, errors.New("could not decode PEM block")
+	}
+	buf := bytes.NewBuffer(p.Bytes)
+	c := new(Certificate)
+	_, err := c.ReadFrom(buf)
+	if err != nil {
+		return nil, nil, err
+	}
+	return c, p.Bytes, nil
+}
+
 // ProvideKey sets the private key associated with the public key in the
 // certificate. You must call ProvideKey before calling any issue functions with
 // this certificate.

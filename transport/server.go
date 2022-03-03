@@ -6,7 +6,6 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"errors"
-	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -597,22 +596,12 @@ func (s *Server) init() error {
 	if s.config.KeyPair == nil && s.config.GetCertificate == nil {
 		return errors.New("config.KeyPair or config.GetCertificate must be set")
 	}
-	if (!s.config.AutoSelfSign && s.config.Certificate == nil) && s.config.GetCertificate == nil {
+	if s.config.Certificate == nil && s.config.GetCertificate == nil {
 		return errors.New("Certificate or AutoSelfSign must be set when GetCertificate is Nil") //nolint:stylecheck
 	}
 
 	if s.config.GetCertificate == nil {
 		var cert, intermediate bytes.Buffer
-		if s.config.Certificate == nil && s.config.AutoSelfSign {
-			identity := certs.Identity{
-				PublicKey: s.config.KeyPair.Public,
-			}
-			var err error
-			s.config.Certificate, err = certs.SelfSignLeaf(&identity)
-			if err != nil {
-				return fmt.Errorf("unable to auto self sign key: %s", err)
-			}
-		}
 		if _, err := s.config.Certificate.WriteTo(&cert); err != nil {
 			return err
 		}

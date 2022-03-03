@@ -47,10 +47,10 @@ type HostConfig struct {
 // NameConfig defines the keys and certificates presented by the server for a
 // given name.
 type NameConfig struct {
-	Pattern     string
-	Key         string
-	Certificate string
-	// Intermediate string
+	Pattern      string
+	Key          string
+	Certificate  string
+	Intermediate string
 	// AutoSelfSign bool
 
 	// TODO(dadrian): User mapping
@@ -181,14 +181,24 @@ func loadServerConfig(c *ServerConfig, root *ast.Node) (*ServerConfig, error) {
 					c.Key = n.SettingValue
 				case ast.Setting.Certificate.Value:
 					c.Certificate = n.SettingValue
+				case ast.Setting.Intermediate.Value:
+					c.Intermediate = n.SettingValue
 				case ast.Setting.ListenAddress.Value:
 					c.ListenAddress = n.SettingValue
 				default:
 					return fmt.Errorf("invalid global setting %q", n.SettingKey)
 				}
 			} else {
-				// TODO(dadrian): Implement this
-				return fmt.Errorf("%s", "server block settings are not implemented")
+				switch n.SettingKey {
+				case ast.Setting.Key.Value:
+					nc.Key = n.SettingValue
+				case ast.Setting.Certificate.Value:
+					nc.Certificate = n.SettingValue
+				case ast.Setting.Intermediate.Value:
+					nc.Intermediate = n.SettingValue
+				default:
+					return fmt.Errorf("invalid host block setting %q", n.SettingKey)
+				}
 			}
 		default:
 			return fmt.Errorf("unknown node type %s", n.Type)

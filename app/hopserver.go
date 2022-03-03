@@ -13,9 +13,11 @@ import (
 	"github.com/sbinet/pstree"
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/authgrants"
+	"zmap.io/portal/certs"
 	"zmap.io/portal/config"
 	"zmap.io/portal/core"
 	"zmap.io/portal/keys"
+	"zmap.io/portal/pkg/glob"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
 )
@@ -261,4 +263,83 @@ func (s *HopServer) authorizeKey(user string, publicKey keys.PublicKey) error {
 		return nil
 	}
 	return fmt.Errorf("key %s is not authorized for user %s", publicKey, user)
+}
+
+// VirtualHosts is mapping from host patterns to Certificates.
+type VirtualHosts []VirtualHost
+
+// VirtualHost is a pattern-certificate pairing.
+type VirtualHost struct {
+	Pattern     string
+	Certificate transport.Certificate
+}
+
+func transportCert(keyPath, certPath, intermediatePath string) (*transport.Certificate, error) {
+	keyPair, err := keys.ReadDHKeyFromPEMFile(keyPath)
+	if err != nil {
+		return nil, err
+	}
+	leaf, rawLeaf, err := certs.ReadCertificateBytesFromPEMFile(certPath)
+	if err != nil {
+		return nil, err
+	}
+	var rawIntermediate []byte
+	if intermediatePath != "" {
+		_, rawIntermediate, err = certs.ReadCertificateBytesFromPEMFile(intermediatePath)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &transport.Certificate{
+		RawLeaf:         rawLeaf,
+		RawIntermediate: rawIntermediate,
+		KeyPair:         keyPair,
+		Leaf:            leaf,
+	}, nil
+
+}
+
+// NewVirtualHosts constructs a VirtualHost object from a server
+// configmap[string]transport.Certificate{}.
+func NewVirtualHosts(c *config.ServerConfig) (VirtualHosts, error) {
+	out := make([]VirtualHost, 0, len(c.Names)+1)
+	for _, block := range c.Names {
+		// TODO(dadrian)[2022-12-26]: If certs are shared, we'll re-parse all
+		// these. We could use some kind of content-addressable store to cache
+		// these after a single load pass across the whole config.
+		tc, err := transportCert(block.Key, block.Certificate, block.Intermediate)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, VirtualHost{
+			Pattern:     block.Pattern,
+			Certificate: *tc,
+		})
+	}
+	if c.Key != "" {
+		tc, err := transportCert(c.Key, c.Certificate, c.Intermediate)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, VirtualHost{
+			Pattern:     "*",
+			Certificate: *tc,
+		})
+	}
+	return out, nil
+}
+
+// Match returns the first VirtualHost where the pattern glob matches the name.
+// It return nil if none are found.
+//
+// TODO(dadrian)[2022-02-26]: This only does raw string matching, it needs to
+// have some way to disambiguate name types.
+func (vhosts VirtualHosts) Match(name certs.Name) *VirtualHost {
+	for i := range vhosts {
+		logrus.Infof("pattern, in: %q, %s", vhosts[i].Pattern, string(name.Label))
+		if glob.Glob(vhosts[i].Pattern, string(name.Label)) {
+			return &vhosts[i]
+		}
+	}
+	return nil
 }

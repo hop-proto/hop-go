@@ -20,6 +20,8 @@ var dnsName string
 
 var output = os.Stdout
 
+var selfSigned bool
+
 func main() {
 	logrus.SetLevel(logrus.InfoLevel)
 
@@ -28,6 +30,7 @@ func main() {
 	flag.StringVar(&dnsName, "dns-name", "", "dns name for the cert")
 	flag.StringVar(&certTypeStr, "type", "leaf", "type of certificate to issue (leaf|intermediate|root)")
 	flag.StringVar(&publicKeyFilePath, "public-key", "pub.pem", "public key file")
+	flag.BoolVar(&selfSigned, "self-signed", false, "issue a self-signed leaf")
 	flag.Parse()
 
 	certType, err := certs.CertificateTypeFromString(certTypeStr)
@@ -36,33 +39,26 @@ func main() {
 		logrus.Fatalf("%s", err)
 	}
 
-	data, err := ioutil.ReadFile(keyFilePath)
-	if err != nil {
-		logrus.Fatalf("unable to open key file: %s", err)
-	}
-	p, _ := pem.Decode(data)
-	if p == nil {
-		logrus.Fatalf("unable to parse PEM file %s", keyFilePath)
-	}
-	signingKeyPair, err := keys.SigningKeyFromPEM(p)
-	if err != nil {
-		logrus.Fatalf("unable to parse private key: %s", err)
+	var signingKeyPair *keys.SigningKeyPair
+	if certType == certs.Leaf && selfSigned {
+		// Do nothing
+	} else {
+		data, err := ioutil.ReadFile(keyFilePath)
+		if err != nil {
+			logrus.Fatalf("unable to open key file: %s", err)
+		}
+		p, _ := pem.Decode(data)
+		if p == nil {
+			logrus.Fatalf("unable to parse PEM file %s", keyFilePath)
+		}
+		signingKeyPair, err = keys.SigningKeyFromPEM(p)
+		if err != nil {
+			logrus.Fatalf("unable to parse private key: %s", err)
+		}
 	}
 
 	switch certType {
 	case certs.Leaf: //nolint:dupl // not quite a full duplicate
-		data, err = ioutil.ReadFile(parentFilePath)
-		if err != nil {
-			logrus.Fatalf("could not open parent cert file: %s", err)
-		}
-		parent, err := certs.ReadCertificatePEM(data)
-		if err != nil {
-			logrus.Fatalf("could not deserialize parent cert: %s", err)
-		}
-		err = parent.ProvideKey((*[32]byte)(&signingKeyPair.Private))
-		if err != nil {
-			logrus.Fatalf("bad private key: %s", err)
-		}
 		pubKeyBytes, err := ioutil.ReadFile(publicKeyFilePath)
 		if err != nil {
 			logrus.Fatalf("could not read public key file: %s", err)
@@ -73,11 +69,33 @@ func main() {
 		}
 		identity := certs.Identity{
 			PublicKey: *pubKey,
-			Names:     []certs.Name{certs.DNSName(dnsName)},
 		}
-		leaf, err := certs.IssueLeaf(parent, &identity)
-		if err != nil {
-			logrus.Fatalf("unable to issue intermediate: %s", err)
+		if dnsName != "" {
+			identity.Names = append(identity.Names, certs.DNSName(dnsName))
+		}
+		var leaf *certs.Certificate
+		if !selfSigned {
+			data, err := ioutil.ReadFile(parentFilePath)
+			if err != nil {
+				logrus.Fatalf("could not open parent cert file: %s", err)
+			}
+			parent, err := certs.ReadCertificatePEM(data)
+			if err != nil {
+				logrus.Fatalf("could not deserialize parent cert: %s", err)
+			}
+			err = parent.ProvideKey((*[32]byte)(&signingKeyPair.Private))
+			if err != nil {
+				logrus.Fatalf("bad private key: %s", err)
+			}
+			leaf, err = certs.IssueLeaf(parent, &identity)
+			if err != nil {
+				logrus.Fatalf("unable to issue leaf: %s", err)
+			}
+		} else {
+			leaf, err = certs.SelfSignLeaf(&identity)
+			if err != nil {
+				logrus.Fatalf("unable to self-sign leaf: %s", err)
+			}
 		}
 		pemBytes, err := certs.EncodeCertificateToPEM(leaf)
 		if err != nil {
@@ -85,7 +103,7 @@ func main() {
 		}
 		output.Write(pemBytes)
 	case certs.Intermediate: //nolint:dupl // not quite a full duplicate
-		data, err = ioutil.ReadFile(parentFilePath)
+		data, err := ioutil.ReadFile(parentFilePath)
 		if err != nil {
 			logrus.Fatalf("could not open parent cert file: %s", err)
 		}

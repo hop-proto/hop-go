@@ -36,6 +36,7 @@ var Setting = struct {
 	AutoSelfSign  Token
 	CAFile        Token
 	Certificate   Token
+	Intermediate  Token
 	Key           Token
 	ListenAddress Token
 	Number        Token
@@ -57,6 +58,10 @@ var Setting = struct {
 	Certificate: Token{
 		Type:  TokenTypeSetting,
 		Value: "Certificate",
+	},
+	Intermediate: Token{
+		Type:  TokenTypeSetting,
+		Value: "Intermediate",
 	},
 	Key: Token{
 		Type:  TokenTypeSetting,
@@ -86,6 +91,7 @@ var Settings = []Token{
 	Setting.AutoSelfSign,
 	Setting.CAFile,
 	Setting.Certificate,
+	Setting.Intermediate,
 	Setting.Key,
 	Setting.ListenAddress,
 	Setting.Number,

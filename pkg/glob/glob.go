@@ -29,7 +29,7 @@ func Glob(pattern, input string, opts ...Option) bool {
 	i := 0
 	j := 0
 	asterisk := false
-	for i < len(pattern) && j < len(input) {
+	for i < len(pattern) {
 		if pattern[i] == '*' {
 			asterisk = true
 			i++
@@ -45,6 +45,9 @@ func Glob(pattern, input string, opts ...Option) bool {
 				asterisk = false
 			}
 			j++
+		}
+		if j >= len(input) {
+			break
 		}
 	}
 	return i == len(pattern) && (asterisk || j == len(input))

@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -10,8 +11,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"zmap.io/portal/app"
 	"zmap.io/portal/config"
-	"zmap.io/portal/keys"
-	"zmap.io/portal/pkg/combinators"
 	"zmap.io/portal/transport"
 )
 
@@ -44,11 +43,9 @@ func main() {
 	}
 
 	sc := config.GetServer()
-	keyPath := combinators.StringOr(sc.Key, config.DefaultServerKeyPath())
-
-	keyPair, err := keys.ReadDHKeyFromPEMFile(keyPath)
+	vhosts, err := app.NewVirtualHosts(sc)
 	if err != nil {
-		logrus.Fatalf("unable to read key %q: %s", keyPath, err)
+		logrus.Fatalf("unable to parse virtual hosts: %s", err)
 	}
 
 	pktConn, err := net.ListenPacket("udp", sc.ListenAddress)
@@ -58,13 +55,18 @@ func main() {
 	udpConn := pktConn.(*net.UDPConn)
 	logrus.Infof("listening at %s", udpConn.LocalAddr())
 
+	getCert := func(info transport.ClientHandshakeInfo) (*transport.Certificate, error) {
+		if h := vhosts.Match(info.ServerName); h != nil {
+			return &h.Certificate, nil
+		}
+		return nil, fmt.Errorf("%v did not match a host block", info.ServerName)
+	}
+
 	tconf := transport.ServerConfig{
-		KeyPair:     keyPair,
-		Certificate: nil, // TODO(dadrian): Read certs from config
 		ClientVerify: &transport.VerifyConfig{
 			InsecureSkipVerify: true, // Do authorized keys instead
 		},
-		AutoSelfSign: true,
+		GetCertificate: getCert,
 	}
 
 	underlying, err := transport.NewServer(udpConn, tconf)

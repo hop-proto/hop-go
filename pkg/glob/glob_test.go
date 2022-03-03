@@ -30,6 +30,7 @@ var globTests = []globTest{
 	{pattern: "d*v*", in: "david", out: true},
 	{pattern: "d*v*d", in: "david", out: true},
 	{pattern: "d*v*d", in: "dave", out: false},
+	{pattern: "*", in: "", out: true},
 }
 
 func TestGlob(t *testing.T) {

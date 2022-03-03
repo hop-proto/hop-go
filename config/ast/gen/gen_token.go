@@ -102,6 +102,7 @@ func main() {
 		{Name: "CAFile"},
 		{Name: "Key"},
 		{Name: "Certificate"},
+		{Name: "Intermediate"},
 		{Name: "AutoSelfSign"},
 		{Name: "Address"},
 		{Name: "Port"},
@@ -134,7 +135,6 @@ func main() {
 		logrus.Fatalf("unable to execute template: %s", err)
 	}
 	out, err := format.Source(buf.Bytes())
-	//out := buf.Bytes()
 	if err != nil {
 		logrus.Fatalf("unable to format source: %s", err)
 	}
