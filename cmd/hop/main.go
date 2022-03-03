@@ -148,7 +148,6 @@ func main() {
 		Leaf:        leaf,
 		SockAddr:    app.DefaultHopAuthSocket,
 		NonPricipal: false,
-		Keypath:     "path", // XXX
 	}
 
 	client, err := app.NewHopClient(cConfig)

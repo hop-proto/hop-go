@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/authgrants"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/codex"
@@ -43,7 +44,6 @@ type HopClientConfig struct {
 	User        string
 	Leaf        *certs.Certificate
 	SockAddr    string
-	Keypath     string
 	LocalArgs   []string
 	RemoteArgs  []string
 	Cmd         string
