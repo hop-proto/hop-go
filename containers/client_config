@@ -1,4 +1,5 @@
+AutoSelfSign true
+
 Host 127.0.0.1 {
-  AutoSelfSign true
   Key containers/id_client.pem
 }

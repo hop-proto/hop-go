@@ -20,15 +20,19 @@ import (
 //
 // TODO(dadrian): This structure probably needs to get moved to another package.
 type Flags struct {
-	// TODO(dadrian): What are these args?
 	ConfigPath string
 	Cmd        string
+
+	// TODO(dadrian): What are these args?
 	RemoteArgs []string
 	LocalArgs  []string
 	Headless   bool
 }
 
 func main() {
+	// TODO(dadrian): This function is kind of long. It'd be nice to break some
+	// of it out (like the key and cert processing) so that config behavior
+	// could be unit tested.
 	var f Flags
 	var fs flag.FlagSet
 
@@ -75,7 +79,8 @@ func main() {
 		logrus.Fatalf("error loading config: %s", err)
 	}
 
-	hc := config.GetClient().MatchHost(inputURL.Host)
+	cc := config.GetClient()
+	hc := cc.MatchHost(inputURL.Host)
 	address := core.MergeURLs(hc.HostURL(), *inputURL)
 
 	if address.User == "" {
@@ -86,28 +91,47 @@ func main() {
 		address.User = u.Username
 	}
 
-	// Set up keys
-	// TODO(dadrian): This logic should probably live somewhere else
-	keyPath := combinators.StringOr(hc.Key, config.DefaultKeyPath())
-	logrus.Info(keyPath)
+	// Set up keys and certificates
+	keyPath := combinators.StringOr(hc.Key, combinators.StringOr(cc.Key, config.DefaultKeyPath()))
+	logrus.Infof("using key %q", keyPath)
 	keypair, err := keys.ReadDHKeyFromPEMFile(keyPath)
 	if err != nil {
 		logrus.Fatalf("unable to load key pair %q: %s", keyPath, err)
 	}
 
-	var leaf *certs.Certificate
+	// Host block overrides global block. Set overrides Unset. Certificate
+	// overrides AutoSelfSign.
+	var leafFile string
+	var autoSelfSign bool
 	if hc.Certificate != "" {
-		leaf, err = certs.ReadCertificatePEMFile(hc.Certificate)
-		if err != nil {
-			logrus.Fatalf("unable to open certificate: %s", err)
-		}
+		leafFile = hc.Certificate
+	} else if hc.AutoSelfSign == config.True {
+		autoSelfSign = true
+	} else if hc.AutoSelfSign != config.True && cc.Certificate != "" {
+		leafFile = cc.Certificate
+	} else if hc.AutoSelfSign == config.Unset && cc.AutoSelfSign == config.True {
+		autoSelfSign = true
 	} else {
+		logrus.Fatalf("no certificate provided and AutoSelfSign is not enabled for %q", address)
+	}
+
+	var leaf *certs.Certificate
+	if autoSelfSign {
+		logrus.Infof("auto self-signing leaf for user %q", address.User)
 		leaf, err = certs.SelfSignLeaf(&certs.Identity{
 			PublicKey: keypair.Public,
 			Names: []certs.Name{
 				certs.RawStringName(address.User),
 			},
 		})
+		if err != nil {
+			logrus.Fatalf("unable to self-sign certificate: %s", err)
+		}
+	} else {
+		leaf, err = certs.ReadCertificatePEMFile(leafFile)
+		if err != nil {
+			logrus.Fatalf("unable to open certificate: %s", err)
+		}
 	}
 
 	authenticator := core.InMemoryAuthenticator{
@@ -115,12 +139,10 @@ func main() {
 		VerifyConfig: transport.VerifyConfig{
 			InsecureSkipVerify: true, // TODO(dadrian): Host-key verification
 		},
+		Leaf: leaf,
 	}
 
 	logrus.Info(address)
-	if err != nil {
-		logrus.Fatalf("unable to handle CLI args: %s", err)
-	}
 	cConfig := app.HopClientConfig{
 		User:        address.User,
 		Leaf:        leaf,

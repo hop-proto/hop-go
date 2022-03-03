@@ -15,10 +15,23 @@ import (
 	"zmap.io/portal/pkg/thunks"
 )
 
+// BoolSetting is True, False, or Unset. The zero value is unset.
+type BoolSetting int
+
+// Valid values for BoolSetting
+const (
+	Unset BoolSetting = 0
+	True  BoolSetting = 1
+	False BoolSetting = -1
+)
+
 // ClientConfig represents a parsed client configuration.
 type ClientConfig struct {
-	CAFiles []string
-	Hosts   []HostConfig
+	CAFiles      []string
+	Key          string
+	Certificate  string
+	AutoSelfSign BoolSetting
+	Hosts        []HostConfig
 }
 
 // ServerConfig represents a parsed server configuration.
@@ -38,7 +51,7 @@ type HostConfig struct {
 	Hostname     string
 	User         string // TODO(dadrian): Implement this setting in the grammar
 	Port         int
-	AutoSelfSign bool
+	AutoSelfSign BoolSetting
 	Key          string
 	Certificate  string
 	Intermediate string
@@ -56,6 +69,8 @@ type NameConfig struct {
 	// TODO(dadrian): User mapping
 }
 
+//go:generate go run ./gen config_gen.go
+
 // LoadClientConfig converts an AST into an actual configuration object.
 func LoadClientConfig(root *ast.Node) (*ClientConfig, error) {
 	var c ClientConfig
@@ -63,59 +78,7 @@ func LoadClientConfig(root *ast.Node) (*ClientConfig, error) {
 }
 
 func loadClientConfig(c *ClientConfig, root *ast.Node) (*ClientConfig, error) {
-	var global bool
-	var hc *HostConfig
-	err := root.Walk(func(n ast.Node) error {
-		fmt.Println(n.Type)
-		switch n.Type {
-		case ast.NodeTypeFile:
-			global = true
-		case ast.NodeTypeBlock:
-			switch n.BlockType {
-			case "Include":
-				// TODO(dadrian): Includes
-			case "Host":
-				c.Hosts = append(c.Hosts, HostConfig{})
-				hc = &c.Hosts[len(c.Hosts)-1]
-				global = false
-				hc.Pattern = n.BlockName
-			}
-		case ast.NodeTypeSetting:
-			if global {
-				switch n.SettingKey {
-				case ast.Setting.CAFile.Value:
-					c.CAFiles = append(c.CAFiles, n.SettingValue)
-				default:
-					return fmt.Errorf("invalid global setting %q", n.SettingKey)
-				}
-			} else {
-				switch n.SettingKey {
-				case ast.Setting.Address.Value:
-					hc.Hostname = n.SettingValue
-				case ast.Setting.Port.Value:
-					port, err := strconv.Atoi(n.SettingValue)
-					if err != nil {
-						return err
-					}
-					hc.Port = port
-				case ast.Setting.AutoSelfSign.Value:
-					b, err := strconv.ParseBool(n.SettingValue)
-					if err != nil {
-						return err
-					}
-					hc.AutoSelfSign = b
-				case ast.Setting.Key.Value:
-					hc.Key = n.SettingValue
-				case ast.Setting.Certificate.Value:
-					hc.Certificate = n.SettingValue
-				}
-			}
-		default:
-			return fmt.Errorf("unknown node type %s", n.Type)
-		}
-		return nil
-	})
-	return c, err
+	return loadClientConfig_Gen(c, root)
 }
 
 func tokenizeAndParseFile(path string) (*ast.Node, error) {
