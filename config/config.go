@@ -2,7 +2,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -40,6 +39,7 @@ type ServerConfig struct {
 	Certificate  string
 	Intermediate string
 
+	AutoSelfSign  BoolSetting
 	ListenAddress string
 
 	Names []NameConfig
@@ -64,7 +64,7 @@ type NameConfig struct {
 	Key          string
 	Certificate  string
 	Intermediate string
-	// AutoSelfSign bool
+	AutoSelfSign BoolSetting
 
 	// TODO(dadrian): User mapping
 }
@@ -74,11 +74,7 @@ type NameConfig struct {
 // LoadClientConfig converts an AST into an actual configuration object.
 func LoadClientConfig(root *ast.Node) (*ClientConfig, error) {
 	var c ClientConfig
-	return loadClientConfig(&c, root)
-}
-
-func loadClientConfig(c *ClientConfig, root *ast.Node) (*ClientConfig, error) {
-	return loadClientConfig_Gen(c, root)
+	return loadClientConfig_Gen(&c, root)
 }
 
 func tokenizeAndParseFile(path string) (*ast.Node, error) {
@@ -109,66 +105,13 @@ func loadClientConfigFromFile(c *ClientConfig, path string) (*ClientConfig, erro
 	if err != nil {
 		return nil, err
 	}
-	return loadClientConfig(c, root)
+	return loadClientConfig_Gen(c, root)
 }
 
 // LoadServerConfig parses an AST into a ServerConfig.
 func LoadServerConfig(root *ast.Node) (*ServerConfig, error) {
 	var c ServerConfig
-	return loadServerConfig(&c, root)
-}
-
-func loadServerConfig(c *ServerConfig, root *ast.Node) (*ServerConfig, error) {
-	// TODO(dadrian): This is duplicated a lot between client and server types.
-	var global bool
-	var nc *NameConfig
-	err := root.Walk(func(n ast.Node) error {
-		fmt.Println(n.Type)
-		switch n.Type {
-		case ast.NodeTypeFile:
-			global = true
-		case ast.NodeTypeBlock:
-			switch n.BlockType {
-			case "Include":
-				// TODO(dadrian): Includes
-			case "Name":
-				c.Names = append(c.Names, NameConfig{})
-				nc = &c.Names[len(c.Names)-1]
-				global = false
-				nc.Pattern = n.BlockName
-			}
-		case ast.NodeTypeSetting:
-			if global {
-				switch n.SettingKey {
-				case ast.Setting.Key.Value:
-					c.Key = n.SettingValue
-				case ast.Setting.Certificate.Value:
-					c.Certificate = n.SettingValue
-				case ast.Setting.Intermediate.Value:
-					c.Intermediate = n.SettingValue
-				case ast.Setting.ListenAddress.Value:
-					c.ListenAddress = n.SettingValue
-				default:
-					return fmt.Errorf("invalid global setting %q", n.SettingKey)
-				}
-			} else {
-				switch n.SettingKey {
-				case ast.Setting.Key.Value:
-					nc.Key = n.SettingValue
-				case ast.Setting.Certificate.Value:
-					nc.Certificate = n.SettingValue
-				case ast.Setting.Intermediate.Value:
-					nc.Intermediate = n.SettingValue
-				default:
-					return fmt.Errorf("invalid host block setting %q", n.SettingKey)
-				}
-			}
-		default:
-			return fmt.Errorf("unknown node type %s", n.Type)
-		}
-		return nil
-	})
-	return c, err
+	return loadServerConfig_Gen(&c, root)
 }
 
 // LoadServerConfigFromFile tokenizes and parse the file at path, and then loads
@@ -183,7 +126,7 @@ func loadServerConfigFromFile(c *ServerConfig, path string) (*ServerConfig, erro
 	if err != nil {
 		return nil, err
 	}
-	return loadServerConfig(c, root)
+	return loadServerConfig_Gen(c, root)
 }
 
 var clientDirectory string

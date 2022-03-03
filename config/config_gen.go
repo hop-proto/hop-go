@@ -25,7 +25,7 @@ func bs(s string) (BoolSetting, error) {
 }
 
 func loadClientConfig_Gen(c *ClientConfig, root *ast.Node) (*ClientConfig, error) {
-	var hc *HostConfig
+	var bc *HostConfig
 	err := root.Walk(func(n ast.Node) error {
 		global := false
 		if n.Parent == nil {
@@ -41,8 +41,8 @@ func loadClientConfig_Gen(c *ClientConfig, root *ast.Node) (*ClientConfig, error
 				logrus.Warnf("%q not yet implemented and %q will be ignored", "Include", n.BlockName)
 			case "Host":
 				c.Hosts = append(c.Hosts, HostConfig{})
-				hc = &c.Hosts[len(c.Hosts)-1]
-				hc.Pattern = n.BlockName
+				bc = &c.Hosts[len(c.Hosts)-1]
+				bc.Pattern = n.BlockName
 			}
 		case ast.NodeTypeSetting:
 			if global {
@@ -81,31 +81,127 @@ func loadClientConfig_Gen(c *ClientConfig, root *ast.Node) (*ClientConfig, error
 					if err != nil {
 						return err
 					}
-					hc.Hostname = result
+					bc.Hostname = result
 				case ast.Setting.Port.Value:
 					result, err := strconv.Atoi(n.SettingValue)
 					if err != nil {
 						return err
 					}
-					hc.Port = result
+					bc.Port = result
 				case ast.Setting.AutoSelfSign.Value:
 					result, err := bs(n.SettingValue)
 					if err != nil {
 						return err
 					}
-					hc.AutoSelfSign = result
+					bc.AutoSelfSign = result
 				case ast.Setting.Key.Value:
 					result, err := identity(n.SettingValue)
 					if err != nil {
 						return err
 					}
-					hc.Key = result
+					bc.Key = result
 				case ast.Setting.Certificate.Value:
 					result, err := identity(n.SettingValue)
 					if err != nil {
 						return err
 					}
-					hc.Certificate = result
+					bc.Certificate = result
+				default:
+					logrus.Warnf("unknown block setting %q", n.SettingKey)
+				}
+			}
+		default:
+			return fmt.Errorf("unknown node type %s", n.Type)
+		}
+		return nil
+	})
+	return c, err
+}
+
+func loadServerConfig_Gen(c *ServerConfig, root *ast.Node) (*ServerConfig, error) {
+	var bc *NameConfig
+	err := root.Walk(func(n ast.Node) error {
+		global := false
+		if n.Parent == nil {
+			global = true
+		} else if n.Parent != nil && n.Parent.Type == ast.NodeTypeFile {
+			global = true
+		}
+		switch n.Type {
+		case ast.NodeTypeFile:
+		case ast.NodeTypeBlock:
+			switch n.BlockType {
+			case "Include":
+				logrus.Warnf("%q not yet implemented and %q will be ignored", "Include", n.BlockName)
+			case "Name":
+				c.Names = append(c.Names, NameConfig{})
+				bc = &c.Names[len(c.Names)-1]
+				bc.Pattern = n.BlockName
+			}
+		case ast.NodeTypeSetting:
+			if global {
+				switch n.SettingKey {
+				case ast.Setting.Key.Value:
+					result, err := identity(n.SettingValue)
+					if err != nil {
+						return err
+					}
+					c.Key = result
+				case ast.Setting.Certificate.Value:
+					result, err := identity(n.SettingValue)
+					if err != nil {
+						return err
+					}
+					c.Certificate = result
+				case ast.Setting.Intermediate.Value:
+					result, err := identity(n.SettingValue)
+					if err != nil {
+						return err
+					}
+					c.Intermediate = result
+				case ast.Setting.ListenAddress.Value:
+					result, err := identity(n.SettingValue)
+					if err != nil {
+						return err
+					}
+					c.ListenAddress = result
+				case ast.Setting.AutoSelfSign.Value:
+					result, err := bs(n.SettingValue)
+					if err != nil {
+						return err
+					}
+					c.AutoSelfSign = result
+				default:
+					logrus.Warnf("unknown global setting %q", n.SettingKey)
+				}
+			} else {
+				switch n.SettingKey {
+				case ast.Setting.Key.Value:
+					result, err := identity(n.SettingValue)
+					if err != nil {
+						return err
+					}
+					bc.Key = result
+				case ast.Setting.Certificate.Value:
+					result, err := identity(n.SettingValue)
+					if err != nil {
+						return err
+					}
+					bc.Certificate = result
+				case ast.Setting.Intermediate.Value:
+					result, err := identity(n.SettingValue)
+					if err != nil {
+						return err
+					}
+					bc.Intermediate = result
+				case ast.Setting.AutoSelfSign.Value:
+					result, err := bs(n.SettingValue)
+					if err != nil {
+						return err
+					}
+					bc.AutoSelfSign = result
+				default:
+					logrus.Warnf("unknown block setting %q", n.SettingKey)
 				}
 			}
 		default:
