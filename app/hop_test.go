@@ -878,8 +878,13 @@ func (s *Suite) NewClient(t *testing.T, config HopClientConfig) *HopClient {
 }
 
 func (s *Suite) ChainAuthenticator(t *testing.T, clientKey *keys.X25519KeyPair) core.Authenticator {
+	leaf, err := certs.SelfSignLeaf(&certs.Identity{
+		PublicKey: clientKey.Public,
+	})
+	assert.NilError(t, err)
 	return core.InMemoryAuthenticator{
 		KeyPair: clientKey,
+		Leaf:    leaf,
 		VerifyConfig: transport.VerifyConfig{
 			Store: s.Store,
 		},
@@ -897,7 +902,7 @@ func TestHopClient(t *testing.T) {
 		mock := fstest.MapFS{
 			"home/username/.hop/authorized_keys": &fstest.MapFile{
 				Data: []byte(clientKey.Public.String() + "\n"),
-				Mode: 0777,
+				Mode: 0600,
 			},
 		}
 		s.MockServerFS(t, mock)

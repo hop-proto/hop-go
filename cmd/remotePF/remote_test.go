@@ -1,18 +1,6 @@
 package main
 
-import (
-	"io"
-	"net"
-	"os"
-	"os/exec"
-	"os/user"
-	"syscall"
-	"testing"
-
-	"github.com/AstromechZA/etcpwdparse"
-	"github.com/sirupsen/logrus"
-	"gotest.tools/assert"
-)
+/*
 
 func TestRemote(t *testing.T) {
 	remotePort := "7779"
@@ -102,3 +90,5 @@ func TestRemote(t *testing.T) {
 	err = c.Wait()
 	assert.NilError(t, err)
 }
+
+*/

@@ -226,7 +226,7 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 	transportConfig := transport.ClientConfig{
 		KeyPair: authenticator.GetKeyPair(),
 		Verify:  authenticator.GetVerifyConfig(),
-		Leaf:    c.config.Leaf,
+		Leaf:    authenticator.GetLeaf(),
 	}
 	var err error
 	if !c.Proxied {
