@@ -12,6 +12,7 @@ import (
 
 	"github.com/sbinet/pstree"
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/authgrants"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/config"
@@ -100,7 +101,7 @@ func (s *HopServer) Serve() {
 	}
 }
 
-// Starts a new hop session
+// newSession Starts a new hop session
 func (s *HopServer) newSession(serverConn *transport.Handle) {
 	sess := &hopSession{
 		transportConn:          serverConn,
@@ -292,7 +293,7 @@ func transportCert(keyPath, certPath, intermediatePath string) (*transport.Certi
 	return &transport.Certificate{
 		RawLeaf:         rawLeaf,
 		RawIntermediate: rawIntermediate,
-		KeyPair:         keyPair,
+		Exchanger:       keyPair,
 		Leaf:            leaf,
 	}, nil
 
@@ -300,7 +301,7 @@ func transportCert(keyPath, certPath, intermediatePath string) (*transport.Certi
 
 // NewVirtualHosts constructs a VirtualHost object from a server
 // configmap[string]transport.Certificate{}.
-func NewVirtualHosts(c *config.ServerConfig) (VirtualHosts, error) {
+func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fallbackCert *certs.Certificate) (VirtualHosts, error) {
 	out := make([]VirtualHost, 0, len(c.Names)+1)
 	for _, block := range c.Names {
 		// TODO(dadrian)[2022-12-26]: If certs are shared, we'll re-parse all

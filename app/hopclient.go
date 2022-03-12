@@ -1,4 +1,4 @@
-//Package app provides functions to run hop client and hop server
+// Package app provides functions to run hop client and hop server
 package app
 
 import (
@@ -224,9 +224,9 @@ func (c *HopClient) getAuthorization() error {
 func (c *HopClient) startUnderlying(address string, authenticator core.Authenticator) error {
 	// TODO(dadrian): Update this once the authenticator interface is set.
 	transportConfig := transport.ClientConfig{
-		KeyPair: authenticator.GetKeyPair(),
-		Verify:  authenticator.GetVerifyConfig(),
-		Leaf:    authenticator.GetLeaf(),
+		Exchanger: authenticator,
+		Verify:    authenticator.GetVerifyConfig(),
+		Leaf:      authenticator.GetLeaf(),
 	}
 	var err error
 	if !c.Proxied {

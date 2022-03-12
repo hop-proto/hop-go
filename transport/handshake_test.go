@@ -29,7 +29,11 @@ func TestClientServerCompatibilityHandshake(t *testing.T) {
 		PublicKey: keyPair.Public,
 	})
 	assert.NilError(t, err)
-	c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verifyConfig, KeyPair: keyPair, Leaf: leaf})
+	c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{
+		Verify:    *verifyConfig,
+		Exchanger: keyPair,
+		Leaf:      leaf,
+	})
 	assert.NilError(t, err)
 	err = c.Handshake()
 	assert.Check(t, err)

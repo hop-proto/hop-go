@@ -883,8 +883,8 @@ func (s *Suite) ChainAuthenticator(t *testing.T, clientKey *keys.X25519KeyPair) 
 	})
 	assert.NilError(t, err)
 	return core.InMemoryAuthenticator{
-		KeyPair: clientKey,
-		Leaf:    leaf,
+		X25519KeyPair: clientKey,
+		Leaf:          leaf,
 		VerifyConfig: transport.VerifyConfig{
 			Store: s.Store,
 		},

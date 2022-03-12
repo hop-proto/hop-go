@@ -79,8 +79,8 @@ func (c *Client) Handshake() error {
 }
 
 func (c *Client) prepareCertificates() (leaf, intermediate []byte, err error) {
-	if c.config.KeyPair == nil {
-		return nil, nil, errors.New("ClientConfig.KeyPair must be non-nil")
+	if c.config.Exchanger == nil {
+		return nil, nil, errors.New("ClientConfig.Exchanger must be non-nil, you probably want to provide a keys.X25519KeyPair")
 	}
 
 	if c.config.Leaf == nil {
@@ -106,7 +106,7 @@ func (c *Client) clientHandshakeLocked() error {
 	if err != nil {
 		return err
 	}
-	c.hs.static = c.config.KeyPair
+	c.hs.static = c.config.Exchanger
 	c.hs.certVerify = &c.config.Verify
 	c.hs.duplex.Absorb([]byte(ProtocolName))
 

@@ -13,9 +13,9 @@ import (
 // making this a getter for now. In reality, it should be something that exposes
 // a DH and certificate verify API.
 type Authenticator interface {
+	keys.Exchangable
 
 	// TODO(dadrian): This isn't actually the interface we want
-	GetKeyPair() *keys.X25519KeyPair
 	GetVerifyConfig() transport.VerifyConfig
 	GetLeaf() *certs.Certificate
 }
@@ -23,14 +23,9 @@ type Authenticator interface {
 // InMemoryAuthenticator implements Authenticator using keys where the private
 // key is backed by an in-memory Go structure.
 type InMemoryAuthenticator struct {
-	KeyPair      *keys.X25519KeyPair
+	*keys.X25519KeyPair
 	VerifyConfig transport.VerifyConfig
 	Leaf         *certs.Certificate
-}
-
-// GetKeyPair implements Authenticator.
-func (a InMemoryAuthenticator) GetKeyPair() *keys.X25519KeyPair {
-	return a.KeyPair
 }
 
 // GetVerifyConfig implements Authenticator.

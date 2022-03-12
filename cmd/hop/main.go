@@ -135,7 +135,7 @@ func main() {
 	}
 
 	authenticator := core.InMemoryAuthenticator{
-		KeyPair: keypair,
+		X25519KeyPair: keypair,
 		VerifyConfig: transport.VerifyConfig{
 			InsecureSkipVerify: true, // TODO(dadrian): Host-key verification
 		},
@@ -166,6 +166,7 @@ func main() {
 		logrus.Error(err)
 		return
 	}
+
 	// handle incoming tubes
 	go client.HandleTubes()
 	client.Wait() //client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session

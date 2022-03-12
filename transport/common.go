@@ -18,7 +18,7 @@ const Version byte = 0x01
 const (
 	HeaderLen = 4
 	MacLen    = 16
-	// TODO(dadrian): It's confusing to have MacLen and tag len
+	// TODO(dadrian): It's confusing to have MacLen and TagLen
 	TagLen       = 32
 	KeyLen       = 16
 	DHLen        = curve25519.PointSize

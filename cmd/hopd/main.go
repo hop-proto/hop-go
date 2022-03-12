@@ -44,7 +44,7 @@ func main() {
 	}
 
 	sc := config.GetServer()
-	vhosts, err := app.NewVirtualHosts(sc)
+	vhosts, err := app.NewVirtualHosts(sc, nil, nil)
 	if err != nil {
 		logrus.Fatalf("unable to parse virtual hosts: %s", err)
 	}

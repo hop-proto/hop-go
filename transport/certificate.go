@@ -11,6 +11,6 @@ type Certificate struct {
 	RawLeaf         []byte
 	RawIntermediate []byte
 
-	KeyPair *keys.X25519KeyPair // TODO(dadrian): Abstract to just the DH interface
-	Leaf    *certs.Certificate  // TODO(dadrian): Do we eve need this field?
+	Exchanger keys.Exchangable
+	Leaf      *certs.Certificate // TODO(dadrian): Do we eve need this field?
 }

@@ -301,7 +301,7 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState)
 	logrus.Debugf("server: sa tag %x", x[:MacLen])
 	x = x[MacLen:]
 	pos += MacLen
-	hs.es, err = c.KeyPair.DH(hs.remoteEphemeral[:])
+	hs.es, err = c.Exchanger.Agree(hs.remoteEphemeral[:])
 	if err != nil {
 		logrus.Debug("could not calculate DH(es)")
 		return pos, err
@@ -614,7 +614,7 @@ func (s *Server) init() error {
 		c := &Certificate{
 			RawLeaf:         cert.Bytes(),
 			RawIntermediate: intermediate.Bytes(),
-			KeyPair:         s.config.KeyPair,
+			Exchanger:       s.config.KeyPair,
 		}
 		s.config.GetCertificate = func(ClientHandshakeInfo) (*Certificate, error) {
 			return c, nil

@@ -65,7 +65,7 @@ func TestClientCertificates(t *testing.T) {
 		assert.NilError(t, err)
 
 		return ClientConfig{
-			KeyPair:      clientKey,
+			Exchanger:    clientKey,
 			Leaf:         clientLeaf,
 			Intermediate: clientIntermediate,
 			Verify:       *verify,
@@ -81,7 +81,7 @@ func TestClientCertificates(t *testing.T) {
 		assert.NilError(t, err)
 
 		return ClientConfig{
-			KeyPair:      clientKey,
+			Exchanger:    clientKey,
 			Leaf:         clientLeaf,
 			Intermediate: nil,
 			Verify:       *verify,

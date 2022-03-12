@@ -29,7 +29,7 @@ type IdentityConfig struct {
 
 // ClientConfig contains client-specific configuration settings.
 type ClientConfig struct {
-	KeyPair            *keys.X25519KeyPair
+	Exchanger          keys.Exchangable
 	Verify             VerifyConfig
 	Leaf, Intermediate *certs.Certificate
 	AutoSelfSign       bool
