@@ -147,6 +147,7 @@ func (c *Client) Get(ctx context.Context, keyID string) (*KeyDescription, error)
 	if err != nil {
 		return nil, err
 	}
+	defer res.Body.Close()
 	desc := KeyDescription{}
 	if err := json.NewDecoder(res.Body).Decode(&desc); err != nil {
 		return nil, err

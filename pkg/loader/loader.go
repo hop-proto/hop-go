@@ -1,3 +1,5 @@
+// Package loader contains utilties for caching the read and parse of a file by
+// path.
 package loader
 
 import (
