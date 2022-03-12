@@ -2,11 +2,17 @@
 package agent
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
 
 	"goji.io"
 	"goji.io/pat"
+
+	"zmap.io/portal/keys"
 )
 
 // Server is an http.Handler that serves the Hop Agent endpoints.
@@ -22,6 +28,7 @@ func New(d *Data) Server {
 		d:   d,
 	}
 	s.Handle(pat.Get("/keys"), http.HandlerFunc(s.listKeys))
+	s.Handle(pat.Get("/keys/:keyid"), http.HandlerFunc(s.getKey))
 	s.Handle(pat.Post("/exchange"), http.HandlerFunc(s.exchange))
 	return s
 }
@@ -55,6 +62,28 @@ func (s *Server) listKeys(w http.ResponseWriter, r *http.Request) {
 	err := enc.Encode(&out)
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
+		return
+	}
+}
+
+func (s *Server) getKey(w http.ResponseWriter, r *http.Request) {
+	keyID := pat.Param(r, "keyid")
+	k, ok := s.d.Keys[keyID]
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	out := KeyDescription{
+		KeyID:   keyID,
+		Type:    "DH",
+		Public:  k.Public[:],
+		Version: 1,
+	}
+	enc := json.NewEncoder(w)
+	err := enc.Encode(&out)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		return
 	}
 }
 
@@ -98,4 +127,85 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		return
 	}
+}
+
+// Client speaks to the agent Server and can create keys.Exchanger
+// implementations.
+type Client struct {
+	BaseURL    string
+	HTTPClient *http.Client
+}
+
+// Get fetches the description of a single key by ID.
+func (c *Client) Get(ctx context.Context, keyID string) (*KeyDescription, error) {
+	u := fmt.Sprintf("%s/%s", c.BaseURL, url.PathEscape(keyID))
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return nil, err
+	}
+	res, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	desc := KeyDescription{}
+	if err := json.NewDecoder(res.Body).Decode(&desc); err != nil {
+		return nil, err
+	}
+	return &desc, nil
+}
+
+// Exchange calls the /exchange endpoint
+func (c *Client) Exchange(ctx context.Context, request *ExchangeRequest) (*ExchangeResponse, error) {
+	u := fmt.Sprintf("%s/exchange", c.BaseURL)
+	buf := bytes.Buffer{}
+	if err := json.NewEncoder(&buf).Encode(request); err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", u, &buf)
+	if err != nil {
+		return nil, err
+	}
+	out := ExchangeResponse{}
+	if err := json.NewDecoder(req.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+type boundClient struct {
+	c      *Client
+	ctx    context.Context
+	keyID  string
+	public []byte
+}
+
+var _ keys.Exchangable = &boundClient{}
+
+func (bc *boundClient) Share() []byte {
+	return bc.public
+}
+
+func (bc *boundClient) Agree(other []byte) ([]byte, error) {
+	request := ExchangeRequest{
+		KeyID: bc.keyID,
+		Other: other,
+	}
+	resp, err := bc.c.Exchange(bc.ctx, &request)
+	if err != nil {
+		return nil, err
+	}
+	return resp.SharedSecret, nil
+}
+
+// ExchangerFor returns an implementation of keys.Exchangable that is bound to
+// the provided keyID and implemented using the Exchange endpoint on the server.
+// The public key will be retrieved and cached at the time of creation.
+func (c *Client) ExchangerFor(ctx context.Context, keyID string) (keys.Exchangable, error) {
+	bc := boundClient{c: c, keyID: keyID}
+	desc, err := c.Get(ctx, keyID)
+	if err != nil {
+		return nil, err
+	}
+	bc.public = desc.Public
+	return &bc, nil
 }

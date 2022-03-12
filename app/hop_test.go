@@ -6,6 +6,7 @@ import (
 	"testing/fstest"
 
 	"gotest.tools/assert"
+
 	"zmap.io/portal/certs"
 	"zmap.io/portal/core"
 	"zmap.io/portal/keys"
