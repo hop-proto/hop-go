@@ -7,29 +7,15 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
-	"zmap.io/portal/ports"
 )
-
-var start = 17000
-
-var portMutex = sync.Mutex{}
-
-func port() string {
-	portMutex.Lock()
-	port, next := ports.GetPortNumber(start)
-	start = next
-	portMutex.Unlock()
-	return port
-}
 
 func TestIntentRequest(t *testing.T) {
 	wg := sync.WaitGroup{}
 	logrus.SetLevel(logrus.DebugLevel)
-	port := port()
-	tcpListener, err := net.Listen("tcp", net.JoinHostPort("localhost", port))
+	tcpListener, err := net.Listen("tcp", "localhost:0")
 	assert.NilError(t, err)
 
-	clientConn, err := net.Dial("tcp", ":"+port)
+	clientConn, err := net.Dial("tcp", tcpListener.Addr().String())
 	assert.NilError(t, err)
 
 	serverConn, err := tcpListener.Accept()

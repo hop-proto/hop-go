@@ -2,8 +2,6 @@ package app
 
 import (
 	"errors"
-	"io/fs"
-	"os"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -25,7 +23,7 @@ const (
 const (
 	ExecTube      = byte(1)
 	AuthGrantTube = byte(2)
-	NetProxyTube  = byte(3) //Net Proxy should maybe be unreliable tube?
+	NetProxyTube  = byte(3) // Net Proxy should maybe be unreliable tube?
 	UserAuthTube  = byte(4)
 	LocalPFTube   = byte(5)
 	RemotePFTube  = byte(6)
@@ -103,67 +101,6 @@ func NewTestServerConfig(testDataPathPrefix string) (*transport.ServerConfig, *t
 	}
 	verify.Store.AddCertificate(root)
 	return &server, &verify
-}
-
-//KeyGen generates a new key pair and adds it to local authorized keys file
-func KeyGen(dir string, filename string, addToAuthKeys bool) (*keys.X25519KeyPair, error) {
-	suffix := dir + "/" + filename
-	pair := keys.GenerateNewX25519KeyPair()
-	path, _ := os.UserHomeDir()
-	path += dir
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		err := os.Mkdir(path, fs.ModeDir|0700)
-		if err != nil {
-			logrus.Error(err)
-			return nil, err
-		}
-	}
-	path += "/" + filename
-	f, e := os.Create(path)
-	if e != nil {
-		logrus.Errorf("error opening default key file: %v", e)
-		return nil, e
-	}
-	logrus.Infof("adding private to ~%v: %v", suffix, pair.Private.String())
-	f.WriteString(pair.Private.String())
-	f.Close()
-
-	path, _ = os.UserHomeDir()
-	path += suffix + ".pub"
-	f, e = os.Create(path)
-	if e != nil {
-		logrus.Errorf("error opening default key file: %v", e)
-		return nil, e
-	}
-	logrus.Infof("adding public to ~%v.pub: %v", suffix, pair.Public.String())
-	f.WriteString(pair.Public.String())
-	f.Close()
-	if addToAuthKeys {
-		logrus.Info("adding to authorized keys")
-		path, _ = os.UserHomeDir()
-		path += dir
-		path += "/authorized_keys" //adds the key to its own authorized key file so that localhost operations will work
-		_, err := os.Stat(path)
-		if errors.Is(err, os.ErrNotExist) {
-			logrus.Info("file does not exist, creating...")
-			f, e := os.Create(path)
-			if e != nil {
-				logrus.Error(e)
-				return nil, e
-			}
-			f.Close()
-		}
-		auth, e := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
-		if e != nil {
-			logrus.Errorf("error opening auth key file: %v", e)
-			return nil, e
-		}
-		defer auth.Close()
-		logrus.Infof("adding public to auth keys: %v", pair.Public.String())
-		auth.WriteString(pair.Public.String())
-		auth.WriteString("\n")
-	}
-	return pair, nil
 }
 
 //Fwd holds state related to portforwarding parsed from cmdline or config

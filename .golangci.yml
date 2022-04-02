@@ -43,7 +43,6 @@ linters:
     - unconvert # Remove unnecessary type conversions [fast: true, auto-fix: false]
     - unused # Checks Go code for unused constants, variables, functions and types [fast: false, auto-fix: false]
     - varcheck # Finds unused global variables and constants [fast: true, auto-fix: false]
-
   disable:
     # Don't care about line length, this is Go
     - lll # Reports long lines [fast: true, auto-fix: false]
@@ -67,7 +66,7 @@ linters:
     - interfacer # Linter that suggests narrower interface types [fast: false, auto-fix: false]
 linters-settings:
   goimports:
-    local-prefixes: github.com/nametaginc/nt
+    local-prefixes: zmap.io/portal
   govet:
     disable:
       - shadow

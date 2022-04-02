@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/certs"
 )
 

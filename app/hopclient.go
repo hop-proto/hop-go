@@ -1,62 +1,65 @@
-//Package app provides functions to run hop client and hop server
+// Package app provides functions to run hop client and hop server
 package app
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"sync"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/authgrants"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/codex"
-	"zmap.io/portal/keys"
+	"zmap.io/portal/core"
 	"zmap.io/portal/netproxy"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
 	"zmap.io/portal/userauth"
 )
 
-//HopClient holds state for client's perspective of session
-type HopClient struct {
+// HopClient holds state for client's perspective of session. It is not safe to
+// copy a HopClient.
+type HopClient struct { // nolint:maligned
+	m  sync.Mutex     // must be held whenever changing state (connecting)
+	wg sync.WaitGroup // incremented while a connection opens, decremented when it ends
+
+	connected bool // true if connected to address
+	address   string
+
 	TransportConn *transport.Client
 	ProxyConn     *tubes.Reliable
 	TubeMuxer     *tubes.Muxer
 	ExecTube      *codex.ExecTube
-	Config        *HopClientConfig
-	Proxied       bool
-	Primarywg     sync.WaitGroup
+
+	config HopClientConfig
+
+	Proxied bool
 }
 
-//HopClientConfig holds configuration options for hop client
+// HopClientConfig holds configuration options for hop client
 type HopClientConfig struct {
-	Principal       bool
-	Quiet           bool
-	Headless        bool
-	TransportConfig *transport.ClientConfig
-	SockAddr        string
-	Keypath         string
-	Username        string
-	Hostname        string
-	Port            string
-	LocalArgs       []string
-	RemoteArgs      []string
-	Cmd             string
+	User        string
+	Leaf        *certs.Certificate
+	SockAddr    string
+	LocalArgs   []string
+	RemoteArgs  []string
+	Cmd         string
+	NonPricipal bool // TODO(dadrian): Rename. What's the name for a non-principal connection? IsAuthGranted?
+	Headless    bool
 }
 
-//NewHopClient creates a new client object and loads keys from file or auth grant protocol
-func NewHopClient(cConfig *HopClientConfig) (*HopClient, error) {
+// NewHopClient creates a new client object and loads keys from file or auth grant protocol
+func NewHopClient(config HopClientConfig) (*HopClient, error) {
 	client := &HopClient{
-		Config:    cConfig,
-		Primarywg: sync.WaitGroup{},
-		Proxied:   false,
+		config:  config,
+		wg:      sync.WaitGroup{},
+		Proxied: false,
 	}
-	if cConfig.Principal {
-		err := client.LoadKeys(cConfig.Keypath) //read keys and generate a self signed cert
-		if err != nil {
-			return nil, err
-		}
+	if !config.NonPricipal {
+		// Do nothing, keys are passed at Dial time
 	} else {
 		err := client.getAuthorization()
 		if err != nil {
@@ -66,9 +69,18 @@ func NewHopClient(cConfig *HopClientConfig) (*HopClient, error) {
 	return client, nil
 }
 
-//Connect starts hop transport, tube muxer, conducts user authorization
-func (c *HopClient) Connect() error {
-	err := c.startUnderlying()
+// Dial connects to an address with the provided authentication.
+func (c *HopClient) Dial(address string, authentiator core.Authenticator) error {
+	c.m.Lock()
+	defer c.m.Unlock()
+	return c.connectLocked(address, authentiator)
+}
+
+func (c *HopClient) connectLocked(address string, authentiator core.Authenticator) error {
+	if c.connected {
+		return errors.New("already connected")
+	}
+	err := c.startUnderlying(address, authentiator)
 	if err != nil {
 		return err
 	}
@@ -78,20 +90,21 @@ func (c *HopClient) Connect() error {
 	if err != nil {
 		return err
 	}
+	c.connected = true
 	return nil
 }
 
 //Start starts any port forwarding/cmds/shells from the client
 func (c *HopClient) Start() error {
 	//TODO(baumanl): fix how session duration tied to cmd duration or port forwarding duration depending on options
-	if len(c.Config.RemoteArgs) > 0 {
-		for _, v := range c.Config.RemoteArgs {
-			if c.Config.Headless {
-				c.Primarywg.Add(1)
+	if len(c.config.RemoteArgs) > 0 {
+		for _, v := range c.config.RemoteArgs {
+			if c.config.Headless {
+				c.wg.Add(1)
 			}
 			go func(arg string) {
-				if c.Config.Headless {
-					defer c.Primarywg.Done()
+				if c.config.Headless {
+					defer c.wg.Done()
 				}
 				logrus.Info("Calling remote forward with arg: ", arg)
 				e := c.remoteForward(arg)
@@ -102,14 +115,14 @@ func (c *HopClient) Start() error {
 			}(v)
 		}
 	}
-	if len(c.Config.LocalArgs) > 0 {
-		for _, v := range c.Config.LocalArgs {
-			if c.Config.Headless {
-				c.Primarywg.Add(1)
+	if len(c.config.LocalArgs) > 0 {
+		for _, v := range c.config.LocalArgs {
+			if c.config.Headless {
+				c.wg.Add(1)
 			}
 			go func(arg string) {
-				if c.Config.Headless {
-					defer c.Primarywg.Done()
+				if c.config.Headless {
+					defer c.wg.Done()
 				}
 				e := c.localForward(arg)
 				if e != nil {
@@ -118,7 +131,7 @@ func (c *HopClient) Start() error {
 			}(v)
 		}
 	}
-	if !c.Config.Headless {
+	if !c.config.Headless {
 		err := c.startExecTube()
 		if err != nil {
 			logrus.Error(err)
@@ -130,7 +143,7 @@ func (c *HopClient) Start() error {
 
 //Wait blocks until the client has finished (usually used when waiting for a session tied to cmd/shell to finish)
 func (c *HopClient) Wait() {
-	c.Primarywg.Wait()
+	c.wg.Wait()
 }
 
 //Close explicitly closes down hop session (usually used after PF is down and can be terminated)
@@ -139,120 +152,101 @@ func (c *HopClient) Close() error {
 	//close all remote and local port forwarding relationships
 }
 
-//LoadKeys reads keys from provided file location and stores them in sess.Config.KeyPair
-func (c *HopClient) LoadKeys(keypath string) error {
-	logrus.Infof("C: Using key-file at %v for auth.", keypath)
-	pair, e := keys.ReadDHKeyFromPEMFile(keypath)
-	if e != nil {
-		return e
-	}
-	names := []certs.Name{certs.RawStringName(c.Config.Username)}
-	clientLeafIdentity := certs.Identity{
-		PublicKey: pair.Public,
-		Names:     names,
-	}
-	clientLeaf, err := certs.SelfSignLeaf(&clientLeafIdentity)
-	if err != nil {
-		return err
-	}
-	c.Config.TransportConfig.KeyPair = pair
-	c.Config.TransportConfig.Leaf = clientLeaf
-	c.Config.TransportConfig.Intermediate = nil
-	return nil
-}
-
 func (c *HopClient) getAuthorization() error {
-	clientKey := keys.GenerateNewX25519KeyPair()
-	c.Config.TransportConfig.KeyPair = clientKey
-	clientLeafIdentity := certs.Identity{
-		PublicKey: clientKey.Public,
-		Names:     []certs.Name{certs.RawStringName(c.Config.Username)},
-	}
-	clientLeaf, err := certs.SelfSignLeaf(&clientLeafIdentity)
-	c.Config.TransportConfig.Leaf = clientLeaf
-	if err != nil {
+	/*
+		clientKey := keys.GenerateNewX25519KeyPair()
+		c.Config.TransportConfig.KeyPair = clientKey
+		clientLeafIdentity := certs.Identity{
+			PublicKey: clientKey.Public,
+			Names:     []certs.Name{certs.RawStringName(c.Config.Username)},
+		}
+		clientLeaf, err := certs.SelfSignLeaf(&clientLeafIdentity)
+		c.Config.TransportConfig.Leaf = clientLeaf
+		if err != nil {
+			return nil
+		}
+
+		logrus.Infof("Client generated: %v", c.Config.TransportConfig.KeyPair.Public.String())
+		logrus.Infof("C: Initiating AGC Protocol.")
+
+		udsconn, err := net.Dial("unix", c.Config.SockAddr)
+		if err != nil {
+			return err
+		}
+		logrus.Infof("C: CONNECTED TO UDS: [%v]", udsconn.RemoteAddr().String())
+		agc := authgrants.NewAuthGrantConn(udsconn)
+		defer agc.Close()
+		if !c.Config.Headless && c.Config.Cmd == "" { //shell
+			t, e := agc.GetAuthGrant(c.Config.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+				c.Config.Port, authgrants.ShellAction, "")
+			if e == nil {
+				logrus.Infof("C: Principal approved request to open a shell. Deadline: %v", t)
+			} else if e != authgrants.ErrIntentDenied {
+				return e
+			}
+		}
+		if !c.Config.Headless && c.Config.Cmd != "" { //cmd
+			t, e := agc.GetAuthGrant(c.Config.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+				c.Config.Port, authgrants.CommandAction, c.Config.Cmd)
+			if e == nil {
+				logrus.Infof("C: Principal approved request to run cmd: %v. Deadline: %v", c.Config.Cmd, t)
+			} else if e != authgrants.ErrIntentDenied {
+				return e
+			}
+		}
+		if len(c.Config.LocalArgs) > 0 { //local forwarding
+			for _, v := range c.Config.LocalArgs {
+				t, e := agc.GetAuthGrant(c.Config.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+					c.Config.Port, authgrants.LocalPFAction, v)
+				if e == nil {
+					logrus.Infof("C: Principal approved request to do local forwarding for %v. Deadline: %v", v, t)
+				} else if e != authgrants.ErrIntentDenied {
+					return e
+				}
+			}
+		}
+		if len(c.Config.RemoteArgs) > 0 { //remote forwarding
+			for _, v := range c.Config.RemoteArgs {
+				t, e := agc.GetAuthGrant(c.Config.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
+					c.Config.Port, authgrants.RemotePFAction, v)
+				if e == nil {
+					logrus.Infof("C: Principal approved request to do remote forwarding for %v. Deadline: %v", v, t)
+				} else if e != authgrants.ErrIntentDenied {
+					return e
+				}
+			}
+		}
 		return nil
-	}
-
-	logrus.Infof("Client generated: %v", c.Config.TransportConfig.KeyPair.Public.String())
-	logrus.Infof("C: Initiating AGC Protocol.")
-
-	udsconn, err := net.Dial("unix", c.Config.SockAddr)
-	if err != nil {
-		return err
-	}
-	logrus.Infof("C: CONNECTED TO UDS: [%v]", udsconn.RemoteAddr().String())
-	agc := authgrants.NewAuthGrantConn(udsconn)
-	defer agc.Close()
-	if !c.Config.Headless && c.Config.Cmd == "" { //shell
-		t, e := agc.GetAuthGrant(c.Config.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
-			c.Config.Port, authgrants.ShellAction, "")
-		if e == nil {
-			logrus.Infof("C: Principal approved request to open a shell. Deadline: %v", t)
-		} else if e != authgrants.ErrIntentDenied {
-			return e
-		}
-	}
-	if !c.Config.Headless && c.Config.Cmd != "" { //cmd
-		t, e := agc.GetAuthGrant(c.Config.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
-			c.Config.Port, authgrants.CommandAction, c.Config.Cmd)
-		if e == nil {
-			logrus.Infof("C: Principal approved request to run cmd: %v. Deadline: %v", c.Config.Cmd, t)
-		} else if e != authgrants.ErrIntentDenied {
-			return e
-		}
-	}
-	if len(c.Config.LocalArgs) > 0 { //local forwarding
-		for _, v := range c.Config.LocalArgs {
-			t, e := agc.GetAuthGrant(c.Config.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
-				c.Config.Port, authgrants.LocalPFAction, v)
-			if e == nil {
-				logrus.Infof("C: Principal approved request to do local forwarding for %v. Deadline: %v", v, t)
-			} else if e != authgrants.ErrIntentDenied {
-				return e
-			}
-		}
-	}
-	if len(c.Config.RemoteArgs) > 0 { //remote forwarding
-		for _, v := range c.Config.RemoteArgs {
-			t, e := agc.GetAuthGrant(c.Config.TransportConfig.KeyPair.Public, c.Config.Username, c.Config.Hostname,
-				c.Config.Port, authgrants.RemotePFAction, v)
-			if e == nil {
-				logrus.Infof("C: Principal approved request to do remote forwarding for %v. Deadline: %v", v, t)
-			} else if e != authgrants.ErrIntentDenied {
-				return e
-			}
-		}
-	}
-	return nil
+	*/
+	panic("unimplemented")
 }
 
-func (c *HopClient) startUnderlying() error {
-	//logrus.SetLevel(logrus.DebugLevel)
-	//******ESTABLISH HOP SESSION******
-	//TODO(baumanl): figure out addr format requirements + check for them above
-	addr := c.Config.Hostname + ":" + c.Config.Port
-	if _, err := net.LookupAddr(addr); err != nil {
-		//Couldn't resolve address with local resolver
-		if ip, ok := hostToIPAddr[c.Config.Hostname]; ok {
-			addr = ip + ":" + c.Config.Port
-		}
+func (c *HopClient) startUnderlying(address string, authenticator core.Authenticator) error {
+	// TODO(dadrian): Update this once the authenticator interface is set.
+	transportConfig := transport.ClientConfig{
+		Exchanger: authenticator,
+		Verify:    authenticator.GetVerifyConfig(),
+		Leaf:      authenticator.GetLeaf(),
 	}
 	var err error
 	if !c.Proxied {
-		c.TransportConn, err = transport.Dial("udp", addr, *c.Config.TransportConfig) //There seem to be limits on Dial() and addr format
+		c.TransportConn, err = transport.Dial("udp", address, transportConfig)
 	} else {
-		c.TransportConn, err = transport.DialNP("netproxy", addr, c.ProxyConn, *c.Config.TransportConfig)
+		c.TransportConn, err = transport.DialNP("netproxy", address, c.ProxyConn, transportConfig)
 	}
 	if err != nil {
 		logrus.Errorf("C: error dialing server: %v", err)
 		return err
 	}
-	err = c.TransportConn.Handshake() //This hangs if the server is not available when it starts. Add retry or timeout?
+
+	// TODO(dadrian): This hangs if the server is not available when it starts.
+	// Transport needs to be set with a timeout.
+	err = c.TransportConn.Handshake()
 	if err != nil {
 		logrus.Errorf("C: Issue with handshake: %v", err)
 		return err
 	}
+	c.address = address
 	return nil
 }
 
@@ -260,7 +254,7 @@ func (c *HopClient) userAuthorization() error {
 	//*****PERFORM USER AUTHORIZATION******
 	uaCh, _ := c.TubeMuxer.CreateTube(UserAuthTube)
 	defer uaCh.Close()
-	if ok := userauth.RequestAuthorization(uaCh, c.Config.Username); !ok {
+	if ok := userauth.RequestAuthorization(uaCh, c.config.User); !ok {
 		return ErrClientUnauthorized
 	}
 	logrus.Info("User authorization complete")
@@ -280,7 +274,7 @@ func (c *HopClient) handleRemote(tube *tubes.Reliable) error {
 	tube.Read(init)
 	arg := string(init)
 	found := false
-	for _, v := range c.Config.RemoteArgs {
+	for _, v := range c.config.RemoteArgs {
 		if v == arg {
 			found = true
 		}
@@ -390,8 +384,8 @@ func (c *HopClient) localForward(arg string) error {
 
 	go func() {
 		//do local port forwarding
-		if c.Config.Headless {
-			defer c.Primarywg.Done()
+		if c.config.Headless {
+			defer c.wg.Done()
 		}
 		//accept incoming connections
 		regchan := make(chan net.Conn)
@@ -419,8 +413,8 @@ func (c *HopClient) localForward(arg string) error {
 				if e != nil {
 					return
 				}
-				if c.Config.Headless {
-					c.Primarywg.Add(1)
+				if c.config.Headless {
+					c.wg.Add(1)
 				}
 				go func() {
 					n, _ := io.Copy(npt, lconn)
@@ -440,14 +434,14 @@ func (c *HopClient) localForward(arg string) error {
 func (c *HopClient) startExecTube() error {
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	//Hop Session is tied to the life of this code execution tube.
-	logrus.Infof("Performing action: %v", c.Config.Cmd)
+	logrus.Infof("Performing action: %v", c.config.Cmd)
 	ch, err := c.TubeMuxer.CreateTube(ExecTube)
 	if err != nil {
 		logrus.Error(err)
 		return err
 	}
-	c.Primarywg.Add(1)
-	c.ExecTube, err = codex.NewExecTube(c.Config.Cmd, ch, &c.Primarywg)
+	c.wg.Add(1)
+	c.ExecTube, err = codex.NewExecTube(c.config.Cmd, ch, &c.wg)
 	return err
 }
 
@@ -462,7 +456,7 @@ func (c *HopClient) HandleTubes() {
 			continue
 		}
 		logrus.Infof("ACCEPTED NEW CHANNEL of TYPE: %v", t.Type())
-		if t.Type() == AuthGrantTube && c.Config.Headless {
+		if t.Type() == AuthGrantTube && c.config.Headless {
 			go c.principal(t)
 		} else if t.Type() == RemotePFTube {
 			go c.handleRemote(t)
@@ -543,24 +537,25 @@ func (c *HopClient) setupRemoteSession(req *authgrants.Intent) (*HopClient, erro
 	logrus.Info("C: USER CONFIRMED FIRST INTENT_REQUEST. CONTACTING S2...")
 
 	//create netproxy with server
-	npt, e := c.TubeMuxer.CreateTube(NetProxyTube)
+	npt, err := c.TubeMuxer.CreateTube(NetProxyTube)
 	logrus.Info("started netproxy tube from principal")
-	if e != nil {
+	if err != nil {
 		logrus.Fatal("C: Error starting netproxy tube")
 	}
 
 	hostname, port := req.Address()
-	addr := hostname + ":" + port
-	e = netproxy.Start(npt, addr, netproxy.AG)
-	if e != nil {
+	err = netproxy.Start(npt, net.JoinHostPort(hostname, port), netproxy.AG)
+	if err != nil {
 		logrus.Error("Issue proxying connection")
-		return nil, e
+		return nil, err
 	}
 
-	subConfig := c.Config
-	subConfig.Hostname = hostname
-	subConfig.Port = port
-	subConfig.Username = req.Username()
+	subConfig := c.config
+	u := core.URL{
+		Host: hostname,
+		Port: port,
+		User: req.Username(),
+	}
 	subsess, err := NewHopClient(subConfig)
 	if err != nil {
 		logrus.Error("Issue creating client")
@@ -569,18 +564,19 @@ func (c *HopClient) setupRemoteSession(req *authgrants.Intent) (*HopClient, erro
 	subsess.Proxied = true
 	subsess.ProxyConn = npt
 
-	e = subsess.startUnderlying()
-	if e != nil {
+	// TODO(dadrian): How do we get an authenticator to the dialer?
+	err = subsess.Dial(u.Address(), nil)
+	if err != nil {
 		logrus.Error("Issue starting underlying connection")
-		return nil, e
+		return nil, err
 	}
 	subsess.TubeMuxer = tubes.NewMuxer(subsess.TransportConn, subsess.TransportConn)
 	go subsess.TubeMuxer.Start()
 
-	e = subsess.userAuthorization()
-	if e != nil {
+	err = subsess.userAuthorization()
+	if err != nil {
 		logrus.Error("Failed user authorization")
-		return nil, e
+		return nil, err
 	}
 	// Want to keep this session open in case the "server 2" wants to continue chaining hop sessions together
 	// TODO(baumanl): Simplify this. Should only get authorization grant tubes?

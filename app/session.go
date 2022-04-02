@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bufio"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -62,7 +61,7 @@ func (sess *hopSession) checkAuthorization() bool {
 	defer uaTube.Close()
 	username := userauth.GetInitMsg(uaTube) //client sends desired username
 	logrus.Info("S: client req to access as: ", username)
-	//TODO(baumanl): verify that this is the best way to get client static key.
+	// TODO(baumanl): verify that this is the best way to get client static key.
 	/*I originally had the client just send the key over along with the username, but it
 	seemed strange to rely on the client to send the same key that it used during the handshake.
 	Instead I modified the transport layer code so that the client static is stored in the session state.
@@ -70,61 +69,49 @@ func (sess *hopSession) checkAuthorization() bool {
 	leaf := sess.server.server.FetchClientLeaf(sess.transportConn) //server fetches client static key that was used in handshake
 	k := keys.PublicKey(leaf.PublicKey)
 	logrus.Info("got userauth init message: ", k.String())
+
+	if err := sess.server.authorizeKey(username, k); err != nil {
+		logrus.Errorf("rejecting key for %q: %s", username, err)
+		return false
+	}
+
 	sess.user = username
 
-	cache, err := etcpwdparse.NewLoadedEtcPasswdCache() //Best way to do this? should I load this only once and then just reload on misses? What if /etc/passwd modified between accesses?
-	if err != nil {
-		err := errors.New("issue loading /etc/passwd")
-		logrus.Error(err)
-	}
-	path := "/home/" + username + sess.authorizedKeysLocation
-	if user, ok := cache.LookupUserByName(sess.user); ok {
-		path = user.Homedir() + sess.authorizedKeysLocation
-	}
-	f, e := os.Open(path)
-	if e != nil {
-		logrus.Error("Could not open file at path: ", path)
-	} else {
-		logrus.Info("opened keys file at path: ", path)
-		defer f.Close()
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			if scanner.Text() == k.String() {
-				logrus.Info("USER AUTHORIZED")
-				sess.isPrincipal = true
-				uaTube.Write([]byte{userauth.UserAuthConf})
-				return true
-			}
-		}
-	}
-
-	//Check for a matching authgrant
-	sess.server.m.Lock()
-	defer sess.server.m.Unlock()
-	authgrant, ok := sess.server.authgrants[k]
-	if !ok {
-		logrus.Info("USER NOT AUTHORIZED")
-		uaTube.Write([]byte{userauth.UserAuthDen})
-		return false
-	}
-	if authgrant.deadline.Before(time.Now()) {
-		delete(sess.server.authgrants, k)
-		logrus.Info("AUTHGRANT DEADLINE EXCEEDED")
-		uaTube.Write([]byte{userauth.UserAuthDen})
-		return false
-	}
-	if sess.user != authgrant.user {
-		logrus.Info("AUTHGRANT USER DOES NOT MATCH")
-		uaTube.Write([]byte{userauth.UserAuthDen})
-		return false
-	}
-	sess.authgrant = authgrant
-	sess.isPrincipal = false
-	delete(sess.server.authgrants, k)
-	sess.server.outstandingAuthgrants--
-	logrus.Info("USER AUTHORIZED VIA AUTHGRANT")
+	logrus.Info("USER AUTHORIZED")
+	sess.isPrincipal = true
 	uaTube.Write([]byte{userauth.UserAuthConf})
 	return true
+
+	// TODO(dadrian): re-enable authgrants
+	/*
+		//Check for a matching authgrant
+		sess.server.m.Lock()
+		defer sess.server.m.Unlock()
+		authgrant, ok := sess.server.authgrants[k]
+		if !ok {
+			logrus.Info("USER NOT AUTHORIZED")
+			uaTube.Write([]byte{userauth.UserAuthDen})
+			return false
+		}
+		if authgrant.deadline.Before(time.Now()) {
+			delete(sess.server.authgrants, k)
+			logrus.Info("AUTHGRANT DEADLINE EXCEEDED")
+			uaTube.Write([]byte{userauth.UserAuthDen})
+			return false
+		}
+		if sess.user != authgrant.user {
+			logrus.Info("AUTHGRANT USER DOES NOT MATCH")
+			uaTube.Write([]byte{userauth.UserAuthDen})
+			return false
+		}
+		sess.authgrant = authgrant
+		sess.isPrincipal = false
+		delete(sess.server.authgrants, k)
+		sess.server.outstandingAuthgrants--
+		logrus.Info("USER AUTHORIZED VIA AUTHGRANT")
+		uaTube.Write([]byte{userauth.UserAuthConf})
+		return true
+	*/
 }
 
 //start() sets up a session's muxer and handles incoming tube requests.

@@ -9,6 +9,8 @@ import (
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
+
+	"zmap.io/portal/certs"
 	"zmap.io/portal/keys"
 )
 
@@ -23,7 +25,15 @@ func TestClientServerCompatibilityHandshake(t *testing.T) {
 	go s.Serve()
 	keyPair, err := keys.ReadDHKeyFromPEMFile("testdata/leaf-key.pem")
 	assert.NilError(t, err)
-	c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verifyConfig, KeyPair: keyPair})
+	leaf, err := certs.SelfSignLeaf(&certs.Identity{
+		PublicKey: keyPair.Public,
+	})
+	assert.NilError(t, err)
+	c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{
+		Verify:    *verifyConfig,
+		Exchanger: keyPair,
+		Leaf:      leaf,
+	})
 	assert.NilError(t, err)
 	err = c.Handshake()
 	assert.Check(t, err)

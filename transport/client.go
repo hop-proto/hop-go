@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"zmap.io/portal/certs"
 )
 
 //UDPLike interface standardizes Reliable channels and UDPConn.
@@ -80,25 +79,10 @@ func (c *Client) Handshake() error {
 }
 
 func (c *Client) prepareCertificates() (leaf, intermediate []byte, err error) {
-	if c.config.KeyPair == nil {
-		return nil, nil, errors.New("ClientConfig.KeyPair must be non-nil")
+	if c.config.Exchanger == nil {
+		return nil, nil, errors.New("ClientConfig.Exchanger must be non-nil, you probably want to provide a keys.X25519KeyPair")
 	}
 
-	if !c.config.UseCertificate {
-		// Generate a temporary self-signed certificate.
-		identity := certs.Identity{
-			PublicKey: c.config.KeyPair.Public,
-		}
-		var tmp *certs.Certificate
-		tmp, err = certs.SelfSignLeaf(&identity)
-		if err != nil {
-			return nil, nil, err
-		}
-		leaf, err = tmp.Marshal()
-		return
-	}
-
-	// Otherwise, certs have been provided
 	if c.config.Leaf == nil {
 		return nil, nil, errors.New("ClientConfig.Leaf must be non-nil when ClientConfig.UseCertificate is true")
 	}
@@ -122,7 +106,7 @@ func (c *Client) clientHandshakeLocked() error {
 	if err != nil {
 		return err
 	}
-	c.hs.static = c.config.KeyPair
+	c.hs.static = c.config.Exchanger
 	c.hs.certVerify = &c.config.Verify
 	c.hs.duplex.Absorb([]byte(ProtocolName))
 

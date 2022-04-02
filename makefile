@@ -27,3 +27,7 @@ install:
 test: ## test
 test:
 	go test ./... -timeout 120s
+
+.PHONY: server-dev
+serve-dev: ## launch a container running the server with code mounted in
+	make -C hack serve-dev

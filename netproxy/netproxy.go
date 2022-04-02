@@ -1,4 +1,4 @@
-//Package netproxy provides utilities for network proxy tubes
+// Package netproxy provides utilities for network proxy tubes
 package netproxy
 
 import (
@@ -7,6 +7,7 @@ import (
 	"net"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/tubes"
 )
 

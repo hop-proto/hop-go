@@ -10,6 +10,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
+
 	"zmap.io/portal/snp"
 )
 

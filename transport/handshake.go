@@ -11,6 +11,7 @@ import (
 	"zmap.io/portal/kravatte"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/cyclist"
 )
 
@@ -30,13 +31,15 @@ func AddressHashKey(addr *net.UDPAddr) string {
 type HandshakeState struct {
 	duplex    cyclist.Cyclist
 	ephemeral keys.X25519KeyPair
-	static    *keys.X25519KeyPair
+	static    keys.Exchangable
 
 	macBuf          [MacLen]byte
 	remoteEphemeral [DHLen]byte
 	handshakeKey    [KeyLen]byte
-	//clientStatic    [DHLen]byte
-	clientLeaf certs.Certificate
+
+	sni certs.Name
+
+	clientLeaf certs.Certificate // TODO(dadrian): Is this necessary?
 	sessionID  [SessionIDLen]byte
 
 	cookieKey *[KeyLen]byte // server only
@@ -437,7 +440,7 @@ func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
 	b = b[MacLen:]
 
 	// DH (se)
-	hs.se, err = hs.static.DH(hs.remoteEphemeral[:])
+	hs.se, err = hs.static.Agree(hs.remoteEphemeral[:])
 	if err != nil {
 		logrus.Debugf("client: unable to calculate se: %s", err)
 		return HeaderLen + SessionIDLen + encCertLen + MacLen, err

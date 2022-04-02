@@ -12,9 +12,19 @@ import (
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
+
 	"zmap.io/portal/certs"
 	"zmap.io/portal/keys"
 )
+
+func newClientAuth(t *testing.T) (*keys.X25519KeyPair, *certs.Certificate) {
+	k := keys.GenerateNewX25519KeyPair()
+	c, err := certs.SelfSignLeaf(&certs.Identity{
+		PublicKey: k.Public,
+	})
+	assert.NilError(t, err)
+	return k, c
+}
 
 func newTestServerConfig(t *testing.T) (*ServerConfig, *VerifyConfig) {
 	keyPair, err := keys.ReadDHKeyFromPEMFile("testdata/leaf-key.pem")
@@ -48,9 +58,11 @@ func TestMultipleHandshakes(t *testing.T) {
 	go func() {
 		s.Serve()
 	}()
+	kp, leaf := newClientAuth(t)
 	clientConfig := ClientConfig{
-		Verify:  *verifyConfig,
-		KeyPair: keys.GenerateNewX25519KeyPair(),
+		Verify:    *verifyConfig,
+		Exchanger: kp,
+		Leaf:      leaf,
 	}
 	wg.Add(3)
 	var zero [KeyLen]byte
@@ -104,7 +116,8 @@ func TestServerRead(t *testing.T) {
 	}()
 
 	t.Run("test client write", func(t *testing.T) {
-		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, KeyPair: keys.GenerateNewX25519KeyPair()})
+		kp, cert := newClientAuth(t)
+		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, Exchanger: kp, Leaf: cert})
 		assert.NilError(t, err)
 		err = c.Handshake()
 		assert.NilError(t, err)
@@ -118,7 +131,8 @@ func TestServerRead(t *testing.T) {
 	})
 
 	t.Run("test client write triggers handshake", func(t *testing.T) {
-		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, KeyPair: keys.GenerateNewX25519KeyPair()})
+		kp, cert := newClientAuth(t)
+		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, Exchanger: kp, Leaf: cert})
 		assert.NilError(t, err)
 		s := "Another splinter under the skin. Another season of loneliness."
 		n, err := c.Write([]byte(s))
@@ -130,7 +144,8 @@ func TestServerRead(t *testing.T) {
 	})
 
 	t.Run("test big client writes", func(t *testing.T) {
-		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, KeyPair: keys.GenerateNewX25519KeyPair()})
+		kp, cert := newClientAuth(t)
+		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, Exchanger: kp, Leaf: cert})
 		assert.NilError(t, err)
 		data := make([]byte, 3100)
 		n, err := rand.Read(data)
@@ -178,7 +193,8 @@ func TestServerWrite(t *testing.T) {
 	}()
 
 	t.Run("server echo", func(t *testing.T) {
-		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, KeyPair: keys.GenerateNewX25519KeyPair()})
+		kp, leaf := newClientAuth(t)
+		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, Exchanger: kp, Leaf: leaf})
 		assert.NilError(t, err)
 		c.Handshake()
 		h, err := server.AcceptTimeout(5 * time.Second)
@@ -213,7 +229,8 @@ func TestServerWrite(t *testing.T) {
 			"Just wanted to love everyone",
 		}
 
-		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, KeyPair: keys.GenerateNewX25519KeyPair()})
+		kp, leaf := newClientAuth(t)
+		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, Exchanger: kp, Leaf: leaf})
 		assert.NilError(t, err)
 
 		wg := sync.WaitGroup{}

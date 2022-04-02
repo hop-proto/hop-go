@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"sync"
@@ -10,8 +12,13 @@ import (
 
 	"github.com/sbinet/pstree"
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/authgrants"
+	"zmap.io/portal/certs"
+	"zmap.io/portal/config"
+	"zmap.io/portal/core"
 	"zmap.io/portal/keys"
+	"zmap.io/portal/pkg/glob"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
 )
@@ -24,47 +31,31 @@ type HopServer struct {
 	outstandingAuthgrants int
 	config                *HopServerConfig
 
+	fsystem fs.FS
+
 	server   *transport.Server
 	authsock net.Listener
 }
 
 //HopServerConfig contains hop server specific configuration settings
 type HopServerConfig struct {
-	Port string
-	Host string
-
 	SockAddr                 string
-	TransportConfig          *transport.ServerConfig
 	MaxOutstandingAuthgrants int
 	AuthorizedKeysLocation   string //defaults to /.hop/authorized_keys
 }
 
-//NewHopServer returns a Hop Server containing a transport server running on the host/port
-//sepcified in the config file and an authgrant server listening on the provided socket.
-func NewHopServer(hconfig *HopServerConfig) (*HopServer, error) {
-	//set up transportServer
-	//*****TRANSPORT LAYER SET UP*****
-	pktConn, err := net.ListenPacket("udp", net.JoinHostPort(hconfig.Host, hconfig.Port))
-	if err != nil {
-		logrus.Errorf("S: ERROR STARTING UDP CONN: %v", err)
-		return nil, err
-	}
-	logrus.Infof("listening on %v:%v", hconfig.Host, hconfig.Port)
-	// It's actually a UDP conn
-	udpConn := pktConn.(*net.UDPConn)
-	transportServer, err := transport.NewServer(udpConn, *hconfig.TransportConfig)
-	if err != nil {
-		logrus.Errorf("S: ERROR STARTING TRANSPORT CONN: %v", err)
-		return nil, err
-	}
-	//set up authgrantServer (UDS socket)
-	//make sure the socket does not already exist.
+// NewHopServer returns a Hop Server containing a transport server running on
+// the host/port specified in the config file and an authgrant server listening
+// on the provided socket.
+func NewHopServer(underlying *transport.Server, hconfig *HopServerConfig) (*HopServer, error) {
+	// set up authgrantServer (UDS socket)
+	// make sure the socket does not already exist.
 	if err := os.RemoveAll(hconfig.SockAddr); err != nil {
 		logrus.Error(err)
 		return nil, err
 	}
 
-	//set socket options and start listening to socket
+	// set socket options and start listening to socket
 	sockconfig := &net.ListenConfig{Control: setListenerOptions}
 	authgrantServer, err := sockconfig.Listen(context.Background(), "unix", hconfig.SockAddr)
 	if err != nil {
@@ -83,10 +74,11 @@ func NewHopServer(hconfig *HopServerConfig) (*HopServer, error) {
 		outstandingAuthgrants: 0,
 		config:                hconfig,
 
-		server:   transportServer,
+		server:   underlying,
 		authsock: authgrantServer,
-	}
 
+		fsystem: os.DirFS("/"),
+	}
 	return server, nil
 }
 
@@ -109,7 +101,7 @@ func (s *HopServer) Serve() {
 	}
 }
 
-//Starts a new hop session
+// newSession Starts a new hop session
 func (s *HopServer) newSession(serverConn *transport.Handle) {
 	sess := &hopSession{
 		transportConn:          serverConn,
@@ -239,4 +231,115 @@ func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
 		}
 	}
 	return false
+}
+
+// ListenAddress returns the underlying net.UDPAddr of the transport server.
+func (s *HopServer) ListenAddress() net.Addr {
+	s.m.Lock()
+	defer s.m.Unlock()
+	if s.server == nil {
+		return &net.UDPAddr{}
+	}
+	return s.server.ListenAddress()
+}
+
+// authorizeKey returns true if the publicKey is in the authorized_keys file for
+// the user.
+func (s *HopServer) authorizeKey(user string, publicKey keys.PublicKey) error {
+	d, err := config.UserDirectoryFor(user)
+	if err != nil {
+		return err
+	}
+	path := core.AuthorizedKeysPath(d)
+	f, err := s.fsystem.Open(path[1:])
+	if err != nil {
+		return err
+	}
+	akeys, err := core.ParseAuthorizedKeys(f)
+	if err != nil {
+		return nil
+	}
+	if akeys.Allowed(publicKey) {
+		return nil
+	}
+	return fmt.Errorf("key %s is not authorized for user %s", publicKey, user)
+}
+
+// VirtualHosts is mapping from host patterns to Certificates.
+type VirtualHosts []VirtualHost
+
+// VirtualHost is a pattern-certificate pairing.
+type VirtualHost struct {
+	Pattern     string
+	Certificate transport.Certificate
+}
+
+func transportCert(keyPath, certPath, intermediatePath string) (*transport.Certificate, error) {
+	keyPair, err := keys.ReadDHKeyFromPEMFile(keyPath)
+	if err != nil {
+		return nil, err
+	}
+	leaf, rawLeaf, err := certs.ReadCertificateBytesFromPEMFile(certPath)
+	if err != nil {
+		return nil, err
+	}
+	var rawIntermediate []byte
+	if intermediatePath != "" {
+		_, rawIntermediate, err = certs.ReadCertificateBytesFromPEMFile(intermediatePath)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &transport.Certificate{
+		RawLeaf:         rawLeaf,
+		RawIntermediate: rawIntermediate,
+		Exchanger:       keyPair,
+		Leaf:            leaf,
+	}, nil
+
+}
+
+// NewVirtualHosts constructs a VirtualHost object from a server
+// configmap[string]transport.Certificate{}.
+func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fallbackCert *certs.Certificate) (VirtualHosts, error) {
+	out := make([]VirtualHost, 0, len(c.Names)+1)
+	for _, block := range c.Names {
+		// TODO(dadrian)[2022-12-26]: If certs are shared, we'll re-parse all
+		// these. We could use some kind of content-addressable store to cache
+		// these after a single load pass across the whole config.
+		tc, err := transportCert(block.Key, block.Certificate, block.Intermediate)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, VirtualHost{
+			Pattern:     block.Pattern,
+			Certificate: *tc,
+		})
+	}
+	if c.Key != "" {
+		tc, err := transportCert(c.Key, c.Certificate, c.Intermediate)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, VirtualHost{
+			Pattern:     "*",
+			Certificate: *tc,
+		})
+	}
+	return out, nil
+}
+
+// Match returns the first VirtualHost where the pattern glob matches the name.
+// It return nil if none are found.
+//
+// TODO(dadrian)[2022-02-26]: This only does raw string matching, it needs to
+// have some way to disambiguate name types.
+func (vhosts VirtualHosts) Match(name certs.Name) *VirtualHost {
+	for i := range vhosts {
+		logrus.Infof("pattern, in: %q, %s", vhosts[i].Pattern, string(name.Label))
+		if glob.Glob(vhosts[i].Pattern, string(name.Label)) {
+			return &vhosts[i]
+		}
+	}
+	return nil
 }

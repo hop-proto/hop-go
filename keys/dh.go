@@ -35,6 +35,13 @@ func (x *X25519KeyPair) Generate() {
 	curve25519.ScalarBaseMult((*[32]byte)(&x.Public), (*[32]byte)(&x.Private))
 }
 
+// DHPublicFromPrivate returns the PublicKey corresponding with a 32-byte DH private key.
+func DHPublicFromPrivate(private *PrivateKey) PublicKey {
+	var out PublicKey
+	curve25519.ScalarBaseMult((*[32]byte)(&out), (*[32]byte)(private))
+	return out
+}
+
 // PublicFromPrivate recalculates the Public key based on the current Private
 // key.
 func (x *X25519KeyPair) PublicFromPrivate() {

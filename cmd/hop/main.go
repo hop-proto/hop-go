@@ -2,60 +2,54 @@ package main
 
 import (
 	"flag"
-	"fmt"
-	"io"
-	"net/url"
 	"os"
 	"os/user"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/app"
+	"zmap.io/portal/certs"
+	"zmap.io/portal/config"
+	"zmap.io/portal/core"
+	"zmap.io/portal/keys"
+	"zmap.io/portal/pkg/combinators"
 	"zmap.io/portal/transport"
 )
 
-func configFromCmdLineFlags(args []string) (*app.HopClientConfig, error) {
-	_, verify := app.NewTestServerConfig(app.TestDataPathPrefixDef)
-	keypath, _ := os.UserHomeDir()
-	keypath += app.DefaultKeyPath
+// Flags holds CLI arguments for the Hop client.
+//
+// TODO(dadrian): This structure probably needs to get moved to another package.
+type Flags struct {
+	ConfigPath string
+	Cmd        string
 
-	transportClientConfig := &transport.ClientConfig{
-		Verify: *verify,
-	}
+	// TODO(dadrian): What are these args?
+	RemoteArgs []string
+	LocalArgs  []string
+	Headless   bool
+}
 
-	cConfig := &app.HopClientConfig{
-		TransportConfig: transportClientConfig,
-		SockAddr:        app.DefaultHopAuthSocket,
-		Principal:       false,
-		Keypath:         keypath,
-	}
-
-	//******PROCESS CMD LINE ARGUMENTS******
+func main() {
+	// TODO(dadrian): This function is kind of long. It'd be nice to break some
+	// of it out (like the key and cert processing) so that config behavior
+	// could be unit tested.
+	var f Flags
 	var fs flag.FlagSet
 
-	fs.Func("k", "indicates principal with specific key location", func(s string) error {
-		cConfig.Principal = true
-		cConfig.Keypath = s
-		return nil
-	})
-
-	fs.BoolVar(&cConfig.Principal, "K", cConfig.Principal, "indicates principal with default key location: $HOME/.hop/key")
-
 	fs.Func("R", "perform remote port forwarding", func(s string) error {
-		cConfig.RemoteArgs = append(cConfig.RemoteArgs, s)
+		f.RemoteArgs = append(f.RemoteArgs, s)
 		return nil
 	})
 
 	fs.Func("L", "perform local port forwarding", func(s string) error {
-		cConfig.LocalArgs = append(cConfig.LocalArgs, s)
+		f.LocalArgs = append(f.LocalArgs, s)
 		return nil
 	})
 
-	fs.StringVar(&cConfig.Cmd, "c", "", "specific command to execute on remote server")
-	fs.BoolVar(&cConfig.Quiet, "q", false, "turn off logging")
-	if cConfig.Quiet {
-		logrus.SetOutput(io.Discard)
-	}
-	fs.BoolVar(&cConfig.Headless, "N", false, "don't execute a remote command. Useful for just port forwarding.")
+	fs.StringVar(&f.ConfigPath, "C", "", "path to client config (uses ~/.hop/config when unspecified)")
+
+	fs.StringVar(&f.Cmd, "c", "", "specific command to execute on remote server")
+	fs.BoolVar(&f.Headless, "N", false, "don't execute a remote command. Useful for just port forwarding.")
 
 	/*TODO(baumanl): Right now all explicit commands are run within the context of a shell using "$SHELL -c <cmd>"
 	(this allows for expanding env variables, piping, etc.) However, there may be instances where this is undesirable.
@@ -66,56 +60,103 @@ func configFromCmdLineFlags(args []string) (*app.HopClientConfig, error) {
 	//var runCmdInShell bool
 	// fs.BoolVar(&runCmdInShell, "s", false, "run specified command...")
 
-	err := fs.Parse(args)
+	err := fs.Parse(os.Args[1:])
 	if err != nil {
-		return nil, err
+		logrus.Fatalf("%s", err)
 	}
 	if fs.NArg() < 1 { //there needs to be an argument that is not a flag of the form [user@]host[:port]
-		return nil, fmt.Errorf("missing [user@]host[:port]")
+		logrus.Fatal("missing [hop://][user@]host[:port]")
 	}
 	hoststring := fs.Arg(0)
-	if fs.NArg() > 1 { //still flags after the hoststring that need to be parsed
-		err = fs.Parse(fs.Args()[1:])
-		if err != nil || fs.NArg() > 0 {
-			return nil, fmt.Errorf("incorrect arguments")
+	inputURL, err := core.ParseURL(hoststring)
+	if err != nil {
+		logrus.Fatalf("invalid input %s: %s", hoststring, err)
+	}
+
+	// Load the config
+	err = config.InitClient(f.ConfigPath)
+	if err != nil {
+		logrus.Fatalf("error loading config: %s", err)
+	}
+
+	cc := config.GetClient()
+	hc := cc.MatchHost(inputURL.Host)
+	address := core.MergeURLs(hc.HostURL(), *inputURL)
+
+	if address.User == "" {
+		u, err := user.Current()
+		if err != nil {
+			logrus.Fatalf("user not specified and unable to determine current user: %s", err)
+		}
+		address.User = u.Username
+	}
+
+	// Set up keys and certificates
+	keyPath := combinators.StringOr(hc.Key, combinators.StringOr(cc.Key, config.DefaultKeyPath()))
+	logrus.Infof("using key %q", keyPath)
+	keypair, err := keys.ReadDHKeyFromPEMFile(keyPath)
+	if err != nil {
+		logrus.Fatalf("unable to load key pair %q: %s", keyPath, err)
+	}
+
+	// Host block overrides global block. Set overrides Unset. Certificate
+	// overrides AutoSelfSign.
+	var leafFile string
+	var autoSelfSign bool
+	if hc.Certificate != "" {
+		leafFile = hc.Certificate
+	} else if hc.AutoSelfSign == config.True {
+		autoSelfSign = true
+	} else if hc.AutoSelfSign != config.True && cc.Certificate != "" {
+		leafFile = cc.Certificate
+	} else if hc.AutoSelfSign == config.Unset && cc.AutoSelfSign == config.True {
+		autoSelfSign = true
+	} else {
+		logrus.Fatalf("no certificate provided and AutoSelfSign is not enabled for %q", address)
+	}
+
+	var leaf *certs.Certificate
+	if autoSelfSign {
+		logrus.Infof("auto self-signing leaf for user %q", address.User)
+		leaf, err = certs.SelfSignLeaf(&certs.Identity{
+			PublicKey: keypair.Public,
+			Names: []certs.Name{
+				certs.RawStringName(address.User),
+			},
+		})
+		if err != nil {
+			logrus.Fatalf("unable to self-sign certificate: %s", err)
+		}
+	} else {
+		leaf, err = certs.ReadCertificatePEMFile(leafFile)
+		if err != nil {
+			logrus.Fatalf("unable to open certificate: %s", err)
 		}
 	}
 
-	url, err := url.Parse("//" + hoststring) //double slashes necessary since there is never a scheme
-	if err != nil {
-		logrus.Error(err)
-		return nil, err
+	authenticator := core.InMemoryAuthenticator{
+		X25519KeyPair: keypair,
+		VerifyConfig: transport.VerifyConfig{
+			InsecureSkipVerify: true, // TODO(dadrian): Host-key verification
+		},
+		Leaf: leaf,
 	}
 
-	cConfig.Hostname = url.Hostname()
-	cConfig.Port = url.Port()
-	if cConfig.Port == "" {
-		cConfig.Port = app.DefaultHopPort
+	logrus.Info(address)
+	cConfig := app.HopClientConfig{
+		User:        address.User,
+		Leaf:        leaf,
+		SockAddr:    app.DefaultHopAuthSocket,
+		NonPricipal: false,
 	}
 
-	username := url.User.Username()
-	if username == "" && cConfig.Username == "" { //if no username is entered use local client username
-		u, e := user.Current()
-		if e != nil {
-			return nil, err
-		}
-		cConfig.Username = u.Username
-	}
-	return cConfig, nil
-}
-
-func main() {
-	cConfig, err := configFromCmdLineFlags(os.Args[1:])
-	if err != nil {
-		logrus.Error(err)
-		return
-	}
 	client, err := app.NewHopClient(cConfig)
 	if err != nil {
 		logrus.Error(err)
 		return
 	}
-	err = client.Connect()
+
+	err = client.Dial(address.Address(), authenticator)
 	if err != nil {
 		logrus.Error(err)
 		return
@@ -125,7 +166,8 @@ func main() {
 		logrus.Error(err)
 		return
 	}
-	//handle incoming tubes
+
+	// handle incoming tubes
 	go client.HandleTubes()
 	client.Wait() //client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
 }

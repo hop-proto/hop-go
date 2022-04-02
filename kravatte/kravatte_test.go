@@ -8,6 +8,7 @@ import (
 
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
+
 	"zmap.io/portal/snp"
 )
 

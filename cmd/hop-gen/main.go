@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/keys"
 )
 
