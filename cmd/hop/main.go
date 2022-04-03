@@ -145,9 +145,15 @@ func main() {
 
 	logrus.Info(address)
 	cConfig := app.HopClientConfig{
-		User:        address.User,
-		Leaf:        leaf,
-		SockAddr:    app.DefaultHopAuthSocket,
+		User:     address.User,
+		Leaf:     leaf,
+		SockAddr: app.DefaultHopAuthSocket,
+		Cmd:      f.Cmd,
+		// TODO(bauman): allow for more config options for cmds/local/remote PF
+		// right now specific cmd can only be specified in cmd line and PF
+		// currently disabled
+
+		// TODO(baumanl): set up docker container with more port bindings for PF?
 		NonPricipal: false,
 	}
 

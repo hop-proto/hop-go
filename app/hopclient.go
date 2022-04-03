@@ -96,7 +96,8 @@ func (c *HopClient) connectLocked(address string, authentiator core.Authenticato
 
 //Start starts any port forwarding/cmds/shells from the client
 func (c *HopClient) Start() error {
-	//TODO(baumanl): fix how session duration tied to cmd duration or port forwarding duration depending on options
+	//TODO(baumanl): fix how session duration tied to cmd duration or port
+	//forwarding duration depending on options
 	if len(c.config.RemoteArgs) > 0 {
 		for _, v := range c.config.RemoteArgs {
 			if c.config.Headless {
