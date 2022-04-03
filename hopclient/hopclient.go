@@ -1,5 +1,5 @@
-// Package app provides functions to run hop client and hop server
-package app
+// Package hopclient provides functions to run hop client
+package hopclient
 
 import (
 	"encoding/binary"
@@ -13,12 +13,34 @@ import (
 	"zmap.io/portal/authgrants"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/codex"
+	"zmap.io/portal/common"
 	"zmap.io/portal/core"
 	"zmap.io/portal/netproxy"
+	"zmap.io/portal/portforwarding"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
 	"zmap.io/portal/userauth"
 )
+
+const clientUsage = "hop [user@]host[:port] [-K or -k path] [-L port:host:hostport] [-R port:host:hostport] [-N] [-c cmd] [-q] [-h]"
+
+//ErrClientInvalidUsage returned by client when unable to parse command line arguments
+var ErrClientInvalidUsage = errors.New("usage: " + clientUsage)
+
+//ErrClientLoadingKeys returned by client (principal) when unable to load keys from specified location
+var ErrClientLoadingKeys = errors.New("unable to load keys")
+
+//ErrClientGettingAuthorization  is returned by client when it can't get
+var ErrClientGettingAuthorization = errors.New("failed to get authorization")
+
+//ErrClientStartingUnderlying is returned by client when it can't start transport layer conn
+var ErrClientStartingUnderlying = errors.New("error starting underlying conn")
+
+//ErrClientUnauthorized is returned by client when it is not authorized to perform the action it requested
+var ErrClientUnauthorized = errors.New("client not authorized")
+
+//ErrClientStartingExecTube is returned by client when cmd execution and/or I/O redirection fails
+var ErrClientStartingExecTube = errors.New("failed to start session")
 
 // HopClient holds state for client's perspective of session. It is not safe to
 // copy a HopClient.
@@ -253,7 +275,7 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 
 func (c *HopClient) userAuthorization() error {
 	//*****PERFORM USER AUTHORIZATION******
-	uaCh, _ := c.TubeMuxer.CreateTube(UserAuthTube)
+	uaCh, _ := c.TubeMuxer.CreateTube(common.UserAuthTube)
 	defer uaCh.Close()
 	if ok := userauth.RequestAuthorization(uaCh, c.config.User); !ok {
 		return ErrClientUnauthorized
@@ -288,7 +310,7 @@ func (c *HopClient) handleRemote(tube *tubes.Reliable) error {
 	//handle another remote pf conn (rewire to dest)
 	logrus.Info("Doing remote with: ", arg)
 
-	fwdStruct := Fwd{
+	fwdStruct := portforwarding.Fwd{
 		Listensock:        false,
 		Connectsock:       false,
 		Listenhost:        "",
@@ -296,7 +318,7 @@ func (c *HopClient) handleRemote(tube *tubes.Reliable) error {
 		Connecthost:       "",
 		Connectportorpath: "",
 	}
-	err := ParseForward(arg, &fwdStruct)
+	err := portforwarding.ParseForward(arg, &fwdStruct)
 	if err != nil {
 		return err
 	}
@@ -311,7 +333,7 @@ func (c *HopClient) handleRemote(tube *tubes.Reliable) error {
 				logrus.Error(e)
 				return e
 			}
-			if ip, ok := hostToIPAddr[h]; ok {
+			if ip, ok := common.HostToIPAddr[h]; ok {
 				addr = ip + ":" + p
 			}
 		}
@@ -345,7 +367,7 @@ func (c *HopClient) handleRemote(tube *tubes.Reliable) error {
 // client initiates remote port forwarding and sends the server the info it needs
 func (c *HopClient) remoteForward(arg string) error {
 	logrus.Info("Setting up remote with: ", arg)
-	npt, e := c.TubeMuxer.CreateTube(RemotePFTube)
+	npt, e := c.TubeMuxer.CreateTube(common.RemotePFTube)
 	if e != nil {
 		return e
 	}
@@ -355,7 +377,7 @@ func (c *HopClient) remoteForward(arg string) error {
 
 func (c *HopClient) localForward(arg string) error {
 	logrus.Info("Doing local with: ", arg)
-	fwdStruct := Fwd{
+	fwdStruct := portforwarding.Fwd{
 		Listensock:        false,
 		Connectsock:       false,
 		Listenhost:        "",
@@ -363,7 +385,7 @@ func (c *HopClient) localForward(arg string) error {
 		Connecthost:       "",
 		Connectportorpath: "",
 	}
-	err := ParseForward(arg, &fwdStruct)
+	err := portforwarding.ParseForward(arg, &fwdStruct)
 	if err != nil {
 		return err
 	}
@@ -405,7 +427,7 @@ func (c *HopClient) localForward(arg string) error {
 		for {
 			lconn := <-regchan
 			go func() { //start tube with server for new connection
-				npt, e := c.TubeMuxer.CreateTube(LocalPFTube)
+				npt, e := c.TubeMuxer.CreateTube(common.LocalPFTube)
 				if e != nil {
 					return
 				}
@@ -436,7 +458,7 @@ func (c *HopClient) startExecTube() error {
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	//Hop Session is tied to the life of this code execution tube.
 	logrus.Infof("Performing action: %v", c.config.Cmd)
-	ch, err := c.TubeMuxer.CreateTube(ExecTube)
+	ch, err := c.TubeMuxer.CreateTube(common.ExecTube)
 	if err != nil {
 		logrus.Error(err)
 		return err
@@ -457,9 +479,9 @@ func (c *HopClient) HandleTubes() {
 			continue
 		}
 		logrus.Infof("ACCEPTED NEW CHANNEL of TYPE: %v", t.Type())
-		if t.Type() == AuthGrantTube && c.config.Headless {
+		if t.Type() == common.AuthGrantTube && c.config.Headless {
 			go c.principal(t)
-		} else if t.Type() == RemotePFTube {
+		} else if t.Type() == common.RemotePFTube {
 			go c.handleRemote(t)
 		} else {
 			//Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
@@ -538,7 +560,7 @@ func (c *HopClient) setupRemoteSession(req *authgrants.Intent) (*HopClient, erro
 	logrus.Info("C: USER CONFIRMED FIRST INTENT_REQUEST. CONTACTING S2...")
 
 	//create netproxy with server
-	npt, err := c.TubeMuxer.CreateTube(NetProxyTube)
+	npt, err := c.TubeMuxer.CreateTube(common.NetProxyTube)
 	logrus.Info("started netproxy tube from principal")
 	if err != nil {
 		logrus.Fatal("C: Error starting netproxy tube")

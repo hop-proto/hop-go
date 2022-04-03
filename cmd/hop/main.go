@@ -10,11 +10,12 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"zmap.io/portal/agent"
-	"zmap.io/portal/app"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/common"
 	"zmap.io/portal/config"
 	"zmap.io/portal/core"
+	"zmap.io/portal/hopclient"
+	"zmap.io/portal/hopserver"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/pkg/combinators"
 	"zmap.io/portal/transport"
@@ -28,9 +29,9 @@ type Flags struct {
 	Cmd        string
 
 	// TODO(dadrian): What are these args?
-	RemoteArgs []string
-	LocalArgs  []string
-	Headless   bool
+	RemoteArgs []string // CLI arguments related to remote port forwarding
+	LocalArgs  []string // CLI arguments related to local port forwarding
+	Headless   bool     // if no cmd/shell desired (just port forwarding)
 }
 
 func main() {
@@ -157,10 +158,10 @@ func main() {
 	}
 
 	logrus.Info(address)
-	cConfig := app.HopClientConfig{
+	cConfig := hopclient.HopClientConfig{
 		User:     address.User,
 		Leaf:     leaf,
-		SockAddr: app.DefaultHopAuthSocket,
+		SockAddr: hopserver.DefaultHopAuthSocket,
 		Cmd:      f.Cmd,
 		// TODO(bauman): allow for more config options for cmds/local/remote PF
 		// right now specific cmd can only be specified in cmd line and PF
@@ -170,7 +171,7 @@ func main() {
 		NonPricipal: false,
 	}
 
-	client, err := app.NewHopClient(cConfig)
+	client, err := hopclient.NewHopClient(cConfig)
 	if err != nil {
 		logrus.Error(err)
 		return

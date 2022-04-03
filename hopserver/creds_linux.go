@@ -1,4 +1,5 @@
-package app
+// Package hopserver includes files related to hop server implementation
+package hopserver
 
 import (
 	"fmt"

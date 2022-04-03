@@ -1,4 +1,4 @@
-package app
+package hopclient
 
 // func TestTransportServerClose(t *testing.T) {
 // 	port := getPort()

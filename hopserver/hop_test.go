@@ -1,4 +1,4 @@
-package app
+package hopserver
 
 import (
 	"net"
@@ -9,6 +9,7 @@ import (
 
 	"zmap.io/portal/certs"
 	"zmap.io/portal/core"
+	"zmap.io/portal/hopclient"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/pkg/thunks"
 	"zmap.io/portal/transport"
@@ -859,7 +860,7 @@ func NewSuite(t *testing.T) *Suite {
 		KeyPair:      s.LeafKeyPair,
 	})
 	assert.NilError(t, err)
-	config := HopServerConfig{
+	config := Config{
 		SockAddr: DefaultHopAuthSocket,
 	}
 	s.Server, err = NewHopServer(s.Transport, &config)
@@ -872,8 +873,8 @@ func (s *Suite) MockServerFS(t *testing.T, fsystem fstest.MapFS) {
 	s.Server.fsystem = fsystem
 }
 
-func (s *Suite) NewClient(t *testing.T, config HopClientConfig) *HopClient {
-	c, err := NewHopClient(config)
+func (s *Suite) NewClient(t *testing.T, config hopclient.HopClientConfig) *hopclient.HopClient {
+	c, err := hopclient.NewHopClient(config)
 	assert.NilError(t, err)
 	return c
 }
@@ -896,7 +897,7 @@ func TestHopClient(t *testing.T) {
 	thunks.SetUpTest()
 	t.Run("connect", func(t *testing.T) {
 		s := NewSuite(t)
-		c := s.NewClient(t, HopClientConfig{
+		c := s.NewClient(t, hopclient.HopClientConfig{
 			User: "username",
 		})
 		clientKey := keys.GenerateNewX25519KeyPair()

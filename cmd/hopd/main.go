@@ -10,8 +10,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/app"
 	"zmap.io/portal/config"
+	"zmap.io/portal/hopserver"
 	"zmap.io/portal/transport"
 )
 
@@ -29,7 +29,7 @@ func main() {
 	f := Flags{}
 
 	var sockAddr string
-	fs.StringVar(&sockAddr, "s", app.DefaultHopAuthSocket, "indicates custom sockaddr to use for auth grant")
+	fs.StringVar(&sockAddr, "s", hopserver.DefaultHopAuthSocket, "indicates custom sockaddr to use for auth grant")
 	fs.StringVar(&f.ConfigPath, "C", "", "path to server config file")
 
 	err := fs.Parse(os.Args[1:])
@@ -44,7 +44,7 @@ func main() {
 	}
 
 	sc := config.GetServer()
-	vhosts, err := app.NewVirtualHosts(sc, nil, nil)
+	vhosts, err := hopserver.NewVirtualHosts(sc, nil, nil)
 	if err != nil {
 		logrus.Fatalf("unable to parse virtual hosts: %s", err)
 	}
@@ -75,11 +75,11 @@ func main() {
 		logrus.Fatalf("unable to open transport server: %s", err)
 	}
 
-	serverConfig := &app.HopServerConfig{
+	serverConfig := &hopserver.Config{
 		SockAddr:                 sockAddr,
 		MaxOutstandingAuthgrants: 50, // TODO(dadrian): How was this picked? Is this a setting?
 	}
-	s, err := app.NewHopServer(underlying, serverConfig)
+	s, err := hopserver.NewHopServer(underlying, serverConfig)
 	if err != nil {
 		logrus.Fatal(err)
 	}
