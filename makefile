@@ -1,6 +1,5 @@
 help: ## List tasks with documentation
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' "$(firstword $(MAKEFILE_LIST))" | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
-	@for file in $(DARKLY_EXE); do printf "\033[36m%-30s\033[0m %s\n" $${file} "Single Darkly executable"; done
 
 GOLANGCI_LINT := golangci-lint
 ifeq (, $(shell command -v "$(GOLANGCI_LINT)"))

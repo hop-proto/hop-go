@@ -109,6 +109,7 @@ func main() {
 		{Name: "Number"},
 		{Name: "Word"},
 		{Name: "ListenAddress"},
+		{Name: "AgentURL"},
 	}
 	sort.Sort(typeSlice(settings))
 

@@ -67,6 +67,11 @@ var clientMapper = ConfigMapper{
 			Field:     "AutoSelfSign",
 			Converter: converters.Bool,
 		},
+		{
+			Setting:   "AgentURL",
+			Field:     "AgentURL",
+			Converter: converters.Identity,
+		},
 	},
 	BlockSettings: []SettingMapper{
 		{

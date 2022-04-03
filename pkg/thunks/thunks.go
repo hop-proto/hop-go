@@ -10,13 +10,13 @@ import (
 )
 
 // UserHomeDir is an alias for os.UserHomeDir
-var UserHomeDir func() (string, error) = os.UserHomeDir
+var UserHomeDir = os.UserHomeDir
 
 // TimeNow is an alias for time.Now
-var TimeNow func() time.Time = time.Now
+var TimeNow = time.Now
 
 // LookupUser is an alias for user.Lookup.
-var LookupUser func(string) (*user.User, error) = user.Lookup
+var LookupUser = user.Lookup
 
 // SetUpTest replaces thunks with stable test versions.
 func SetUpTest() {
