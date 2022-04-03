@@ -8,7 +8,7 @@ import (
 )
 
 var zero [25]uint64
-var one [25]uint64 = [25]uint64{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}
+var one = [25]uint64{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}
 
 func newDefaultState() [25]uint64 {
 	var out [25]uint64

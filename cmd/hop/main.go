@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"flag"
+	"net/http"
 	"os"
 	"os/user"
 
 	"github.com/sirupsen/logrus"
 
+	"zmap.io/portal/agent"
 	"zmap.io/portal/app"
 	"zmap.io/portal/certs"
+	"zmap.io/portal/common"
 	"zmap.io/portal/config"
 	"zmap.io/portal/core"
 	"zmap.io/portal/keys"
@@ -78,8 +82,17 @@ func main() {
 	if err != nil {
 		logrus.Fatalf("error loading config: %s", err)
 	}
-
 	cc := config.GetClient()
+
+	// Connect to the agent
+	ac := agent.Client{
+		BaseURL:    combinators.StringOr(cc.AgentURL, common.DefaultAgentURL),
+		HTTPClient: http.DefaultClient,
+	}
+	if ac.Available(context.Background()) {
+		logrus.Infof("connected to agent at %s", ac.BaseURL)
+	}
+
 	hc := cc.MatchHost(inputURL.Host)
 	address := core.MergeURLs(hc.HostURL(), *inputURL)
 

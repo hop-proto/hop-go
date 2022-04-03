@@ -71,6 +71,12 @@ func loadClientConfig_Gen(c *ClientConfig, root *ast.Node) (*ClientConfig, error
 						return err
 					}
 					c.AutoSelfSign = result
+				case ast.Setting.AgentURL.Value:
+					result, err := identity(n.SettingValue)
+					if err != nil {
+						return err
+					}
+					c.AgentURL = result
 				default:
 					logrus.Warnf("unknown global setting %q", n.SettingKey)
 				}

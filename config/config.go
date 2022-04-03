@@ -30,6 +30,7 @@ type ClientConfig struct {
 	Key          string
 	Certificate  string
 	AutoSelfSign BoolSetting
+	AgentURL     string
 	Hosts        []HostConfig
 }
 

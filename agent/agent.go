@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
 	"goji.io"
 	"goji.io/pat"
@@ -30,6 +31,7 @@ func New(d *Data) Server {
 	s.Handle(pat.Get("/keys"), http.HandlerFunc(s.listKeys))
 	s.Handle(pat.Get("/keys/:keyid"), http.HandlerFunc(s.getKey))
 	s.Handle(pat.Post("/exchange"), http.HandlerFunc(s.exchange))
+	s.Handle(pat.Get("/healthz"), http.HandlerFunc(s.healthz))
 	return s
 }
 
@@ -129,6 +131,10 @@ func (s *Server) exchange(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+}
+
 // Client speaks to the agent Server and can create keys.Exchanger
 // implementations.
 type Client struct {
@@ -209,4 +215,19 @@ func (c *Client) ExchangerFor(ctx context.Context, keyID string) (keys.Exchangab
 	}
 	bc.public = desc.Public
 	return &bc, nil
+}
+
+// Available returns if the agent is reachable, by hitting the /healthz
+// endpoint.
+func (c *Client) Available(ctx context.Context) bool {
+	// TODO(dadrian): Make this fast
+	child, cancel := context.WithTimeout(ctx, time.Millisecond*100)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(child, "GET", c.BaseURL+"/healthz", nil)
+	res, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer res.Body.Close()
+	return res.StatusCode == 200
 }

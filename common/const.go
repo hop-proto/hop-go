@@ -18,6 +18,10 @@ const (
 	// agent listens on.
 	DefaultAgentPortString = "26735"
 
+	// DefaultAgentURL is the string version of the default URL the agent
+	// listens on, including the port number.
+	DefaultAgentURL = "http://localhost:26735"
+
 	// DefaultListenPortString is the string version of the hop default listen
 	// port.
 	DefaultListenPortString = "77"
