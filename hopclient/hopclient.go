@@ -56,13 +56,13 @@ type HopClient struct { // nolint:maligned
 	TubeMuxer     *tubes.Muxer
 	ExecTube      *codex.ExecTube
 
-	config HopClientConfig
+	config Config
 
 	Proxied bool
 }
 
-// HopClientConfig holds configuration options for hop client
-type HopClientConfig struct {
+// Config holds configuration options for hop client
+type Config struct {
 	User        string
 	Leaf        *certs.Certificate
 	SockAddr    string
@@ -74,7 +74,7 @@ type HopClientConfig struct {
 }
 
 // NewHopClient creates a new client object and loads keys from file or auth grant protocol
-func NewHopClient(config HopClientConfig) (*HopClient, error) {
+func NewHopClient(config Config) (*HopClient, error) {
 	client := &HopClient{
 		config:  config,
 		wg:      sync.WaitGroup{},
@@ -161,6 +161,10 @@ func (c *HopClient) Start() error {
 			return ErrClientStartingExecTube
 		}
 	}
+
+	// handle incoming tubes
+	go c.HandleTubes()
+	c.Wait() //client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
 	return nil
 }
 
@@ -504,8 +508,8 @@ func (c *HopClient) principal(tube *tubes.Reliable) {
 	defer tube.Close()
 	logrus.SetOutput(io.Discard)
 	agt := authgrants.NewAuthGrantConn(tube)
-	var remoteSession *HopClient = nil
-	var targetAgt *authgrants.AuthGrantConn = nil
+	var remoteSession *HopClient
+	var targetAgt *authgrants.AuthGrantConn
 
 	for { //allows for user to retry sending intent request if denied
 		intent, err := agt.GetIntentRequest()

@@ -37,6 +37,8 @@ const (
 	RemotePFTube  = byte(6)
 )
 
+// HostToIPAddr is a hacky DNS alt. Should probs be deleted as transition to
+// using docker for testing
 var HostToIPAddr = map[string]string{ //TODO(baumanl): this should be dealt with in some user hop config file
 	"scratch-01": "10.216.2.64",
 	"scratch-02": "10.216.2.128",

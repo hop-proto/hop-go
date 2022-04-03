@@ -1,4 +1,4 @@
-package hopserver
+package hoptests
 
 import (
 	"net"
@@ -9,11 +9,64 @@ import (
 
 	"zmap.io/portal/certs"
 	"zmap.io/portal/core"
+	"zmap.io/portal/hopserver"
+
 	"zmap.io/portal/hopclient"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/pkg/thunks"
 	"zmap.io/portal/transport"
 )
+
+// //Defaults and constants for starting a hop session
+// const (
+// 	DefaultHopPort        = "7777"
+// 	DefaultKeyPath        = "/.hop/key"
+//
+// 	TestDataPathPrefixDef = "../../certs/"
+
+// )
+// //NewTestServerConfig populates server config and verify config with sample cert data
+// func NewTestServerConfig(testDataPathPrefix string) (*transport.ServerConfig, *transport.VerifyConfig) {
+// 	keyPair, err := keys.ReadDHKeyFromPEMFile(testDataPathPrefix + "testdata/leaf-key.pem")
+// 	if err != nil {
+// 		logrus.Fatalf("S: ERROR WITH KEYPAIR %v", err)
+// 	}
+// 	certificate, err := certs.ReadCertificatePEMFile(testDataPathPrefix + "testdata/leaf.pem")
+// 	if err != nil {
+// 		logrus.Fatalf("S: ERROR WITH CERTS %v", err)
+// 	}
+// 	intermediate, err := certs.ReadCertificatePEMFile(testDataPathPrefix + "testdata/intermediate.pem")
+// 	if err != nil {
+// 		logrus.Fatalf("S: ERROR WITH INT CERTS %v", err)
+// 	}
+// 	root, err := certs.ReadCertificatePEMFile(testDataPathPrefix + "testdata/root.pem")
+// 	if err != nil {
+// 		logrus.Fatalf("S: ERROR WITH ROOT CERT %v", err)
+// 	}
+// 	err = certs.VerifyParent(certificate, intermediate)
+// 	if err != nil {
+// 		logrus.Fatal("Verify Parent Issue: ", err)
+// 	}
+// 	err = certs.VerifyParent(intermediate, root)
+// 	if err != nil {
+// 		logrus.Fatal("Verify Parent Issue: ", err)
+// 	}
+// 	err = certs.VerifyParent(root, root)
+// 	if err != nil {
+// 		logrus.Fatal("Verify Parent Issue: ", err)
+// 	}
+
+// 	server := transport.ServerConfig{
+// 		KeyPair:      keyPair,
+// 		Certificate:  certificate,
+// 		Intermediate: intermediate,
+// 	}
+// 	verify := transport.VerifyConfig{
+// 		Store: certs.Store{},
+// 	}
+// 	verify.Store.AddCertificate(root)
+// 	return &server, &verify
+// }
 
 /*
 const howdy = "Howdy! This is connection numero two./n"
@@ -827,7 +880,7 @@ type Suite struct {
 
 	UDPConn   *net.UDPConn
 	Transport *transport.Server
-	Server    *HopServer
+	Server    *hopserver.HopServer
 }
 
 func NewSuite(t *testing.T) *Suite {
@@ -860,20 +913,20 @@ func NewSuite(t *testing.T) *Suite {
 		KeyPair:      s.LeafKeyPair,
 	})
 	assert.NilError(t, err)
-	config := Config{
-		SockAddr: DefaultHopAuthSocket,
+	config := hopserver.Config{
+		SockAddr: hopserver.DefaultHopAuthSocket,
 	}
-	s.Server, err = NewHopServer(s.Transport, &config)
+	s.Server, err = hopserver.NewHopServer(s.Transport, &config)
 	assert.NilError(t, err)
 	return s
 }
 
 func (s *Suite) MockServerFS(t *testing.T, fsystem fstest.MapFS) {
 	assert.Assert(t, s.Server != nil)
-	s.Server.fsystem = fsystem
+	s.Server.SetFSystem(fsystem) // TODO(baumnl): not sure if a setter is the way to go here
 }
 
-func (s *Suite) NewClient(t *testing.T, config hopclient.HopClientConfig) *hopclient.HopClient {
+func (s *Suite) NewClient(t *testing.T, config hopclient.Config) *hopclient.HopClient {
 	c, err := hopclient.NewHopClient(config)
 	assert.NilError(t, err)
 	return c
@@ -897,7 +950,7 @@ func TestHopClient(t *testing.T) {
 	thunks.SetUpTest()
 	t.Run("connect", func(t *testing.T) {
 		s := NewSuite(t)
-		c := s.NewClient(t, hopclient.HopClientConfig{
+		c := s.NewClient(t, hopclient.Config{
 			User: "username",
 		})
 		clientKey := keys.GenerateNewX25519KeyPair()

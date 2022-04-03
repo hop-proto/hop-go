@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"testing/fstest"
 	"time"
 
 	"github.com/sbinet/pstree"
@@ -148,7 +149,11 @@ func (s *HopServer) authGrantServer() {
 			s.proxyAuthGrantRequest(principalSess, c)
 		}()
 	}
+}
 
+// SetFSystem is a setter currently just used for testing (alt to exporting fsystem)
+func (s *HopServer) SetFSystem(fsystem fstest.MapFS) {
+	s.fsystem = fsystem
 }
 
 //proxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client

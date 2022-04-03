@@ -1,44 +1,21 @@
 package main
 
 import (
-	"context"
 	"flag"
-	"net/http"
 	"os"
-	"os/user"
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/agent"
-	"zmap.io/portal/certs"
-	"zmap.io/portal/common"
-	"zmap.io/portal/config"
 	"zmap.io/portal/core"
+	"zmap.io/portal/flags"
 	"zmap.io/portal/hopclient"
-	"zmap.io/portal/hopserver"
-	"zmap.io/portal/keys"
-	"zmap.io/portal/pkg/combinators"
-	"zmap.io/portal/transport"
 )
-
-// Flags holds CLI arguments for the Hop client.
-//
-// TODO(dadrian): This structure probably needs to get moved to another package.
-type Flags struct {
-	ConfigPath string
-	Cmd        string
-
-	// TODO(dadrian): What are these args?
-	RemoteArgs []string // CLI arguments related to remote port forwarding
-	LocalArgs  []string // CLI arguments related to local port forwarding
-	Headless   bool     // if no cmd/shell desired (just port forwarding)
-}
 
 func main() {
 	// TODO(dadrian): This function is kind of long. It'd be nice to break some
 	// of it out (like the key and cert processing) so that config behavior
 	// could be unit tested.
-	var f Flags
+	var f flags.Flags
 	var fs flag.FlagSet
 
 	fs.Func("R", "perform remote port forwarding", func(s string) error {
@@ -79,105 +56,15 @@ func main() {
 		logrus.Fatalf("invalid input %s: %s", hoststring, err)
 	}
 
-	// Load the config
-	err = config.InitClient(f.ConfigPath)
-	if err != nil {
-		logrus.Fatalf("error loading config: %s", err)
-	}
-	cc := config.GetClient()
+	config, address, authenticator := hopclient.ClientSetup(f, inputURL)
 
-	// Connect to the agent
-	ac := agent.Client{
-		BaseURL:    combinators.StringOr(cc.AgentURL, common.DefaultAgentURL),
-		HTTPClient: http.DefaultClient,
-	}
-	if ac.Available(context.Background()) {
-		logrus.Infof("connected to agent at %s", ac.BaseURL)
-	}
-
-	hc := cc.MatchHost(inputURL.Host)
-	address := core.MergeURLs(hc.HostURL(), *inputURL)
-
-	if address.User == "" {
-		u, err := user.Current()
-		if err != nil {
-			logrus.Fatalf("user not specified and unable to determine current user: %s", err)
-		}
-		address.User = u.Username
-	}
-
-	// Set up keys and certificates
-	keyPath := combinators.StringOr(hc.Key, combinators.StringOr(cc.Key, config.DefaultKeyPath()))
-	logrus.Infof("using key %q", keyPath)
-	keypair, err := keys.ReadDHKeyFromPEMFile(keyPath)
-	if err != nil {
-		logrus.Fatalf("unable to load key pair %q: %s", keyPath, err)
-	}
-
-	// Host block overrides global block. Set overrides Unset. Certificate
-	// overrides AutoSelfSign.
-	var leafFile string
-	var autoSelfSign bool
-	if hc.Certificate != "" {
-		leafFile = hc.Certificate
-	} else if hc.AutoSelfSign == config.True {
-		autoSelfSign = true
-	} else if hc.AutoSelfSign != config.True && cc.Certificate != "" {
-		leafFile = cc.Certificate
-	} else if hc.AutoSelfSign == config.Unset && cc.AutoSelfSign == config.True {
-		autoSelfSign = true
-	} else {
-		logrus.Fatalf("no certificate provided and AutoSelfSign is not enabled for %q", address)
-	}
-
-	var leaf *certs.Certificate
-	if autoSelfSign {
-		logrus.Infof("auto self-signing leaf for user %q", address.User)
-		leaf, err = certs.SelfSignLeaf(&certs.Identity{
-			PublicKey: keypair.Public,
-			Names: []certs.Name{
-				certs.RawStringName(address.User),
-			},
-		})
-		if err != nil {
-			logrus.Fatalf("unable to self-sign certificate: %s", err)
-		}
-	} else {
-		leaf, err = certs.ReadCertificatePEMFile(leafFile)
-		if err != nil {
-			logrus.Fatalf("unable to open certificate: %s", err)
-		}
-	}
-
-	authenticator := core.InMemoryAuthenticator{
-		X25519KeyPair: keypair,
-		VerifyConfig: transport.VerifyConfig{
-			InsecureSkipVerify: true, // TODO(dadrian): Host-key verification
-		},
-		Leaf: leaf,
-	}
-
-	logrus.Info(address)
-	cConfig := hopclient.HopClientConfig{
-		User:     address.User,
-		Leaf:     leaf,
-		SockAddr: hopserver.DefaultHopAuthSocket,
-		Cmd:      f.Cmd,
-		// TODO(bauman): allow for more config options for cmds/local/remote PF
-		// right now specific cmd can only be specified in cmd line and PF
-		// currently disabled
-
-		// TODO(baumanl): set up docker container with more port bindings for PF?
-		NonPricipal: false,
-	}
-
-	client, err := hopclient.NewHopClient(cConfig)
+	client, err := hopclient.NewHopClient(config)
 	if err != nil {
 		logrus.Error(err)
 		return
 	}
 
-	err = client.Dial(address.Address(), authenticator)
+	err = client.Dial(address, authenticator)
 	if err != nil {
 		logrus.Error(err)
 		return
@@ -187,8 +74,4 @@ func main() {
 		logrus.Error(err)
 		return
 	}
-
-	// handle incoming tubes
-	go client.HandleTubes()
-	client.Wait() //client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
 }
