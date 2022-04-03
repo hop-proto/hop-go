@@ -285,6 +285,9 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 		c.Env = env
 		logrus.Infof("Executing: %v", cmd)
 		f, err := pty.Start(c)
+		// TODO (baumanl): something is wrong with pty (backspace no longer works
+		// and getting "error resizing pty: inappropriate ioctl for device" in
+		// docker)
 		if err != nil {
 			logrus.Errorf("S: error starting pty %v", err)
 			codex.SendFailure(tube, err)
