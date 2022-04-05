@@ -31,13 +31,12 @@ func ClientSetup(f flags.Flags, inputURL *core.URL) (Config, string, core.Authen
 	cc := config.GetClient()
 
 	// TODO(baumanl): should the agent always be used if available?
+	// current assumption: if agent active it has the client's key and we should use it
+
 	// Connect to the agent
 	ac := agent.Client{
 		BaseURL:    combinators.StringOr(cc.AgentURL, common.DefaultAgentURL),
 		HTTPClient: http.DefaultClient,
-	}
-	if ac.Available(context.Background()) {
-		logrus.Infof("connected to agent at %s", ac.BaseURL)
 	}
 
 	hc := cc.MatchHost(inputURL.Host)
@@ -51,12 +50,33 @@ func ClientSetup(f flags.Flags, inputURL *core.URL) (Config, string, core.Authen
 		address.User = u.Username
 	}
 
-	// Set up keys and certificates
+	var keypair *keys.X25519KeyPair // only set if agent not in use
+	var public keys.PublicKey       // currently set from file or agent for use in self-signed cert
+
 	keyPath := combinators.StringOr(hc.Key, combinators.StringOr(cc.Key, config.DefaultKeyPath()))
-	logrus.Infof("using key %q", keyPath)
-	keypair, err := keys.ReadDHKeyFromPEMFile(keyPath) // TODO(baumanl): use agent instead of reading in key
-	if err != nil {
-		logrus.Fatalf("unable to load key pair %q: %s", keyPath, err)
+	if ac.Available(context.Background()) {
+		logrus.Infof("connected to agent at %s", ac.BaseURL)
+		// no need to read key from PEM file --> assume loaded in agent
+		keydescr, err := ac.Get(context.Background(), keyPath) // TODO(baumanl): rearrange so this only happens if self-signed cert needed
+		if err != nil {
+			logrus.Fatalf("agent doesn't have key pair %q: %s", keyPath, err)
+		}
+		if len(keydescr.Public) != 32 { // TODO(baumanl): check on keydescr.Type?
+			logrus.Fatal("unexpected key length")
+		}
+		copy(keydescr.Public[0:32], public[:]) // TODO(baumanl): best way to do this?
+
+		// certificate could still need to be read from file if issued by CA
+		// if basic (like auth_keys functionality) will need to use agent/public-key to generate "self-signed" certificate
+	} else {
+		// read in key from file
+		logrus.Infof("using key %q", keyPath)
+		keypair, err = keys.ReadDHKeyFromPEMFile(keyPath) // TODO(baumanl): use agent instead of reading in key
+		if err != nil {
+			logrus.Fatalf("unable to load key pair %q: %s", keyPath, err)
+		}
+		public = keypair.Public
+		logrus.Infof("no agent running")
 	}
 
 	// Host block overrides global block. Set overrides Unset. Certificate
@@ -79,7 +99,7 @@ func ClientSetup(f flags.Flags, inputURL *core.URL) (Config, string, core.Authen
 	if autoSelfSign {
 		logrus.Infof("auto self-signing leaf for user %q", address.User)
 		leaf, err = certs.SelfSignLeaf(&certs.Identity{
-			PublicKey: keypair.Public,
+			PublicKey: public,
 			Names: []certs.Name{
 				certs.RawStringName(address.User),
 			},
@@ -95,7 +115,7 @@ func ClientSetup(f flags.Flags, inputURL *core.URL) (Config, string, core.Authen
 	}
 
 	authenticator := core.InMemoryAuthenticator{
-		X25519KeyPair: keypair,
+		X25519KeyPair: keypair, // TODO(baumanl): doesn't make sense if agent in use
 		VerifyConfig: transport.VerifyConfig{
 			InsecureSkipVerify: true, // TODO(dadrian): Host-key verification
 		},
