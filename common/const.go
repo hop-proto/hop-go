@@ -29,19 +29,10 @@ const (
 
 //Tube Type constants
 const (
-	ExecTube      = byte(1)
-	AuthGrantTube = byte(2)
+	ExecTube      = byte(1) // Used for Shell or Command Execution
+	AuthGrantTube = byte(2) // Used for myriad Authorization Grant protocol steps
 	NetProxyTube  = byte(3) // Net Proxy should maybe be unreliable tube?
 	UserAuthTube  = byte(4)
 	LocalPFTube   = byte(5)
 	RemotePFTube  = byte(6)
 )
-
-// HostToIPAddr is a hacky DNS alt. Should probs be deleted as transition to
-// using docker for testing
-var HostToIPAddr = map[string]string{ //TODO(baumanl): this should be dealt with in some user hop config file
-	"scratch-01": "10.216.2.64",
-	"scratch-02": "10.216.2.128",
-	"scratch-07": "10.216.2.208",
-	"localhost":  "127.0.0.1",
-}

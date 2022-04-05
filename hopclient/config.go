@@ -30,6 +30,7 @@ func ClientSetup(f flags.Flags, inputURL *core.URL) (Config, string, core.Authen
 	}
 	cc := config.GetClient()
 
+	// TODO(baumanl): should the agent always be used if available?
 	// Connect to the agent
 	ac := agent.Client{
 		BaseURL:    combinators.StringOr(cc.AgentURL, common.DefaultAgentURL),
@@ -53,7 +54,7 @@ func ClientSetup(f flags.Flags, inputURL *core.URL) (Config, string, core.Authen
 	// Set up keys and certificates
 	keyPath := combinators.StringOr(hc.Key, combinators.StringOr(cc.Key, config.DefaultKeyPath()))
 	logrus.Infof("using key %q", keyPath)
-	keypair, err := keys.ReadDHKeyFromPEMFile(keyPath)
+	keypair, err := keys.ReadDHKeyFromPEMFile(keyPath) // TODO(baumanl): use agent instead of reading in key
 	if err != nil {
 		logrus.Fatalf("unable to load key pair %q: %s", keyPath, err)
 	}

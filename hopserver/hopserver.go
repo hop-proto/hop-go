@@ -231,7 +231,7 @@ func (s *HopServer) checkCredentials(c net.Conn) (int32, error) {
 	return ancestor, nil
 }
 
-//checks tree (starting at proc) to see if cPID is a descendent
+// checks tree (starting at proc) to see if cPID is a descendent
 func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
 	for _, child := range proc.Children {
 		if child == cPID || checkDescendents(tree, tree.Procs[child], cPID) {

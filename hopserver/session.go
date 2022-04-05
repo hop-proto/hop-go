@@ -513,15 +513,9 @@ func (sess *hopSession) LocalServer(tube *tubes.Reliable, arg string) {
 		addr := net.JoinHostPort(fwdStruct.Connecthost, fwdStruct.Connectportorpath)
 		if _, err := net.LookupAddr(addr); err != nil {
 			//Couldn't resolve address with local resolver
-			h, p, e := net.SplitHostPort(addr)
-			if e != nil {
-				logrus.Error(e)
-				tube.Write([]byte{netproxy.NpcDen})
-				return
-			}
-			if ip, ok := common.HostToIPAddr[h]; ok {
-				addr = ip + ":" + p
-			}
+			logrus.Error(err)
+			tube.Write([]byte{netproxy.NpcDen})
+			return
 		}
 		logrus.Infof("dialing dest: %v", addr)
 		tconn, err = net.Dial("tcp", addr)

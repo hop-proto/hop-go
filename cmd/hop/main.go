@@ -33,13 +33,14 @@ func main() {
 	fs.StringVar(&f.Cmd, "c", "", "specific command to execute on remote server")
 	fs.BoolVar(&f.Headless, "N", false, "don't execute a remote command. Useful for just port forwarding.")
 
-	/*TODO(baumanl): Right now all explicit commands are run within the context
-	of a shell using "$SHELL -c <cmd>" (this allows for expanding env variables,
-	piping, etc.) However, there may be instances where this is undesirable. Add
-	an option to resort to running the command without this feature. Decide which
-	is the better default. Add config/enforcement on what clients/auth grants are
-	allowed to do. How should this be communicated within Intent and in
-	Authgrant?*/
+	// TODO(baumanl): Right now all explicit commands are run within the context
+	// of a shell using "$SHELL -c <cmd>" (this allows for expanding env
+	// variables, piping, etc.) However, there may be instances where this is
+	// undesirable. Add an option to resort to running the command without this
+	// feature. Decide which is the better default. Add config/enforcement on
+	// what clients/auth grants are allowed to do. How should this be
+	// communicated within Intent and in Authgrant?
+
 	//var runCmdInShell bool
 	// fs.BoolVar(&runCmdInShell, "s", false, "run specified command...")
 
@@ -47,7 +48,7 @@ func main() {
 	if err != nil {
 		logrus.Fatalf("%s", err)
 	}
-	if fs.NArg() < 1 { //there needs to be an argument that is not a flag of the form [user@]host[:port]
+	if fs.NArg() < 1 { // there needs to be an argument that is not a flag of the form [user@]host[:port]
 		logrus.Fatal("missing [hop://][user@]host[:port]")
 	}
 	hoststring := fs.Arg(0)
