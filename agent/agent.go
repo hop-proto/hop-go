@@ -179,25 +179,28 @@ func (c *Client) Exchange(ctx context.Context, request *ExchangeRequest) (*Excha
 	return &out, nil
 }
 
-type boundClient struct {
-	c      *Client
-	ctx    context.Context
-	keyID  string
-	public []byte
+// BoundClient implements keys.Exchangable
+type BoundClient struct {
+	C      *Client
+	Ctx    context.Context
+	KeyID  string
+	Public []byte
 }
 
-var _ keys.Exchangable = &boundClient{}
+var _ keys.Exchangable = &BoundClient{}
 
-func (bc *boundClient) Share() []byte {
-	return bc.public
+// Share implements Exchangable
+func (bc *BoundClient) Share() []byte {
+	return bc.Public
 }
 
-func (bc *boundClient) Agree(other []byte) ([]byte, error) {
+// Agree implements Exchangable
+func (bc *BoundClient) Agree(other []byte) ([]byte, error) {
 	request := ExchangeRequest{
-		KeyID: bc.keyID,
+		KeyID: bc.KeyID,
 		Other: other,
 	}
-	resp, err := bc.c.Exchange(bc.ctx, &request)
+	resp, err := bc.C.Exchange(bc.Ctx, &request)
 	if err != nil {
 		return nil, err
 	}
@@ -208,12 +211,12 @@ func (bc *boundClient) Agree(other []byte) ([]byte, error) {
 // the provided keyID and implemented using the Exchange endpoint on the server.
 // The public key will be retrieved and cached at the time of creation.
 func (c *Client) ExchangerFor(ctx context.Context, keyID string) (keys.Exchangable, error) {
-	bc := boundClient{c: c, keyID: keyID}
+	bc := BoundClient{C: c, KeyID: keyID}
 	desc, err := c.Get(ctx, keyID)
 	if err != nil {
 		return nil, err
 	}
-	bc.public = desc.Public
+	bc.Public = desc.Public
 	return &bc, nil
 }
 
