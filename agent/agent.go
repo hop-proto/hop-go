@@ -144,7 +144,7 @@ type Client struct {
 
 // Get fetches the description of a single key by ID.
 func (c *Client) Get(ctx context.Context, keyID string) (*KeyDescription, error) {
-	u := fmt.Sprintf("%s/%s", c.BaseURL, url.PathEscape(keyID))
+	u := fmt.Sprintf("%s/keys/%s", c.BaseURL, url.PathEscape(keyID))
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
 		return nil, err
@@ -172,8 +172,13 @@ func (c *Client) Exchange(ctx context.Context, request *ExchangeRequest) (*Excha
 	if err != nil {
 		return nil, err
 	}
+	res, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
 	out := ExchangeResponse{}
-	if err := json.NewDecoder(req.Body).Decode(&out); err != nil {
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -184,7 +189,7 @@ type BoundClient struct {
 	C      *Client
 	Ctx    context.Context
 	KeyID  string
-	Public []byte
+	Public []byte // TODO(baumanl): is it redundant to have this if you can use C.Get(Ctx, KeyID)?
 }
 
 var _ keys.Exchangable = &BoundClient{}
