@@ -30,7 +30,7 @@ jobs:
       - name: lint
         uses: golangci/golangci-lint-action@v2
         with:
-          version: v1.33.0
+          version: v1.45
           args: --deadline 1m
       - name: test
         run: make test
