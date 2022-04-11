@@ -1,6 +1,8 @@
 // Package common contains shared constants across all of Hop.
 package common
 
+import "zmap.io/portal/tubes"
+
 const (
 	// UserConfigDirtory is the dirname of the directory holding the user
 	// configuration for the Hop client.
@@ -27,12 +29,12 @@ const (
 	DefaultListenPortString = "77"
 )
 
-//Tube Type constants
+// TubeType constants
 const (
-	ExecTube      = byte(1) // Used for Shell or Command Execution
-	AuthGrantTube = byte(2) // Used for myriad Authorization Grant protocol steps
-	NetProxyTube  = byte(3) // Net Proxy should maybe be unreliable tube?
-	UserAuthTube  = byte(4)
-	LocalPFTube   = byte(5)
-	RemotePFTube  = byte(6)
+	ExecTube      = tubes.TubeType(1) // Used for Shell or Command Execution
+	AuthGrantTube = tubes.TubeType(2) // Used for myriad Authorization Grant protocol steps
+	NetProxyTube  = tubes.TubeType(3) // Net Proxy should maybe be unreliable tube?
+	UserAuthTube  = tubes.TubeType(4)
+	LocalPFTube   = tubes.TubeType(5)
+	RemotePFTube  = tubes.TubeType(6)
 )

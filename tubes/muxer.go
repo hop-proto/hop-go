@@ -49,7 +49,7 @@ func (m *Muxer) getTube(tubeID byte) (*Reliable, bool) {
 }
 
 //CreateTube starts a new reliable tube
-func (m *Muxer) CreateTube(tType byte) (*Reliable, error) {
+func (m *Muxer) CreateTube(tType TubeType) (*Reliable, error) {
 	r, err := newReliableTube(m.underlying, m.netConn, m.sendQueue, tType)
 	m.addTube(r)
 	logrus.Infof("Created Tube: %v", r.id)
