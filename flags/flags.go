@@ -13,3 +13,11 @@ type Flags struct {
 	LocalArgs  []string // CLI arguments related to local port forwarding
 	Headless   bool     // if no cmd/shell desired (just port forwarding)
 }
+
+// TODO(baumanl): Provide this functionality eventually and re-evaluate
+// distinction between Flags and Config structs.
+
+// func ParseArgs(args []string) (*Flags, error) // Defines and parses the flags
+// func DefineFlags(fs *flgs.FlagSet, values *Flags) // Call fs.StringVar
+// func LoadConfigFromFlags(f Flags) *Config // Maybe in a different package
+// func ClientSetup(f flags) (*Config)
