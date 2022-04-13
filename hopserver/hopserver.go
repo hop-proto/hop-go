@@ -1,4 +1,4 @@
-package app
+package hopserver
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"testing/fstest"
 	"time"
 
 	"github.com/sbinet/pstree"
@@ -23,13 +24,16 @@ import (
 	"zmap.io/portal/tubes"
 )
 
+// DefaultHopAuthSocket is the default UDS used for Authorization grants
+const DefaultHopAuthSocket = "@hopauth"
+
 //HopServer represents state/conns needed for a hop server
 type HopServer struct {
 	m                     sync.Mutex
 	principals            map[int32]*hopSession
 	authgrants            map[keys.PublicKey]*authGrant //static key -> authgrant associated with that key
 	outstandingAuthgrants int
-	config                *HopServerConfig
+	config                *Config
 
 	fsystem fs.FS
 
@@ -37,8 +41,8 @@ type HopServer struct {
 	authsock net.Listener
 }
 
-//HopServerConfig contains hop server specific configuration settings
-type HopServerConfig struct {
+//Config contains hop server specific configuration settings
+type Config struct {
 	SockAddr                 string
 	MaxOutstandingAuthgrants int
 	AuthorizedKeysLocation   string //defaults to /.hop/authorized_keys
@@ -47,7 +51,7 @@ type HopServerConfig struct {
 // NewHopServer returns a Hop Server containing a transport server running on
 // the host/port specified in the config file and an authgrant server listening
 // on the provided socket.
-func NewHopServer(underlying *transport.Server, hconfig *HopServerConfig) (*HopServer, error) {
+func NewHopServer(underlying *transport.Server, hconfig *Config) (*HopServer, error) {
 	// set up authgrantServer (UDS socket)
 	// make sure the socket does not already exist.
 	if err := os.RemoveAll(hconfig.SockAddr); err != nil {
@@ -145,7 +149,11 @@ func (s *HopServer) authGrantServer() {
 			s.proxyAuthGrantRequest(principalSess, c)
 		}()
 	}
+}
 
+// SetFSystem is a setter currently just used for testing (alt to exporting fsystem)
+func (s *HopServer) SetFSystem(fsystem fstest.MapFS) {
+	s.fsystem = fsystem
 }
 
 //proxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
@@ -223,7 +231,7 @@ func (s *HopServer) checkCredentials(c net.Conn) (int32, error) {
 	return ancestor, nil
 }
 
-//checks tree (starting at proc) to see if cPID is a descendent
+// checks tree (starting at proc) to see if cPID is a descendent
 func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
 	for _, child := range proc.Children {
 		if child == cPID || checkDescendents(tree, tree.Procs[child], cPID) {

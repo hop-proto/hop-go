@@ -8,13 +8,13 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/app"
 	"zmap.io/portal/netproxy"
+	"zmap.io/portal/portforwarding"
 )
 
 func main() {
 	arg := os.Args[1]
-	fwdStruct := app.Fwd{
+	fwdStruct := portforwarding.Fwd{
 		Listensock:        false,
 		Connectsock:       false,
 		Listenhost:        "",
@@ -22,7 +22,7 @@ func main() {
 		Connecthost:       "",
 		Connectportorpath: "",
 	}
-	app.ParseForward(arg, &fwdStruct)
+	portforwarding.ParseForward(arg, &fwdStruct)
 
 	contentSockAddr := "@content" + fwdStruct.Listenportorpath
 	controlSockAddr := "@control" + fwdStruct.Listenportorpath

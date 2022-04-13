@@ -28,6 +28,9 @@ const windowSize = 128
 
 type state int
 
+// TubeType represents identifier bytes of Tubes.
+type TubeType byte
+
 const (
 	created    state = iota
 	initiated  state = iota
@@ -38,7 +41,7 @@ const (
 // Reliable implements a reliable and receiveWindow tube on top
 type Reliable struct {
 	closedCond sync.Cond
-	tType      byte
+	tType      TubeType
 	id         byte
 	localAddr  net.Addr
 	m          sync.Mutex
@@ -69,13 +72,13 @@ func (r *Reliable) send() {
 	}
 }
 
-func newReliableTubeWithTubeID(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType byte, tubeID byte) *Reliable {
+func newReliableTubeWithTubeID(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType TubeType, tubeID byte) *Reliable {
 	r := makeTube(underlying, netConn, sendQueue, tubeType, tubeID)
 	go r.initiate(false)
 	return r
 }
 
-func makeTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType byte, tubeID byte) *Reliable {
+func makeTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType TubeType, tubeID byte) *Reliable {
 	r := &Reliable{
 		id:        tubeID,
 		tubeState: created,
@@ -115,7 +118,7 @@ func makeTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []b
 	return r
 }
 
-func newReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType byte) (*Reliable, error) {
+func newReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType TubeType) (*Reliable, error) {
 	cid := []byte{0}
 	n, err := rand.Read(cid)
 	if err != nil || n != 1 {
@@ -293,7 +296,7 @@ func (r *Reliable) Close() error {
 }
 
 //Type returns tube type
-func (r *Reliable) Type() byte {
+func (r *Reliable) Type() TubeType {
 	return r.tType
 }
 

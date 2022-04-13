@@ -1,4 +1,4 @@
-package app
+package hopserver
 
 import (
 	"encoding/binary"
@@ -17,10 +17,13 @@ import (
 	"github.com/AstromechZA/etcpwdparse"
 	"github.com/creack/pty"
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/authgrants"
 	"zmap.io/portal/codex"
+	"zmap.io/portal/common"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/netproxy"
+	"zmap.io/portal/portforwarding"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
 	"zmap.io/portal/userauth"
@@ -147,15 +150,15 @@ func (sess *hopSession) start() {
 		case tube := <-sess.tubeQueue:
 			logrus.Infof("S: ACCEPTED NEW TUBE (%v)", tube.Type())
 			switch tube.Type() {
-			case ExecTube:
+			case common.ExecTube:
 				go sess.startCodex(tube)
-			case AuthGrantTube:
+			case common.AuthGrantTube:
 				go sess.handleAgc(tube)
-			case NetProxyTube:
+			case common.NetProxyTube:
 				go sess.startNetProxy(tube)
-			case RemotePFTube:
+			case common.RemotePFTube:
 				go sess.startRemote(tube)
-			case LocalPFTube:
+			case common.LocalPFTube:
 				go sess.startLocal(tube)
 			default:
 				tube.Close() //Close unrecognized tube types
@@ -285,6 +288,9 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 		c.Env = env
 		logrus.Infof("Executing: %v", cmd)
 		f, err := pty.Start(c)
+		// TODO (baumanl): something is wrong with pty (backspace no longer works
+		// and getting "error resizing pty: inappropriate ioctl for device" in
+		// docker)
 		if err != nil {
 			logrus.Errorf("S: error starting pty %v", err)
 			codex.SendFailure(tube, err)
@@ -361,7 +367,7 @@ func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
 //RemoteServer starts listening on given port and pipes the traffic back over the tube
 func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
 	//parts := strings.Split(arg, ":") //assuming port:host:hostport
-	fwdStruct := Fwd{
+	fwdStruct := portforwarding.Fwd{
 		Listensock:        false,
 		Connectsock:       false,
 		Listenhost:        "",
@@ -369,7 +375,7 @@ func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
 		Connecthost:       "",
 		Connectportorpath: "",
 	}
-	err := ParseForward(arg, &fwdStruct)
+	err := portforwarding.ParseForward(arg, &fwdStruct)
 	if err != nil {
 		logrus.Error(err)
 		tube.Write([]byte{netproxy.NpcDen})
@@ -456,7 +462,7 @@ func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
 			return
 		}
 		logrus.Info("server got a uds conn from child")
-		t, err := sess.tubeMuxer.CreateTube(RemotePFTube)
+		t, err := sess.tubeMuxer.CreateTube(common.RemotePFTube)
 		if err != nil {
 			logrus.Error("error creating tube", err)
 			return
@@ -487,7 +493,7 @@ func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
 func (sess *hopSession) LocalServer(tube *tubes.Reliable, arg string) {
 	defer tube.Close()
 
-	fwdStruct := Fwd{
+	fwdStruct := portforwarding.Fwd{
 		Listensock:        false,
 		Connectsock:       false,
 		Listenhost:        "",
@@ -495,7 +501,7 @@ func (sess *hopSession) LocalServer(tube *tubes.Reliable, arg string) {
 		Connecthost:       "",
 		Connectportorpath: "",
 	}
-	err := ParseForward(arg, &fwdStruct)
+	err := portforwarding.ParseForward(arg, &fwdStruct)
 	if err != nil {
 		logrus.Error(err)
 		tube.Write([]byte{netproxy.NpcDen})
@@ -507,15 +513,9 @@ func (sess *hopSession) LocalServer(tube *tubes.Reliable, arg string) {
 		addr := net.JoinHostPort(fwdStruct.Connecthost, fwdStruct.Connectportorpath)
 		if _, err := net.LookupAddr(addr); err != nil {
 			//Couldn't resolve address with local resolver
-			h, p, e := net.SplitHostPort(addr)
-			if e != nil {
-				logrus.Error(e)
-				tube.Write([]byte{netproxy.NpcDen})
-				return
-			}
-			if ip, ok := hostToIPAddr[h]; ok {
-				addr = ip + ":" + p
-			}
+			logrus.Error(err)
+			tube.Write([]byte{netproxy.NpcDen})
+			return
 		}
 		logrus.Infof("dialing dest: %v", addr)
 		tconn, err = net.Dial("tcp", addr)

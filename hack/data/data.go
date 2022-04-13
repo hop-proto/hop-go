@@ -25,7 +25,6 @@ func Workspace() string {
 	workspaceOnce.Do(func() {
 		d, _ := os.Getwd()
 		for d != "." && d != "" {
-			logrus.Error(d)
 			path := filepath.Join(d, "WORKSPACE")
 			if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 				d = filepath.Dir(d)

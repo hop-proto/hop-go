@@ -1,43 +1,21 @@
 package main
 
 import (
-	"context"
 	"flag"
-	"net/http"
 	"os"
-	"os/user"
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/agent"
-	"zmap.io/portal/app"
-	"zmap.io/portal/certs"
-	"zmap.io/portal/common"
-	"zmap.io/portal/config"
 	"zmap.io/portal/core"
-	"zmap.io/portal/keys"
-	"zmap.io/portal/pkg/combinators"
-	"zmap.io/portal/transport"
+	"zmap.io/portal/flags"
+	"zmap.io/portal/hopclient"
 )
-
-// Flags holds CLI arguments for the Hop client.
-//
-// TODO(dadrian): This structure probably needs to get moved to another package.
-type Flags struct {
-	ConfigPath string
-	Cmd        string
-
-	// TODO(dadrian): What are these args?
-	RemoteArgs []string
-	LocalArgs  []string
-	Headless   bool
-}
 
 func main() {
 	// TODO(dadrian): This function is kind of long. It'd be nice to break some
 	// of it out (like the key and cert processing) so that config behavior
 	// could be unit tested.
-	var f Flags
+	var f flags.Flags
 	var fs flag.FlagSet
 
 	fs.Func("R", "perform remote port forwarding", func(s string) error {
@@ -55,12 +33,14 @@ func main() {
 	fs.StringVar(&f.Cmd, "c", "", "specific command to execute on remote server")
 	fs.BoolVar(&f.Headless, "N", false, "don't execute a remote command. Useful for just port forwarding.")
 
-	/*TODO(baumanl): Right now all explicit commands are run within the context of a shell using "$SHELL -c <cmd>"
-	(this allows for expanding env variables, piping, etc.) However, there may be instances where this is undesirable.
-	Add an option to resort to running the command without this feature.
-	Decide which is the better default.
-	Add config/enforcement on what clients/auth grants are allowed to do.
-	How should this be communicated within Intent and in Authgrant?*/
+	// TODO(baumanl): Right now all explicit commands are run within the context
+	// of a shell using "$SHELL -c <cmd>" (this allows for expanding env
+	// variables, piping, etc.) However, there may be instances where this is
+	// undesirable. Add an option to resort to running the command without this
+	// feature. Decide which is the better default. Add config/enforcement on
+	// what clients/auth grants are allowed to do. How should this be
+	// communicated within Intent and in Authgrant?
+
 	//var runCmdInShell bool
 	// fs.BoolVar(&runCmdInShell, "s", false, "run specified command...")
 
@@ -68,7 +48,7 @@ func main() {
 	if err != nil {
 		logrus.Fatalf("%s", err)
 	}
-	if fs.NArg() < 1 { //there needs to be an argument that is not a flag of the form [user@]host[:port]
+	if fs.NArg() < 1 { // there needs to be an argument that is not a flag of the form [user@]host[:port]
 		logrus.Fatal("missing [hop://][user@]host[:port]")
 	}
 	hoststring := fs.Arg(0)
@@ -77,99 +57,15 @@ func main() {
 		logrus.Fatalf("invalid input %s: %s", hoststring, err)
 	}
 
-	// Load the config
-	err = config.InitClient(f.ConfigPath)
-	if err != nil {
-		logrus.Fatalf("error loading config: %s", err)
-	}
-	cc := config.GetClient()
+	config, address, authenticator := hopclient.ClientSetup(f, inputURL)
 
-	// Connect to the agent
-	ac := agent.Client{
-		BaseURL:    combinators.StringOr(cc.AgentURL, common.DefaultAgentURL),
-		HTTPClient: http.DefaultClient,
-	}
-	if ac.Available(context.Background()) {
-		logrus.Infof("connected to agent at %s", ac.BaseURL)
-	}
-
-	hc := cc.MatchHost(inputURL.Host)
-	address := core.MergeURLs(hc.HostURL(), *inputURL)
-
-	if address.User == "" {
-		u, err := user.Current()
-		if err != nil {
-			logrus.Fatalf("user not specified and unable to determine current user: %s", err)
-		}
-		address.User = u.Username
-	}
-
-	// Set up keys and certificates
-	keyPath := combinators.StringOr(hc.Key, combinators.StringOr(cc.Key, config.DefaultKeyPath()))
-	logrus.Infof("using key %q", keyPath)
-	keypair, err := keys.ReadDHKeyFromPEMFile(keyPath)
-	if err != nil {
-		logrus.Fatalf("unable to load key pair %q: %s", keyPath, err)
-	}
-
-	// Host block overrides global block. Set overrides Unset. Certificate
-	// overrides AutoSelfSign.
-	var leafFile string
-	var autoSelfSign bool
-	if hc.Certificate != "" {
-		leafFile = hc.Certificate
-	} else if hc.AutoSelfSign == config.True {
-		autoSelfSign = true
-	} else if hc.AutoSelfSign != config.True && cc.Certificate != "" {
-		leafFile = cc.Certificate
-	} else if hc.AutoSelfSign == config.Unset && cc.AutoSelfSign == config.True {
-		autoSelfSign = true
-	} else {
-		logrus.Fatalf("no certificate provided and AutoSelfSign is not enabled for %q", address)
-	}
-
-	var leaf *certs.Certificate
-	if autoSelfSign {
-		logrus.Infof("auto self-signing leaf for user %q", address.User)
-		leaf, err = certs.SelfSignLeaf(&certs.Identity{
-			PublicKey: keypair.Public,
-			Names: []certs.Name{
-				certs.RawStringName(address.User),
-			},
-		})
-		if err != nil {
-			logrus.Fatalf("unable to self-sign certificate: %s", err)
-		}
-	} else {
-		leaf, err = certs.ReadCertificatePEMFile(leafFile)
-		if err != nil {
-			logrus.Fatalf("unable to open certificate: %s", err)
-		}
-	}
-
-	authenticator := core.InMemoryAuthenticator{
-		X25519KeyPair: keypair,
-		VerifyConfig: transport.VerifyConfig{
-			InsecureSkipVerify: true, // TODO(dadrian): Host-key verification
-		},
-		Leaf: leaf,
-	}
-
-	logrus.Info(address)
-	cConfig := app.HopClientConfig{
-		User:        address.User,
-		Leaf:        leaf,
-		SockAddr:    app.DefaultHopAuthSocket,
-		NonPricipal: false,
-	}
-
-	client, err := app.NewHopClient(cConfig)
+	client, err := hopclient.NewHopClient(config)
 	if err != nil {
 		logrus.Error(err)
 		return
 	}
 
-	err = client.Dial(address.Address(), authenticator)
+	err = client.Dial(address, authenticator)
 	if err != nil {
 		logrus.Error(err)
 		return
@@ -179,8 +75,4 @@ func main() {
 		logrus.Error(err)
 		return
 	}
-
-	// handle incoming tubes
-	go client.HandleTubes()
-	client.Wait() //client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
 }

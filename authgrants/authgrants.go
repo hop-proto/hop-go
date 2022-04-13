@@ -10,6 +10,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"zmap.io/portal/common"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/tubes"
 )
@@ -21,7 +22,7 @@ type AuthGrantConn struct {
 
 //NewAuthGrantConnFromMux starts a new Tube using provided muxer and uses it for an AuthGrantConn
 func NewAuthGrantConnFromMux(m *tubes.Muxer) (*AuthGrantConn, error) {
-	t, e := m.CreateTube(byte(2))
+	t, e := m.CreateTube(common.AuthGrantTube)
 	if e != nil {
 		return nil, e
 	}

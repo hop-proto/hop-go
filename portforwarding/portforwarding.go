@@ -1,107 +1,18 @@
-package app
+// Package portforwarding includes data structures related to port forwarding conns.
+package portforwarding
 
 import (
 	"errors"
 	"strings"
 
 	"github.com/sirupsen/logrus"
-	"zmap.io/portal/certs"
-	"zmap.io/portal/keys"
-	"zmap.io/portal/transport"
 )
-
-//Defaults and constants for starting a hop session
-const (
-	DefaultHopPort        = "7777"
-	DefaultKeyPath        = "/.hop/key"
-	clientUsage           = "hop [user@]host[:port] [-K or -k path] [-L port:host:hostport] [-R port:host:hostport] [-N] [-c cmd] [-q] [-h]"
-	TestDataPathPrefixDef = "../../certs/"
-	DefaultHopAuthSocket  = "@hopauth"
-)
-
-//Tube Type constants
-const (
-	ExecTube      = byte(1)
-	AuthGrantTube = byte(2)
-	NetProxyTube  = byte(3) // Net Proxy should maybe be unreliable tube?
-	UserAuthTube  = byte(4)
-	LocalPFTube   = byte(5)
-	RemotePFTube  = byte(6)
-)
-
-var hostToIPAddr = map[string]string{ //TODO(baumanl): this should be dealt with in some user hop config file
-	"scratch-01": "10.216.2.64",
-	"scratch-02": "10.216.2.128",
-	"scratch-07": "10.216.2.208",
-	"localhost":  "127.0.0.1",
-}
 
 //ErrInvalidPortForwardingArgs returned when client receives unsupported -L or -R options
 var ErrInvalidPortForwardingArgs = errors.New("port forwarding currently only supported with port:host:hostport format")
 
-//ErrClientInvalidUsage returned by client when unable to parse command line arguments
-var ErrClientInvalidUsage = errors.New("usage: " + clientUsage)
-
-//ErrClientLoadingKeys returned by client (principal) when unable to load keys from specified location
-var ErrClientLoadingKeys = errors.New("unable to load keys")
-
-//ErrClientGettingAuthorization  is returned by client when it can't get
-var ErrClientGettingAuthorization = errors.New("failed to get authorization")
-
-//ErrClientStartingUnderlying is returned by client when it can't start transport layer conn
-var ErrClientStartingUnderlying = errors.New("error starting underlying conn")
-
-//ErrClientUnauthorized is returned by client when it is not authorized to perform the action it requested
-var ErrClientUnauthorized = errors.New("client not authorized")
-
-//ErrClientStartingExecTube is returned by client when cmd execution and/or I/O redirection fails
-var ErrClientStartingExecTube = errors.New("failed to start session")
-
 //ErrInvalidPFArgs is returned when there is a problem parsing portfowarding argument
 var ErrInvalidPFArgs = errors.New("error parsing portforwarding argument")
-
-//NewTestServerConfig populates server config and verify config with sample cert data
-func NewTestServerConfig(testDataPathPrefix string) (*transport.ServerConfig, *transport.VerifyConfig) {
-	keyPair, err := keys.ReadDHKeyFromPEMFile(testDataPathPrefix + "testdata/leaf-key.pem")
-	if err != nil {
-		logrus.Fatalf("S: ERROR WITH KEYPAIR %v", err)
-	}
-	certificate, err := certs.ReadCertificatePEMFile(testDataPathPrefix + "testdata/leaf.pem")
-	if err != nil {
-		logrus.Fatalf("S: ERROR WITH CERTS %v", err)
-	}
-	intermediate, err := certs.ReadCertificatePEMFile(testDataPathPrefix + "testdata/intermediate.pem")
-	if err != nil {
-		logrus.Fatalf("S: ERROR WITH INT CERTS %v", err)
-	}
-	root, err := certs.ReadCertificatePEMFile(testDataPathPrefix + "testdata/root.pem")
-	if err != nil {
-		logrus.Fatalf("S: ERROR WITH ROOT CERT %v", err)
-	}
-	err = certs.VerifyParent(certificate, intermediate)
-	if err != nil {
-		logrus.Fatal("Verify Parent Issue: ", err)
-	}
-	err = certs.VerifyParent(intermediate, root)
-	if err != nil {
-		logrus.Fatal("Verify Parent Issue: ", err)
-	}
-	err = certs.VerifyParent(root, root)
-	if err != nil {
-		logrus.Fatal("Verify Parent Issue: ", err)
-	}
-
-	server := transport.ServerConfig{
-		KeyPair:      keyPair,
-		Certificate:  certificate,
-		Intermediate: intermediate,
-	}
-	verify := transport.VerifyConfig{
-		Store: certs.Store{},
-	}
-	verify.Store.AddCertificate(root)
-	return &server, &verify
-}
 
 //Fwd holds state related to portforwarding parsed from cmdline or config
 type Fwd struct {
@@ -111,6 +22,11 @@ type Fwd struct {
 	Listenportorpath  string // port to listen on or socket to listen on
 	Connecthost       string // optional final destination (not used if final dest is a socket)
 	Connectportorpath string // final dest port or socket path
+}
+
+//returns true if a forward slash exists
+func checkPath(arg string) bool {
+	return strings.Contains(arg, "/")
 }
 
 /*-R port (ssh acts as a SOCKS 4/5 proxy) HOP NOT SUPPORTED -R
@@ -124,11 +40,6 @@ E. (3) -R remote_socket:host:hostport or 		-L local_socket:host:hostport 		--> l
 F. (2) -R remote_socket:local_socket or 		-L local_socket:remote_socket 		--> listen_socket:connect_socket (0 no sock)
 
 */
-
-//returns true if a forward slash exists
-func checkPath(arg string) bool {
-	return strings.Contains(arg, "/")
-}
 
 // Bind address meanings
 //o  "" means that connections are to be accepted on all protocol
