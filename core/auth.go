@@ -20,6 +20,8 @@ type Authenticator interface {
 	GetLeaf() *certs.Certificate
 }
 
+// TODO(baumanl): add another implementation of Authenticator for selfsign?
+
 // InMemoryAuthenticator implements Authenticator using keys where the private
 // key is backed by an in-memory Go structure.
 type InMemoryAuthenticator struct {
