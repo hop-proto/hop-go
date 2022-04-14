@@ -15,7 +15,6 @@ import (
 // a DH and certificate verify API.
 type Authenticator interface {
 	keys.Exchangable
-
 	// TODO(dadrian): This isn't actually the interface we want
 	GetVerifyConfig() transport.VerifyConfig
 	GetLeaf() *certs.Certificate
@@ -27,6 +26,10 @@ type InMemoryAuthenticator struct {
 	*keys.X25519KeyPair
 	VerifyConfig transport.VerifyConfig
 	Leaf         *certs.Certificate
+}
+
+func NewInMemoryAuthenticator(keyID string, verify *transport.VerifyConfig) *InMemoryAuthenticator {
+	return &InMemoryAuthenticator{}
 }
 
 // GetVerifyConfig implements Authenticator.

@@ -19,6 +19,30 @@ import (
 	"zmap.io/portal/transport"
 )
 
+// Creates a self-signed leaf or loads in from leafFile.
+func loadLeaf(leafFile string, autoSelfSign bool, public *keys.PublicKey, address core.URL) *certs.Certificate {
+	var leaf *certs.Certificate
+	var err error
+	if autoSelfSign {
+		logrus.Infof("auto self-signing leaf for user %q", address.User)
+		leaf, err = certs.SelfSignLeaf(&certs.Identity{
+			PublicKey: *public,
+			Names: []certs.Name{
+				certs.RawStringName(address.User),
+			},
+		})
+		if err != nil {
+			logrus.Fatalf("unable to self-sign certificate: %s", err)
+		}
+	} else {
+		leaf, err = certs.ReadCertificatePEMFile(leafFile)
+		if err != nil {
+			logrus.Fatalf("unable to open certificate: %s", err)
+		}
+	}
+	return leaf
+}
+
 // ClientSetup uses CLI flags and config file to set up hthe HopClientConfig,
 // the address to connect to, and creates authenticator object.
 // TODO (baumanl): can be decomposed further + add unit tests.
@@ -30,7 +54,6 @@ func ClientSetup(f flags.Flags, inputURL *core.URL) (Config, string, core.Authen
 	}
 	cc := config.GetClient()
 
-	// TODO(baumanl): should the agent always be used if available?
 	// current assumption: if agent active it has the client's key and we should use it
 
 	// Connect to the agent
@@ -66,79 +89,46 @@ func ClientSetup(f flags.Flags, inputURL *core.URL) (Config, string, core.Authen
 		logrus.Fatalf("no certificate provided and AutoSelfSign is not enabled for %q", address)
 	}
 
-	var keypair *keys.X25519KeyPair // only set if agent not in use
-	var public keys.PublicKey       // currently set from file or agent for use in self-signed cert
 	var authenticator core.Authenticator
-	useAgent := ac.Available(context.Background())
-
 	keyPath := combinators.StringOr(hc.Key, combinators.StringOr(cc.Key, config.DefaultKeyPath()))
-	if useAgent {
-		logrus.Infof("connected to agent at %s", ac.BaseURL)
-		// no need to read key from PEM file --> assume loaded in agent
-		keydescr, err := ac.Get(context.Background(), keyPath) // TODO(baumanl): rearrange so this only happens if self-signed cert needed
-		if err != nil {
-			logrus.Fatalf("agent doesn't have key pair %q: %s", keyPath, err)
-		}
-		if len(keydescr.Public) != 32 { // TODO(baumanl): check on keydescr.Type?
-			logrus.Fatal("unexpected key length")
-		}
-		copy(public[:], keydescr.Public[0:32]) // TODO(baumanl): best way to do this?
-
-		// certificate could still need to be read from file if issued by CA
-		// if basic (like auth_keys functionality) will need to use agent/public-key to generate "self-signed" certificate
-	} else {
-		// read in key from file
-		logrus.Infof("using key %q", keyPath)
-		keypair, err = keys.ReadDHKeyFromPEMFile(keyPath) // TODO(baumanl): use agent instead of reading in key
-		if err != nil {
-			logrus.Fatalf("unable to load key pair %q: %s", keyPath, err)
-		}
-		public = keypair.Public
-
-		logrus.Infof("no agent running")
-	}
 
 	var leaf *certs.Certificate
-	if autoSelfSign {
-		logrus.Infof("auto self-signing leaf for user %q", address.User)
-		leaf, err = certs.SelfSignLeaf(&certs.Identity{
-			PublicKey: public,
-			Names: []certs.Name{
-				certs.RawStringName(address.User),
-			},
-		})
-		if err != nil {
-			logrus.Fatalf("unable to self-sign certificate: %s", err)
-		}
-	} else {
-		leaf, err = certs.ReadCertificatePEMFile(leafFile)
-		if err != nil {
-			logrus.Fatalf("unable to open certificate: %s", err)
-		}
-	}
 
-	if useAgent {
+	if ac.Available(context.Background()) {
+		bc, err := ac.ExchangerFor(context.Background(), keyPath)
+		if err != nil {
+			logrus.Fatalf("unable to create exchanger for agent with keyID: %s", err)
+		}
+		var public keys.PublicKey
+		copy(bc.Public[:], public[:]) // TODO(baumanl): resolve public key type awkwardness
+		leaf = loadLeaf(leafFile, autoSelfSign, &public, address)
 		authenticator = core.AgentAuthenticator{
-			BoundClient: &agent.BoundClient{
-				C:      &ac,
-				Ctx:    context.Background(),
-				KeyID:  keyPath,
-				Public: public[:],
-			},
+			BoundClient: bc,
 			VerifyConfig: transport.VerifyConfig{
 				InsecureSkipVerify: true, // TODO
 			},
 			Leaf: leaf,
 		}
 	} else {
+		// read in key from file
+		// TODO(baumanl): move loading key to within Authenticator interface?
+		logrus.Infof("using key %q", keyPath)
+		keypair, err := keys.ReadDHKeyFromPEMFile(keyPath)
+		if err != nil {
+			logrus.Fatalf("unable to load key pair %q: %s", keyPath, err)
+		}
+		leaf = loadLeaf(leafFile, autoSelfSign, &keypair.Public, address)
+		logrus.Infof("no agent running")
 		authenticator = core.InMemoryAuthenticator{
-			X25519KeyPair: keypair, // TODO(baumanl): doesn't make sense if agent in use
+			X25519KeyPair: keypair,
 			VerifyConfig: transport.VerifyConfig{
 				InsecureSkipVerify: true, // TODO(dadrian): Host-key verification
 			},
 			Leaf: leaf,
 		}
 	}
+
+	// TODO(baumanl): resolve weirdness around creating leaf/loading keys
 	logrus.Info(address)
 	cConfig := Config{
 		User:     address.User,

@@ -215,7 +215,7 @@ func (bc *BoundClient) Agree(other []byte) ([]byte, error) {
 // ExchangerFor returns an implementation of keys.Exchangable that is bound to
 // the provided keyID and implemented using the Exchange endpoint on the server.
 // The public key will be retrieved and cached at the time of creation.
-func (c *Client) ExchangerFor(ctx context.Context, keyID string) (keys.Exchangable, error) {
+func (c *Client) ExchangerFor(ctx context.Context, keyID string) (*BoundClient, error) {
 	bc := BoundClient{C: c, KeyID: keyID}
 	desc, err := c.Get(ctx, keyID)
 	if err != nil {
