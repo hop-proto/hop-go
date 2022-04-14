@@ -144,7 +144,7 @@ type Client struct {
 
 // Get fetches the description of a single key by ID.
 func (c *Client) Get(ctx context.Context, keyID string) (*KeyDescription, error) {
-	u := fmt.Sprintf("%s/%s", c.BaseURL, url.PathEscape(keyID))
+	u := fmt.Sprintf("%s/keys/%s", c.BaseURL, url.PathEscape(keyID))
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
 		return nil, err
@@ -172,32 +172,40 @@ func (c *Client) Exchange(ctx context.Context, request *ExchangeRequest) (*Excha
 	if err != nil {
 		return nil, err
 	}
+	res, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
 	out := ExchangeResponse{}
-	if err := json.NewDecoder(req.Body).Decode(&out); err != nil {
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-type boundClient struct {
-	c      *Client
-	ctx    context.Context
-	keyID  string
-	public []byte
+// BoundClient implements keys.Exchangable
+type BoundClient struct {
+	C      *Client
+	Ctx    context.Context
+	KeyID  string
+	Public []byte // TODO(baumanl): is it redundant to have this if you can use C.Get(Ctx, KeyID)?
 }
 
-var _ keys.Exchangable = &boundClient{}
+var _ keys.Exchangable = &BoundClient{}
 
-func (bc *boundClient) Share() []byte {
-	return bc.public
+// Share implements Exchangable
+func (bc *BoundClient) Share() []byte {
+	return bc.Public
 }
 
-func (bc *boundClient) Agree(other []byte) ([]byte, error) {
+// Agree implements Exchangable
+func (bc *BoundClient) Agree(other []byte) ([]byte, error) {
 	request := ExchangeRequest{
-		KeyID: bc.keyID,
+		KeyID: bc.KeyID,
 		Other: other,
 	}
-	resp, err := bc.c.Exchange(bc.ctx, &request)
+	resp, err := bc.C.Exchange(bc.Ctx, &request)
 	if err != nil {
 		return nil, err
 	}
@@ -207,13 +215,13 @@ func (bc *boundClient) Agree(other []byte) ([]byte, error) {
 // ExchangerFor returns an implementation of keys.Exchangable that is bound to
 // the provided keyID and implemented using the Exchange endpoint on the server.
 // The public key will be retrieved and cached at the time of creation.
-func (c *Client) ExchangerFor(ctx context.Context, keyID string) (keys.Exchangable, error) {
-	bc := boundClient{c: c, keyID: keyID}
+func (c *Client) ExchangerFor(ctx context.Context, keyID string) (*BoundClient, error) {
+	bc := BoundClient{C: c, KeyID: keyID}
 	desc, err := c.Get(ctx, keyID)
 	if err != nil {
 		return nil, err
 	}
-	bc.public = desc.Public
+	bc.Public = desc.Public
 	return &bc, nil
 }
 

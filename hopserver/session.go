@@ -64,6 +64,7 @@ func (sess *hopSession) checkAuthorization() bool {
 	defer uaTube.Close()
 	username := userauth.GetInitMsg(uaTube) //client sends desired username
 	logrus.Info("S: client req to access as: ", username)
+
 	// TODO(baumanl): verify that this is the best way to get client static key.
 	/*I originally had the client just send the key over along with the username, but it
 	seemed strange to rely on the client to send the same key that it used during the handshake.
