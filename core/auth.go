@@ -28,10 +28,6 @@ type InMemoryAuthenticator struct {
 	Leaf         *certs.Certificate
 }
 
-func NewInMemoryAuthenticator(keyID string, verify *transport.VerifyConfig) *InMemoryAuthenticator {
-	return &InMemoryAuthenticator{}
-}
-
 // GetVerifyConfig implements Authenticator.
 func (a InMemoryAuthenticator) GetVerifyConfig() transport.VerifyConfig {
 	return a.VerifyConfig
