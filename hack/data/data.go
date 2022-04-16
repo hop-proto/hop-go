@@ -5,12 +5,14 @@ package data
 
 import (
 	"crypto/sha256"
-	"encoding/json"
+	"encoding/hex"
 	"errors"
-	"io"
+	"fmt"
+	"hash"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -40,11 +42,47 @@ func Workspace() string {
 	return workspaceDir
 }
 
+type Checksum [32]byte
+
+func (ck Checksum) String() string {
+	return fmt.Sprintf("%x", ck[:])
+}
+
+// ChecksumHexString decodes s as hex and returns it as a checksum. Invalid data
+// or extra data is ignored.
+func ChecksumHexString(s string) (ck Checksum) {
+	b, _ := hex.DecodeString(s)
+	copy(ck[:], b)
+	return ck
+}
+
+type Hasher interface {
+	hash.Hash
+	Checksum() Checksum
+}
+
+type s256 struct {
+	hash.Hash
+}
+
+func (s s256) Checksum() (ck Checksum) {
+	_ = s.Sum(ck[:0])
+	return ck
+}
+
+func NewHasher() Hasher {
+	return s256{
+		Hash: sha256.New(),
+	}
+}
+
 // Data is not-quite a content addressable store
 type Data struct {
 	m       sync.Mutex
 	root    string
+	cache   string
 	fsystem fs.FS
+	state   State
 }
 
 var instance *Data
@@ -53,55 +91,32 @@ var initOnce sync.Once
 // Instance returns the default global instance for the workspace
 func Instance() *Data {
 	initOnce.Do(func() {
-		root := filepath.Join(Workspace(), ".local")
+		root := Workspace()
+		cache := filepath.Join(Workspace(), ".local")
 		instance = &Data{
 			root:    root,
+			cache:   cache,
 			fsystem: os.DirFS(root),
+			state:   State{},
 		}
 	})
 	return instance
 }
 
-// Hash is a byte array representing a SHA-256
-type Hash [sha256.Size]byte
+// State is a map of checksums to data
+type State map[Checksum][]byte
 
-// State is a map of names to hashes
-type State map[string]Hash
-
-// State returns the current data state.
-func (d *Data) State() (State, error) {
-	var s State
+func (d *Data) Set(ck Checksum, b []byte) {
 	d.m.Lock()
 	defer d.m.Unlock()
-	f, err := os.Open(filepath.Join(d.root, "db.json"))
-	if err != nil {
-		return nil, err
-	}
-	err = json.NewDecoder(f).Decode(&s)
-	return s, err
+	d.state[ck] = b
 }
 
-// Get retrieves the named object as bytes
-func (d *Data) Get(name string) ([]byte, error) {
-	f, err := d.fsystem.Open(name)
-	if err != nil {
-		return nil, err
+func (d *Data) PackageSourceFS(path string) (fs.FS, error) {
+	if strings.HasPrefix(path, "//") {
+		path = path[2:]
+		path = filepath.Join(d.root, path)
+		return os.DirFS(path), nil
 	}
-	return io.ReadAll(f)
-}
-
-// NewResource writes out a new resource for during calls to Gen.
-type NewResource struct {
-	Name      string
-	Generator func(w io.Writer) error
-}
-
-// Gen overwrites a resource
-func (d *Data) Gen(res NewResource) error {
-	p := filepath.Join(d.root, res.Name)
-	f, err := os.Create(p)
-	if err != nil {
-		return err
-	}
-	return res.Generator(f)
+	return nil, errors.New("only abs workspace paths supported")
 }

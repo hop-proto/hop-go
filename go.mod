@@ -12,8 +12,10 @@ require (
 	github.com/tockins/interact v0.0.0-20171114182912-f8fb5795b5d7
 	goji.io v2.0.2+incompatible
 	golang.org/x/crypto v0.0.0-20220427172511-eb4f295cb31f
+	golang.org/x/exp v0.0.0-20220428152302-39d4317da171
 	golang.org/x/sys v0.0.0-20220422013727-9388b58f7150
 	golang.org/x/term v0.0.0-20220411215600-e5f449aeb171
+	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
 	gotest.tools v2.2.0+incompatible
 )
 

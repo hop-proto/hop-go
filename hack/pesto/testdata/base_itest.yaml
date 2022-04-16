@@ -1,0 +1,15 @@
+targets:
+  - name: server_test_config
+    type: file
+    depends_on: []
+  - name: base_container
+    type: dockerfile_container
+    depends_on: []
+  - name: dev_container
+    type: layered_container
+    depends_on:
+      - base_container
+      - server_test_config
+files:
+  - name: server_test_config
+    path: hopd_config

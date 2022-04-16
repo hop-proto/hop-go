@@ -1,0 +1,28 @@
+Testing TODO
+============
+
+We want a way to declaratively build containers and itest setups. A new itest
+should be easy to write in code or in YAML, and should be able to easily run
+multiple containers. The builds should be deterministic (ish) so that we don't
+always have to rebuild everything.
+
+Why pesto? Because it's like Bazel (pronounced basil), but blended with Docker.
+
+Goals:
+- Build a container from a Dockerfile
+- Build a container from generated files
+- Generate stable and unstable files
+- Layer generated files into container
+- Declarative interface (YAML)
+
+Approach:
+- Start writing out a file format that's OK to write and seems OK to parse
+- For each target type, write code to read / generate it
+- Build a target graph independent of types
+- Connect build as a walk of the graph
+
+Specific Tests:
+- Launch a server and a client where the server already has the client key, and
+  the key is generated at test time.
+- Launch multiple servers that a client can hop through
+- Specify a transcript of commands to run on the remote end
