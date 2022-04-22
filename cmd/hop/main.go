@@ -6,15 +6,13 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"zmap.io/portal/config"
 	"zmap.io/portal/core"
 	"zmap.io/portal/flags"
 	"zmap.io/portal/hopclient"
 )
 
 func main() {
-	// TODO(dadrian): This function is kind of long. It'd be nice to break some
-	// of it out (like the key and cert processing) so that config behavior
-	// could be unit tested.
 	var f flags.Flags
 	var fs flag.FlagSet
 
@@ -41,7 +39,7 @@ func main() {
 	// what clients/auth grants are allowed to do. How should this be
 	// communicated within Intent and in Authgrant?
 
-	//var runCmdInShell bool
+	// var runCmdInShell bool
 	// fs.BoolVar(&runCmdInShell, "s", false, "run specified command...")
 
 	err := fs.Parse(os.Args[1:])
@@ -56,6 +54,15 @@ func main() {
 	if err != nil {
 		logrus.Fatalf("invalid input %s: %s", hoststring, err)
 	}
+	// Make client config
+	// Load the config
+	err = config.InitClient(f.ConfigPath)
+	if err != nil {
+		logrus.Fatalf("error loading config: %s", err)
+	}
+	cc := config.GetClient()
+
+	// Make authenticator
 
 	config, address, authenticator := hopclient.ClientSetup(f, inputURL)
 

@@ -24,8 +24,8 @@ type HopClient struct { // nolint:maligned
 	m  sync.Mutex     // must be held whenever changing state (connecting)
 	wg sync.WaitGroup // incremented while a connection opens, decremented when it ends
 
-	connected bool // true if connected to address
-	address   string
+	connected bool   // true if connected to address
+	address   string // TODO(baumanl): necessary?
 
 	TransportConn *transport.Client
 	ProxyConn     *tubes.Reliable

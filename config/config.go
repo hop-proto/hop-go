@@ -244,7 +244,7 @@ func (c *ClientConfig) MatchHost(inputHost string) *HostConfig {
 			return &c.Hosts[i]
 		}
 	}
-	//TODO(dadrian): Should this return a default host config? Yes.
+	// TODO(dadrian): Should this return a default host config? Yes.
 	return &HostConfig{}
 }
 
