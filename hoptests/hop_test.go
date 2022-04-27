@@ -927,7 +927,7 @@ func (s *Suite) MockServerFS(t *testing.T, fsystem fstest.MapFS) {
 }
 
 func (s *Suite) NewClient(t *testing.T, config hopclient.Config) *hopclient.HopClient {
-	c, err := hopclient.NewHopClient(config)
+	c, err := hopclient.NewHopClient(&config)
 	assert.NilError(t, err)
 	return c
 }

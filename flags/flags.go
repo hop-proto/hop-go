@@ -10,6 +10,7 @@ import (
 	"os/user"
 
 	"github.com/sirupsen/logrus"
+
 	"zmap.io/portal/agent"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/common"
@@ -64,6 +65,7 @@ func loadLeaf(leafFile string, autoSelfSign bool, public *keys.PublicKey, addres
 }
 
 // TODO(baumanl): Put this in a different package
+
 // AuthenticatorSetup either connects to an agent or makes an inmemory authenticator object
 func AuthenticatorSetup(cc *config.ClientConfig, f *Flags) (core.Authenticator, error) {
 	// Connect to the agent
@@ -130,6 +132,8 @@ func AuthenticatorSetup(cc *config.ClientConfig, f *Flags) (core.Authenticator, 
 	return authenticator, nil
 }
 
+// LoadConfigFromFlags follows the configpath provided in flags (or default)
+// also updates the flags.Address to be the correct override (currently)
 func LoadConfigFromFlags(f *Flags) (*config.ClientConfig, error) {
 	// Make client config
 	// Load the config file
