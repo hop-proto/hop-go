@@ -9,7 +9,6 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"zmap.io/portal/authgrants"
-	"zmap.io/portal/certs"
 	"zmap.io/portal/codex"
 	"zmap.io/portal/common"
 	"zmap.io/portal/core"
@@ -24,8 +23,9 @@ type HopClient struct { // nolint:maligned
 	m  sync.Mutex     // must be held whenever changing state (connecting)
 	wg sync.WaitGroup // incremented while a connection opens, decremented when it ends
 
-	connected bool   // true if connected to address
-	address   string // TODO(baumanl): necessary?
+	connected     bool // true if connected to address
+	address       string
+	authenticator core.Authenticator
 
 	TransportConn *transport.Client
 	ProxyConn     *tubes.Reliable
@@ -37,10 +37,16 @@ type HopClient struct { // nolint:maligned
 	Proxied bool
 }
 
+// TODO (baumanl): this whole struct feels very redundant
+// it is basically just a copy of some of the config.ClientConfig
+// However, if we want hopclient to be a stand alone library then
+// we shouldn't depend on having a config file. Maybe some decomp though???
+
 // Config holds configuration options for hop client
 type Config struct {
-	User string
-	Leaf *certs.Certificate
+	// TODO (baumanl): delete/refine this
+	User string //necessary?
+	// Leaf *certs.Certificate
 
 	SockAddr   string
 	LocalArgs  []string
@@ -52,9 +58,9 @@ type Config struct {
 }
 
 // NewHopClient creates a new client object and loads keys from file or auth grant protocol
-func NewHopClient(config Config) (*HopClient, error) {
+func NewHopClient(config *Config) (*HopClient, error) {
 	client := &HopClient{
-		config:  config,
+		config:  *config, // TODO(baumanl): is this a good idea?
 		wg:      sync.WaitGroup{},
 		Proxied: false,
 	}
@@ -70,20 +76,25 @@ func NewHopClient(config Config) (*HopClient, error) {
 }
 
 // Dial connects to an address with the provided authentication.
-func (c *HopClient) Dial(address string, authentiator core.Authenticator) error {
+func (c *HopClient) Dial(address string, authenticator core.Authenticator) error {
 	c.m.Lock()
 	defer c.m.Unlock()
-	return c.connectLocked(address, authentiator)
+	return c.connectLocked(address, authenticator)
 }
 
-func (c *HopClient) connectLocked(address string, authentiator core.Authenticator) error {
+func (c *HopClient) connectLocked(address string, authenticator core.Authenticator) error {
 	if c.connected {
 		return errors.New("already connected")
 	}
-	err := c.startUnderlying(address, authentiator)
+	err := c.startUnderlying(address, authenticator)
 	if err != nil {
 		return err
 	}
+	// TODO(baumanl): Is there something wrong with doing this?
+	// This would allow for the same authenticator to be used again during the
+	// authgrant procedure.
+	c.address = address
+	c.authenticator = authenticator
 	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.TransportConn)
 	go c.TubeMuxer.Start()
 	err = c.userAuthorization()
@@ -98,40 +109,41 @@ func (c *HopClient) connectLocked(address string, authentiator core.Authenticato
 func (c *HopClient) Start() error {
 	//TODO(baumanl): fix how session duration tied to cmd duration or port
 	//forwarding duration depending on options
-	if len(c.config.RemoteArgs) > 0 {
-		for _, v := range c.config.RemoteArgs {
-			if c.config.Headless {
-				c.wg.Add(1)
-			}
-			go func(arg string) {
-				if c.config.Headless {
-					defer c.wg.Done()
-				}
-				logrus.Info("Calling remote forward with arg: ", arg)
-				e := c.remoteForward(arg)
-				if e != nil {
-					logrus.Error(e)
-				}
 
-			}(v)
-		}
-	}
-	if len(c.config.LocalArgs) > 0 {
-		for _, v := range c.config.LocalArgs {
-			if c.config.Headless {
-				c.wg.Add(1)
-			}
-			go func(arg string) {
-				if c.config.Headless {
-					defer c.wg.Done()
-				}
-				e := c.localForward(arg)
-				if e != nil {
-					logrus.Error(e)
-				}
-			}(v)
-		}
-	}
+	// if len(c.config.RemoteArgs) > 0 {
+	// 	for _, v := range c.config.RemoteArgs {
+	// 		if c.config.Headless {
+	// 			c.wg.Add(1)
+	// 		}
+	// 		go func(arg string) {
+	// 			if c.config.Headless {
+	// 				defer c.wg.Done()
+	// 			}
+	// 			logrus.Info("Calling remote forward with arg: ", arg)
+	// 			e := c.remoteForward(arg)
+	// 			if e != nil {
+	// 				logrus.Error(e)
+	// 			}
+
+	// 		}(v)
+	// 	}
+	// }
+	// if len(c.config.LocalArgs) > 0 {
+	// 	for _, v := range c.config.LocalArgs {
+	// 		if c.config.Headless {
+	// 			c.wg.Add(1)
+	// 		}
+	// 		go func(arg string) {
+	// 			if c.config.Headless {
+	// 				defer c.wg.Done()
+	// 			}
+	// 			e := c.localForward(arg)
+	// 			if e != nil {
+	// 				logrus.Error(e)
+	// 			}
+	// 		}(v)
+	// 	}
+	// }
 	if !c.config.Headless {
 		err := c.startExecTube()
 		if err != nil {
@@ -251,7 +263,6 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 		logrus.Errorf("C: Issue with handshake: %v", err)
 		return err
 	}
-	c.address = address
 	return nil
 }
 
