@@ -11,6 +11,7 @@ import (
 	"zmap.io/portal/authgrants"
 	"zmap.io/portal/codex"
 	"zmap.io/portal/common"
+	"zmap.io/portal/config"
 	"zmap.io/portal/core"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
@@ -24,17 +25,22 @@ type HopClient struct { // nolint:maligned
 	wg sync.WaitGroup // incremented while a connection opens, decremented when it ends
 
 	connected     bool // true if connected to address
-	address       string
 	authenticator core.Authenticator
 
 	TransportConn *transport.Client
 	ProxyConn     *tubes.Reliable
-	TubeMuxer     *tubes.Muxer
-	ExecTube      *codex.ExecTube
 
-	config Config
+	TubeMuxer *tubes.Muxer
+	ExecTube  *codex.ExecTube
 
-	Proxied bool
+	// Proxied bool   // TODO(baumanl): put in config probably
+	// address string // TODO(baumanl): what exactly is this? address string or real address or hop url??? does it need to be here or could it be in the config
+
+	// TODO(baumanl): does the hop client actually need all of the Hosts slice if
+	// it is just connecting to one? In general I think they won't be used, but
+	// could be useful for creating a config during authorization grant protocol
+	config     config.ClientConfig
+	hostconfig config.HostConfig // TODO(baumanl): better to have a single representation with just the ClientConfig information & the host specific information
 }
 
 // TODO (baumanl): this whole struct feels very redundant
@@ -43,35 +49,36 @@ type HopClient struct { // nolint:maligned
 // we shouldn't depend on having a config file. Maybe some decomp though???
 
 // Config holds configuration options for hop client
-type Config struct {
-	// TODO (baumanl): delete/refine this
-	User string //necessary?
-	// Leaf *certs.Certificate
+// type Config struct {
+// 	// TODO (baumanl): delete/refine this
+// 	User string //necessary?
+// 	// Leaf *certs.Certificate
 
-	SockAddr   string
-	LocalArgs  []string
-	RemoteArgs []string
-	Cmd        string
+// 	SockAddr   string
+// 	LocalArgs  []string
+// 	RemoteArgs []string
+// 	Cmd        string
 
-	NonPricipal bool // TODO(dadrian): Rename. What's the name for a non-principal connection? IsAuthGranted?
-	Headless    bool
-}
+// 	NonPricipal bool // TODO(dadrian): Rename. What's the name for a non-principal connection? IsAuthGranted?
+// 	Headless    bool
+// }
 
 // NewHopClient creates a new client object and loads keys from file or auth grant protocol
-func NewHopClient(config *Config) (*HopClient, error) {
+func NewHopClient(config *config.ClientConfig, hostname string) (*HopClient, error) {
 	client := &HopClient{
-		config:  *config, // TODO(baumanl): is this a good idea?
-		wg:      sync.WaitGroup{},
-		Proxied: false,
+		config:     *config,
+		hostconfig: *config.MatchHost(hostname), // TODO(baumanl): don't love this
+		wg:         sync.WaitGroup{},
+		// Proxied:    false,
 	}
-	if !config.NonPricipal {
-		// Do nothing, keys are passed at Dial time
-	} else {
-		err := client.getAuthorization()
-		if err != nil {
-			return nil, err
-		}
-	}
+	// if !config.NonPricipal {
+	// 	// Do nothing, keys are passed at Dial time
+	// } else {
+	// 	err := client.getAuthorization()
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// }
 	return client, nil
 }
 
@@ -93,7 +100,7 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	// TODO(baumanl): Is there something wrong with doing this?
 	// This would allow for the same authenticator to be used again during the
 	// authgrant procedure.
-	c.address = address
+	// c.address = address
 	c.authenticator = authenticator
 	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.TransportConn)
 	go c.TubeMuxer.Start()
@@ -144,13 +151,13 @@ func (c *HopClient) Start() error {
 	// 		}(v)
 	// 	}
 	// }
-	if !c.config.Headless {
-		err := c.startExecTube()
-		if err != nil {
-			logrus.Error(err)
-			return ErrClientStartingExecTube
-		}
+	// if !c.config.Headless {
+	err := c.startExecTube()
+	if err != nil {
+		logrus.Error(err)
+		return ErrClientStartingExecTube
 	}
+	// }
 
 	// handle incoming tubes
 	go c.HandleTubes()
@@ -246,11 +253,11 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 		Leaf:      authenticator.GetLeaf(),
 	}
 	var err error
-	if !c.Proxied {
-		c.TransportConn, err = transport.Dial("udp", address, transportConfig)
-	} else {
-		c.TransportConn, err = transport.DialNP("netproxy", address, c.ProxyConn, transportConfig)
-	}
+	// if !c.Proxied {
+	c.TransportConn, err = transport.Dial("udp", address, transportConfig)
+	// } else {
+	// 	c.TransportConn, err = transport.DialNP("netproxy", address, c.ProxyConn, transportConfig)
+	// }
 	if err != nil {
 		logrus.Errorf("C: error dialing server: %v", err)
 		return err
@@ -270,7 +277,7 @@ func (c *HopClient) userAuthorization() error {
 	//*****PERFORM USER AUTHORIZATION******
 	uaCh, _ := c.TubeMuxer.CreateTube(common.UserAuthTube)
 	defer uaCh.Close()
-	if ok := userauth.RequestAuthorization(uaCh, c.config.User); !ok {
+	if ok := userauth.RequestAuthorization(uaCh, c.hostconfig.User); !ok {
 		return ErrClientUnauthorized
 	}
 	logrus.Info("User authorization complete")
@@ -280,14 +287,16 @@ func (c *HopClient) userAuthorization() error {
 func (c *HopClient) startExecTube() error {
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	//Hop Session is tied to the life of this code execution tube.
-	logrus.Infof("Performing action: %v", c.config.Cmd)
+	// TODO(baumanl): provide support for Cmd in ClientConfig
+
+	logrus.Infof("Performing action: %v", c.hostconfig.Cmd)
 	ch, err := c.TubeMuxer.CreateTube(common.ExecTube)
 	if err != nil {
 		logrus.Error(err)
 		return err
 	}
 	c.wg.Add(1)
-	c.ExecTube, err = codex.NewExecTube(c.config.Cmd, ch, &c.wg)
+	c.ExecTube, err = codex.NewExecTube(c.hostconfig.Cmd, ch, &c.wg)
 	return err
 }
 
@@ -302,7 +311,7 @@ func (c *HopClient) HandleTubes() {
 			continue
 		}
 		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v", t.Type())
-		if t.Type() == common.AuthGrantTube && c.config.Headless {
+		if t.Type() == common.AuthGrantTube && c.hostconfig.Headless {
 			go c.principal(t)
 		} else if t.Type() == common.RemotePFTube {
 			go c.handleRemote(t)

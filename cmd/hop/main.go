@@ -21,7 +21,7 @@ func main() {
 		return
 	}
 	// Combine the CLI Flags and the ClientConfig with appropriate override
-	config, address := flags.ClientSetup(f)
+	// config, address := flags.ClientSetup(f)
 	client, err := hopclient.NewHopClient(config)
 	if err != nil {
 		logrus.Error(err)

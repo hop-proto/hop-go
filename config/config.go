@@ -56,6 +56,13 @@ type HostConfig struct {
 	Key          string
 	Certificate  string
 	Intermediate string
+
+	// TODO(baumanl): Add application layer hop config options to grammar
+	Cmd      string // what command to run on connect
+	Headless bool   // run without shell
+	// something for principal vs. delegate
+	// something for remote port forward
+	// something for local port forward
 }
 
 // NameConfig defines the keys and certificates presented by the server for a

@@ -16,7 +16,6 @@ import (
 	"zmap.io/portal/common"
 	"zmap.io/portal/config"
 	"zmap.io/portal/core"
-	"zmap.io/portal/hopclient"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/pkg/combinators"
 	"zmap.io/portal/transport"
@@ -216,7 +215,7 @@ func ParseArgs(args []string) (*Flags, error) {
 }
 
 // ClientSetup creates a hopclient config with the appropriate ovveride rules with information from Flags and config file
-func ClientSetup(f *Flags) (*hopclient.Config, string) {
-	// potentially other stuff??? Or not necessary at all???
-	return &hopclient.Config{User: f.Address.User}, f.Address.Address()
-}
+// func ClientSetup(f *Flags) (*hopclient.Config, string) {
+// 	// potentially other stuff??? Or not necessary at all???
+// 	return &hopclient.Config{User: f.Address.User}, f.Address.Address()
+// }
