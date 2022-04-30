@@ -4,6 +4,7 @@ package hopclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"sync"
@@ -77,6 +78,8 @@ func NewHopClient(config *config.ClientConfig, hostname string) (*HopClient, err
 		wg:         sync.WaitGroup{},
 		// Proxied:    false,
 	}
+	logrus.Info("C: hostname: ", hostname)
+	logrus.Info("C: created client: ", client.hostconfig.Hostname)
 	// if !config.NonPricipal {
 	// 	// Do nothing, keys are passed at Dial time
 	// } else {
@@ -101,7 +104,7 @@ func (c *HopClient) Dial() error {
 	return c.connectLocked(c.hostconfig.HostURL().Address(), c.authenticator)
 }
 
-// Dial connects to an address with the provided authentication.
+// DialExternalAuthenticator connects to an address with the provided authentication.
 func (c *HopClient) DialExternalAuthenticator(address string, authenticator core.Authenticator) error {
 	c.m.Lock()
 	defer c.m.Unlock()
@@ -159,7 +162,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 	} else if hc.AutoSelfSign == config.Unset && cc.AutoSelfSign == config.True {
 		autoSelfSign = true
 	} else {
-		logrus.Fatalf("no certificate provided and AutoSelfSign is not enabled for %q", hc.HostURL().Address)
+		return fmt.Errorf("no certificate provided and AutoSelfSign is not enabled for %q", hc.HostURL().Address())
 	}
 	keyPath := combinators.StringOr(hc.Key, combinators.StringOr(cc.Key, config.DefaultKeyPath()))
 	var authenticator core.Authenticator
@@ -169,7 +172,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 	if ac.Available(context.Background()) {
 		bc, err := ac.ExchangerFor(context.Background(), keyPath)
 		if err != nil {
-			logrus.Fatalf("unable to create exchanger for agent with keyID: %s", err)
+			return fmt.Errorf("unable to create exchanger for agent with keyID: %s", err)
 		}
 		var public keys.PublicKey
 		copy(bc.Public[:], public[:]) // TODO(baumanl): resolve public key type awkwardness
@@ -187,7 +190,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		logrus.Infof("using key %q", keyPath)
 		keypair, err := keys.ReadDHKeyFromPEMFile(keyPath)
 		if err != nil {
-			logrus.Fatalf("unable to load key pair %q: %s", keyPath, err)
+			return fmt.Errorf("unable to load key pair %q: %s", keyPath, err)
 		}
 		leaf = loadLeaf(leafFile, autoSelfSign, &keypair.Public, hc.HostURL())
 		logrus.Infof("no agent running")
@@ -394,6 +397,7 @@ func (c *HopClient) userAuthorization() error {
 	//*****PERFORM USER AUTHORIZATION******
 	uaCh, _ := c.TubeMuxer.CreateTube(common.UserAuthTube)
 	defer uaCh.Close()
+	logrus.Info("requesting auth for", c.hostconfig.User)
 	if ok := userauth.RequestAuthorization(uaCh, c.hostconfig.User); !ok {
 		return ErrClientUnauthorized
 	}

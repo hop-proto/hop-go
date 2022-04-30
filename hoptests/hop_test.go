@@ -8,6 +8,7 @@ import (
 	"gotest.tools/assert"
 
 	"zmap.io/portal/certs"
+	"zmap.io/portal/config"
 	"zmap.io/portal/core"
 	"zmap.io/portal/hopserver"
 
@@ -923,11 +924,11 @@ func NewSuite(t *testing.T) *Suite {
 
 func (s *Suite) MockServerFS(t *testing.T, fsystem fstest.MapFS) {
 	assert.Assert(t, s.Server != nil)
-	s.Server.SetFSystem(fsystem) // TODO(baumnl): not sure if a setter is the way to go here
+	s.Server.SetFSystem(fsystem) // TODO(baumanl): not sure if a setter is the way to go here
 }
 
-func (s *Suite) NewClient(t *testing.T, config hopclient.Config) *hopclient.HopClient {
-	c, err := hopclient.NewHopClient(&config)
+func (s *Suite) NewClient(t *testing.T, config *config.ClientConfig, hostname string) *hopclient.HopClient {
+	c, err := hopclient.NewHopClient(config, hostname)
 	assert.NilError(t, err)
 	return c
 }
@@ -950,9 +951,19 @@ func TestHopClient(t *testing.T) {
 	thunks.SetUpTest()
 	t.Run("connect", func(t *testing.T) {
 		s := NewSuite(t)
-		c := s.NewClient(t, hopclient.Config{
-			User: "username",
-		})
+
+		h, _, err := net.SplitHostPort(s.Server.ListenAddress().String())
+		assert.NilError(t, err)
+
+		cc := config.ClientConfig{
+			Hosts: []config.HostConfig{{
+				Pattern:  h,
+				Hostname: h,
+				User:     "username",
+			}},
+		}
+		c, err := hopclient.NewHopClient(&cc, h)
+		assert.NilError(t, err)
 		clientKey := keys.GenerateNewX25519KeyPair()
 		mock := fstest.MapFS{
 			"home/username/.hop/authorized_keys": &fstest.MapFile{
@@ -962,7 +973,7 @@ func TestHopClient(t *testing.T) {
 		}
 		s.MockServerFS(t, mock)
 		go s.Server.Serve()
-		err := c.Dial(s.Server.ListenAddress().String(), s.ChainAuthenticator(t, clientKey))
+		err = c.DialExternalAuthenticator(s.Server.ListenAddress().String(), s.ChainAuthenticator(t, clientKey))
 		assert.NilError(t, err)
 	})
 
