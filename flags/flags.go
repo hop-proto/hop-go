@@ -72,7 +72,7 @@ func LoadConfigFromFlags(f *Flags) (*config.ClientConfig, error) {
 		// host config and CLI flags?
 		return nil, fmt.Errorf("no config file found: %s", err)
 	}
-	cc := config.GetClientCopy()
+	cc := config.GetClientCopy(f.Address.Host)
 	err = mergeFlagsAndConfig(f, cc)
 	return cc, err
 }

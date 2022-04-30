@@ -928,7 +928,7 @@ func (s *Suite) MockServerFS(t *testing.T, fsystem fstest.MapFS) {
 }
 
 func (s *Suite) NewClient(t *testing.T, config *config.ClientConfig, hostname string) *hopclient.HopClient {
-	c, err := hopclient.NewHopClient(config, hostname)
+	c, err := hopclient.NewHopClient(config)
 	assert.NilError(t, err)
 	return c
 }
@@ -962,7 +962,7 @@ func TestHopClient(t *testing.T) {
 				User:     "username",
 			}},
 		}
-		c, err := hopclient.NewHopClient(&cc, h)
+		c, err := hopclient.NewHopClient(&cc)
 		assert.NilError(t, err)
 		clientKey := keys.GenerateNewX25519KeyPair()
 		mock := fstest.MapFS{

@@ -70,15 +70,14 @@ type HopClient struct { // nolint:maligned
 // 	Headless    bool
 // }
 
-// NewHopClient creates a new client object and loads keys from file or auth grant protocol
-func NewHopClient(config *config.ClientConfig, hostname string) (*HopClient, error) {
+// NewHopClient creates a new client object
+func NewHopClient(config *config.ClientConfig) (*HopClient, error) {
 	client := &HopClient{
 		config:     config,
-		hostconfig: config.MatchHost(hostname), // TODO(baumanl): don't love this
+		hostconfig: &config.Hosts[0], // TODO(baumanl): don't love this
 		wg:         sync.WaitGroup{},
 		// Proxied:    false,
 	}
-	logrus.Info("C: hostname: ", hostname)
 	logrus.Info("C: created client: ", client.hostconfig.Hostname)
 	// if !config.NonPricipal {
 	// 	// Do nothing, keys are passed at Dial time
