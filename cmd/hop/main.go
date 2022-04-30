@@ -15,27 +15,20 @@ func main() {
 		logrus.Error(err)
 		return
 	}
+	// cc will be result of merging config file settings and flags
 	cc, err := flags.LoadConfigFromFlags(f)
 	if err != nil {
 		logrus.Error(err)
 		return
 	}
-	// Combine the CLI Flags and the ClientConfig with appropriate override
-	// config, address := flags.ClientSetup(f)
-	client, err := hopclient.NewHopClient(config)
+
+	client, err := hopclient.NewHopClient(cc, f.Address.Host)
 	if err != nil {
 		logrus.Error(err)
 		return
 	}
 
-	// Make authenticator using info in config
-	authenticator, err := flags.AuthenticatorSetup(cc, f)
-	if err != nil {
-		logrus.Error(err)
-		return
-	}
-
-	err = client.Dial(address, authenticator)
+	err = client.Dial()
 	if err != nil {
 		logrus.Error(err)
 		return

@@ -214,6 +214,17 @@ func GetClient() *ClientConfig {
 	return &userConfig
 }
 
+// GetClientCopy mMakes a deep copy of userConfig and returns a pointer to it
+// this allows caller to modify config
+func GetClientCopy() *ClientConfig {
+	configCopy := userConfig
+	configCopy.CAFiles = make([]string, len(userConfig.CAFiles))
+	copy(configCopy.CAFiles, userConfig.CAFiles)
+	configCopy.Hosts = make([]HostConfig, len(userConfig.Hosts))
+	copy(configCopy.Hosts, userConfig.Hosts)
+	return &configCopy
+}
+
 var serverConfig ServerConfig
 var serverConfigErr error
 var serverConfigOnce sync.Once

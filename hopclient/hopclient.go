@@ -2,17 +2,23 @@
 package hopclient
 
 import (
+	"context"
 	"errors"
 	"io"
+	"net/http"
 	"sync"
 
 	"github.com/sirupsen/logrus"
 
+	"zmap.io/portal/agent"
 	"zmap.io/portal/authgrants"
+	"zmap.io/portal/certs"
 	"zmap.io/portal/codex"
 	"zmap.io/portal/common"
 	"zmap.io/portal/config"
 	"zmap.io/portal/core"
+	"zmap.io/portal/keys"
+	"zmap.io/portal/pkg/combinators"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
 	"zmap.io/portal/userauth"
@@ -39,8 +45,8 @@ type HopClient struct { // nolint:maligned
 	// TODO(baumanl): does the hop client actually need all of the Hosts slice if
 	// it is just connecting to one? In general I think they won't be used, but
 	// could be useful for creating a config during authorization grant protocol
-	config     config.ClientConfig
-	hostconfig config.HostConfig // TODO(baumanl): better to have a single representation with just the ClientConfig information & the host specific information
+	config     *config.ClientConfig
+	hostconfig *config.HostConfig // TODO(baumanl): better to have a single representation with just the ClientConfig information & the host specific information
 }
 
 // TODO (baumanl): this whole struct feels very redundant
@@ -66,8 +72,8 @@ type HopClient struct { // nolint:maligned
 // NewHopClient creates a new client object and loads keys from file or auth grant protocol
 func NewHopClient(config *config.ClientConfig, hostname string) (*HopClient, error) {
 	client := &HopClient{
-		config:     *config,
-		hostconfig: *config.MatchHost(hostname), // TODO(baumanl): don't love this
+		config:     config,
+		hostconfig: config.MatchHost(hostname), // TODO(baumanl): don't love this
 		wg:         sync.WaitGroup{},
 		// Proxied:    false,
 	}
@@ -82,8 +88,21 @@ func NewHopClient(config *config.ClientConfig, hostname string) (*HopClient, err
 	return client, nil
 }
 
+// Dial connects to an address after setting up it's own authentication
+// using information in it's config.
+func (c *HopClient) Dial() error {
+	err := c.authenticatorSetup() // TODO(baumanl): or should this be done in NewClient?
+	if err != nil {
+		return err
+	}
+	c.m.Lock()
+	defer c.m.Unlock()
+	// TODO(baumanl): modify interface of connectLocked
+	return c.connectLocked(c.hostconfig.HostURL().Address(), c.authenticator)
+}
+
 // Dial connects to an address with the provided authentication.
-func (c *HopClient) Dial(address string, authenticator core.Authenticator) error {
+func (c *HopClient) DialExternalAuthenticator(address string, authenticator core.Authenticator) error {
 	c.m.Lock()
 	defer c.m.Unlock()
 	return c.connectLocked(address, authenticator)
@@ -110,6 +129,104 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	}
 	c.connected = true
 	return nil
+}
+
+func (c *HopClient) authenticatorSetup() error {
+	c.m.Lock()
+	defer c.m.Unlock()
+	return c.authenticatorSetupLocked()
+}
+
+func (c *HopClient) authenticatorSetupLocked() error {
+	cc := c.config
+	hc := c.hostconfig
+	// Connect to the agent
+	ac := agent.Client{
+		BaseURL:    combinators.StringOr(cc.AgentURL, common.DefaultAgentURL),
+		HTTPClient: http.DefaultClient,
+	}
+
+	// Host block overrides global block. Set overrides Unset. Certificate
+	// overrides AutoSelfSign.
+	var leafFile string
+	var autoSelfSign bool
+	if hc.Certificate != "" {
+		leafFile = hc.Certificate
+	} else if hc.AutoSelfSign == config.True {
+		autoSelfSign = true
+	} else if hc.AutoSelfSign != config.True && cc.Certificate != "" {
+		leafFile = cc.Certificate
+	} else if hc.AutoSelfSign == config.Unset && cc.AutoSelfSign == config.True {
+		autoSelfSign = true
+	} else {
+		logrus.Fatalf("no certificate provided and AutoSelfSign is not enabled for %q", hc.HostURL().Address)
+	}
+	keyPath := combinators.StringOr(hc.Key, combinators.StringOr(cc.Key, config.DefaultKeyPath()))
+	var authenticator core.Authenticator
+
+	var leaf *certs.Certificate
+
+	if ac.Available(context.Background()) {
+		bc, err := ac.ExchangerFor(context.Background(), keyPath)
+		if err != nil {
+			logrus.Fatalf("unable to create exchanger for agent with keyID: %s", err)
+		}
+		var public keys.PublicKey
+		copy(bc.Public[:], public[:]) // TODO(baumanl): resolve public key type awkwardness
+		leaf = loadLeaf(leafFile, autoSelfSign, &public, hc.HostURL())
+		authenticator = core.AgentAuthenticator{
+			BoundClient: bc,
+			VerifyConfig: transport.VerifyConfig{
+				InsecureSkipVerify: true, // TODO
+			},
+			Leaf: leaf,
+		}
+	} else {
+		// read in key from file
+		// TODO(baumanl): move loading key to within Authenticator interface?
+		logrus.Infof("using key %q", keyPath)
+		keypair, err := keys.ReadDHKeyFromPEMFile(keyPath)
+		if err != nil {
+			logrus.Fatalf("unable to load key pair %q: %s", keyPath, err)
+		}
+		leaf = loadLeaf(leafFile, autoSelfSign, &keypair.Public, hc.HostURL())
+		logrus.Infof("no agent running")
+		authenticator = core.InMemoryAuthenticator{
+			X25519KeyPair: keypair,
+			VerifyConfig: transport.VerifyConfig{
+				InsecureSkipVerify: true, // TODO(dadrian): Host-key verification
+			},
+			Leaf: leaf,
+		}
+	}
+	c.authenticator = authenticator
+	return nil
+}
+
+// TODO(baumanl): Put this in a different package/file
+
+// Creates a self-signed leaf or loads in from leafFile.
+func loadLeaf(leafFile string, autoSelfSign bool, public *keys.PublicKey, address core.URL) *certs.Certificate {
+	var leaf *certs.Certificate
+	var err error
+	if autoSelfSign {
+		logrus.Infof("auto self-signing leaf for user %q", address.User)
+		leaf, err = certs.SelfSignLeaf(&certs.Identity{
+			PublicKey: *public,
+			Names: []certs.Name{
+				certs.RawStringName(address.User),
+			},
+		})
+		if err != nil {
+			logrus.Fatalf("unable to self-sign certificate: %s", err)
+		}
+	} else {
+		leaf, err = certs.ReadCertificatePEMFile(leafFile)
+		if err != nil {
+			logrus.Fatalf("unable to open certificate: %s", err)
+		}
+	}
+	return leaf
 }
 
 //Start starts any port forwarding/cmds/shells from the client

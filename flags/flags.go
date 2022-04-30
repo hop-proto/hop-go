@@ -2,23 +2,14 @@
 package flags
 
 import (
-	"context"
 	"errors"
 	"flag"
 	"fmt"
-	"net/http"
 	"os/user"
+	"strconv"
 
-	"github.com/sirupsen/logrus"
-
-	"zmap.io/portal/agent"
-	"zmap.io/portal/certs"
-	"zmap.io/portal/common"
 	"zmap.io/portal/config"
 	"zmap.io/portal/core"
-	"zmap.io/portal/keys"
-	"zmap.io/portal/pkg/combinators"
-	"zmap.io/portal/transport"
 )
 
 // ErrMissingInputURL is returned when hoststring is missing
@@ -39,96 +30,34 @@ type Flags struct {
 	Headless   bool     // if no cmd/shell desired (just port forwarding)
 }
 
-// Creates a self-signed leaf or loads in from leafFile.
-func loadLeaf(leafFile string, autoSelfSign bool, public *keys.PublicKey, address core.URL) *certs.Certificate {
-	var leaf *certs.Certificate
-	var err error
-	if autoSelfSign {
-		logrus.Infof("auto self-signing leaf for user %q", address.User)
-		leaf, err = certs.SelfSignLeaf(&certs.Identity{
-			PublicKey: *public,
-			Names: []certs.Name{
-				certs.RawStringName(address.User),
-			},
-		})
+func mergeAddresses(f *Flags, hc *config.HostConfig) error {
+	address := core.MergeURLs(hc.HostURL(), *f.Address)
+
+	if address.User == "" {
+		u, err := user.Current()
 		if err != nil {
-			logrus.Fatalf("unable to self-sign certificate: %s", err)
+			return fmt.Errorf("user not specified and unable to determine current user: %s", err)
 		}
-	} else {
-		leaf, err = certs.ReadCertificatePEMFile(leafFile)
-		if err != nil {
-			logrus.Fatalf("unable to open certificate: %s", err)
-		}
+		address.User = u.Username
 	}
-	return leaf
+
+	// Update host config address
+	hc.Hostname = address.Host
+	hc.Port, _ = strconv.Atoi(address.Port)
+	hc.User = address.User
+	return nil
 }
 
-// TODO(baumanl): Put this in a different package
-
-// AuthenticatorSetup either connects to an agent or makes an inmemory authenticator object
-func AuthenticatorSetup(cc *config.ClientConfig, f *Flags) (core.Authenticator, error) {
-	// Connect to the agent
-	ac := agent.Client{
-		BaseURL:    combinators.StringOr(cc.AgentURL, common.DefaultAgentURL),
-		HTTPClient: http.DefaultClient,
-	}
-
+func mergeFlagsAndConfig(f *Flags, cc *config.ClientConfig) error {
+	//
+	// TODO(baumanl): any need to preserve the original inputURL?
 	hc := cc.MatchHost(f.Address.Host)
-
-	// Host block overrides global block. Set overrides Unset. Certificate
-	// overrides AutoSelfSign.
-	var leafFile string
-	var autoSelfSign bool
-	if hc.Certificate != "" {
-		leafFile = hc.Certificate
-	} else if hc.AutoSelfSign == config.True {
-		autoSelfSign = true
-	} else if hc.AutoSelfSign != config.True && cc.Certificate != "" {
-		leafFile = cc.Certificate
-	} else if hc.AutoSelfSign == config.Unset && cc.AutoSelfSign == config.True {
-		autoSelfSign = true
-	} else {
-		logrus.Fatalf("no certificate provided and AutoSelfSign is not enabled for %q", f.Address)
+	err := mergeAddresses(f, hc)
+	if err != nil {
+		return err
 	}
-	keyPath := combinators.StringOr(hc.Key, combinators.StringOr(cc.Key, config.DefaultKeyPath()))
-	var authenticator core.Authenticator
-
-	var leaf *certs.Certificate
-
-	if ac.Available(context.Background()) {
-		bc, err := ac.ExchangerFor(context.Background(), keyPath)
-		if err != nil {
-			logrus.Fatalf("unable to create exchanger for agent with keyID: %s", err)
-		}
-		var public keys.PublicKey
-		copy(bc.Public[:], public[:]) // TODO(baumanl): resolve public key type awkwardness
-		leaf = loadLeaf(leafFile, autoSelfSign, &public, *f.Address)
-		authenticator = core.AgentAuthenticator{
-			BoundClient: bc,
-			VerifyConfig: transport.VerifyConfig{
-				InsecureSkipVerify: true, // TODO
-			},
-			Leaf: leaf,
-		}
-	} else {
-		// read in key from file
-		// TODO(baumanl): move loading key to within Authenticator interface?
-		logrus.Infof("using key %q", keyPath)
-		keypair, err := keys.ReadDHKeyFromPEMFile(keyPath)
-		if err != nil {
-			logrus.Fatalf("unable to load key pair %q: %s", keyPath, err)
-		}
-		leaf = loadLeaf(leafFile, autoSelfSign, &keypair.Public, *f.Address)
-		logrus.Infof("no agent running")
-		authenticator = core.InMemoryAuthenticator{
-			X25519KeyPair: keypair,
-			VerifyConfig: transport.VerifyConfig{
-				InsecureSkipVerify: true, // TODO(dadrian): Host-key verification
-			},
-			Leaf: leaf,
-		}
-	}
-	return authenticator, nil
+	// TODO(baumanl): add merge support for all other flags/config options
+	return nil
 }
 
 // LoadConfigFromFlags follows the configpath provided in flags (or default)
@@ -143,24 +72,9 @@ func LoadConfigFromFlags(f *Flags) (*config.ClientConfig, error) {
 		// host config and CLI flags?
 		return nil, fmt.Errorf("no config file found: %s", err)
 	}
-	cc := config.GetClient()
-
-	// TODO(baumanl): don't like doing this here. feels janky. What version of the address
-	// do each of the different abstractions need?
-	// update Address with the real address
-	hc := cc.MatchHost(f.Address.Host)
-	address := core.MergeURLs(hc.HostURL(), *f.Address)
-
-	if address.User == "" {
-		u, err := user.Current()
-		if err != nil {
-			logrus.Fatalf("user not specified and unable to determine current user: %s", err)
-		}
-		address.User = u.Username
-	}
-	*f.Address = address
-
-	return cc, nil // parse config file
+	cc := config.GetClientCopy()
+	err = mergeFlagsAndConfig(f, cc)
+	return cc, err
 }
 
 // defineFlags calls fs.StringVar
