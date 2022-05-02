@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	logrus.SetLevel(logrus.InfoLevel)
+	// logrus.SetLevel(logrus.InfoLevel)
 	d := agent.Data{}
 	err := d.Init()
 	if err != nil {

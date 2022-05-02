@@ -88,7 +88,7 @@ func NewHopServer(underlying *transport.Server, hconfig *Config) (*HopServer, er
 
 //Serve listens for incoming hop connection requests and start corresponding authGrantServer on a Unix Domain socket
 func (s *HopServer) Serve() {
-	logrus.SetLevel(logrus.InfoLevel)
+	// logrus.SetLevel(logrus.InfoLevel)
 
 	go s.server.Serve()    //start transport layer server
 	go s.authGrantServer() //start authgrant server

@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"os"
 	"strings"
+	"testing/fstest"
 
 	"golang.org/x/crypto/curve25519"
 )
@@ -107,6 +108,23 @@ func ReadDHKeyFromPEMFile(path string) (*X25519KeyPair, error) {
 		return nil, err
 	}
 	b, err := ioutil.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+	p, _ := pem.Decode(b)
+	if p == nil {
+		return nil, errors.New("not a PEM file")
+	}
+	return DHKeyFromPEM(p)
+}
+
+// ReadDHKeyFromPEMFileFS reads the first PEM-encoded Hop DH key from the
+// file.
+func ReadDHKeyFromPEMFileFS(path string, fs fstest.MapFS) (*X25519KeyPair, error) {
+	if fs == nil {
+		return ReadDHKeyFromPEMFile(path)
+	}
+	b, err := fs.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"testing/fstest"
 
 	"github.com/sirupsen/logrus"
 
@@ -33,6 +34,8 @@ type HopClient struct { // nolint:maligned
 
 	connected     bool // true if connected to address
 	authenticator core.Authenticator
+
+	Fsystem fstest.MapFS // TODO(baumanl): current hack for test. switch to something better.
 
 	TransportConn *transport.Client
 	ProxyConn     *tubes.Reliable
@@ -76,6 +79,7 @@ func NewHopClient(config *config.ClientConfig) (*HopClient, error) {
 		config:     config,
 		hostconfig: &config.Hosts[0], // TODO(baumanl): don't love this
 		wg:         sync.WaitGroup{},
+		Fsystem:    nil,
 		// Proxied:    false,
 	}
 	logrus.Info("C: created client: ", client.hostconfig.Hostname)
@@ -100,6 +104,7 @@ func (c *HopClient) Dial() error {
 	c.m.Lock()
 	defer c.m.Unlock()
 	// TODO(baumanl): modify interface of connectLocked
+	logrus.Info("calling connectLocked on :", c.hostconfig.HostURL().Address())
 	return c.connectLocked(c.hostconfig.HostURL().Address(), c.authenticator)
 }
 
@@ -114,6 +119,7 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	if c.connected {
 		return errors.New("already connected")
 	}
+	logrus.Infof("connectLocked to: %q", address)
 	err := c.startUnderlying(address, authenticator)
 	if err != nil {
 		return err
@@ -140,6 +146,7 @@ func (c *HopClient) authenticatorSetup() error {
 }
 
 func (c *HopClient) authenticatorSetupLocked() error {
+	defer logrus.Info("C: authenticator setup complete")
 	cc := c.config
 	hc := c.hostconfig
 	// Connect to the agent
@@ -187,7 +194,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		// read in key from file
 		// TODO(baumanl): move loading key to within Authenticator interface?
 		logrus.Infof("using key %q", keyPath)
-		keypair, err := keys.ReadDHKeyFromPEMFile(keyPath)
+		keypair, err := keys.ReadDHKeyFromPEMFileFS(keyPath, c.Fsystem)
 		if err != nil {
 			return fmt.Errorf("unable to load key pair %q: %s", keyPath, err)
 		}
@@ -215,9 +222,9 @@ func loadLeaf(leafFile string, autoSelfSign bool, public *keys.PublicKey, addres
 		logrus.Infof("auto self-signing leaf for user %q", address.User)
 		leaf, err = certs.SelfSignLeaf(&certs.Identity{
 			PublicKey: *public,
-			Names: []certs.Name{
-				certs.RawStringName(address.User),
-			},
+			// Names: []certs.Name{
+			// 	certs.RawStringName(address.User),
+			// },
 		})
 		if err != nil {
 			logrus.Fatalf("unable to self-sign certificate: %s", err)
