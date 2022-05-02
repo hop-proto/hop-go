@@ -57,6 +57,8 @@ type HostConfig struct {
 	Certificate  string
 	Intermediate string
 
+	DisableAgent BoolSetting // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
+
 	// TODO(baumanl): Add application layer hop config options to grammar
 	Cmd      string // what command to run on connect
 	Headless bool   // run without shell

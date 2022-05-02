@@ -175,7 +175,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 
 	var leaf *certs.Certificate
 
-	if ac.Available(context.Background()) {
+	if hc.DisableAgent != config.True && ac.Available(context.Background()) {
 		bc, err := ac.ExchangerFor(context.Background(), keyPath)
 		if err != nil {
 			return fmt.Errorf("unable to create exchanger for agent with keyID: %s", err)

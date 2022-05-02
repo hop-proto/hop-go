@@ -977,11 +977,13 @@ func TestHopClientExtAuthenticator(t *testing.T) {
 				Data: []byte(clientKey.Public.String() + "\n"),
 				Mode: 0600,
 			},
+			"home/username/.hop/hopauth": &fstest.MapFile{},
 		}
 		s.MockServerFS(t, mock)
 		go s.Server.Serve()
 		err = c.DialExternalAuthenticator(s.Server.ListenAddress().String(), s.ChainAuthenticator(t, clientKey))
 		assert.NilError(t, err)
+		s.Server.Close()
 	})
 
 }
@@ -1006,6 +1008,7 @@ func TestHopClient(t *testing.T) {
 				User:         "username",
 				AutoSelfSign: config.True,
 				Key:          "home/username/.hop/id_hop.pem",
+				DisableAgent: config.True,
 			}},
 		}
 		c, err := hopclient.NewHopClient(&cc)
@@ -1029,6 +1032,7 @@ func TestHopClient(t *testing.T) {
 		go s.Server.Serve()
 		err = c.Dial()
 		assert.NilError(t, err)
+		s.Server.Close()
 	})
 
 }
