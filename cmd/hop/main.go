@@ -22,7 +22,7 @@ func main() {
 		return
 	}
 
-	client, err := hopclient.NewHopClient(cc)
+	client, err := hopclient.NewHopClient(cc, f.Address.Host)
 	if err != nil {
 		logrus.Error(err)
 		return

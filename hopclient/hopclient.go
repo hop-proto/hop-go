@@ -54,10 +54,10 @@ type HopClient struct { // nolint:maligned
 }
 
 // NewHopClient creates a new client object
-func NewHopClient(config *config.ClientConfig) (*HopClient, error) {
+func NewHopClient(config *config.ClientConfig, hostname string) (*HopClient, error) {
 	client := &HopClient{
 		config:     config,
-		hostconfig: &config.Hosts[0], // TODO(baumanl): don't love this
+		hostconfig: config.MatchHost(hostname),
 		wg:         sync.WaitGroup{},
 		Fsystem:    nil,
 		// Proxied:    false,

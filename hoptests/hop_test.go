@@ -935,7 +935,7 @@ func (s *Suite) MockClientFS(t *testing.T, client *hopclient.HopClient, fsystem 
 }
 
 func (s *Suite) NewClient(t *testing.T, config *config.ClientConfig, hostname string) *hopclient.HopClient {
-	c, err := hopclient.NewHopClient(config)
+	c, err := hopclient.NewHopClient(config, hostname)
 	assert.NilError(t, err)
 	return c
 }
@@ -969,8 +969,7 @@ func TestHopClientExtAuthenticator(t *testing.T) {
 				User:     "username",
 			}},
 		}
-		c, err := hopclient.NewHopClient(&cc)
-		assert.NilError(t, err)
+		c := s.NewClient(t, &cc, h)
 		clientKey := keys.GenerateNewX25519KeyPair()
 		mock := fstest.MapFS{
 			"home/username/.hop/authorized_keys": &fstest.MapFile{
@@ -988,6 +987,7 @@ func TestHopClientExtAuthenticator(t *testing.T) {
 
 }
 
+/* The hopclient automatically generates a cert and authenticator from key file */
 func TestHopClient(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	thunks.SetUpTest()
@@ -1011,8 +1011,7 @@ func TestHopClient(t *testing.T) {
 				DisableAgent: config.True,
 			}},
 		}
-		c, err := hopclient.NewHopClient(&cc)
-		assert.NilError(t, err)
+		c := s.NewClient(t, &cc, h)
 		clientKey := keys.GenerateNewX25519KeyPair()
 		mock := fstest.MapFS{
 			"home/username/.hop/authorized_keys": &fstest.MapFile{
@@ -1034,5 +1033,4 @@ func TestHopClient(t *testing.T) {
 		assert.NilError(t, err)
 		s.Server.Close()
 	})
-
 }
