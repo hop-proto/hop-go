@@ -2,17 +2,25 @@
 package hopclient
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net/http"
 	"sync"
+	"testing/fstest"
 
 	"github.com/sirupsen/logrus"
 
+	"zmap.io/portal/agent"
 	"zmap.io/portal/authgrants"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/codex"
 	"zmap.io/portal/common"
+	"zmap.io/portal/config"
 	"zmap.io/portal/core"
+	"zmap.io/portal/keys"
+	"zmap.io/portal/pkg/combinators"
 	"zmap.io/portal/transport"
 	"zmap.io/portal/tubes"
 	"zmap.io/portal/userauth"
@@ -24,66 +32,83 @@ type HopClient struct { // nolint:maligned
 	m  sync.Mutex     // must be held whenever changing state (connecting)
 	wg sync.WaitGroup // incremented while a connection opens, decremented when it ends
 
-	connected bool // true if connected to address
-	address   string
+	connected     bool // true if connected to address
+	authenticator core.Authenticator
+
+	Fsystem fstest.MapFS // TODO(baumanl): current hack for test. switch to something better.
 
 	TransportConn *transport.Client
 	ProxyConn     *tubes.Reliable
-	TubeMuxer     *tubes.Muxer
-	ExecTube      *codex.ExecTube
 
-	config Config
+	TubeMuxer *tubes.Muxer
+	ExecTube  *codex.ExecTube
 
-	Proxied bool
+	// Proxied bool   // TODO(baumanl): put in config probably
+	// address string // TODO(baumanl): what exactly is this? address string or real address or hop url??? does it need to be here or could it be in the config
+
+	// TODO(baumanl): does the hop client actually need all of the Hosts slice if
+	// it is just connecting to one? In general I think they won't be used, but
+	// could be useful for creating a config during authorization grant protocol
+	config     *config.ClientConfig
+	hostconfig *config.HostConfig
 }
 
-// Config holds configuration options for hop client
-type Config struct {
-	User string
-	Leaf *certs.Certificate
-
-	SockAddr   string
-	LocalArgs  []string
-	RemoteArgs []string
-	Cmd        string
-
-	NonPricipal bool // TODO(dadrian): Rename. What's the name for a non-principal connection? IsAuthGranted?
-	Headless    bool
-}
-
-// NewHopClient creates a new client object and loads keys from file or auth grant protocol
-func NewHopClient(config Config) (*HopClient, error) {
+// NewHopClient creates a new client object
+func NewHopClient(config *config.ClientConfig, hostname string) (*HopClient, error) {
 	client := &HopClient{
-		config:  config,
-		wg:      sync.WaitGroup{},
-		Proxied: false,
+		config:     config,
+		hostconfig: config.MatchHost(hostname),
+		wg:         sync.WaitGroup{},
+		Fsystem:    nil,
+		// Proxied:    false,
 	}
-	if !config.NonPricipal {
-		// Do nothing, keys are passed at Dial time
-	} else {
-		err := client.getAuthorization()
-		if err != nil {
-			return nil, err
-		}
-	}
+	logrus.Info("C: created client: ", client.hostconfig.Hostname)
+	// if !config.NonPricipal {
+	// 	// Do nothing, keys are passed at Dial time
+	// } else {
+	// 	err := client.getAuthorization()
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// }
 	return client, nil
 }
 
-// Dial connects to an address with the provided authentication.
-func (c *HopClient) Dial(address string, authentiator core.Authenticator) error {
-	c.m.Lock()
-	defer c.m.Unlock()
-	return c.connectLocked(address, authentiator)
-}
-
-func (c *HopClient) connectLocked(address string, authentiator core.Authenticator) error {
-	if c.connected {
-		return errors.New("already connected")
-	}
-	err := c.startUnderlying(address, authentiator)
+// Dial connects to an address after setting up it's own authentication
+// using information in it's config.
+func (c *HopClient) Dial() error {
+	err := c.authenticatorSetup() // TODO(baumanl): or should this be done in NewClient?
 	if err != nil {
 		return err
 	}
+	c.m.Lock()
+	defer c.m.Unlock()
+	// TODO(baumanl): modify interface of connectLocked
+	logrus.Info("calling connectLocked on :", c.hostconfig.HostURL().Address())
+	return c.connectLocked(c.hostconfig.HostURL().Address(), c.authenticator)
+}
+
+// DialExternalAuthenticator connects to an address with the provided authentication.
+func (c *HopClient) DialExternalAuthenticator(address string, authenticator core.Authenticator) error {
+	c.m.Lock()
+	defer c.m.Unlock()
+	return c.connectLocked(address, authenticator)
+}
+
+func (c *HopClient) connectLocked(address string, authenticator core.Authenticator) error {
+	if c.connected {
+		return errors.New("already connected")
+	}
+	logrus.Infof("connectLocked to: %q", address)
+	err := c.startUnderlying(address, authenticator)
+	if err != nil {
+		return err
+	}
+	// TODO(baumanl): Is there something wrong with doing this?
+	// This would allow for the same authenticator to be used again during the
+	// authgrant procedure.
+	// c.address = address
+	c.authenticator = authenticator
 	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.TransportConn)
 	go c.TubeMuxer.Start()
 	err = c.userAuthorization()
@@ -94,51 +119,151 @@ func (c *HopClient) connectLocked(address string, authentiator core.Authenticato
 	return nil
 }
 
+func (c *HopClient) authenticatorSetup() error {
+	c.m.Lock()
+	defer c.m.Unlock()
+	return c.authenticatorSetupLocked()
+}
+
+func (c *HopClient) authenticatorSetupLocked() error {
+	defer logrus.Info("C: authenticator setup complete")
+	cc := c.config
+	hc := c.hostconfig
+	// Connect to the agent
+	ac := agent.Client{
+		BaseURL:    combinators.StringOr(cc.AgentURL, common.DefaultAgentURL),
+		HTTPClient: http.DefaultClient,
+	}
+
+	// Host block overrides global block. Set overrides Unset. Certificate
+	// overrides AutoSelfSign.
+	var leafFile string
+	var autoSelfSign bool
+	if hc.Certificate != "" {
+		leafFile = hc.Certificate
+	} else if hc.AutoSelfSign == config.True {
+		autoSelfSign = true
+	} else if hc.AutoSelfSign != config.True && cc.Certificate != "" {
+		leafFile = cc.Certificate
+	} else if hc.AutoSelfSign == config.Unset && cc.AutoSelfSign == config.True {
+		autoSelfSign = true
+	} else {
+		return fmt.Errorf("no certificate provided and AutoSelfSign is not enabled for %q", hc.HostURL().Address())
+	}
+	keyPath := combinators.StringOr(hc.Key, combinators.StringOr(cc.Key, config.DefaultKeyPath()))
+	var authenticator core.Authenticator
+
+	var leaf *certs.Certificate
+
+	if hc.DisableAgent != config.True && ac.Available(context.Background()) {
+		bc, err := ac.ExchangerFor(context.Background(), keyPath)
+		if err != nil {
+			return fmt.Errorf("unable to create exchanger for agent with keyID: %s", err)
+		}
+		var public keys.PublicKey
+		copy(bc.Public[:], public[:]) // TODO(baumanl): resolve public key type awkwardness
+		leaf = loadLeaf(leafFile, autoSelfSign, &public, hc.HostURL())
+		authenticator = core.AgentAuthenticator{
+			BoundClient: bc,
+			VerifyConfig: transport.VerifyConfig{
+				InsecureSkipVerify: true, // TODO
+			},
+			Leaf: leaf,
+		}
+	} else {
+		// read in key from file
+		// TODO(baumanl): move loading key to within Authenticator interface?
+		logrus.Infof("using key %q", keyPath)
+		keypair, err := keys.ReadDHKeyFromPEMFileFS(keyPath, c.Fsystem)
+		if err != nil {
+			return fmt.Errorf("unable to load key pair %q: %s", keyPath, err)
+		}
+		leaf = loadLeaf(leafFile, autoSelfSign, &keypair.Public, hc.HostURL())
+		logrus.Infof("no agent running")
+		authenticator = core.InMemoryAuthenticator{
+			X25519KeyPair: keypair,
+			VerifyConfig: transport.VerifyConfig{
+				InsecureSkipVerify: true, // TODO(dadrian): Host-key verification
+			},
+			Leaf: leaf,
+		}
+	}
+	c.authenticator = authenticator
+	return nil
+}
+
+// TODO(baumanl): Put this in a different package/file
+
+// Creates a self-signed leaf or loads in from leafFile.
+func loadLeaf(leafFile string, autoSelfSign bool, public *keys.PublicKey, address core.URL) *certs.Certificate {
+	var leaf *certs.Certificate
+	var err error
+	if autoSelfSign {
+		logrus.Infof("auto self-signing leaf for user %q", address.User)
+		leaf, err = certs.SelfSignLeaf(&certs.Identity{
+			PublicKey: *public,
+			// Names: []certs.Name{
+			// 	certs.RawStringName(address.User),
+			// },
+		})
+		if err != nil {
+			logrus.Fatalf("unable to self-sign certificate: %s", err)
+		}
+	} else {
+		leaf, err = certs.ReadCertificatePEMFile(leafFile)
+		if err != nil {
+			logrus.Fatalf("unable to open certificate: %s", err)
+		}
+	}
+	return leaf
+}
+
 //Start starts any port forwarding/cmds/shells from the client
 func (c *HopClient) Start() error {
 	//TODO(baumanl): fix how session duration tied to cmd duration or port
 	//forwarding duration depending on options
-	if len(c.config.RemoteArgs) > 0 {
-		for _, v := range c.config.RemoteArgs {
-			if c.config.Headless {
-				c.wg.Add(1)
-			}
-			go func(arg string) {
-				if c.config.Headless {
-					defer c.wg.Done()
-				}
-				logrus.Info("Calling remote forward with arg: ", arg)
-				e := c.remoteForward(arg)
-				if e != nil {
-					logrus.Error(e)
-				}
 
-			}(v)
-		}
+	// if len(c.config.RemoteArgs) > 0 {
+	// 	for _, v := range c.config.RemoteArgs {
+	// 		if c.config.Headless {
+	// 			c.wg.Add(1)
+	// 		}
+	// 		go func(arg string) {
+	// 			if c.config.Headless {
+	// 				defer c.wg.Done()
+	// 			}
+	// 			logrus.Info("Calling remote forward with arg: ", arg)
+	// 			e := c.remoteForward(arg)
+	// 			if e != nil {
+	// 				logrus.Error(e)
+	// 			}
+
+	// 		}(v)
+	// 	}
+	// }
+	// if len(c.config.LocalArgs) > 0 {
+	// 	for _, v := range c.config.LocalArgs {
+	// 		if c.config.Headless {
+	// 			c.wg.Add(1)
+	// 		}
+	// 		go func(arg string) {
+	// 			if c.config.Headless {
+	// 				defer c.wg.Done()
+	// 			}
+	// 			e := c.localForward(arg)
+	// 			if e != nil {
+	// 				logrus.Error(e)
+	// 			}
+	// 		}(v)
+	// 	}
+	// }
+	// if !c.config.Headless {
+	err := c.startExecTube()
+	if err != nil {
+		logrus.Error(err)
+		return ErrClientStartingExecTube
 	}
-	if len(c.config.LocalArgs) > 0 {
-		for _, v := range c.config.LocalArgs {
-			if c.config.Headless {
-				c.wg.Add(1)
-			}
-			go func(arg string) {
-				if c.config.Headless {
-					defer c.wg.Done()
-				}
-				e := c.localForward(arg)
-				if e != nil {
-					logrus.Error(e)
-				}
-			}(v)
-		}
-	}
-	if !c.config.Headless {
-		err := c.startExecTube()
-		if err != nil {
-			logrus.Error(err)
-			return ErrClientStartingExecTube
-		}
-	}
+	// }
 
 	// handle incoming tubes
 	go c.HandleTubes()
@@ -234,11 +359,11 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 		Leaf:      authenticator.GetLeaf(),
 	}
 	var err error
-	if !c.Proxied {
-		c.TransportConn, err = transport.Dial("udp", address, transportConfig)
-	} else {
-		c.TransportConn, err = transport.DialNP("netproxy", address, c.ProxyConn, transportConfig)
-	}
+	// if !c.Proxied {
+	c.TransportConn, err = transport.Dial("udp", address, transportConfig)
+	// } else {
+	// 	c.TransportConn, err = transport.DialNP("netproxy", address, c.ProxyConn, transportConfig)
+	// }
 	if err != nil {
 		logrus.Errorf("C: error dialing server: %v", err)
 		return err
@@ -251,7 +376,6 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 		logrus.Errorf("C: Issue with handshake: %v", err)
 		return err
 	}
-	c.address = address
 	return nil
 }
 
@@ -259,7 +383,8 @@ func (c *HopClient) userAuthorization() error {
 	//*****PERFORM USER AUTHORIZATION******
 	uaCh, _ := c.TubeMuxer.CreateTube(common.UserAuthTube)
 	defer uaCh.Close()
-	if ok := userauth.RequestAuthorization(uaCh, c.config.User); !ok {
+	logrus.Info("requesting auth for", c.hostconfig.User)
+	if ok := userauth.RequestAuthorization(uaCh, c.hostconfig.User); !ok {
 		return ErrClientUnauthorized
 	}
 	logrus.Info("User authorization complete")
@@ -269,14 +394,16 @@ func (c *HopClient) userAuthorization() error {
 func (c *HopClient) startExecTube() error {
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	//Hop Session is tied to the life of this code execution tube.
-	logrus.Infof("Performing action: %v", c.config.Cmd)
+	// TODO(baumanl): provide support for Cmd in ClientConfig
+
+	logrus.Infof("Performing action: %v", c.hostconfig.Cmd)
 	ch, err := c.TubeMuxer.CreateTube(common.ExecTube)
 	if err != nil {
 		logrus.Error(err)
 		return err
 	}
 	c.wg.Add(1)
-	c.ExecTube, err = codex.NewExecTube(c.config.Cmd, ch, &c.wg)
+	c.ExecTube, err = codex.NewExecTube(c.hostconfig.Cmd, ch, &c.wg)
 	return err
 }
 
@@ -291,7 +418,7 @@ func (c *HopClient) HandleTubes() {
 			continue
 		}
 		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v", t.Type())
-		if t.Type() == common.AuthGrantTube && c.config.Headless {
+		if t.Type() == common.AuthGrantTube && c.hostconfig.Headless {
 			go c.principal(t)
 		} else if t.Type() == common.RemotePFTube {
 			go c.handleRemote(t)

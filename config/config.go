@@ -56,6 +56,15 @@ type HostConfig struct {
 	Key          string
 	Certificate  string
 	Intermediate string
+
+	DisableAgent BoolSetting // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
+
+	// TODO(baumanl): Add application layer hop config options to grammar
+	Cmd      string // what command to run on connect
+	Headless bool   // run without shell
+	// something for principal vs. delegate
+	// something for remote port forward
+	// something for local port forward
 }
 
 // NameConfig defines the keys and certificates presented by the server for a
@@ -184,29 +193,19 @@ func DefaultServerKeyPath() string {
 	return filepath.Join(d, common.DefaultKeyFile)
 }
 
-var userConfig ClientConfig
-var userConfigErr error
-var userConfigOnce sync.Once
-
-// InitClient reads and parses the ClientConfig, either from the override path
-// or a default location. This function caches its result and only parses the
-// config once.
-func InitClient(path string) error {
+// GetClient reads and parses the ClientConfig, either from the override path
+// or a default location and returns a parsed ClientConfig.
+func GetClient(path string) (*ClientConfig, error) {
+	var userConfig ClientConfig
+	var userConfigErr error
 	if path == "" {
 		path = filepath.Join(UserDirectory(), "config")
 	}
-	userConfigOnce.Do(func() {
-		_, userConfigErr = loadClientConfigFromFile(&userConfig, path)
-	})
-	return userConfigErr
+	_, userConfigErr = loadClientConfigFromFile(&userConfig, path)
+	return &userConfig, userConfigErr
 }
 
-// GetClient returns a parsed ClientConfig. This will return nil until
-// InitClient is called.
-func GetClient() *ClientConfig {
-	return &userConfig
-}
-
+// TODO(baumanl): get rid of server config caching
 var serverConfig ServerConfig
 var serverConfigErr error
 var serverConfigOnce sync.Once
@@ -244,7 +243,7 @@ func (c *ClientConfig) MatchHost(inputHost string) *HostConfig {
 			return &c.Hosts[i]
 		}
 	}
-	//TODO(dadrian): Should this return a default host config? Yes.
+	// TODO(dadrian): Should this return a default host config? Yes.
 	return &HostConfig{}
 }
 

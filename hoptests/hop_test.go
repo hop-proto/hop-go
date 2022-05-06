@@ -2,12 +2,16 @@ package hoptests
 
 import (
 	"net"
+	"strconv"
 	"testing"
 	"testing/fstest"
 
+	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 
 	"zmap.io/portal/certs"
+	"zmap.io/portal/common"
+	"zmap.io/portal/config"
 	"zmap.io/portal/core"
 	"zmap.io/portal/hopserver"
 
@@ -923,11 +927,15 @@ func NewSuite(t *testing.T) *Suite {
 
 func (s *Suite) MockServerFS(t *testing.T, fsystem fstest.MapFS) {
 	assert.Assert(t, s.Server != nil)
-	s.Server.SetFSystem(fsystem) // TODO(baumnl): not sure if a setter is the way to go here
+	s.Server.SetFSystem(fsystem) // TODO(baumanl): not sure if a setter is the way to go here
 }
 
-func (s *Suite) NewClient(t *testing.T, config hopclient.Config) *hopclient.HopClient {
-	c, err := hopclient.NewHopClient(config)
+func (s *Suite) MockClientFS(t *testing.T, client *hopclient.HopClient, fsystem fstest.MapFS) {
+	client.Fsystem = fsystem
+}
+
+func (s *Suite) NewClient(t *testing.T, config *config.ClientConfig, hostname string) *hopclient.HopClient {
+	c, err := hopclient.NewHopClient(config, hostname)
 	assert.NilError(t, err)
 	return c
 }
@@ -946,13 +954,64 @@ func (s *Suite) ChainAuthenticator(t *testing.T, clientKey *keys.X25519KeyPair) 
 	}
 }
 
-func TestHopClient(t *testing.T) {
+func TestHopClientExtAuthenticator(t *testing.T) {
 	thunks.SetUpTest()
 	t.Run("connect", func(t *testing.T) {
 		s := NewSuite(t)
-		c := s.NewClient(t, hopclient.Config{
-			User: "username",
-		})
+
+		h, _, err := net.SplitHostPort(s.Server.ListenAddress().String())
+		assert.NilError(t, err)
+
+		cc := config.ClientConfig{
+			Hosts: []config.HostConfig{{
+				Pattern:  h,
+				Hostname: h,
+				User:     "username",
+			}},
+		}
+		c := s.NewClient(t, &cc, h)
+		clientKey := keys.GenerateNewX25519KeyPair()
+		mock := fstest.MapFS{
+			"home/username/.hop/authorized_keys": &fstest.MapFile{
+				Data: []byte(clientKey.Public.String() + "\n"),
+				Mode: 0600,
+			},
+			"home/username/.hop/hopauth": &fstest.MapFile{},
+		}
+		s.MockServerFS(t, mock)
+		go s.Server.Serve()
+		err = c.DialExternalAuthenticator(s.Server.ListenAddress().String(), s.ChainAuthenticator(t, clientKey))
+		assert.NilError(t, err)
+		s.Server.Close()
+	})
+
+}
+
+/* The hopclient automatically generates a cert and authenticator from key file */
+func TestHopClient(t *testing.T) {
+	logrus.SetLevel(logrus.DebugLevel)
+	thunks.SetUpTest()
+	t.Run("connect", func(t *testing.T) {
+		s := NewSuite(t)
+
+		h, p, err := net.SplitHostPort(s.Server.ListenAddress().String())
+		assert.NilError(t, err)
+		port, err := strconv.Atoi(p)
+		assert.NilError(t, err)
+		logrus.Info("Test: ", s.Server.ListenAddress().String())
+
+		cc := config.ClientConfig{
+			Hosts: []config.HostConfig{{
+				Pattern:      h,
+				Hostname:     h,
+				Port:         port,
+				User:         "username",
+				AutoSelfSign: config.True,
+				Key:          "home/username/.hop/id_hop.pem",
+				DisableAgent: config.True,
+			}},
+		}
+		c := s.NewClient(t, &cc, h)
 		clientKey := keys.GenerateNewX25519KeyPair()
 		mock := fstest.MapFS{
 			"home/username/.hop/authorized_keys": &fstest.MapFile{
@@ -961,9 +1020,17 @@ func TestHopClient(t *testing.T) {
 			},
 		}
 		s.MockServerFS(t, mock)
-		go s.Server.Serve()
-		err := c.Dial(s.Server.ListenAddress().String(), s.ChainAuthenticator(t, clientKey))
-		assert.NilError(t, err)
-	})
+		mockClient := fstest.MapFS{
+			"home/username/.hop/" + common.DefaultKeyFile: &fstest.MapFile{
+				Data: []byte(clientKey.Private.String() + "\n"),
+				Mode: 0600,
+			},
+		}
 
+		c.Fsystem = mockClient
+		go s.Server.Serve()
+		err = c.Dial()
+		assert.NilError(t, err)
+		s.Server.Close()
+	})
 }

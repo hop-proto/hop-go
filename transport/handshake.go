@@ -119,6 +119,7 @@ func writeClientHello(hs *HandshakeState, b []byte) (int, error) {
 }
 
 func readClientHello(hs *HandshakeState, b []byte) (int, error) {
+	logrus.Debug("read client hello")
 	if len(b) < HelloLen {
 		return 0, ErrBufUnderflow
 	}

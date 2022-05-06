@@ -470,6 +470,7 @@ func (s *Server) Serve() error {
 		defer wg.Done()
 		for !s.closed.isSet() {
 			err := s.readPacket()
+			logrus.Debug("read a packet")
 			if err != nil {
 				logrus.Errorf("server: %s", err)
 			}
@@ -554,9 +555,11 @@ func (s *Server) lockHandleAndWriteToSession(ss *SessionState, plaintext []byte)
 
 // AcceptTimeout blocks for up to duration until a new connection is available.
 func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
+	logrus.Debug("accept timeout started")
 	timer := time.NewTicker(duration)
 	select {
 	case handle := <-s.pendingConnections:
+		logrus.Debug("got a handle")
 		ss := s.fetchSessionState(handle.sessionID)
 		if ss.handle != handle {
 			// Should never happen

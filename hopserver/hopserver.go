@@ -86,12 +86,20 @@ func NewHopServer(underlying *transport.Server, hconfig *Config) (*HopServer, er
 	return server, nil
 }
 
+// Close currently just allows the hop server to explicitly shut down the
+// authsock. TODO (baumanl): this is hacky & incomplete. Clarify when this
+// should happen and all it should do.
+func (s *HopServer) Close() {
+	s.authsock.Close()
+}
+
 //Serve listens for incoming hop connection requests and start corresponding authGrantServer on a Unix Domain socket
 func (s *HopServer) Serve() {
-	logrus.SetLevel(logrus.InfoLevel)
+	// logrus.SetLevel(logrus.InfoLevel)
 
-	go s.server.Serve()    //start transport layer server
-	go s.authGrantServer() //start authgrant server
+	go s.server.Serve() //start transport layer server
+	// TODO(baumanl): re-enable after integrating config to server side
+	// go s.authGrantServer() //start authgrant server
 
 	//*****ACCEPT CONNS AND START SESSIONS*****
 	logrus.Info("hop server starting")
