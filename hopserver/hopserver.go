@@ -24,7 +24,7 @@ import (
 )
 
 // DefaultHopAuthSocket is the default UDS used for Authorization grants
-const DefaultHopAuthSocket = "@hopauth"
+// const DefaultHopAuthSocket = "@hopauth"
 
 //HopServer represents state/conns needed for a hop server
 type HopServer struct {
@@ -39,13 +39,6 @@ type HopServer struct {
 	server   *transport.Server
 	authsock net.Listener
 }
-
-//Config contains hop server specific configuration settings
-// type Config struct {
-// 	SockAddr                 string
-// 	MaxOutstandingAuthgrants int
-// 	AuthorizedKeysLocation   string //defaults to /.hop/authorized_keys
-// }
 
 // NewHopServerExt returns a Hop Server containing a transport server running on
 // the host/port specified in the config file and an authgrant server listening
@@ -86,6 +79,9 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig) 
 	return server, nil
 }
 
+// NewHopServer returns a Hop Server containing a transport server running on
+// the host/port specified in the config file and an authgrant server listening
+// on the provided socket.
 func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	// make transport.Server
 	vhosts, err := NewVirtualHosts(sc, nil, nil)
@@ -119,14 +115,16 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		logrus.Fatalf("unable to open transport server: %s", err)
 	}
 
+	return NewHopServerExt(underlying, sc)
+
 }
 
 // Close currently just allows the hop server to explicitly shut down the
 // authsock. TODO (baumanl): this is hacky & incomplete. Clarify when this
 // should happen and all it should do.
-func (s *HopServer) Close() {
-	s.authsock.Close()
-}
+// func (s *HopServer) Close() {
+// 	s.authsock.Close()
+// }
 
 //Serve listens for incoming hop connection requests and start corresponding authGrantServer on a Unix Domain socket
 func (s *HopServer) Serve() {

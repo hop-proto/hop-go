@@ -4,21 +4,20 @@ package hopserver
 import (
 	"fmt"
 	"net"
-	"syscall"
 
 	"golang.org/x/sys/unix"
 )
 
 //Callback function that sets the appropriate socket options
-func setListenerOptions(proto, addr string, c syscall.RawConn) error {
-	return c.Control(func(fd uintptr) {
-		syscall.SetsockoptInt(
-			int(fd),
-			unix.SOL_SOCKET,
-			unix.SO_PASSCRED,
-			1)
-	})
-}
+// func setListenerOptions(proto, addr string, c syscall.RawConn) error {
+// 	return c.Control(func(fd uintptr) {
+// 		syscall.SetsockoptInt(
+// 			int(fd),
+// 			unix.SOL_SOCKET,
+// 			unix.SO_PASSCRED,
+// 			1)
+// 	})
+// }
 
 //Src: https://blog.jbowen.dev/2019/09/using-so_peercred-in-go/src/peercred/cred.go
 //Parses the credentials sent by the client when it connects to the socket

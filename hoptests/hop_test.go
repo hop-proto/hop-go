@@ -917,10 +917,10 @@ func NewSuite(t *testing.T) *Suite {
 		KeyPair:      s.LeafKeyPair,
 	})
 	assert.NilError(t, err)
-	config := hopserver.Config{
-		SockAddr: hopserver.DefaultHopAuthSocket,
-	}
-	s.Server, err = hopserver.NewHopServer(s.Transport, &config)
+
+	sc := config.ServerConfig{}
+
+	s.Server, err = hopserver.NewHopServerExt(s.Transport, &sc)
 	assert.NilError(t, err)
 	return s
 }
@@ -982,14 +982,12 @@ func TestHopClientExtAuthenticator(t *testing.T) {
 		go s.Server.Serve()
 		err = c.DialExternalAuthenticator(s.Server.ListenAddress().String(), s.ChainAuthenticator(t, clientKey))
 		assert.NilError(t, err)
-		s.Server.Close()
 	})
 
 }
 
 /* The hopclient automatically generates a cert and authenticator from key file */
 func TestHopClient(t *testing.T) {
-	logrus.SetLevel(logrus.DebugLevel)
 	thunks.SetUpTest()
 	t.Run("connect", func(t *testing.T) {
 		s := NewSuite(t)
@@ -1031,6 +1029,5 @@ func TestHopClient(t *testing.T) {
 		go s.Server.Serve()
 		err = c.Dial()
 		assert.NilError(t, err)
-		s.Server.Close()
 	})
 }
