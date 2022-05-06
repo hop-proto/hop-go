@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"zmap.io/portal/config"
+	"zmap.io/portal/flags"
 	"zmap.io/portal/hopserver"
 	"zmap.io/portal/transport"
 )
@@ -24,17 +24,9 @@ type Flags struct {
 
 func main() {
 	logrus.SetLevel(logrus.InfoLevel)
-
-	var fs flag.FlagSet
-	f := Flags{}
-
-	var sockAddr string
-	fs.StringVar(&sockAddr, "s", hopserver.DefaultHopAuthSocket, "indicates custom sockaddr to use for auth grant")
-	fs.StringVar(&f.ConfigPath, "C", "", "path to server config file")
-
-	err := fs.Parse(os.Args[1:])
+	f, err := flags.ParseServerArgs(os.Args)
 	if err != nil {
-		logrus.Fatalf("%s", err)
+		logrus.Error(err)
 		return
 	}
 
@@ -75,10 +67,11 @@ func main() {
 		logrus.Fatalf("unable to open transport server: %s", err)
 	}
 
-	serverConfig := &hopserver.Config{
-		SockAddr:                 sockAddr,
-		MaxOutstandingAuthgrants: 50, // TODO(dadrian): How was this picked? Is this a setting?
-	}
+	// serverConfig := &hopserver.Config{
+	// 	SockAddr:                 sockAddr,
+	// 	MaxOutstandingAuthgrants: 50, // TODO(dadrian): How was this picked? Is this a setting?
+	// }
+
 	s, err := hopserver.NewHopServer(underlying, serverConfig)
 	if err != nil {
 		logrus.Fatal(err)

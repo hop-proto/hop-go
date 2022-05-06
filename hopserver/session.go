@@ -52,7 +52,7 @@ type hopSession struct {
 	server *HopServer
 	user   string
 
-	authorizedKeysLocation string
+	// authorizedKeysLocation string
 
 	isPrincipal bool
 	authgrant   *authGrant
@@ -196,12 +196,14 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 		}
 		logrus.Info("got intent comm")
 		sess.server.m.Lock()
-		if sess.server.outstandingAuthgrants >= sess.server.config.MaxOutstandingAuthgrants {
-			sess.server.m.Unlock()
-			logrus.Info("Server exceeded max number of authgrants")
-			agc.SendIntentDenied("Server denied. Too many outstanding authgrants.")
-			return
-		}
+		// TODO(baumanl): add this back? Or not necessary? Concept of maxoutstanding
+		// was mentioned in original authgrant protocol
+		// if sess.server.outstandingAuthgrants >= sess.server.config.MaxOutstandingAuthgrants {
+		// 	sess.server.m.Unlock()
+		// 	logrus.Info("Server exceeded max number of authgrants")
+		// 	agc.SendIntentDenied("Server denied. Too many outstanding authgrants.")
+		// 	return
+		// }
 		if _, ok := sess.server.authgrants[k]; !ok {
 			sess.server.outstandingAuthgrants++
 			sess.server.authgrants[k] = &authGrant{
