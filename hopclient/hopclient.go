@@ -53,26 +53,6 @@ type HopClient struct { // nolint:maligned
 	hostconfig *config.HostConfig // TODO(baumanl): better to have a single representation with just the ClientConfig information & the host specific information
 }
 
-// TODO (baumanl): this whole struct feels very redundant
-// it is basically just a copy of some of the config.ClientConfig
-// However, if we want hopclient to be a stand alone library then
-// we shouldn't depend on having a config file. Maybe some decomp though???
-
-// Config holds configuration options for hop client
-// type Config struct {
-// 	// TODO (baumanl): delete/refine this
-// 	User string //necessary?
-// 	// Leaf *certs.Certificate
-
-// 	SockAddr   string
-// 	LocalArgs  []string
-// 	RemoteArgs []string
-// 	Cmd        string
-
-// 	NonPricipal bool // TODO(dadrian): Rename. What's the name for a non-principal connection? IsAuthGranted?
-// 	Headless    bool
-// }
-
 // NewHopClient creates a new client object
 func NewHopClient(config *config.ClientConfig) (*HopClient, error) {
 	client := &HopClient{

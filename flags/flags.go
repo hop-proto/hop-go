@@ -65,14 +65,13 @@ func mergeFlagsAndConfig(f *Flags, cc *config.ClientConfig) error {
 func LoadConfigFromFlags(f *Flags) (*config.ClientConfig, error) {
 	// Make client config
 	// Load the config file
-	err := config.InitClient(f.ConfigPath)
+	cc, err := config.GetClient(f.ConfigPath)
 	if err != nil {
 		// TODO(baumanl): currently fails if no config file found at provided path or default path
 		// Do we want to support case where file literally doesn't exist? Just use default
 		// host config and CLI flags?
 		return nil, fmt.Errorf("no config file found: %s", err)
 	}
-	cc := config.GetClientCopy(f.Address.Host)
 	err = mergeFlagsAndConfig(f, cc)
 	return cc, err
 }

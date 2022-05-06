@@ -193,40 +193,19 @@ func DefaultServerKeyPath() string {
 	return filepath.Join(d, common.DefaultKeyFile)
 }
 
-var userConfig ClientConfig
-var userConfigErr error
-var userConfigOnce sync.Once
-
-// InitClient reads and parses the ClientConfig, either from the override path
-// or a default location. This function caches its result and only parses the
-// config once.
-func InitClient(path string) error {
+// GetClient reads and parses the ClientConfig, either from the override path
+// or a default location and returns a parsed ClientConfig.
+func GetClient(path string) (*ClientConfig, error) {
+	var userConfig ClientConfig
+	var userConfigErr error
 	if path == "" {
 		path = filepath.Join(UserDirectory(), "config")
 	}
-	userConfigOnce.Do(func() {
-		_, userConfigErr = loadClientConfigFromFile(&userConfig, path)
-	})
-	return userConfigErr
+	_, userConfigErr = loadClientConfigFromFile(&userConfig, path)
+	return &userConfig, userConfigErr
 }
 
-// GetClient returns a parsed ClientConfig. This will return nil until
-// InitClient is called.
-func GetClient() *ClientConfig {
-	return &userConfig
-}
-
-// GetClientCopy mMakes a deep copy of userConfig and returns a pointer to it
-// this allows caller to modify config. It only copies the HostConfig requested.
-func GetClientCopy(hostname string) *ClientConfig {
-	configCopy := userConfig
-	configCopy.CAFiles = make([]string, len(userConfig.CAFiles))
-	copy(configCopy.CAFiles, userConfig.CAFiles)
-	configCopy.Hosts = make([]HostConfig, 1)
-	configCopy.Hosts[0] = *userConfig.MatchHost(hostname)
-	return &configCopy
-}
-
+// TODO(baumanl): get rid of server config caching
 var serverConfig ServerConfig
 var serverConfigErr error
 var serverConfigOnce sync.Once
