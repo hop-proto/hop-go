@@ -10,13 +10,13 @@ import (
 )
 
 func main() {
-	f, err := flags.ParseArgs(os.Args)
+	f, err := flags.ParseClientArgs(os.Args)
 	if err != nil {
 		logrus.Error(err)
 		return
 	}
 	// cc will be result of merging config file settings and flags
-	cc, err := flags.LoadConfigFromFlags(f)
+	cc, err := flags.LoadClientConfigFromFlags(f)
 	if err != nil {
 		logrus.Error(err)
 		return

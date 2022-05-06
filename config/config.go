@@ -205,28 +205,17 @@ func GetClient(path string) (*ClientConfig, error) {
 	return &userConfig, userConfigErr
 }
 
-// TODO(baumanl): get rid of server config caching
-var serverConfig ServerConfig
-var serverConfigErr error
-var serverConfigOnce sync.Once
-
-// InitServer reads and parses the ServerConfig, either from the default
-// location (/etc), or from the provided location if the path is non-empty. The
-// result is cached.
-func InitServer(path string) error {
+// GetServer reads and parses the ServerConfig, either from the default
+// location (/etc), or from the provided location if the path is non-empty. It
+// returns a parsed ServerConfig.
+func GetServer(path string) (*ServerConfig, error) {
+	var serverConfig ServerConfig
+	var serverConfigErr error
 	if path == "" {
 		path = filepath.Join(ServerDirectory(), "config")
 	}
-	serverConfigOnce.Do(func() {
-		_, serverConfigErr = loadServerConfigFromFile(&serverConfig, path)
-	})
-	return serverConfigErr
-}
-
-// GetServer returns a parsed ServerConfig. It is only non-nil after InitServer
-// finishes executing. It is not atomic with InitServer.
-func GetServer() *ServerConfig {
-	return &serverConfig
+	_, serverConfigErr = loadServerConfigFromFile(&serverConfig, path)
+	return &serverConfig, serverConfigErr
 }
 
 // MatchHostPattern returns true if the input string matches the provided

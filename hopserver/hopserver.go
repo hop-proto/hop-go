@@ -47,10 +47,10 @@ type HopServer struct {
 // 	AuthorizedKeysLocation   string //defaults to /.hop/authorized_keys
 // }
 
-// NewHopServer returns a Hop Server containing a transport server running on
+// NewHopServerExt returns a Hop Server containing a transport server running on
 // the host/port specified in the config file and an authgrant server listening
 // on the provided socket.
-func NewHopServer(underlying *transport.Server, hconfig *config.ServerConfig) (*HopServer, error) {
+func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig) (*HopServer, error) {
 	// TODO(baumanl): reintegrate authgrant server
 	// set up authgrantServer (UDS socket)
 	// make sure the socket does not already exist.
@@ -76,7 +76,7 @@ func NewHopServer(underlying *transport.Server, hconfig *config.ServerConfig) (*
 		principals:            principals,
 		authgrants:            authgrants,
 		outstandingAuthgrants: 0,
-		config:                hconfig,
+		config:                config,
 
 		server: underlying,
 		// authsock: authgrantServer,
@@ -84,6 +84,41 @@ func NewHopServer(underlying *transport.Server, hconfig *config.ServerConfig) (*
 		fsystem: os.DirFS("/"),
 	}
 	return server, nil
+}
+
+func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
+	// make transport.Server
+	vhosts, err := NewVirtualHosts(sc, nil, nil)
+	if err != nil {
+		logrus.Fatalf("unable to parse virtual hosts: %s", err)
+	}
+
+	pktConn, err := net.ListenPacket("udp", sc.ListenAddress)
+	if err != nil {
+		logrus.Fatalf("unable to open socket for address %s: %s", sc.ListenAddress, err)
+	}
+	udpConn := pktConn.(*net.UDPConn)
+	logrus.Infof("listening at %s", udpConn.LocalAddr())
+
+	getCert := func(info transport.ClientHandshakeInfo) (*transport.Certificate, error) {
+		if h := vhosts.Match(info.ServerName); h != nil {
+			return &h.Certificate, nil
+		}
+		return nil, fmt.Errorf("%v did not match a host block", info.ServerName)
+	}
+
+	tconf := transport.ServerConfig{
+		ClientVerify: &transport.VerifyConfig{
+			InsecureSkipVerify: true, // Do authorized keys instead
+		},
+		GetCertificate: getCert,
+	}
+
+	underlying, err := transport.NewServer(udpConn, tconf)
+	if err != nil {
+		logrus.Fatalf("unable to open transport server: %s", err)
+	}
+
 }
 
 // Close currently just allows the hop server to explicitly shut down the

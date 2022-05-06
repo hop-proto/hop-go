@@ -124,26 +124,3 @@ func ParseClientArgs(args []string) (*ClientFlags, error) {
 	f.Address = inputURL
 	return f, nil
 }
-
-func ParseArgsServer(args []string) (*ClientFlags, error) {
-	var f *ClientFlags
-	var fs *flag.FlagSet
-	defineClientFlags(fs, f)
-
-	err := fs.Parse(args[1:])
-	if err != nil {
-		return nil, err
-	}
-	if fs.NArg() < 1 { // there needs to be an argument that is not a flag of the form [user@]host[:port]
-		return nil, ErrMissingInputURL
-	}
-	hoststring := fs.Arg(0)
-	inputURL, err := core.ParseURL(hoststring)
-	if err != nil {
-		return nil, fmt.Errorf("invalid input %s: %s", hoststring, err)
-	}
-	f.Address = inputURL
-	return f, nil
-}
-
-func defineFlagsServer(fs *flag.FlagSet, f *ClientFlags)
