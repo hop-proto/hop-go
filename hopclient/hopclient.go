@@ -50,7 +50,7 @@ type HopClient struct { // nolint:maligned
 	// it is just connecting to one? In general I think they won't be used, but
 	// could be useful for creating a config during authorization grant protocol
 	config     *config.ClientConfig
-	hostconfig *config.HostConfig // TODO(baumanl): better to have a single representation with just the ClientConfig information & the host specific information
+	hostconfig *config.HostConfig
 }
 
 // NewHopClient creates a new client object
