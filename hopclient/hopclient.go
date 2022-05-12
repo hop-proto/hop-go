@@ -132,7 +132,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 	// Connect to the agent
 	ac := agent.Client{
 		BaseURL:    combinators.StringOr(cc.AgentURL, common.DefaultAgentURL),
-		HTTPClient: http.DefaultClient,
+		HTTPClient: http.DefaultClient, // TODO: change this to somehow take an existing conn for testing puposes?
 	}
 
 	// Host block overrides global block. Set overrides Unset. Certificate

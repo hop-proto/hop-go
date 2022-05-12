@@ -32,7 +32,8 @@ type HopServer struct {
 	principals            map[int32]*hopSession
 	authgrants            map[keys.PublicKey]*authGrant //static key -> authgrant associated with that key
 	outstandingAuthgrants int
-	config                *config.ServerConfig
+
+	config *config.ServerConfig
 
 	fsystem fs.FS
 
@@ -40,9 +41,7 @@ type HopServer struct {
 	authsock net.Listener
 }
 
-// NewHopServerExt returns a Hop Server containing a transport server running on
-// the host/port specified in the config file and an authgrant server listening
-// on the provided socket.
+// NewHopServerExt returns a Hop Server using the provided transport server.
 func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig) (*HopServer, error) {
 	// TODO(baumanl): reintegrate authgrant server
 	// set up authgrantServer (UDS socket)
@@ -69,7 +68,8 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig) 
 		principals:            principals,
 		authgrants:            authgrants,
 		outstandingAuthgrants: 0,
-		config:                config,
+
+		config: config,
 
 		server: underlying,
 		// authsock: authgrantServer,
@@ -80,8 +80,7 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig) 
 }
 
 // NewHopServer returns a Hop Server containing a transport server running on
-// the host/port specified in the config file and an authgrant server listening
-// on the provided socket.
+// the host/port specified in the config file.
 func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	// make transport.Server
 	vhosts, err := NewVirtualHosts(sc, nil, nil)

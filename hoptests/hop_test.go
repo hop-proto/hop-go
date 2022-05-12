@@ -9,6 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 
+	"zmap.io/portal/agent"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/common"
 	"zmap.io/portal/config"
@@ -873,8 +874,9 @@ func TestTwoLocalPF(t *testing.T) {
 }
 */
 
-// Suite is a helper type for writing tests
-type Suite struct {
+// ServerSuite is a helper type for writing tests
+type ServerSuite struct {
+	// Server side stuff
 	ServerSockPath           string
 	LeafKeyPair              *keys.X25519KeyPair
 	IntermediateKeyPair      *keys.SigningKeyPair
@@ -887,8 +889,28 @@ type Suite struct {
 	Server    *hopserver.HopServer
 }
 
-func NewSuite(t *testing.T) *Suite {
-	s := new(Suite)
+type ClientSuite struct {
+	// Client side stuff?
+
+}
+
+type AgentSuite struct {
+	Data    *agent.Data // map string (keypath) -> keys
+	Address string      // agent listen address
+
+	Listener *net.Listener
+	Agent    *agent.Server
+}
+
+func NewAgentSuite(t *testing.T) *AgentSuite {
+	a := new(AgentSuite)
+	var err error
+	a.Data = &agent.Data{}
+
+}
+
+func NewSuite(t *testing.T) *ServerSuite {
+	s := new(ServerSuite)
 	var err error
 	s.UDPConn, err = net.ListenUDP("udp", nil)
 	assert.NilError(t, err)
@@ -925,22 +947,23 @@ func NewSuite(t *testing.T) *Suite {
 	return s
 }
 
-func (s *Suite) MockServerFS(t *testing.T, fsystem fstest.MapFS) {
+func (s *ServerSuite) MockServerFS(t *testing.T, fsystem fstest.MapFS) {
 	assert.Assert(t, s.Server != nil)
 	s.Server.SetFSystem(fsystem) // TODO(baumanl): not sure if a setter is the way to go here
 }
 
-func (s *Suite) MockClientFS(t *testing.T, client *hopclient.HopClient, fsystem fstest.MapFS) {
+func (s *ServerSuite) MockClientFS(t *testing.T, client *hopclient.HopClient, fsystem fstest.MapFS) {
 	client.Fsystem = fsystem
 }
 
-func (s *Suite) NewClient(t *testing.T, config *config.ClientConfig, hostname string) *hopclient.HopClient {
+func (s *ServerSuite) NewClient(t *testing.T, config *config.ClientConfig, hostname string) *hopclient.HopClient {
+
 	c, err := hopclient.NewHopClient(config, hostname)
 	assert.NilError(t, err)
 	return c
 }
 
-func (s *Suite) ChainAuthenticator(t *testing.T, clientKey *keys.X25519KeyPair) core.Authenticator {
+func (s *ServerSuite) ChainAuthenticator(t *testing.T, clientKey *keys.X25519KeyPair) core.Authenticator {
 	leaf, err := certs.SelfSignLeaf(&certs.Identity{
 		PublicKey: clientKey.Public,
 	})
@@ -1031,3 +1054,5 @@ func TestHopClient(t *testing.T) {
 		assert.NilError(t, err)
 	})
 }
+
+//TODO: add in tests with client and agent.
