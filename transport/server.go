@@ -185,7 +185,9 @@ func (s *Server) readPacket() error {
 			return err
 		}
 	case MessageTypeClientAuth:
-		logrus.Debug("server: received client auth")
+		logrus.Debug("server: received client auth with length ", msgLen)
+		logrus.Debug(s.rawRead[:msgLen])
+
 		_, hs, err := s.handleClientAuth(s.rawRead[:msgLen], addr)
 		if err != nil {
 			return err

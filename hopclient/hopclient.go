@@ -95,7 +95,8 @@ func (c *HopClient) Dial() error {
 	return c.connectLocked(c.hostconfig.HostURL().Address(), c.authenticator)
 }
 
-// Same as Dial but skips dialing the agent or authgrant server directly
+// DialExternalConn is the same as Dial but skips dialing the agent or
+// authgrant server directly. (Useful for testing)
 func (c *HopClient) DialExternalConn(agentConn net.Conn, authGrantConn net.Conn) error {
 	// If providing an authGrantConn this way the caller is responsible for
 	// ensuring that this client is actually allowed to be asking the principal
@@ -107,7 +108,9 @@ func (c *HopClient) DialExternalConn(agentConn net.Conn, authGrantConn net.Conn)
 	if err != nil {
 		return err
 	}
-
+	c.m.Lock()
+	defer c.m.Unlock()
+	logrus.Info("calling connectLocked on :", c.hostconfig.HostURL().Address())
 	return c.connectLocked(c.hostconfig.HostURL().Address(), c.authenticator)
 }
 
@@ -115,6 +118,7 @@ func (c *HopClient) DialExternalConn(agentConn net.Conn, authGrantConn net.Conn)
 func (c *HopClient) DialExternalAuthenticator(address string, authenticator core.Authenticator) error {
 	c.m.Lock()
 	defer c.m.Unlock()
+	logrus.Info("calling connectLocked on :", c.hostconfig.HostURL().Address())
 	return c.connectLocked(address, authenticator)
 }
 
@@ -190,8 +194,11 @@ func (c *HopClient) authenticatorSetupLocked(agentConn net.Conn, authgrantConn n
 		if err != nil {
 			return fmt.Errorf("unable to create exchanger for agent with keyID: %s", err)
 		}
+
+		logrus.Infof("Created exchanger for agent with keyID: %s ", keyPath)
+
 		var public keys.PublicKey
-		copy(bc.Public[:], public[:]) // TODO(baumanl): resolve public key type awkwardness
+		copy(public[:], bc.Public[:]) // TODO(baumanl): resolve public key type awkwardness
 		leaf = loadLeaf(leafFile, autoSelfSign, &public, hc.HostURL())
 		authenticator = core.AgentAuthenticator{
 			BoundClient: bc,
@@ -200,6 +207,7 @@ func (c *HopClient) authenticatorSetupLocked(agentConn net.Conn, authgrantConn n
 			},
 			Leaf: leaf,
 		}
+		logrus.Info("leaf: ", leaf)
 	} else {
 		// read in key from file
 		// TODO(baumanl): move loading key to within Authenticator interface?

@@ -217,7 +217,7 @@ func (bc *BoundClient) Agree(other []byte) ([]byte, error) {
 // the provided keyID and implemented using the Exchange endpoint on the server.
 // The public key will be retrieved and cached at the time of creation.
 func (c *Client) ExchangerFor(ctx context.Context, keyID string) (*BoundClient, error) {
-	bc := BoundClient{C: c, KeyID: keyID}
+	bc := BoundClient{C: c, Ctx: context.Background(), KeyID: keyID}
 	desc, err := c.Get(ctx, keyID)
 	if err != nil {
 		return nil, err
