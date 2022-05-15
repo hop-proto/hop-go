@@ -139,7 +139,6 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 // Client speaks to the agent Server and can create keys.Exchanger
 // implementations.
 type Client struct {
-	// BaseURL    string
 	AgentConn  net.Conn
 	HTTPClient *http.Client
 }
