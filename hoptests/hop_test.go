@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync"
 	"testing"
 	"testing/fstest"
 
@@ -22,57 +23,8 @@ import (
 	"zmap.io/portal/transport"
 )
 
-func AddClientToAuthorizedKeys(t *testing.T, s *TestServer, c *TestClient) {
-	logrus.Info("adding key for ", c.Username)
-	ak := s.AuthorizedKeyFiles[c.Username]
-	s.AuthorizedKeyFiles[c.Username] = append(ak, []byte(c.KeyPair.Public.String())...)
-}
-
-func AddAgentConnToClient(t *testing.T, c *TestClient, a *TestAgent) {
-	logrus.Info("adding agent conn to client")
-	aconn, err := net.Dial("tcp", a.Listener.Addr().String())
-	assert.NilError(t, err)
-	c.AgentConn = aconn
-}
-
-func (s *TestServer) ChainAuthenticator(t *testing.T, clientKey *keys.X25519KeyPair) core.Authenticator {
-	leaf, err := certs.SelfSignLeaf(&certs.Identity{
-		PublicKey: clientKey.Public,
-	})
-	assert.NilError(t, err)
-	return core.InMemoryAuthenticator{
-		X25519KeyPair: clientKey,
-		Leaf:          leaf,
-		VerifyConfig: transport.VerifyConfig{
-			Store: s.Store,
-		},
-	}
-}
-
-func NewAgent(t *testing.T) *TestAgent {
-	a := new(TestAgent)
-	a.Data = &agent.Data{}
-	a.Data.Keys = make(map[string]*keys.X25519KeyPair)
-	return a
-}
-
-func (a *TestAgent) AddClientKey(t *testing.T, c *TestClient) {
-	path := "home/" + c.Username + "/.hop/" + common.DefaultKeyFile
-	a.Data.Keys[path] = c.KeyPair
-}
-
-func (a *TestAgent) Run(t *testing.T) {
-	a.Agent = agent.New(a.Data)
-	sock, err := net.Listen("tcp", "127.0.0.1:")
-	assert.NilError(t, err)
-	logrus.Infof("agent listening on %s", sock.Addr().String())
-	a.Listener = sock
-	go http.Serve(sock, a.Agent)
-}
-
 type TestAgent struct {
-	Data    *agent.Data // map string (keypath) -> keys
-	Address string      // agent listen address
+	Data *agent.Data // map string (keypath) -> keys
 
 	Listener net.Listener
 	Agent    agent.Server
@@ -80,8 +32,6 @@ type TestAgent struct {
 
 // One hopserver process
 type TestServer struct {
-	ServerSockPath string
-
 	LeafKeyPair              *keys.X25519KeyPair
 	IntermediateKeyPair      *keys.SigningKeyPair
 	RootKeyPair              *keys.SigningKeyPair
@@ -92,8 +42,7 @@ type TestServer struct {
 	TransportConfig *transport.ServerConfig
 
 	AuthorizedKeyFiles map[string][]byte // username to file contents
-
-	FileSystem *fstest.MapFS
+	FileSystem         *fstest.MapFS
 
 	UDPConn   *net.UDPConn
 	Transport *transport.Server
@@ -104,20 +53,18 @@ type TestServer struct {
 type TestClient struct {
 	KeyPair *keys.X25519KeyPair
 
-	AgentClient agent.Client
-	Username    string // user it will be authenticating as
-
-	Config        config.ClientConfig
-	AuthgrantConn net.Conn
-	AgentConn     net.Conn
-	Authenticator core.Authenticator // can be nil if want hopclient to make one
-
-	FileSystem *fstest.MapFS
-
+	Config   config.ClientConfig
+	Username string // user it will be authenticating as
 	Remote   string // address of server it will be connecting to
 	Hostname string
 
-	Client *hopclient.HopClient
+	AuthgrantConn net.Conn
+	AgentConn     net.Conn
+
+	Authenticator core.Authenticator // can be nil if want hopclient to make one
+
+	FileSystem *fstest.MapFS
+	Client     *hopclient.HopClient
 }
 
 func NewTestServer(t *testing.T) *TestServer {
@@ -145,11 +92,32 @@ func NewTestServer(t *testing.T) *TestServer {
 	s.Store = certs.Store{}
 	s.Store.AddCertificate(s.Root)
 
-	// s.Config = set to default????
+	s.Config = &config.ServerConfig{}
+	s.FileSystem = &fstest.MapFS{}
 
 	s.AuthorizedKeyFiles = make(map[string][]byte)
 	logrus.Info("Created new test server...")
 	return s
+}
+
+func (s *TestServer) ChainAuthenticator(t *testing.T, clientKey *keys.X25519KeyPair) core.Authenticator {
+	leaf, err := certs.SelfSignLeaf(&certs.Identity{
+		PublicKey: clientKey.Public,
+	})
+	assert.NilError(t, err)
+	return core.InMemoryAuthenticator{
+		X25519KeyPair: clientKey,
+		Leaf:          leaf,
+		VerifyConfig: transport.VerifyConfig{
+			Store: s.Store,
+		},
+	}
+}
+
+func (s *TestServer) AddClientToAuthorizedKeys(t *testing.T, c *TestClient) {
+	logrus.Info("adding key for ", c.Username)
+	ak := s.AuthorizedKeyFiles[c.Username]
+	s.AuthorizedKeyFiles[c.Username] = append(ak, []byte(c.KeyPair.Public.String())...)
 }
 
 // StartTransport starts transport layer server with optional serverconfig (otherwise default)
@@ -174,9 +142,11 @@ func (s *TestServer) StartTransport(t *testing.T) {
 func (s *TestServer) StartHopServer(t *testing.T) {
 	var err error
 
+	s.Server.SetFSystem(*s.FileSystem)
+
 	if s.Transport == nil {
 		logrus.Info("Setting up Hop Server with just config.")
-		// all certs necessary would need to be loaded into fsystem.
+		// all certs necessary need to be loaded into fsystem. (not currently implemented)
 		s.Server, err = hopserver.NewHopServer(s.Config)
 	} else {
 		logrus.Info("Setting up Hop Server with provided Transport server.")
@@ -186,10 +156,9 @@ func (s *TestServer) StartHopServer(t *testing.T) {
 	assert.NilError(t, err)
 	logrus.Infof("Hop Server running on address: %s", s.Server.ListenAddress().String())
 
-	fs := fstest.MapFS{}
 	for user, file := range s.AuthorizedKeyFiles {
 		path := "home/" + user + "/.hop/authorized_keys"
-		fs[path] = &fstest.MapFile{
+		(*s.FileSystem)[path] = &fstest.MapFile{
 			Data: file,
 			Mode: 600,
 		}
@@ -197,13 +166,13 @@ func (s *TestServer) StartHopServer(t *testing.T) {
 	}
 	logrus.Info("Wrote authorized keys to server filesystem.")
 
-	s.Server.SetFSystem(fs)
-
 	go s.Server.Serve()
 }
 
 func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
 	c := new(TestClient)
+
+	// TODO: make a better way to store this information
 	c.Username = username
 	c.KeyPair = keys.GenerateNewX25519KeyPair()
 	c.Remote = s.UDPConn.LocalAddr().String()
@@ -236,6 +205,17 @@ func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
 	return c
 }
 
+func (c *TestClient) AddAgentConnToClient(t *testing.T, a *TestAgent) {
+	logrus.Info("adding agent conn to client")
+	aconn, err := net.Dial("tcp", a.Listener.Addr().String())
+	assert.NilError(t, err)
+	c.AgentConn = aconn
+}
+
+// will start a client using an external authenticator if one is set
+// otherwise it will use an authgrant conn if provided
+// otherwise it will use an agentconn if provided
+// lastly it will just call Dial and let hopclient determine method from config
 func (c *TestClient) StartClient(t *testing.T) {
 	var err error
 	c.Client, err = hopclient.NewHopClient(&c.Config, c.Hostname)
@@ -251,16 +231,37 @@ func (c *TestClient) StartClient(t *testing.T) {
 	assert.NilError(t, err)
 }
 
+func NewAgent(t *testing.T) *TestAgent {
+	a := new(TestAgent)
+	a.Data = &agent.Data{}
+	a.Data.Keys = make(map[string]*keys.X25519KeyPair)
+	return a
+}
+
+func (a *TestAgent) AddClientKey(t *testing.T, c *TestClient) {
+	path := "home/" + c.Username + "/.hop/" + common.DefaultKeyFile
+	a.Data.Keys[path] = c.KeyPair
+}
+
+func (a *TestAgent) Run(t *testing.T) {
+	a.Agent = agent.New(a.Data)
+	sock, err := net.Listen("tcp", "127.0.0.1:")
+	assert.NilError(t, err)
+	logrus.Infof("agent listening on %s", sock.Addr().String())
+	a.Listener = sock
+	go http.Serve(sock, a.Agent)
+}
+
 func TestHopClientExtAuth(t *testing.T) {
 	logrus.SetLevel(logrus.InfoLevel)
 	thunks.SetUpTest()
-	t.Run("connect", func(t *testing.T) {
+	t.Run("connect external authenticator", func(t *testing.T) {
 		// Create the basic Client and Server
 		s := NewTestServer(t)
 		c := NewTestClient(t, s, "username")
 
 		// Modify authentication details
-		AddClientToAuthorizedKeys(t, s, c)
+		s.AddClientToAuthorizedKeys(t, c)
 
 		s.StartTransport(t)
 		s.StartHopServer(t)
@@ -274,13 +275,13 @@ func TestHopClientExtAuth(t *testing.T) {
 func TestHopClientInMemAuth(t *testing.T) {
 	logrus.SetLevel(logrus.InfoLevel)
 	thunks.SetUpTest()
-	t.Run("connect", func(t *testing.T) {
+	t.Run("connect in memory authenticator", func(t *testing.T) {
 		// Create the basic Client and Server
 		s := NewTestServer(t)
 		c := NewTestClient(t, s, "username")
 
 		// Modify authentication details
-		AddClientToAuthorizedKeys(t, s, c)
+		s.AddClientToAuthorizedKeys(t, c)
 
 		s.StartTransport(t)
 		s.StartHopServer(t)
@@ -292,13 +293,13 @@ func TestHopClientInMemAuth(t *testing.T) {
 func TestHopClientAgentAuth(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	thunks.SetUpTest()
-	t.Run("connect", func(t *testing.T) {
+	t.Run("connect agent authenticator", func(t *testing.T) {
 		// Create the basic Client and Server
 		s := NewTestServer(t)
 		c := NewTestClient(t, s, "username")
 
 		// Modify authentication details
-		AddClientToAuthorizedKeys(t, s, c)
+		s.AddClientToAuthorizedKeys(t, c)
 
 		s.StartTransport(t)
 		s.StartHopServer(t)
@@ -308,8 +309,40 @@ func TestHopClientAgentAuth(t *testing.T) {
 		a.AddClientKey(t, c)
 		a.Run(t)
 
-		AddAgentConnToClient(t, c, a)
+		c.AddAgentConnToClient(t, a)
 
 		c.StartClient(t)
+	})
+}
+
+func TestTwoClients(t *testing.T) {
+	logrus.SetLevel(logrus.InfoLevel)
+	thunks.SetUpTest()
+	t.Run("connect two clients", func(t *testing.T) {
+		// Create the basic Client and Server
+		s := NewTestServer(t)
+		c := NewTestClient(t, s, "username")
+		cTwo := NewTestClient(t, s, "bob")
+
+		// Modify authentication details
+		s.AddClientToAuthorizedKeys(t, c)
+		s.AddClientToAuthorizedKeys(t, cTwo)
+
+		s.StartTransport(t)
+		s.StartHopServer(t)
+
+		c.Authenticator = s.ChainAuthenticator(t, c.KeyPair)
+		cTwo.Authenticator = s.ChainAuthenticator(t, cTwo.KeyPair)
+
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			c.StartClient(t)
+		}()
+
+		cTwo.StartClient(t)
+		wg.Wait()
 	})
 }
