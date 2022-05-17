@@ -142,8 +142,6 @@ func (s *TestServer) StartTransport(t *testing.T) {
 func (s *TestServer) StartHopServer(t *testing.T) {
 	var err error
 
-	s.Server.SetFSystem(*s.FileSystem)
-
 	if s.Transport == nil {
 		logrus.Info("Setting up Hop Server with just config.")
 		// all certs necessary need to be loaded into fsystem. (not currently implemented)
@@ -165,6 +163,7 @@ func (s *TestServer) StartHopServer(t *testing.T) {
 		logrus.Infof("Wrote authorized keys to: %s", path)
 	}
 	logrus.Info("Wrote authorized keys to server filesystem.")
+	s.Server.SetFSystem(*s.FileSystem)
 
 	go s.Server.Serve()
 }
