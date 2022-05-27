@@ -53,7 +53,7 @@ type TestServer struct {
 type TestClient struct {
 	KeyPair *keys.X25519KeyPair
 
-	Config   config.ClientConfig
+	Config   *config.ClientConfig
 	Username string // user it will be authenticating as
 	Remote   string // address of server it will be connecting to
 	Hostname string
@@ -182,7 +182,7 @@ func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
 	assert.NilError(t, err)
 
 	// TODO(baumanl): what should actual default values be here.
-	c.Config = config.ClientConfig{
+	c.Config = &config.ClientConfig{
 		Hosts: []config.HostConfig{{
 			Pattern:      h,
 			Hostname:     h,
@@ -211,13 +211,20 @@ func (c *TestClient) AddAgentConnToClient(t *testing.T, a *TestAgent) {
 	c.AgentConn = aconn
 }
 
+func (c *TestClient) AddCmd(cmd string) {
+	logrus.Info("adding cmd to client config")
+	c.Config.MatchHost(c.Hostname).Cmd = cmd
+	logrus.Info("added: ", c.Config.MatchHost(c.Hostname).Cmd)
+	logrus.Info("config: ", c.Config)
+}
+
 // will start a client using an external authenticator if one is set
 // otherwise it will use an authgrant conn if provided
 // otherwise it will use an agentconn if provided
 // lastly it will just call Dial and let hopclient determine method from config
 func (c *TestClient) StartClient(t *testing.T) {
 	var err error
-	c.Client, err = hopclient.NewHopClient(&c.Config, c.Hostname)
+	c.Client, err = hopclient.NewHopClient(c.Config, c.Hostname)
 	c.Client.Fsystem = *c.FileSystem
 	assert.NilError(t, err)
 	if c.Authenticator != nil {
@@ -343,5 +350,38 @@ func TestTwoClients(t *testing.T) {
 
 		cTwo.StartClient(t)
 		wg.Wait()
+	})
+}
+
+func TestStartCmd(t *testing.T) {
+	logrus.SetLevel(logrus.DebugLevel)
+	thunks.SetUpTest()
+	t.Run("connect agent authenticator", func(t *testing.T) {
+		// Create the basic Client and Server
+		s := NewTestServer(t)
+		c := NewTestClient(t, s, "username")
+
+		// Modify authentication details
+		s.AddClientToAuthorizedKeys(t, c)
+
+		// Modify client config with command to run
+		c.AddCmd("pwd")
+
+		s.StartTransport(t)
+		s.StartHopServer(t)
+
+		// Start agent for client
+		a := NewAgent(t)
+		a.AddClientKey(t, c)
+		a.Run(t)
+
+		c.AddAgentConnToClient(t, a)
+
+		c.StartClient(t)
+
+		logrus.Info("CMD: ", c.Config.MatchHost(c.Hostname).Cmd)
+
+		err := c.Client.Start()
+		assert.NilError(t, err)
 	})
 }

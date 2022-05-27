@@ -240,9 +240,9 @@ func loadLeaf(leafFile string, autoSelfSign bool, public *keys.PublicKey, addres
 		logrus.Infof("auto self-signing leaf for user %q", address.User)
 		leaf, err = certs.SelfSignLeaf(&certs.Identity{
 			PublicKey: *public,
-			// Names: []certs.Name{
-			// 	certs.RawStringName(address.User),
-			// },
+			Names: []certs.Name{
+				certs.RawStringName(address.User),
+			},
 		})
 		if err != nil {
 			logrus.Fatalf("unable to self-sign certificate: %s", err)
