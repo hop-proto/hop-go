@@ -7,10 +7,6 @@
 
 run:
   skip-dirs:
-    - reliable
-    - channels
-    - sessions
-    - app
     - cmd/hop
   skip-files:
     - .*keccakf_amd64.s
