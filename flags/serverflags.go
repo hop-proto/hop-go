@@ -20,8 +20,8 @@ type ServerFlags struct {
 
 // ParseServerArgs defines and parses the flags from the cmd line for hop server
 func ParseServerArgs(args []string) (*ServerFlags, error) {
-	var f *ServerFlags
-	var fs *flag.FlagSet
+	f := new(ServerFlags)
+	fs := new(flag.FlagSet)
 	defineServerFlags(fs, f)
 
 	err := fs.Parse(args[1:])
@@ -35,7 +35,7 @@ func ParseServerArgs(args []string) (*ServerFlags, error) {
 }
 
 func defineServerFlags(fs *flag.FlagSet, f *ServerFlags) {
-	// var sockAddr string
+	//var sockAddr string
 	// fs.StringVar(&sockAddr, "s", hopserver.DefaultHopAuthSocket, "indicates custom sockaddr to use for auth grant")
 	fs.StringVar(&f.ConfigPath, "C", "", "path to server config file")
 }
