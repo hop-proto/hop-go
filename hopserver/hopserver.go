@@ -1,7 +1,6 @@
 package hopserver
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -25,7 +24,7 @@ import (
 )
 
 // DefaultHopAuthSocket is the default UDS used for Authorization grants
-const DefaultHopAuthSocket = "@hopauth"
+// const DefaultHopAuthSocket = "@hopauth"
 
 //HopServer represents state/conns needed for a hop server
 type HopServer struct {
@@ -33,7 +32,8 @@ type HopServer struct {
 	principals            map[int32]*hopSession
 	authgrants            map[keys.PublicKey]*authGrant //static key -> authgrant associated with that key
 	outstandingAuthgrants int
-	config                *Config
+
+	config *config.ServerConfig
 
 	fsystem fs.FS
 
@@ -41,32 +41,24 @@ type HopServer struct {
 	authsock net.Listener
 }
 
-//Config contains hop server specific configuration settings
-type Config struct {
-	SockAddr                 string
-	MaxOutstandingAuthgrants int
-	AuthorizedKeysLocation   string //defaults to /.hop/authorized_keys
-}
-
-// NewHopServer returns a Hop Server containing a transport server running on
-// the host/port specified in the config file and an authgrant server listening
-// on the provided socket.
-func NewHopServer(underlying *transport.Server, hconfig *Config) (*HopServer, error) {
+// NewHopServerExt returns a Hop Server using the provided transport server.
+func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig) (*HopServer, error) {
+	// TODO(baumanl): reintegrate authgrant server
 	// set up authgrantServer (UDS socket)
 	// make sure the socket does not already exist.
-	if err := os.RemoveAll(hconfig.SockAddr); err != nil {
-		logrus.Error(err)
-		return nil, err
-	}
+	// if err := os.RemoveAll(hconfig.SockAddr); err != nil {
+	// 	logrus.Error(err)
+	// 	return nil, err
+	// }
 
 	// set socket options and start listening to socket
-	sockconfig := &net.ListenConfig{Control: setListenerOptions}
-	authgrantServer, err := sockconfig.Listen(context.Background(), "unix", hconfig.SockAddr)
-	if err != nil {
-		logrus.Error("S: UDS LISTEN ERROR:", err)
-		return nil, err
-	}
-	logrus.Infof("address: %v", authgrantServer.Addr())
+	// sockconfig := &net.ListenConfig{Control: setListenerOptions}
+	// authgrantServer, err := sockconfig.Listen(context.Background(), "unix", hconfig.SockAddr)
+	// if err != nil {
+	// 	logrus.Error("S: UDS LISTEN ERROR:", err)
+	// 	return nil, err
+	// }
+	// logrus.Infof("address: %v", authgrantServer.Addr())
 
 	principals := make(map[int32]*hopSession)         //PID -> principal hop session
 	authgrants := make(map[keys.PublicKey]*authGrant) //static key -> authgrant
@@ -76,22 +68,62 @@ func NewHopServer(underlying *transport.Server, hconfig *Config) (*HopServer, er
 		principals:            principals,
 		authgrants:            authgrants,
 		outstandingAuthgrants: 0,
-		config:                hconfig,
 
-		server:   underlying,
-		authsock: authgrantServer,
+		config: config,
+
+		server: underlying,
+		// authsock: authgrantServer,
 
 		fsystem: os.DirFS("/"),
 	}
 	return server, nil
 }
 
+// NewHopServer returns a Hop Server containing a transport server running on
+// the host/port specified in the config file.
+func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
+	// make transport.Server
+	vhosts, err := NewVirtualHosts(sc, nil, nil)
+	if err != nil {
+		logrus.Fatalf("unable to parse virtual hosts: %s", err)
+	}
+
+	pktConn, err := net.ListenPacket("udp", sc.ListenAddress)
+	if err != nil {
+		logrus.Fatalf("unable to open socket for address %s: %s", sc.ListenAddress, err)
+	}
+	udpConn := pktConn.(*net.UDPConn)
+	logrus.Infof("listening at %s", udpConn.LocalAddr())
+
+	getCert := func(info transport.ClientHandshakeInfo) (*transport.Certificate, error) {
+		if h := vhosts.Match(info.ServerName); h != nil {
+			return &h.Certificate, nil
+		}
+		return nil, fmt.Errorf("%v did not match a host block", info.ServerName)
+	}
+
+	tconf := transport.ServerConfig{
+		ClientVerify: &transport.VerifyConfig{
+			InsecureSkipVerify: true, // Do authorized keys instead
+		},
+		GetCertificate: getCert,
+	}
+
+	underlying, err := transport.NewServer(udpConn, tconf)
+	if err != nil {
+		logrus.Fatalf("unable to open transport server: %s", err)
+	}
+
+	return NewHopServerExt(underlying, sc)
+
+}
+
 // Close currently just allows the hop server to explicitly shut down the
 // authsock. TODO (baumanl): this is hacky & incomplete. Clarify when this
 // should happen and all it should do.
-func (s *HopServer) Close() {
-	s.authsock.Close()
-}
+// func (s *HopServer) Close() {
+// 	s.authsock.Close()
+// }
 
 //Serve listens for incoming hop connection requests and start corresponding authGrantServer on a Unix Domain socket
 func (s *HopServer) Serve() {
@@ -116,19 +148,19 @@ func (s *HopServer) Serve() {
 // newSession Starts a new hop session
 func (s *HopServer) newSession(serverConn *transport.Handle) {
 	sess := &hopSession{
-		transportConn:          serverConn,
-		tubeMuxer:              tubes.NewMuxer(serverConn, serverConn),
-		tubeQueue:              make(chan *tubes.Reliable),
-		done:                   make(chan int),
-		controlChannels:        []net.Conn{},
-		server:                 s,
-		authorizedKeysLocation: s.config.AuthorizedKeysLocation,
+		transportConn:   serverConn,
+		tubeMuxer:       tubes.NewMuxer(serverConn, serverConn),
+		tubeQueue:       make(chan *tubes.Reliable),
+		done:            make(chan int),
+		controlChannels: []net.Conn{},
+		server:          s,
+		// authorizedKeysLocation: s.config.AuthorizedKeysLocation,
 	}
-	if sess.authorizedKeysLocation != sess.server.config.AuthorizedKeysLocation {
-		logrus.Error("Authorized Keys location mismatch")
-	} else {
-		logrus.Info("ALL GOOD AUTH KEYS LOCATION")
-	}
+	// if sess.authorizedKeysLocation != sess.server.config.AuthorizedKeysLocation {
+	// 	logrus.Error("Authorized Keys location mismatch")
+	// } else {
+	// 	logrus.Info("ALL GOOD AUTH KEYS LOCATION")
+	// }
 	sess.start()
 }
 

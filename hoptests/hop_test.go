@@ -2,895 +2,77 @@ package hoptests
 
 import (
 	"net"
+	"net/http"
 	"strconv"
+	"sync"
 	"testing"
 	"testing/fstest"
 
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 
+	"zmap.io/portal/agent"
 	"zmap.io/portal/certs"
 	"zmap.io/portal/common"
 	"zmap.io/portal/config"
 	"zmap.io/portal/core"
-	"zmap.io/portal/hopserver"
-
 	"zmap.io/portal/hopclient"
+	"zmap.io/portal/hopserver"
 	"zmap.io/portal/keys"
 	"zmap.io/portal/pkg/thunks"
 	"zmap.io/portal/transport"
 )
 
-// //Defaults and constants for starting a hop session
-// const (
-// 	DefaultHopPort        = "7777"
-// 	DefaultKeyPath        = "/.hop/key"
-//
-// 	TestDataPathPrefixDef = "../../certs/"
+type TestAgent struct {
+	Data *agent.Data // map string (keypath) -> keys
 
-// )
-// //NewTestServerConfig populates server config and verify config with sample cert data
-// func NewTestServerConfig(testDataPathPrefix string) (*transport.ServerConfig, *transport.VerifyConfig) {
-// 	keyPair, err := keys.ReadDHKeyFromPEMFile(testDataPathPrefix + "testdata/leaf-key.pem")
-// 	if err != nil {
-// 		logrus.Fatalf("S: ERROR WITH KEYPAIR %v", err)
-// 	}
-// 	certificate, err := certs.ReadCertificatePEMFile(testDataPathPrefix + "testdata/leaf.pem")
-// 	if err != nil {
-// 		logrus.Fatalf("S: ERROR WITH CERTS %v", err)
-// 	}
-// 	intermediate, err := certs.ReadCertificatePEMFile(testDataPathPrefix + "testdata/intermediate.pem")
-// 	if err != nil {
-// 		logrus.Fatalf("S: ERROR WITH INT CERTS %v", err)
-// 	}
-// 	root, err := certs.ReadCertificatePEMFile(testDataPathPrefix + "testdata/root.pem")
-// 	if err != nil {
-// 		logrus.Fatalf("S: ERROR WITH ROOT CERT %v", err)
-// 	}
-// 	err = certs.VerifyParent(certificate, intermediate)
-// 	if err != nil {
-// 		logrus.Fatal("Verify Parent Issue: ", err)
-// 	}
-// 	err = certs.VerifyParent(intermediate, root)
-// 	if err != nil {
-// 		logrus.Fatal("Verify Parent Issue: ", err)
-// 	}
-// 	err = certs.VerifyParent(root, root)
-// 	if err != nil {
-// 		logrus.Fatal("Verify Parent Issue: ", err)
-// 	}
-
-// 	server := transport.ServerConfig{
-// 		KeyPair:      keyPair,
-// 		Certificate:  certificate,
-// 		Intermediate: intermediate,
-// 	}
-// 	verify := transport.VerifyConfig{
-// 		Store: certs.Store{},
-// 	}
-// 	verify.Store.AddCertificate(root)
-// 	return &server, &verify
-// }
-
-/*
-const howdy = "Howdy! This is connection numero two./n"
-
-func serverSetup(t *testing.T, p string) *HopServer {
-	baseConfig, _ := NewTestServerConfig("../certs/")
-	transportConfig := *baseConfig
-	transportConfig.ClientVerify = nil //no certificate verification at all
-	serverConfig := &HopServerConfig{
-		SockAddr:                 DefaultHopAuthSocket + p,
-		MaxOutstandingAuthgrants: 50,
-		AuthorizedKeysLocation:   "/.hop_test/authorized_keys",
-	}
-	s, err := NewHopServer(serverConfig)
-	assert.NilError(t, err)
-	return s
+	// Listener net.Listener
+	baseURL string
+	Agent   agent.Server
 }
 
-func principalSetup(t *testing.T, p string, auth bool) *HopClient {
-	_, verify := NewTestServerConfig("../certs/")
-	keyname := "key" + p
-	u, e := user.Current()
-	assert.NilError(t, e)
-	clientKey, e := KeyGen("/.hop_test", keyname, auth)
-	assert.NilError(t, e)
-	clientLeafIdentity := certs.Identity{
-		PublicKey: clientKey.Public,
-		Names:     []certs.Name{certs.RawStringName(u.Username)},
-	}
-	clientLeaf, err := certs.SelfSignLeaf(&clientLeafIdentity)
-	assert.NilError(t, err)
-
-	transportClientConfig := &transport.ClientConfig{
-		KeyPair:        clientKey,
-		Leaf:           clientLeaf,
-		UseCertificate: true,
-		Intermediate:   nil,
-		Verify:         *verify,
-	}
-	//set up Hop client
-	keypath, _ := os.UserHomeDir()
-	keypath += "/.hop_test/" + keyname
-	assert.NilError(t, e)
-	clientConfig := &HopClientConfig{
-		TransportConfig: transportClientConfig,
-		Keypath:         keypath,
-		Hostname:        "127.0.0.1",
-		Port:            p,
-		Username:        u.Username,
-		Principal:       true,
-	}
-	client, err := NewHopClient(clientConfig)
-	assert.NilError(t, err)
-	return client
-}
-
-func delegateSetup(t *testing.T, p string, authSockID string) *HopClient {
-	_, verify := NewTestServerConfig("../certs/")
-	u, e := user.Current()
-	assert.NilError(t, e)
-
-	transportClientConfig := &transport.ClientConfig{
-		KeyPair:        nil,
-		Leaf:           nil,
-		UseCertificate: true,
-		Intermediate:   nil,
-		Verify:         *verify,
-	}
-	//set up Hop client
-	clientConfig := &HopClientConfig{
-		TransportConfig: transportClientConfig,
-		SockAddr:        DefaultHopAuthSocket + authSockID,
-		Hostname:        "127.0.0.1",
-		Port:            p,
-		Username:        u.Username,
-	}
-	client, err := NewHopClient(clientConfig)
-	assert.NilError(t, err)
-	return client
-}
-
-//simple client server connect
-func TestSimpleClientServer(t *testing.T) {
-	port := getPort()
-	server := serverSetup(t, port)
-	go server.Serve()
-	client := principalSetup(t, port, true)
-
-	//handshake + user authorization
-	err := client.Connect()
-	assert.NilError(t, err)
-}
-
-//connect fail when key not in authorized_keys
-func TestUnauthorizedFail(t *testing.T) {
-	port := getPort()
-	server := serverSetup(t, port)
-	go server.Serve()
-	client := principalSetup(t, port, false)
-
-	//handshake + user authorization
-	err := client.Connect()
-	assert.Error(t, err, "client not authorized")
-}
-
-func TestAuthgrantOneHop(t *testing.T) {
-	port1 := getPort()               //port server 1 (delegate) will listen on
-	port2 := getPort()               //port server 2 (target) will listen on
-	server1 := serverSetup(t, port1) //server 1 (delegate)
-	server2 := serverSetup(t, port2) //server 2 (target)
-	principal := principalSetup(t, port1, true)
-
-	//start hop server 2
-	go server2.Serve()        //starts transport layer server, authgrant server, and listens for hop conns
-	go server1.server.Serve() //start delgate transport layer server (manually handle incoming connection because I can't simulate the delegate client actually being a child process)
-
-	go func() {
-		//principal starts session with server 1
-		err := principal.Connect()
-		assert.NilError(t, err)
-
-		//principal handles intent request from delegate
-		agreqtube, err := principal.TubeMuxer.Accept()
-		assert.NilError(t, err)
-
-		agt := authgrants.NewAuthGrantConn(agreqtube)
-		intent, err := agt.GetIntentRequest()
-		assert.NilError(t, err)
-		logrus.Info("assuming user approves prompt")
-
-		//ask remote
-		remoteSession, err := principal.setupRemoteSession(intent)
-		assert.NilError(t, err)
-		targetAgt, err := authgrants.NewAuthGrantConnFromMux(remoteSession.TubeMuxer)
-		assert.NilError(t, err)
-		response, err := remoteSession.confirmWithRemote(intent, targetAgt, agt)
-		assert.NilError(t, err)
-		err = agt.WriteRawBytes(response)
-		assert.NilError(t, err)
-		agt.Close()
-		targetAgt.Close()
-	}()
-
-	//server 1 accepts principal connection and starts hopsession
-	psconn, err := server1.server.AcceptTimeout(1 * time.Minute)
-	assert.NilError(t, err)
-	psess := &hopSession{
-		transportConn:          psconn,
-		tubeMuxer:              tubes.NewMuxer(psconn, psconn),
-		tubeQueue:              make(chan *tubes.Reliable),
-		done:                   make(chan int),
-		server:                 server1,
-		authorizedKeysLocation: server1.config.AuthorizedKeysLocation,
-	}
-	go psess.start()
-
-	// server 1 listens on authsock for Intent requests
-	// proxies them to the principal
-	go func() {
-		c, err := server1.authsock.Accept()
-		assert.NilError(t, err)
-		server1.proxyAuthGrantRequest(psess, c)
-	}()
-
-	delegate := delegateSetup(t, port2, port1)
-	err = delegate.Connect()
-	assert.NilError(t, err)
-}
-
-func TestAuthgrantTimeout(t *testing.T) {
-	port1 := getPort()               //port server 1 (delegate) will listen on
-	port2 := getPort()               //port server 2 (target) will listen on
-	server1 := serverSetup(t, port1) //server 1 (delegate)
-	server2 := serverSetup(t, port2) //server 2 (target)
-	principal := principalSetup(t, port1, true)
-
-	//start hop server 2
-	go server2.Serve()        //starts transport layer server, authgrant server, and listens for hop conns
-	go server1.server.Serve() //start delgate transport layer server (manually handle incoming connection because I can't simulate the delegate client actually being a child process)
-
-	go func() {
-		//principal starts session with server 1
-		err := principal.Connect()
-		assert.NilError(t, err)
-
-		//principal handles intent request from delegate
-		agreqtube, err := principal.TubeMuxer.Accept()
-		assert.NilError(t, err)
-
-		agt := authgrants.NewAuthGrantConn(agreqtube)
-		intent, err := agt.GetIntentRequest()
-		assert.NilError(t, err)
-		logrus.Info("assuming user approves prompt")
-
-		//ask remote
-		remoteSession, err := principal.setupRemoteSession(intent)
-		assert.NilError(t, err)
-		targetAgt, err := authgrants.NewAuthGrantConnFromMux(remoteSession.TubeMuxer)
-		assert.NilError(t, err)
-		response, err := remoteSession.confirmWithRemote(intent, targetAgt, agt)
-		assert.NilError(t, err)
-		//pause to add delay
-		time.Sleep(6 * time.Second) //max set to 5 seconds
-		err = agt.WriteRawBytes(response)
-		assert.NilError(t, err)
-		agt.Close()
-		targetAgt.Close()
-	}()
-
-	//server 1 accepts principal connection and starts hopsession
-	psconn, err := server1.server.AcceptTimeout(1 * time.Minute)
-	assert.NilError(t, err)
-	psess := &hopSession{
-		transportConn:          psconn,
-		tubeMuxer:              tubes.NewMuxer(psconn, psconn),
-		tubeQueue:              make(chan *tubes.Reliable),
-		done:                   make(chan int),
-		server:                 server1,
-		authorizedKeysLocation: server1.config.AuthorizedKeysLocation,
-	}
-	go psess.start()
-
-	// server 1 listens on authsock for Intent requests
-	// proxies them to the principal
-	go func() {
-		c, err := server1.authsock.Accept()
-		assert.NilError(t, err)
-		server1.proxyAuthGrantRequest(psess, c)
-	}()
-
-	delegate := delegateSetup(t, port2, port1)
-	err = delegate.Connect()
-	assert.Error(t, err, ErrClientUnauthorized.Error())
-}
-
-func TestRemotePF(t *testing.T) {
-	port := getPort()
-	server := serverSetup(t, port)
-	go server.Serve()
-
-	remoteport1 := getPort()
-	remoteport2 := getPort()
-
-	client := principalSetup(t, port, true)
-	client.config.RemoteArgs = []string{remoteport1 + ":localhost:" + remoteport2}
-
-	err := client.Connect()
-	assert.NilError(t, err)
-
-	err = client.remoteForward(client.config.RemoteArgs[0])
-	assert.NilError(t, err)
-
-	logrus.Info("simulating a tcp conn")
-
-	parts := strings.Split(client.config.RemoteArgs[0], ":") //assuming port:host:hostport
-
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-
-	go func() {
-		//simulate program listening on local (target port)
-		li, err := net.Listen("tcp", ":"+parts[2])
-		logrus.Info("simulating listening program on target: port ", parts[2])
-		wg.Done()
-		assert.NilError(t, err)
-		liconn, err := li.Accept()
-		assert.NilError(t, err)
-		buf := make([]byte, 39)
-		n := 0
-		for n < 39 {
-			x, err := liconn.Read(buf[n:])
-			logrus.Infof("listening program read %v bytes", x)
-			assert.NilError(t, err)
-			n += x
-		}
-		logrus.Info("program listening on target got: ", string(buf[:]))
-		if string(buf) == howdy {
-			logrus.Info("writing Hello")
-			liconn.Write([]byte("Hello/n"))
-		}
-		liconn.Close()
-
-		logrus.Info("expecting second conn")
-		liconn, err = li.Accept()
-		assert.NilError(t, err)
-		n = 0
-		for n < 39 {
-			x, err := liconn.Read(buf[n:])
-			logrus.Infof("listening program read %v bytes", x)
-			assert.NilError(t, err)
-			n += x
-		}
-		logrus.Info("program listening on target got: ", string(buf[:]))
-		if string(buf) == howdy {
-			logrus.Info("writing Hello")
-			liconn.Write([]byte("Hello/n"))
-		}
-		liconn.Close()
-	}()
-
-	wg.Wait()
-	go func() {
-		//simulate a TCP conn to remote port
-		logrus.Info("attempting to dial port ", parts[0])
-		ctconn, err := net.Dial("tcp", ":"+parts[0])
-		assert.NilError(t, err)
-		n, err := ctconn.Write([]byte(howdy))
-		assert.NilError(t, err)
-		logrus.Infof("sent %v bytes over tcpconn. Waiting for response...", n)
-		buf := make([]byte, 7)
-		n = 0
-		for n < 7 {
-			x, err := ctconn.Read(buf[n:])
-			logrus.Infof("response read %v bytes", x)
-			assert.NilError(t, err)
-			n += x
-		}
-		logrus.Info("2nd tcp initiator got: ", string(buf))
-		err = ctconn.Close()
-		assert.NilError(t, err)
-	}()
-
-	go func() {
-		//simulate another TCP conn to remote port
-		logrus.Info("attempting to dial port ", parts[0])
-		ctconn, err := net.Dial("tcp", ":"+parts[0])
-		assert.NilError(t, err)
-		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn./n"))
-		assert.NilError(t, err)
-		logrus.Infof("sent %v bytes over tcpconn", n)
-		err = ctconn.Close()
-		assert.NilError(t, err)
-	}()
-
-	crft, err := client.TubeMuxer.Accept()
-	assert.NilError(t, err)
-	assert.Equal(t, crft.Type(), RemotePFTube)
-
-	err = client.handleRemote(crft)
-	assert.NilError(t, err)
-	logrus.Info("First tube done")
-
-	crft, err = client.TubeMuxer.Accept()
-	assert.NilError(t, err)
-	assert.Equal(t, crft.Type(), RemotePFTube)
-
-	err = client.handleRemote(crft)
-	assert.NilError(t, err)
-
-}
-
-func TestTwoRemotePF(t *testing.T) {
-	port := getPort()
-	server := serverSetup(t, port)
-	go server.Serve()
-
-	remoteport1 := getPort()
-	remoteport2 := getPort()
-
-	remoteport3 := getPort()
-	remoteport4 := getPort()
-
-	client := principalSetup(t, port, true)
-	client.config.RemoteArgs = []string{remoteport1 + ":localhost:" + remoteport2, remoteport3 + ":localhost:" + remoteport4}
-
-	err := client.Connect()
-	assert.NilError(t, err)
-
-	err = client.remoteForward(client.config.RemoteArgs[0])
-	assert.NilError(t, err)
-
-	err = client.remoteForward(client.config.RemoteArgs[1])
-	assert.NilError(t, err)
-
-	logrus.Info("simulating a tcp conn")
-
-	parts := strings.Split(client.config.RemoteArgs[0], ":")    //assuming port:host:hostport
-	partsTwo := strings.Split(client.config.RemoteArgs[1], ":") //assuming port:host:hostport
-
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-
-	go func() {
-		//simulate program listening on local (target port)
-		li, err := net.Listen("tcp", ":"+parts[2])
-		logrus.Info("simulating listening program on target: port ", parts[2])
-		assert.NilError(t, err)
-		wg.Done()
-		liconn, err := li.Accept()
-		assert.NilError(t, err)
-		buf := make([]byte, 39)
-		n := 0
-		for n < 39 {
-			x, err := liconn.Read(buf[n:])
-			logrus.Infof("listening program read %v bytes", x)
-			assert.NilError(t, err)
-			n += x
-		}
-		logrus.Info("program listening on target got: ", string(buf[:]))
-		liconn.Close()
-	}()
-
-	go func() {
-		//simulate program listening on local (target port) (for second arg)
-		li, err := net.Listen("tcp", ":"+partsTwo[2])
-		logrus.Info("simulating listening program on target: port ", partsTwo[2])
-		assert.NilError(t, err)
-		wg.Done()
-		liconn, err := li.Accept()
-		assert.NilError(t, err)
-		buf := make([]byte, 39)
-		n := 0
-		for n < 39 {
-			x, err := liconn.Read(buf[n:])
-			logrus.Infof("listening program read %v bytes", x)
-			assert.NilError(t, err)
-			n += x
-		}
-		logrus.Info("program listening on target got: ", string(buf[:]))
-		liconn.Close()
-	}()
-
-	wg.Wait()
-
-	go func() {
-		//simulate a TCP conn to remote port
-		logrus.Info("attempting to dial port ", parts[0])
-		ctconn, err := net.Dial("tcp", ":"+parts[0])
-		assert.NilError(t, err)
-		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn./n"))
-		assert.NilError(t, err)
-		logrus.Infof("sent %v bytes over tcpconn", n)
-		err = ctconn.Close()
-		assert.NilError(t, err)
-	}()
-
-	go func() {
-		//simulate a TCP conn to remote port (2)
-		logrus.Info("attempting to dial port ", partsTwo[0])
-		ctconn, err := net.Dial("tcp", ":"+partsTwo[0])
-		assert.NilError(t, err)
-		n, err := ctconn.Write([]byte("HI THERE! THIS IS THE FIRST TCP CONN./n"))
-		assert.NilError(t, err)
-		logrus.Infof("sent %v bytes over tcpconn", n)
-		err = ctconn.Close()
-		assert.NilError(t, err)
-	}()
-
-	wg.Add(1)
-	go func() {
-
-		crft, err := client.TubeMuxer.Accept()
-		assert.NilError(t, err)
-		assert.Equal(t, crft.Type(), RemotePFTube)
-
-		err = client.handleRemote(crft)
-		assert.NilError(t, err)
-		logrus.Info("First tube done")
-		wg.Done()
-	}()
-
-	crft, err := client.TubeMuxer.Accept()
-	assert.NilError(t, err)
-	assert.Equal(t, crft.Type(), RemotePFTube)
-
-	err = client.handleRemote(crft)
-	assert.NilError(t, err)
-	wg.Wait()
-
-}
-
-func TestRemotePFListenSocket(t *testing.T) {
-	port := getPort()
-	server := serverSetup(t, port)
-	go server.Serve()
-
-	remoteport1 := getPort()
-	listensocket := "/tmp/sock" + remoteport1 //just using remoteport1 as a unique id to avoid conflicts in testing
-	remoteport2 := getPort()
-
-	client := principalSetup(t, port, true)
-	client.config.RemoteArgs = []string{listensocket + ":localhost:" + remoteport2}
-
-	err := client.Connect()
-	assert.NilError(t, err)
-
-	err = client.remoteForward(client.config.RemoteArgs[0])
-	assert.NilError(t, err)
-
-	logrus.Info("simulating a tcp conn")
-
-	fwdStruct := Fwd{
-		Listensock:        false,
-		Connectsock:       false,
-		Listenhost:        "",
-		Listenportorpath:  "",
-		Connecthost:       "",
-		Connectportorpath: "",
-	}
-	err = ParseForward(client.config.RemoteArgs[0], &fwdStruct)
-	assert.NilError(t, err)
-
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-
-	go func() {
-		//simulate program listening on Connecthost:Connectport
-		addr := net.JoinHostPort(fwdStruct.Connecthost, fwdStruct.Connectportorpath)
-		li, err := net.Listen("tcp", addr)
-		logrus.Info("simulating listening program on target: ", addr)
-		wg.Done()
-		assert.NilError(t, err)
-		liconn, err := li.Accept()
-		assert.NilError(t, err)
-		buf := make([]byte, 39)
-		n := 0
-		for n < 39 {
-			x, err := liconn.Read(buf[n:])
-			logrus.Infof("listening program read %v bytes", x)
-			assert.NilError(t, err)
-			n += x
-		}
-		logrus.Info("program listening on target got: ", string(buf[:]))
-		if string(buf) == howdy {
-			logrus.Info("writing Hello")
-			liconn.Write([]byte("Hello/n"))
-		}
-		liconn.Close()
-
-		logrus.Info("expecting second conn")
-		liconn, err = li.Accept()
-		assert.NilError(t, err)
-		n = 0
-		for n < 39 {
-			x, err := liconn.Read(buf[n:])
-			logrus.Infof("listening program read %v bytes", x)
-			assert.NilError(t, err)
-			n += x
-		}
-		logrus.Info("program listening on target got: ", string(buf[:]))
-		if string(buf) == howdy {
-			logrus.Info("writing Hello")
-			liconn.Write([]byte("Hello/n"))
-		}
-		liconn.Close()
-	}()
-
-	wg.Wait()
-	go func() {
-		//simulate a conn to listening socket
-		logrus.Info("attempting to dial socket ", listensocket)
-		ctconn, err := net.Dial("unix", listensocket)
-		assert.NilError(t, err)
-		n, err := ctconn.Write([]byte(howdy))
-		assert.NilError(t, err)
-		logrus.Infof("sent %v bytes over tcpconn. Waiting for response...", n)
-		buf := make([]byte, 7)
-		n = 0
-		for n < 7 {
-			x, err := ctconn.Read(buf[n:])
-			logrus.Infof("response read %v bytes", x)
-			assert.NilError(t, err)
-			n += x
-		}
-		logrus.Info("2nd tcp initiator got: ", string(buf))
-		err = ctconn.Close()
-		assert.NilError(t, err)
-	}()
-
-	go func() {
-		//simulate another conn to listening socket
-		logrus.Info("attempting to dial port ", listensocket)
-		ctconn, err := net.Dial("unix", listensocket)
-		assert.NilError(t, err)
-		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn./n"))
-		assert.NilError(t, err)
-		logrus.Infof("sent %v bytes over tcpconn", n)
-		err = ctconn.Close()
-		assert.NilError(t, err)
-	}()
-
-	crft, err := client.TubeMuxer.Accept()
-	assert.NilError(t, err)
-	assert.Equal(t, crft.Type(), RemotePFTube)
-
-	err = client.handleRemote(crft)
-	assert.NilError(t, err)
-	logrus.Info("First tube done")
-
-	crft, err = client.TubeMuxer.Accept()
-	assert.NilError(t, err)
-	assert.Equal(t, crft.Type(), RemotePFTube)
-
-	err = client.handleRemote(crft)
-	assert.NilError(t, err)
-
-}
-
-func TestLocalPF(t *testing.T) {
-	port := getPort()
-	server := serverSetup(t, port)
-	go server.Serve()
-	localport1 := getPort()
-	localport2 := getPort()
-
-	client := principalSetup(t, port, true)
-	client.config.LocalArgs = []string{localport1 + ":127.0.0.1:" + localport2}
-
-	err := client.Connect()
-	assert.NilError(t, err)
-
-	err = client.localForward(client.config.LocalArgs[0]) //client listening on localport1
-	assert.NilError(t, err)
-
-	parts := strings.Split(client.config.LocalArgs[0], ":") //assuming port:host:hostport
-
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-
-	go func() {
-		//simulate program listening on end dest (host:hostport)
-		li, err := net.Listen("tcp", parts[1]+":"+parts[2])
-		logrus.Infof("simulating listening program on end dest: addr %v & port %v", parts[1], parts[2])
-		wg.Done()
-		assert.NilError(t, err)
-		liconn, err := li.Accept()
-		assert.NilError(t, err)
-		buf := make([]byte, 39)
-		n := 0
-		for n < 39 {
-			x, err := liconn.Read(buf[n:])
-			logrus.Infof("listening program read %v bytes", x)
-			assert.NilError(t, err)
-			n += x
-		}
-		logrus.Info("program listening on end dest got: ", string(buf[:]))
-		if string(buf) == "Howdy! This is connection number two./n" {
-			logrus.Info("writing Hello")
-			liconn.Write([]byte("Hello/n"))
-		}
-		liconn.Close()
-
-		logrus.Info("expecting second conn")
-		liconn, err = li.Accept()
-		assert.NilError(t, err)
-		n = 0
-		for n < 39 {
-			x, err := liconn.Read(buf[n:])
-			logrus.Infof("listening program read %v bytes", x)
-			assert.NilError(t, err)
-			n += x
-		}
-		logrus.Info("program listening on end dest got: ", string(buf[:]))
-		if string(buf) == "Howdy! This is connection number two./n" {
-			logrus.Info("writing Hello")
-			liconn.Write([]byte("Hello/n"))
-		}
-		liconn.Close()
-	}()
-
-	wg.Wait()
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		//simulate another TCP conn to localport1
-		logrus.Info("attempting to dial port ", parts[0])
-		ctconn, err := net.Dial("tcp", ":"+parts[0])
-		assert.NilError(t, err)
-		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn./n"))
-		assert.NilError(t, err)
-		logrus.Infof("sent %v bytes over tcpconn", n)
-		err = ctconn.Close()
-		assert.NilError(t, err)
-	}()
-
-	go func() {
-		defer wg.Done()
-		//simulate a TCP conn to localport
-		logrus.Info("simulating a tcp conn to localport1, ", parts[0])
-		ctconn, err := net.Dial("tcp", "127.0.0.1:"+parts[0])
-		assert.NilError(t, err)
-		n, err := ctconn.Write([]byte("Howdy! This is connection number two./n"))
-		assert.NilError(t, err)
-		logrus.Infof("sent %v bytes over tcpconn. Waiting for response...", n)
-		buf := make([]byte, 7)
-		n = 0
-		for n < 7 {
-			x, err := ctconn.Read(buf[n:])
-			logrus.Infof("response read %v bytes", x)
-			assert.NilError(t, err)
-			n += x
-		}
-		logrus.Info("2nd tcp initiator got: ", string(buf))
-		err = ctconn.Close()
-		assert.NilError(t, err)
-	}()
-
-	wg.Wait()
-}
-
-func TestTwoLocalPF(t *testing.T) {
-	port := getPort()
-	server := serverSetup(t, port)
-	go server.Serve()
-
-	localport1 := getPort()
-	localport2 := getPort()
-
-	localport3 := getPort()
-	localport4 := getPort()
-
-	client := principalSetup(t, port, true)
-	client.config.LocalArgs = []string{localport1 + ":localhost:" + localport2, localport3 + ":localhost:" + localport4}
-
-	err := client.Connect()
-	assert.NilError(t, err)
-
-	err = client.localForward(client.config.LocalArgs[0])
-	assert.NilError(t, err)
-
-	err = client.localForward(client.config.LocalArgs[1])
-	assert.NilError(t, err)
-
-	parts := strings.Split(client.config.LocalArgs[0], ":")    //assuming port:host:hostport
-	partsTwo := strings.Split(client.config.LocalArgs[1], ":") //assuming port:host:hostport
-
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-
-	go func() {
-		//simulate program listening on end dest (target port)
-		li, err := net.Listen("tcp", parts[1]+":"+parts[2])
-		logrus.Info("simulating listening program on target: port ", parts[2])
-		assert.NilError(t, err)
-		wg.Done()
-		liconn, err := li.Accept()
-		assert.NilError(t, err)
-		buf := make([]byte, 39)
-		n := 0
-		for n < 39 {
-			x, err := liconn.Read(buf[n:])
-			logrus.Infof("listening program read %v bytes", x)
-			assert.NilError(t, err)
-			n += x
-		}
-		logrus.Info("program listening on end dest got: ", string(buf[:]))
-		liconn.Close()
-	}()
-
-	go func() {
-		//simulate program listening on end dest (target port) (for second arg)
-		li, err := net.Listen("tcp", partsTwo[1]+":"+partsTwo[2])
-		logrus.Info("simulating listening program on target: port ", partsTwo[2])
-		assert.NilError(t, err)
-		wg.Done()
-		liconn, err := li.Accept()
-		assert.NilError(t, err)
-		buf := make([]byte, 39)
-		n := 0
-		for n < 39 {
-			x, err := liconn.Read(buf[n:])
-			logrus.Infof("listening program read %v bytes", x)
-			assert.NilError(t, err)
-			n += x
-		}
-		logrus.Info("program listening on end dest got: ", string(buf[:]))
-		liconn.Close()
-	}()
-
-	wg.Wait()
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		//simulate a TCP conn to localport1
-		logrus.Info("attempting to dial port ", parts[0])
-		ctconn, err := net.Dial("tcp", ":"+parts[0])
-		assert.NilError(t, err)
-		n, err := ctconn.Write([]byte("Hi there! this is the first tcp conn./n"))
-		assert.NilError(t, err)
-		logrus.Infof("sent %v bytes over tcpconn", n)
-		err = ctconn.Close()
-		assert.NilError(t, err)
-	}()
-
-	go func() {
-		defer wg.Done()
-		//simulate a TCP conn to localport3
-		logrus.Info("attempting to dial port ", partsTwo[0])
-		ctconn, err := net.Dial("tcp", ":"+partsTwo[0])
-		assert.NilError(t, err)
-		n, err := ctconn.Write([]byte("HI THERE! THIS IS THE FIRST TCP CONN./n"))
-		assert.NilError(t, err)
-		logrus.Infof("sent %v bytes over tcpconn", n)
-		err = ctconn.Close()
-		assert.NilError(t, err)
-	}()
-	wg.Wait()
-}
-*/
-
-// Suite is a helper type for writing tests
-type Suite struct {
-	ServerSockPath           string
+// One hopserver process
+type TestServer struct {
 	LeafKeyPair              *keys.X25519KeyPair
 	IntermediateKeyPair      *keys.SigningKeyPair
 	RootKeyPair              *keys.SigningKeyPair
 	Leaf, Intermediate, Root *certs.Certificate
 	Store                    certs.Store
 
+	Config          *config.ServerConfig
+	TransportConfig *transport.ServerConfig
+
+	AuthorizedKeyFiles map[string][]byte // username to file contents
+	FileSystem         *fstest.MapFS
+
 	UDPConn   *net.UDPConn
 	Transport *transport.Server
 	Server    *hopserver.HopServer
 }
 
-func NewSuite(t *testing.T) *Suite {
-	s := new(Suite)
+// One hopclient process
+type TestClient struct {
+	KeyPair *keys.X25519KeyPair
+
+	Config   *config.ClientConfig
+	Username string // user it will be authenticating as
+	Remote   string // address of server it will be connecting to
+	Hostname string
+
+	AuthgrantConn net.Conn
+	AgentConn     net.Conn
+
+	Authenticator core.Authenticator // can be nil if want hopclient to make one
+
+	FileSystem *fstest.MapFS
+	Client     *hopclient.HopClient
+}
+
+func NewTestServer(t *testing.T) *TestServer {
+	s := new(TestServer)
+
 	var err error
-	s.UDPConn, err = net.ListenUDP("udp", nil)
+	s.UDPConn, err = net.ListenUDP("udp", nil) // TODO(baumanl): change to just localhost?
 	assert.NilError(t, err)
 
 	s.LeafKeyPair = keys.GenerateNewX25519KeyPair()
@@ -911,36 +93,15 @@ func NewSuite(t *testing.T) *Suite {
 	s.Store = certs.Store{}
 	s.Store.AddCertificate(s.Root)
 
-	s.Transport, err = transport.NewServer(s.UDPConn, transport.ServerConfig{
-		Certificate:  s.Leaf,
-		Intermediate: s.Intermediate,
-		KeyPair:      s.LeafKeyPair,
-	})
-	assert.NilError(t, err)
-	config := hopserver.Config{
-		SockAddr: hopserver.DefaultHopAuthSocket,
-	}
-	s.Server, err = hopserver.NewHopServer(s.Transport, &config)
-	assert.NilError(t, err)
+	s.Config = &config.ServerConfig{}
+	s.FileSystem = &fstest.MapFS{}
+
+	s.AuthorizedKeyFiles = make(map[string][]byte)
+	logrus.Info("Created new test server...")
 	return s
 }
 
-func (s *Suite) MockServerFS(t *testing.T, fsystem fstest.MapFS) {
-	assert.Assert(t, s.Server != nil)
-	s.Server.SetFSystem(fsystem) // TODO(baumanl): not sure if a setter is the way to go here
-}
-
-func (s *Suite) MockClientFS(t *testing.T, client *hopclient.HopClient, fsystem fstest.MapFS) {
-	client.Fsystem = fsystem
-}
-
-func (s *Suite) NewClient(t *testing.T, config *config.ClientConfig, hostname string) *hopclient.HopClient {
-	c, err := hopclient.NewHopClient(config, hostname)
-	assert.NilError(t, err)
-	return c
-}
-
-func (s *Suite) ChainAuthenticator(t *testing.T, clientKey *keys.X25519KeyPair) core.Authenticator {
+func (s *TestServer) ChainAuthenticator(t *testing.T, clientKey *keys.X25519KeyPair) core.Authenticator {
 	leaf, err := certs.SelfSignLeaf(&certs.Identity{
 		PublicKey: clientKey.Public,
 	})
@@ -954,83 +115,276 @@ func (s *Suite) ChainAuthenticator(t *testing.T, clientKey *keys.X25519KeyPair) 
 	}
 }
 
-func TestHopClientExtAuthenticator(t *testing.T) {
-	thunks.SetUpTest()
-	t.Run("connect", func(t *testing.T) {
-		s := NewSuite(t)
-
-		h, _, err := net.SplitHostPort(s.Server.ListenAddress().String())
-		assert.NilError(t, err)
-
-		cc := config.ClientConfig{
-			Hosts: []config.HostConfig{{
-				Pattern:  h,
-				Hostname: h,
-				User:     "username",
-			}},
-		}
-		c := s.NewClient(t, &cc, h)
-		clientKey := keys.GenerateNewX25519KeyPair()
-		mock := fstest.MapFS{
-			"home/username/.hop/authorized_keys": &fstest.MapFile{
-				Data: []byte(clientKey.Public.String() + "\n"),
-				Mode: 0600,
-			},
-			"home/username/.hop/hopauth": &fstest.MapFile{},
-		}
-		s.MockServerFS(t, mock)
-		go s.Server.Serve()
-		err = c.DialExternalAuthenticator(s.Server.ListenAddress().String(), s.ChainAuthenticator(t, clientKey))
-		assert.NilError(t, err)
-		s.Server.Close()
-	})
-
+func (s *TestServer) AddClientToAuthorizedKeys(t *testing.T, c *TestClient) {
+	logrus.Info("adding key for ", c.Username)
+	ak := s.AuthorizedKeyFiles[c.Username]
+	s.AuthorizedKeyFiles[c.Username] = append(ak, []byte(c.KeyPair.Public.String())...)
 }
 
-/* The hopclient automatically generates a cert and authenticator from key file */
-func TestHopClient(t *testing.T) {
+// StartTransport starts transport layer server with optional serverconfig (otherwise default)
+func (s *TestServer) StartTransport(t *testing.T) {
+	var err error
+	if s.TransportConfig == nil { // Default
+		logrus.Info("Using default transport config.")
+		s.Transport, err = transport.NewServer(s.UDPConn, transport.ServerConfig{
+			Certificate:  s.Leaf,
+			Intermediate: s.Intermediate,
+			KeyPair:      s.LeafKeyPair,
+		})
+	} else {
+		logrus.Info("Using custom transport config.")
+		s.Transport, err = transport.NewServer(s.UDPConn, *s.TransportConfig)
+	}
+	assert.NilError(t, err)
+	logrus.Infof("Transport server listening on address: %s", s.Transport.ListenAddress().String())
+}
+
+// StartHopServer starts hop server with optional config (otherwise default)
+func (s *TestServer) StartHopServer(t *testing.T) {
+	var err error
+
+	if s.Transport == nil {
+		logrus.Info("Setting up Hop Server with just config.")
+		// all certs necessary need to be loaded into fsystem. (not currently implemented)
+		s.Server, err = hopserver.NewHopServer(s.Config)
+	} else {
+		logrus.Info("Setting up Hop Server with provided Transport server.")
+		// starts with external transport server
+		s.Server, err = hopserver.NewHopServerExt(s.Transport, s.Config)
+	}
+	assert.NilError(t, err)
+	logrus.Infof("Hop Server running on address: %s", s.Server.ListenAddress().String())
+
+	for user, file := range s.AuthorizedKeyFiles {
+		path := "home/" + user + "/.hop/authorized_keys"
+		(*s.FileSystem)[path] = &fstest.MapFile{
+			Data: file,
+			Mode: 600,
+		}
+		logrus.Infof("Wrote authorized keys to: %s", path)
+	}
+	logrus.Info("Wrote authorized keys to server filesystem.")
+	s.Server.SetFSystem(*s.FileSystem)
+
+	go s.Server.Serve()
+}
+
+func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
+	c := new(TestClient)
+
+	// TODO: make a better way to store this information
+	c.Username = username
+	c.KeyPair = keys.GenerateNewX25519KeyPair()
+	c.Remote = s.UDPConn.LocalAddr().String()
+	h, p, err := net.SplitHostPort(s.UDPConn.LocalAddr().String())
+	c.Hostname = h
+	assert.NilError(t, err)
+	port, err := strconv.Atoi(p)
+	assert.NilError(t, err)
+
+	// TODO(baumanl): what should actual default values be here.
+	c.Config = &config.ClientConfig{
+		Hosts: []config.HostConfig{{
+			Pattern:      h,
+			Hostname:     h,
+			Port:         port,
+			User:         username,
+			AutoSelfSign: config.True,
+			Key:          "home/" + username + "/.hop/id_hop.pem",
+		}},
+	}
+
+	c.FileSystem = &fstest.MapFS{
+		"home/username/.hop/" + common.DefaultKeyFile: &fstest.MapFile{
+			Data: []byte(c.KeyPair.Private.String() + "\n"),
+			Mode: 0600,
+		},
+	}
+
+	logrus.Info("Created new test client...")
+	return c
+}
+
+func (c *TestClient) AddAgentConnToClient(t *testing.T, a *TestAgent) {
+	logrus.Info("adding agent conn to client")
+	//aconn, err := net.Dial("tcp", a.Listener.Addr().String())
+	// assert.NilError(t, err)
+	c.Config.AgentURL = a.baseURL
+}
+
+func (c *TestClient) AddCmd(cmd string) {
+	logrus.Info("adding cmd to client config")
+	c.Config.MatchHost(c.Hostname).Cmd = cmd
+	logrus.Info("added: ", c.Config.MatchHost(c.Hostname).Cmd)
+	logrus.Info("config: ", c.Config)
+}
+
+// will start a client using an external authenticator if one is set
+// otherwise it will use an authgrant conn if provided
+// otherwise it will use an agentconn if provided
+// lastly it will just call Dial and let hopclient determine method from config
+func (c *TestClient) StartClient(t *testing.T) {
+	var err error
+	c.Client, err = hopclient.NewHopClient(c.Config, c.Hostname)
+	c.Client.Fsystem = *c.FileSystem
+	assert.NilError(t, err)
+	if c.Authenticator != nil {
+		err = c.Client.DialExternalAuthenticator(c.Remote, c.Authenticator)
+	} else if c.AuthgrantConn != nil {
+		err = c.Client.DialExternalConn(c.AuthgrantConn)
+	} else {
+		err = c.Client.Dial()
+	}
+	assert.NilError(t, err)
+}
+
+func NewAgent(t *testing.T) *TestAgent {
+	a := new(TestAgent)
+	a.Data = &agent.Data{}
+	a.Data.Keys = make(map[string]*keys.X25519KeyPair)
+	return a
+}
+
+func (a *TestAgent) AddClientKey(t *testing.T, c *TestClient) {
+	path := "home/" + c.Username + "/.hop/" + common.DefaultKeyFile
+	a.Data.Keys[path] = c.KeyPair
+}
+
+func (a *TestAgent) Run(t *testing.T) {
+	a.Agent = agent.New(a.Data)
+	sock, err := net.Listen("tcp", "127.0.0.1:")
+	assert.NilError(t, err)
+	logrus.Infof("agent listening on %s", sock.Addr().String())
+	a.baseURL = sock.Addr().String()
+	go http.Serve(sock, a.Agent)
+}
+
+func TestHopClientExtAuth(t *testing.T) {
+	logrus.SetLevel(logrus.InfoLevel)
+	thunks.SetUpTest()
+	t.Run("connect external authenticator", func(t *testing.T) {
+		// Create the basic Client and Server
+		s := NewTestServer(t)
+		c := NewTestClient(t, s, "username")
+
+		// Modify authentication details
+		s.AddClientToAuthorizedKeys(t, c)
+
+		s.StartTransport(t)
+		s.StartHopServer(t)
+
+		c.Authenticator = s.ChainAuthenticator(t, c.KeyPair)
+
+		c.StartClient(t)
+	})
+}
+
+func TestHopClientInMemAuth(t *testing.T) {
+	logrus.SetLevel(logrus.InfoLevel)
+	thunks.SetUpTest()
+	t.Run("connect in memory authenticator", func(t *testing.T) {
+		// Create the basic Client and Server
+		s := NewTestServer(t)
+		c := NewTestClient(t, s, "username")
+
+		// Modify authentication details
+		s.AddClientToAuthorizedKeys(t, c)
+
+		s.StartTransport(t)
+		s.StartHopServer(t)
+
+		c.StartClient(t)
+	})
+}
+
+func TestHopClientAgentAuth(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	thunks.SetUpTest()
-	t.Run("connect", func(t *testing.T) {
-		s := NewSuite(t)
+	t.Run("connect agent authenticator", func(t *testing.T) {
+		// Create the basic Client and Server
+		s := NewTestServer(t)
+		c := NewTestClient(t, s, "username")
 
-		h, p, err := net.SplitHostPort(s.Server.ListenAddress().String())
-		assert.NilError(t, err)
-		port, err := strconv.Atoi(p)
-		assert.NilError(t, err)
-		logrus.Info("Test: ", s.Server.ListenAddress().String())
+		// Modify authentication details
+		s.AddClientToAuthorizedKeys(t, c)
 
-		cc := config.ClientConfig{
-			Hosts: []config.HostConfig{{
-				Pattern:      h,
-				Hostname:     h,
-				Port:         port,
-				User:         "username",
-				AutoSelfSign: config.True,
-				Key:          "home/username/.hop/id_hop.pem",
-				DisableAgent: config.True,
-			}},
-		}
-		c := s.NewClient(t, &cc, h)
-		clientKey := keys.GenerateNewX25519KeyPair()
-		mock := fstest.MapFS{
-			"home/username/.hop/authorized_keys": &fstest.MapFile{
-				Data: []byte(clientKey.Public.String() + "\n"),
-				Mode: 0600,
-			},
-		}
-		s.MockServerFS(t, mock)
-		mockClient := fstest.MapFS{
-			"home/username/.hop/" + common.DefaultKeyFile: &fstest.MapFile{
-				Data: []byte(clientKey.Private.String() + "\n"),
-				Mode: 0600,
-			},
-		}
+		s.StartTransport(t)
+		s.StartHopServer(t)
 
-		c.Fsystem = mockClient
-		go s.Server.Serve()
-		err = c.Dial()
-		assert.NilError(t, err)
-		s.Server.Close()
+		// Start agent for client
+		a := NewAgent(t)
+		a.AddClientKey(t, c)
+		a.Run(t)
+
+		c.AddAgentConnToClient(t, a)
+
+		c.StartClient(t)
+	})
+}
+
+func TestTwoClients(t *testing.T) {
+	logrus.SetLevel(logrus.InfoLevel)
+	thunks.SetUpTest()
+	t.Run("connect two clients", func(t *testing.T) {
+		// Create the basic Client and Server
+		s := NewTestServer(t)
+		c := NewTestClient(t, s, "username")
+		cTwo := NewTestClient(t, s, "bob")
+
+		// Modify authentication details
+		s.AddClientToAuthorizedKeys(t, c)
+		s.AddClientToAuthorizedKeys(t, cTwo)
+
+		s.StartTransport(t)
+		s.StartHopServer(t)
+
+		c.Authenticator = s.ChainAuthenticator(t, c.KeyPair)
+		cTwo.Authenticator = s.ChainAuthenticator(t, cTwo.KeyPair)
+
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			c.StartClient(t)
+		}()
+
+		cTwo.StartClient(t)
+		wg.Wait()
+	})
+}
+
+func TestStartCmd(t *testing.T) {
+	logrus.SetLevel(logrus.DebugLevel)
+	thunks.SetUpTest()
+	t.Run("connect agent authenticator", func(t *testing.T) {
+		// Create the basic Client and Server
+		s := NewTestServer(t)
+		c := NewTestClient(t, s, "baumanl")
+
+		// Modify authentication details
+		s.AddClientToAuthorizedKeys(t, c)
+
+		// Modify client config with command to run
+		c.AddCmd("pwd")
+
+		s.StartTransport(t)
+		s.StartHopServer(t)
+
+		// Start agent for client
+		a := NewAgent(t)
+		a.AddClientKey(t, c)
+		a.Run(t)
+
+		c.AddAgentConnToClient(t, a)
+
+		c.StartClient(t)
+
+		logrus.Info("CMD: ", c.Config.MatchHost(c.Hostname).Cmd)
+
+		//_ = c.Client.Start()
+		// TODO(baumanl): this currently doesn't work because code execution
+		// is tied to standard case of having an attached terminal
+		//assert.NilError(t, err)
 	})
 }

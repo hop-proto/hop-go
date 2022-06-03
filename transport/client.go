@@ -61,7 +61,7 @@ func (c *Client) unlockUser() {
 // must already be open. It is an error to call Handshake on a connection that
 // has already performed the portal handshake.
 func (c *Client) Handshake() error {
-	logrus.SetLevel(logrus.DebugLevel)
+	// logrus.SetLevel(logrus.DebugLevel)
 	logrus.Info("Initiating Handshake")
 	if c.handshakeComplete.isSet() {
 		return nil

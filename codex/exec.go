@@ -1,4 +1,3 @@
-//Package codex provides functions specific to code execution tubes
 package codex
 
 import (
@@ -69,10 +68,18 @@ func getStatus(t *tubes.Reliable) error {
 //NewExecTube sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
 //Stores state in an ExecChan struct so stdin can be manipulated during authgrant process
 func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTube, error) {
-	oldState, e := term.MakeRaw(int(os.Stdin.Fd()))
-	if e != nil {
-		logrus.Errorf("C: error with terminal state: %v", e)
-		return nil, e
+	// TODO(baumanl): if no actual attached terminal then this causes issues.
+	var oldState *term.State
+	var e error
+	if fileInfo, _ := os.Stdin.Stat(); (fileInfo.Mode() & os.ModeCharDevice) != 0 {
+		// stdin is from a terminal
+		oldState, e = term.MakeRaw(int(os.Stdin.Fd()))
+		if e != nil {
+			logrus.Errorf("C: error with terminal state: %v", e)
+			return nil, e
+		}
+	} else {
+		oldState = nil
 	}
 	msg := newExecInitMsg(specificCmd, cmd)
 	if cmd == "" {
@@ -87,7 +94,9 @@ func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTub
 	//get confirmation that cmd started successfully before piping IO
 	err := getStatus(tube)
 	if err != nil {
-		term.Restore(int(os.Stdin.Fd()), oldState)
+		if oldState != nil {
+			term.Restore(int(os.Stdin.Fd()), oldState)
+		}
 		logrus.Error("C: server failed to start cmd with error: ", err)
 		return nil, err
 	}
@@ -104,7 +113,9 @@ func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTub
 	go func(ex *ExecTube) {
 		defer wg.Done()
 		io.Copy(os.Stdout, ex.tube) //read bytes from tube to os.Stdout
-		term.Restore(int(os.Stdin.Fd()), ex.state)
+		if oldState != nil {
+			term.Restore(int(os.Stdin.Fd()), oldState)
+		}
 		logrus.Info("Stopped io.Copy(os.Stdout, tube)")
 		ex.tube.Close()
 		logrus.Info("closed tube")
@@ -206,10 +217,14 @@ func (e *ExecTube) Redirect() *io.PipeReader {
 
 //Restore returns the terminal to regular state
 func (e *ExecTube) Restore() {
-	term.Restore(int(os.Stdin.Fd()), e.state)
+	if e.state != nil {
+		term.Restore(int(os.Stdin.Fd()), e.state)
+	}
 }
 
 //Raw switches the terminal to raw mode
 func (e *ExecTube) Raw() {
-	term.MakeRaw(int(os.Stdin.Fd()))
+	if e.state != nil {
+		term.MakeRaw(int(os.Stdin.Fd()))
+	}
 }

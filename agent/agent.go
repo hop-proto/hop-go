@@ -144,7 +144,7 @@ type Client struct {
 
 // Get fetches the description of a single key by ID.
 func (c *Client) Get(ctx context.Context, keyID string) (*KeyDescription, error) {
-	u := fmt.Sprintf("%s/keys/%s", c.BaseURL, url.PathEscape(keyID))
+	u := fmt.Sprintf("http://%s/keys/%s", c.BaseURL, url.PathEscape(keyID))
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
 		return nil, err
@@ -163,7 +163,7 @@ func (c *Client) Get(ctx context.Context, keyID string) (*KeyDescription, error)
 
 // Exchange calls the /exchange endpoint
 func (c *Client) Exchange(ctx context.Context, request *ExchangeRequest) (*ExchangeResponse, error) {
-	u := fmt.Sprintf("%s/exchange", c.BaseURL)
+	u := fmt.Sprintf("http://%s/exchange", c.BaseURL)
 	buf := bytes.Buffer{}
 	if err := json.NewEncoder(&buf).Encode(request); err != nil {
 		return nil, err
@@ -216,7 +216,7 @@ func (bc *BoundClient) Agree(other []byte) ([]byte, error) {
 // the provided keyID and implemented using the Exchange endpoint on the server.
 // The public key will be retrieved and cached at the time of creation.
 func (c *Client) ExchangerFor(ctx context.Context, keyID string) (*BoundClient, error) {
-	bc := BoundClient{C: c, KeyID: keyID}
+	bc := BoundClient{C: c, Ctx: context.Background(), KeyID: keyID}
 	desc, err := c.Get(ctx, keyID)
 	if err != nil {
 		return nil, err
@@ -231,7 +231,7 @@ func (c *Client) Available(ctx context.Context) bool {
 	// TODO(dadrian): Make this fast
 	child, cancel := context.WithTimeout(ctx, time.Millisecond*100)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(child, "GET", c.BaseURL+"/healthz", nil)
+	req, _ := http.NewRequestWithContext(child, "GET", "http://"+c.BaseURL+"/healthz", nil)
 	res, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return false

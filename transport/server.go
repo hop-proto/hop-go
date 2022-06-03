@@ -185,7 +185,9 @@ func (s *Server) readPacket() error {
 			return err
 		}
 	case MessageTypeClientAuth:
-		logrus.Debug("server: received client auth")
+		logrus.Debug("server: received client auth with length ", msgLen)
+		logrus.Debug(s.rawRead[:msgLen])
+
 		_, hs, err := s.handleClientAuth(s.rawRead[:msgLen], addr)
 		if err != nil {
 			return err
@@ -601,7 +603,7 @@ func (s *Server) init() error {
 		return errors.New("config.KeyPair or config.GetCertificate must be set")
 	}
 	if s.config.Certificate == nil && s.config.GetCertificate == nil {
-		return errors.New("Certificate or AutoSelfSign must be set when GetCertificate is Nil") //nolint:stylecheck
+		return errors.New("Certificate must be set when GetCertificate is Nil") //nolint:stylecheck
 	}
 
 	if s.config.GetCertificate == nil {

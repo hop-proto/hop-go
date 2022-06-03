@@ -15,10 +15,8 @@ import (
 // ErrMissingInputURL is returned when hoststring is missing
 var ErrMissingInputURL = errors.New("missing [hop://][user@]host[:port]")
 
-// Flags holds CLI arguments for the Hop client.
-//
-// TODO(dadrian): This structure probably needs to get moved to another package.
-type Flags struct {
+// ClientFlags holds CLI arguments for the Hop client.
+type ClientFlags struct {
 	ConfigPath string
 
 	Cmd     string
@@ -30,7 +28,7 @@ type Flags struct {
 	Headless   bool     // if no cmd/shell desired (just port forwarding)
 }
 
-func mergeAddresses(f *Flags, hc *config.HostConfig) error {
+func mergeAddresses(f *ClientFlags, hc *config.HostConfig) error {
 	address := core.MergeURLs(hc.HostURL(), *f.Address)
 
 	if address.User == "" {
@@ -48,7 +46,7 @@ func mergeAddresses(f *Flags, hc *config.HostConfig) error {
 	return nil
 }
 
-func mergeFlagsAndConfig(f *Flags, cc *config.ClientConfig) error {
+func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig) error {
 	//
 	// TODO(baumanl): any need to preserve the original inputURL?
 	hc := cc.MatchHost(f.Address.Host)
@@ -60,9 +58,9 @@ func mergeFlagsAndConfig(f *Flags, cc *config.ClientConfig) error {
 	return nil
 }
 
-// LoadConfigFromFlags follows the configpath provided in flags (or default)
+// LoadClientConfigFromFlags follows the configpath provided in flags (or default)
 // also updates the flags.Address to be the correct override (currently)
-func LoadConfigFromFlags(f *Flags) (*config.ClientConfig, error) {
+func LoadClientConfigFromFlags(f *ClientFlags) (*config.ClientConfig, error) {
 	// Make client config
 	// Load the config file
 	cc, err := config.GetClient(f.ConfigPath)
@@ -72,12 +70,12 @@ func LoadConfigFromFlags(f *Flags) (*config.ClientConfig, error) {
 		// host config and CLI flags?
 		return nil, fmt.Errorf("no config file found: %s", err)
 	}
-	err = mergeFlagsAndConfig(f, cc)
+	err = mergeClientFlagsAndConfig(f, cc)
 	return cc, err
 }
 
-// defineFlags calls fs.StringVar
-func defineFlags(fs *flag.FlagSet, f *Flags) {
+// defineClientFlags calls fs.StringVar for Client
+func defineClientFlags(fs *flag.FlagSet, f *ClientFlags) {
 	fs.Func("R", "perform remote port forwarding", func(s string) error {
 		f.RemoteArgs = append(f.RemoteArgs, s)
 		return nil
@@ -105,11 +103,11 @@ func defineFlags(fs *flag.FlagSet, f *Flags) {
 	// fs.BoolVar(&runCmdInShell, "s", false, "run specified command...")
 }
 
-// ParseArgs defines and parses the flags from the command line
-func ParseArgs(args []string) (*Flags, error) {
-	var f *Flags
+// ParseClientArgs defines and parses the flags from the command line for Client
+func ParseClientArgs(args []string) (*ClientFlags, error) {
+	var f *ClientFlags
 	var fs *flag.FlagSet
-	defineFlags(fs, f)
+	defineClientFlags(fs, f)
 
 	err := fs.Parse(args[1:])
 	if err != nil {
@@ -126,9 +124,3 @@ func ParseArgs(args []string) (*Flags, error) {
 	f.Address = inputURL
 	return f, nil
 }
-
-// ClientSetup creates a hopclient config with the appropriate ovveride rules with information from Flags and config file
-// func ClientSetup(f *Flags) (*hopclient.Config, string) {
-// 	// potentially other stuff??? Or not necessary at all???
-// 	return &hopclient.Config{User: f.Address.User}, f.Address.Address()
-// }

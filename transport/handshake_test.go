@@ -80,9 +80,14 @@ func TestClientServerHSWithAgent(t *testing.T) {
 	logrus.Infof("listening on %s", sock.Addr().String())
 	go http.Serve(sock, as)
 
+	//aconn, err := net.Dial("tcp", sock.Addr().String())
+	assert.NilError(t, err)
+	logrus.Infof("dialing %s", sock.Addr().String())
+	//logrus.Infof("aconn %s", aconn.RemoteAddr().String())
+
 	// Connect to the agent
 	ac := agent.Client{
-		BaseURL:    common.DefaultAgentURL,
+		BaseURL:    sock.Addr().String(),
 		HTTPClient: http.DefaultClient,
 	}
 

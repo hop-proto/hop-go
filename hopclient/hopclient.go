@@ -1,4 +1,3 @@
-// Package hopclient provides functions to run hop client
 package hopclient
 
 import (
@@ -6,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"testing/fstest"
@@ -77,7 +77,8 @@ func NewHopClient(config *config.ClientConfig, hostname string) (*HopClient, err
 // Dial connects to an address after setting up it's own authentication
 // using information in it's config.
 func (c *HopClient) Dial() error {
-	err := c.authenticatorSetup() // TODO(baumanl): or should this be done in NewClient?
+	// TODO(baumanl): Connect to the authgrant server
+	err := c.authenticatorSetup(nil) // TODO(baumanl): or should this be done in NewClient?
 	if err != nil {
 		return err
 	}
@@ -88,10 +89,30 @@ func (c *HopClient) Dial() error {
 	return c.connectLocked(c.hostconfig.HostURL().Address(), c.authenticator)
 }
 
+// DialExternalConn is the same as Dial but skips dialing the
+// authgrant server directly.
+func (c *HopClient) DialExternalConn(authGrantConn net.Conn) error {
+	// If providing an authGrantConn this way the caller is responsible for
+	// ensuring that this client is actually allowed to be asking the principal
+	// for the authorization grant. (necessary for testing since the check on
+	// descendent processes may be broken.)
+
+	// create authenticator object provided a conn to hop key agent
+	err := c.authenticatorSetup(authGrantConn)
+	if err != nil {
+		return err
+	}
+	c.m.Lock()
+	defer c.m.Unlock()
+	logrus.Info("calling connectLocked on :", c.hostconfig.HostURL().Address())
+	return c.connectLocked(c.hostconfig.HostURL().Address(), c.authenticator)
+}
+
 // DialExternalAuthenticator connects to an address with the provided authentication.
 func (c *HopClient) DialExternalAuthenticator(address string, authenticator core.Authenticator) error {
 	c.m.Lock()
 	defer c.m.Unlock()
+	logrus.Info("calling connectLocked on :", c.hostconfig.HostURL().Address())
 	return c.connectLocked(address, authenticator)
 }
 
@@ -119,20 +140,22 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	return nil
 }
 
-func (c *HopClient) authenticatorSetup() error {
+func (c *HopClient) authenticatorSetup(authgrantConn net.Conn) error {
 	c.m.Lock()
 	defer c.m.Unlock()
-	return c.authenticatorSetupLocked()
+	return c.authenticatorSetupLocked(authgrantConn)
 }
 
-func (c *HopClient) authenticatorSetupLocked() error {
+// Client creates an authenticator object from AG, agent, or in mem keys.
+func (c *HopClient) authenticatorSetupLocked(authgrantConn net.Conn) error {
 	defer logrus.Info("C: authenticator setup complete")
 	cc := c.config
 	hc := c.hostconfig
-	// Connect to the agent
-	ac := agent.Client{
-		BaseURL:    combinators.StringOr(cc.AgentURL, common.DefaultAgentURL),
-		HTTPClient: http.DefaultClient,
+
+	if authgrantConn != nil {
+		// TODO(baumanl): this is where client should get authorization grant
+		// authorization grants --> default authentication method unless specified
+		// that the client should be started as a principle.
 	}
 
 	// Host block overrides global block. Set overrides Unset. Certificate
@@ -154,14 +177,26 @@ func (c *HopClient) authenticatorSetupLocked() error {
 	var authenticator core.Authenticator
 
 	var leaf *certs.Certificate
+	agentURL := combinators.StringOr(cc.AgentURL, common.DefaultAgentURL)
 
-	if hc.DisableAgent != config.True && ac.Available(context.Background()) {
+	ac := agent.Client{
+		BaseURL:    agentURL,
+		HTTPClient: http.DefaultClient,
+	}
+
+	// Connect to the agent
+	aconn, _ := net.Dial("tcp", agentURL)
+
+	if hc.DisableAgent != config.True && aconn != nil && ac.Available(context.Background()) {
 		bc, err := ac.ExchangerFor(context.Background(), keyPath)
 		if err != nil {
 			return fmt.Errorf("unable to create exchanger for agent with keyID: %s", err)
 		}
+
+		logrus.Infof("Created exchanger for agent with keyID: %s ", keyPath)
+
 		var public keys.PublicKey
-		copy(bc.Public[:], public[:]) // TODO(baumanl): resolve public key type awkwardness
+		copy(public[:], bc.Public[:]) // TODO(baumanl): resolve public key type awkwardness
 		leaf = loadLeaf(leafFile, autoSelfSign, &public, hc.HostURL())
 		authenticator = core.AgentAuthenticator{
 			BoundClient: bc,
@@ -170,6 +205,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 			},
 			Leaf: leaf,
 		}
+		logrus.Info("leaf: ", leaf)
 	} else {
 		// read in key from file
 		// TODO(baumanl): move loading key to within Authenticator interface?
@@ -202,9 +238,9 @@ func loadLeaf(leafFile string, autoSelfSign bool, public *keys.PublicKey, addres
 		logrus.Infof("auto self-signing leaf for user %q", address.User)
 		leaf, err = certs.SelfSignLeaf(&certs.Identity{
 			PublicKey: *public,
-			// Names: []certs.Name{
-			// 	certs.RawStringName(address.User),
-			// },
+			Names: []certs.Name{
+				certs.RawStringName(address.User),
+			},
 		})
 		if err != nil {
 			logrus.Fatalf("unable to self-sign certificate: %s", err)
