@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -139,13 +138,13 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 // Client speaks to the agent Server and can create keys.Exchanger
 // implementations.
 type Client struct {
-	AgentConn  net.Conn
+	BaseURL    string
 	HTTPClient *http.Client
 }
 
 // Get fetches the description of a single key by ID.
 func (c *Client) Get(ctx context.Context, keyID string) (*KeyDescription, error) {
-	u := fmt.Sprintf("http://%s/keys/%s", c.AgentConn.RemoteAddr().String(), url.PathEscape(keyID))
+	u := fmt.Sprintf("http://%s/keys/%s", c.BaseURL, url.PathEscape(keyID))
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
 		return nil, err
@@ -164,7 +163,7 @@ func (c *Client) Get(ctx context.Context, keyID string) (*KeyDescription, error)
 
 // Exchange calls the /exchange endpoint
 func (c *Client) Exchange(ctx context.Context, request *ExchangeRequest) (*ExchangeResponse, error) {
-	u := fmt.Sprintf("http://%s/exchange", c.AgentConn.RemoteAddr().String())
+	u := fmt.Sprintf("http://%s/exchange", c.BaseURL)
 	buf := bytes.Buffer{}
 	if err := json.NewEncoder(&buf).Encode(request); err != nil {
 		return nil, err
@@ -232,7 +231,7 @@ func (c *Client) Available(ctx context.Context) bool {
 	// TODO(dadrian): Make this fast
 	child, cancel := context.WithTimeout(ctx, time.Millisecond*100)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(child, "GET", "http://"+c.AgentConn.RemoteAddr().String()+"/healthz", nil)
+	req, _ := http.NewRequestWithContext(child, "GET", "http://"+c.BaseURL+"/healthz", nil)
 	res, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return false

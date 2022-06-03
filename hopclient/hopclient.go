@@ -78,13 +78,8 @@ func NewHopClient(config *config.ClientConfig, hostname string) (*HopClient, err
 // Dial connects to an address after setting up it's own authentication
 // using information in it's config.
 func (c *HopClient) Dial() error {
-	cc := c.config
-	// Connect to the agent
-	agentURL := combinators.StringOr(cc.AgentURL, common.DefaultAgentURL)
-	aconn, _ := net.Dial("tcp", agentURL)
 	// TODO(baumanl): Connect to the authgrant server
-
-	err := c.authenticatorSetup(aconn, nil) // TODO(baumanl): or should this be done in NewClient?
+	err := c.authenticatorSetup(nil) // TODO(baumanl): or should this be done in NewClient?
 	if err != nil {
 		return err
 	}
@@ -95,16 +90,16 @@ func (c *HopClient) Dial() error {
 	return c.connectLocked(c.hostconfig.HostURL().Address(), c.authenticator)
 }
 
-// DialExternalConn is the same as Dial but skips dialing the agent or
-// authgrant server directly. (Useful for testing)
-func (c *HopClient) DialExternalConn(agentConn net.Conn, authGrantConn net.Conn) error {
+// DialExternalConn is the same as Dial but skips dialing the
+// authgrant server directly.
+func (c *HopClient) DialExternalConn(authGrantConn net.Conn) error {
 	// If providing an authGrantConn this way the caller is responsible for
 	// ensuring that this client is actually allowed to be asking the principal
 	// for the authorization grant. (necessary for testing since the check on
 	// descendent processes may be broken.)
 
 	// create authenticator object provided a conn to hop key agent
-	err := c.authenticatorSetup(agentConn, authGrantConn)
+	err := c.authenticatorSetup(authGrantConn)
 	if err != nil {
 		return err
 	}
@@ -146,14 +141,14 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	return nil
 }
 
-func (c *HopClient) authenticatorSetup(agentConn net.Conn, authgrantConn net.Conn) error {
+func (c *HopClient) authenticatorSetup(authgrantConn net.Conn) error {
 	c.m.Lock()
 	defer c.m.Unlock()
-	return c.authenticatorSetupLocked(agentConn, authgrantConn)
+	return c.authenticatorSetupLocked(authgrantConn)
 }
 
 // Client creates an authenticator object from AG, agent, or in mem keys.
-func (c *HopClient) authenticatorSetupLocked(agentConn net.Conn, authgrantConn net.Conn) error {
+func (c *HopClient) authenticatorSetupLocked(authgrantConn net.Conn) error {
 	defer logrus.Info("C: authenticator setup complete")
 	cc := c.config
 	hc := c.hostconfig
@@ -183,13 +178,17 @@ func (c *HopClient) authenticatorSetupLocked(agentConn net.Conn, authgrantConn n
 	var authenticator core.Authenticator
 
 	var leaf *certs.Certificate
+	agentURL := combinators.StringOr(cc.AgentURL, common.DefaultAgentURL)
 
 	ac := agent.Client{
-		AgentConn:  agentConn,
-		HTTPClient: http.DefaultClient, // TODO: change this to somehow take an existing conn for testing puposes?
+		BaseURL:    agentURL,
+		HTTPClient: http.DefaultClient,
 	}
 
-	if hc.DisableAgent != config.True && ac.AgentConn != nil && ac.Available(context.Background()) {
+	// Connect to the agent
+	aconn, _ := net.Dial("tcp", agentURL)
+
+	if hc.DisableAgent != config.True && aconn != nil && ac.Available(context.Background()) {
 		bc, err := ac.ExchangerFor(context.Background(), keyPath)
 		if err != nil {
 			return fmt.Errorf("unable to create exchanger for agent with keyID: %s", err)
