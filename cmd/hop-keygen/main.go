@@ -67,7 +67,7 @@ func main() {
 		if err := keys.EncodeSigningKeyToPEM(fd, kp); err != nil {
 			logrus.Fatalf("unable to write private key: %s", err)
 		}
-		pfd.WriteString(kp.Private.String())
+		pfd.WriteString(kp.Public.String())
 	} else {
 		kp := keys.GenerateNewX25519KeyPair()
 		if err := keys.EncodeDHKeyToPEM(fd, kp); err != nil {
