@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"net"
 
-	"zmap.io/portal/certs"
-	"zmap.io/portal/keys"
-	"zmap.io/portal/kravatte"
+	"hop.computer/hop/certs"
+	"hop.computer/hop/keys"
+	"hop.computer/hop/kravatte"
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/cyclist"
+	"hop.computer/hop/cyclist"
 )
 
 // AddressHashKey returns a string suitable for use as a key in Golang map (e.g.

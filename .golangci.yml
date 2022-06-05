@@ -61,7 +61,7 @@ linters:
     - interfacer # Linter that suggests narrower interface types [fast: false, auto-fix: false]
 linters-settings:
   goimports:
-    local-prefixes: zmap.io/portal
+    local-prefixes: hop.computer/hop
   govet:
     disable:
       - shadow

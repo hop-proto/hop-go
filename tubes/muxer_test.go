@@ -10,9 +10,9 @@ package tubes
 // 	"github.com/sirupsen/logrus"
 // 	"gotest.tools/assert"
 // 	"gotest.tools/assert/cmp"
-// 	"zmap.io/portal/certs"
-// 	"zmap.io/portal/keys"
-// 	"zmap.io/portal/transport"
+// 	"hop.computer/hop/certs"
+// 	"hop.computer/hop/keys"
+// 	"hop.computer/hop/transport"
 // )
 
 // func newTestServerConfig(t *testing.T) *transport.ServerConfig {

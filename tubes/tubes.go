@@ -13,7 +13,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/transport"
+	"hop.computer/hop/transport"
 )
 
 // How David would approach this:

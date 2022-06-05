@@ -1,10 +1,10 @@
 package core
 
 import (
-	"zmap.io/portal/agent"
-	"zmap.io/portal/certs"
-	"zmap.io/portal/keys"
-	"zmap.io/portal/transport"
+	"hop.computer/hop/agent"
+	"hop.computer/hop/certs"
+	"hop.computer/hop/keys"
+	"hop.computer/hop/transport"
 )
 
 // Authenticator is an interface that exposes the crypto operations necessary to

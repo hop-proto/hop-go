@@ -6,8 +6,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/agent"
-	"zmap.io/portal/common"
+	"hop.computer/hop/agent"
+	"hop.computer/hop/common"
 )
 
 func main() {

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"zmap.io/portal/common"
-	"zmap.io/portal/keys"
+	"hop.computer/hop/common"
+	"hop.computer/hop/keys"
 )
 
 // AuthorizedKeys is a list of keys that can be used to authenticate as a single

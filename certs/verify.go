@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"zmap.io/portal/keys"
+	"hop.computer/hop/keys"
 )
 
 // Identity is a set of names associated with a public key.

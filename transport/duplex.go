@@ -7,7 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
 
-	"zmap.io/portal/cyclist"
+	"hop.computer/hop/cyclist"
 )
 
 // ReplayDuplexFromCookie reads a cookie containing an encrypted ephemeral

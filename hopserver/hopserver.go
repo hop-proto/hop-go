@@ -13,14 +13,14 @@ import (
 	"github.com/sbinet/pstree"
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/authgrants"
-	"zmap.io/portal/certs"
-	"zmap.io/portal/config"
-	"zmap.io/portal/core"
-	"zmap.io/portal/keys"
-	"zmap.io/portal/pkg/glob"
-	"zmap.io/portal/transport"
-	"zmap.io/portal/tubes"
+	"hop.computer/hop/authgrants"
+	"hop.computer/hop/certs"
+	"hop.computer/hop/config"
+	"hop.computer/hop/core"
+	"hop.computer/hop/keys"
+	"hop.computer/hop/pkg/glob"
+	"hop.computer/hop/transport"
+	"hop.computer/hop/tubes"
 )
 
 // DefaultHopAuthSocket is the default UDS used for Authorization grants

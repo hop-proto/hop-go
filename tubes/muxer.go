@@ -6,7 +6,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/transport"
+	"hop.computer/hop/transport"
 )
 
 //Muxer handles delivering and sending tube messages

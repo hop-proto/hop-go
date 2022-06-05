@@ -3,8 +3,8 @@ package transport
 import (
 	"time"
 
-	"zmap.io/portal/certs"
-	"zmap.io/portal/keys"
+	"hop.computer/hop/certs"
+	"hop.computer/hop/keys"
 )
 
 // VerifyConfig defines how to verify a remote certificate.

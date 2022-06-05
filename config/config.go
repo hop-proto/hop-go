@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"sync"
 
-	"zmap.io/portal/common"
-	"zmap.io/portal/config/ast"
-	"zmap.io/portal/core"
-	"zmap.io/portal/pkg/glob"
-	"zmap.io/portal/pkg/thunks"
+	"hop.computer/hop/common"
+	"hop.computer/hop/config/ast"
+	"hop.computer/hop/core"
+	"hop.computer/hop/pkg/glob"
+	"hop.computer/hop/pkg/thunks"
 )
 
 // BoolSetting is True, False, or Unset. The zero value is unset.

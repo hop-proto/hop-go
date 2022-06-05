@@ -162,7 +162,7 @@ import (
 	"strconv"
 
 	"github.com/sirupsen/logrus"
-	"zmap.io/portal/config/ast"
+	"hop.computer/hop/config/ast"
 )
 
 func identity(s string) (string, error) {

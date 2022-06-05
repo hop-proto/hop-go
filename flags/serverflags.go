@@ -5,7 +5,7 @@ import (
 	"flag"
 	"fmt"
 
-	"zmap.io/portal/config"
+	"hop.computer/hop/config"
 )
 
 // ErrExcessArgs is called when unparsed arguments remain

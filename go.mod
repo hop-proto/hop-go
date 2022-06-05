@@ -1,4 +1,4 @@
-module zmap.io/portal
+module hop.computer/hop
 
 go 1.18
 

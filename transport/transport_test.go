@@ -6,7 +6,7 @@ import (
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
 
-	"zmap.io/portal/kravatte"
+	"hop.computer/hop/kravatte"
 )
 
 func TestTransportAEAD(t *testing.T) {

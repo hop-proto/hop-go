@@ -12,18 +12,18 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/agent"
-	"zmap.io/portal/authgrants"
-	"zmap.io/portal/certs"
-	"zmap.io/portal/codex"
-	"zmap.io/portal/common"
-	"zmap.io/portal/config"
-	"zmap.io/portal/core"
-	"zmap.io/portal/keys"
-	"zmap.io/portal/pkg/combinators"
-	"zmap.io/portal/transport"
-	"zmap.io/portal/tubes"
-	"zmap.io/portal/userauth"
+	"hop.computer/hop/agent"
+	"hop.computer/hop/authgrants"
+	"hop.computer/hop/certs"
+	"hop.computer/hop/codex"
+	"hop.computer/hop/common"
+	"hop.computer/hop/config"
+	"hop.computer/hop/core"
+	"hop.computer/hop/keys"
+	"hop.computer/hop/pkg/combinators"
+	"hop.computer/hop/transport"
+	"hop.computer/hop/tubes"
+	"hop.computer/hop/userauth"
 )
 
 // HopClient holds state for client's perspective of session. It is not safe to

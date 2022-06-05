@@ -18,15 +18,15 @@ import (
 	"github.com/creack/pty"
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/authgrants"
-	"zmap.io/portal/codex"
-	"zmap.io/portal/common"
-	"zmap.io/portal/keys"
-	"zmap.io/portal/netproxy"
-	"zmap.io/portal/portforwarding"
-	"zmap.io/portal/transport"
-	"zmap.io/portal/tubes"
-	"zmap.io/portal/userauth"
+	"hop.computer/hop/authgrants"
+	"hop.computer/hop/codex"
+	"hop.computer/hop/common"
+	"hop.computer/hop/keys"
+	"hop.computer/hop/netproxy"
+	"hop.computer/hop/portforwarding"
+	"hop.computer/hop/transport"
+	"hop.computer/hop/tubes"
+	"hop.computer/hop/userauth"
 )
 
 //AuthGrant contains deadline, user, data

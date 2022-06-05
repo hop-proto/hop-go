@@ -7,8 +7,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/certs"
-	"zmap.io/portal/kravatte"
+	"hop.computer/hop/certs"
+	"hop.computer/hop/kravatte"
 )
 
 // SessionID is an IP-independent identifier of a tunnel.

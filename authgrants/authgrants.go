@@ -9,9 +9,9 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/common"
-	"zmap.io/portal/keys"
-	"zmap.io/portal/tubes"
+	"hop.computer/hop/common"
+	"hop.computer/hop/keys"
+	"hop.computer/hop/tubes"
 )
 
 //AuthGrantConn wraps a net.Conn (either tube or UDS conn) for authorization grant protocol messages

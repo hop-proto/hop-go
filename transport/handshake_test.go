@@ -12,10 +12,10 @@ import (
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
 
-	"zmap.io/portal/agent"
-	"zmap.io/portal/certs"
-	"zmap.io/portal/common"
-	"zmap.io/portal/keys"
+	"hop.computer/hop/agent"
+	"hop.computer/hop/certs"
+	"hop.computer/hop/common"
+	"hop.computer/hop/keys"
 )
 
 func TestClientServerCompatibilityHandshake(t *testing.T) {
