@@ -11,16 +11,16 @@ import (
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 
-	"zmap.io/portal/agent"
-	"zmap.io/portal/certs"
-	"zmap.io/portal/common"
-	"zmap.io/portal/config"
-	"zmap.io/portal/core"
-	"zmap.io/portal/hopclient"
-	"zmap.io/portal/hopserver"
-	"zmap.io/portal/keys"
-	"zmap.io/portal/pkg/thunks"
-	"zmap.io/portal/transport"
+	"hop.computer/hop/agent"
+	"hop.computer/hop/certs"
+	"hop.computer/hop/common"
+	"hop.computer/hop/config"
+	"hop.computer/hop/core"
+	"hop.computer/hop/hopclient"
+	"hop.computer/hop/hopserver"
+	"hop.computer/hop/keys"
+	"hop.computer/hop/pkg/thunks"
+	"hop.computer/hop/transport"
 )
 
 type TestAgent struct {

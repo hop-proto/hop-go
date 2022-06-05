@@ -3,8 +3,8 @@ package hopclient
 import (
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/authgrants"
-	"zmap.io/portal/tubes"
+	"hop.computer/hop/authgrants"
+	"hop.computer/hop/tubes"
 )
 
 //start session between principal and target proxied through the delegate

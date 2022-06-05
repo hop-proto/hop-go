@@ -1,9 +1,6 @@
 Hop
 ===
 
-Right now, the base package is `zmap.io/portal`, but that's not a final name,
-and we don't plan on hosting this as part of the ZMap organization.
-
 See [ARCHITECTURE](./ARCHITECTURE.md) for details on how this project is
 structured.
 

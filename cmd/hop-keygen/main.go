@@ -18,8 +18,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/config"
-	"zmap.io/portal/keys"
+	"hop.computer/hop/config"
+	"hop.computer/hop/keys"
 )
 
 // Flags holds all the command-line flags for hop-keygen.

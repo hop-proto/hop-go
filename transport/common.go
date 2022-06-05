@@ -5,7 +5,7 @@ import (
 
 	"golang.org/x/crypto/curve25519"
 
-	"zmap.io/portal/kravatte"
+	"hop.computer/hop/kravatte"
 )
 
 // ProtocolName is the string representation of the parameters used in this version

@@ -8,8 +8,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/netproxy"
-	"zmap.io/portal/portforwarding"
+	"hop.computer/hop/netproxy"
+	"hop.computer/hop/portforwarding"
 )
 
 func main() {

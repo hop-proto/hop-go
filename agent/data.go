@@ -7,9 +7,9 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/common"
-	"zmap.io/portal/keys"
-	"zmap.io/portal/pkg/thunks"
+	"hop.computer/hop/common"
+	"hop.computer/hop/keys"
+	"hop.computer/hop/pkg/thunks"
 )
 
 // Data is the data access object for all of the Agent.

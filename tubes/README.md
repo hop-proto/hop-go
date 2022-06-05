@@ -1,19 +1,22 @@
 Channels
 ========
 
-Hop Channels are individual units of reliable, bidirectional, ordered communication over the transport protocol.
-Channels are multiplexed over the same transport session.
-For more information about the motivation and function of channels, see [LINK TODO].
+Hop Channels are individual units of reliable, bidirectional, ordered
+communication over the transport protocol. Channels are multiplexed over the
+same transport session. For more information about the motivation and function
+of channels, see [LINK TODO].
+
+TODO(dadrian)[2022-06-05]: Make sure this is up to date, move documentation into Godoc
 
 # Basic Usage
 ```
 package main
 
 import (
-    "log"
+	"log"
 
-	"zmap.io/portal/channels"
-    "zmap.io/portal/transport"
+	"hop.computer/hop/channels"
+	"hop.computer/hop/transport"
 )
 
 func main() {

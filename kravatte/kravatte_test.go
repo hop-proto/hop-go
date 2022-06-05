@@ -9,7 +9,7 @@ import (
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
 
-	"zmap.io/portal/snp"
+	"hop.computer/hop/snp"
 )
 
 func newTestKey(n int) []byte {

@@ -13,7 +13,7 @@ import (
 	"goji.io"
 	"goji.io/pat"
 
-	"zmap.io/portal/keys"
+	"hop.computer/hop/keys"
 )
 
 // Server is an http.Handler that serves the Hop Agent endpoints.

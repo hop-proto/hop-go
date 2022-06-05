@@ -12,7 +12,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/certs"
+	"hop.computer/hop/certs"
 )
 
 type outgoing struct {

@@ -11,7 +11,7 @@ import (
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
 
-	"zmap.io/portal/snp"
+	"hop.computer/hop/snp"
 )
 
 func runSANSETranscript(t *testing.T, s *sanse, transcript []snp.TranscriptEntry) {

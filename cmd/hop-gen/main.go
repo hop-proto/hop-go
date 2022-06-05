@@ -8,7 +8,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/keys"
+	"hop.computer/hop/keys"
 )
 
 var signing bool

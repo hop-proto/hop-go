@@ -16,7 +16,7 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/hack/data"
+	"hop.computer/hop/hack/data"
 )
 
 func buildContainer(ctx context.Context, c *client.Client) error {

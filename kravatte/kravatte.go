@@ -1,7 +1,7 @@
 package kravatte
 
 import (
-	"zmap.io/portal/snp"
+	"hop.computer/hop/snp"
 )
 
 const (

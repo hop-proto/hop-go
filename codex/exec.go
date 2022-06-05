@@ -15,7 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/term"
 
-	"zmap.io/portal/tubes"
+	"hop.computer/hop/tubes"
 )
 
 //ExecTube wraps a code execution tube with additional terminal state

@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 
-	"zmap.io/portal/pkg/combinators"
+	"hop.computer/hop/pkg/combinators"
 )
 
 // URL contains enough information to dial Hop server as a user

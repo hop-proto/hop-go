@@ -7,7 +7,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/tubes"
+	"hop.computer/hop/tubes"
 )
 
 var hostToIPAddr = map[string]string{ //TODO(baumanl): this should be dealt with in some user hop config file

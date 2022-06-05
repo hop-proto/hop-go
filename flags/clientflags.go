@@ -8,8 +8,8 @@ import (
 	"os/user"
 	"strconv"
 
-	"zmap.io/portal/config"
-	"zmap.io/portal/core"
+	"hop.computer/hop/config"
+	"hop.computer/hop/core"
 )
 
 // ErrMissingInputURL is returned when hoststring is missing

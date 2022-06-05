@@ -12,9 +12,9 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"zmap.io/portal/certs"
-	"zmap.io/portal/keys"
-	"zmap.io/portal/transport"
+	"hop.computer/hop/certs"
+	"hop.computer/hop/keys"
+	"hop.computer/hop/transport"
 )
 
 const forever = time.Duration(math.MaxInt64)

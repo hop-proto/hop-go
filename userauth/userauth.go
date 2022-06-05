@@ -4,7 +4,7 @@ package userauth
 import (
 	"encoding/binary"
 
-	"zmap.io/portal/tubes"
+	"hop.computer/hop/tubes"
 )
 
 const (

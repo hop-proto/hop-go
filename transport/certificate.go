@@ -1,8 +1,8 @@
 package transport
 
 import (
-	"zmap.io/portal/certs"
-	"zmap.io/portal/keys"
+	"hop.computer/hop/certs"
+	"hop.computer/hop/keys"
 )
 
 // Certificate holds a certs.Certificate from the perspective of a server
