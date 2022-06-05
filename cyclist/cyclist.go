@@ -1,6 +1,6 @@
 // Package cyclist contains an implementtation of the Cyclist duplex function
-// using instantiated with 12 rounds of Keccak-p[1600]. It is directly ported
-// from the XKCP implementation. This package is experimental and unoptimized.
+// instantiated with 12 rounds of Keccak-p[1600]. It is directly ported from the
+// XKCP implementation. This package is experimental and unoptimized.
 package cyclist
 
 // Phase is a enum used to represent internal state of Cyclist

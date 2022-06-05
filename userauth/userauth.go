@@ -1,4 +1,4 @@
-//Package userauth allows servers/clients to determine user authorization
+// Package userauth allows servers/clients to determine user authorization
 package userauth
 
 import (
