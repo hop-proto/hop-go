@@ -21,8 +21,8 @@ $ go run ./cmd/hop-gen --help     # A more complicated keygen
 ```
 
 **Local testing with Docker.** It's annoying to test against your own home
-*directory, so this will build the server in a Docker container and run it. This
-*test harness code is very much WIP.
+directory, so this will build the server in a Docker container and run it. This
+test harness code is very much WIP. For more info, see #38.
 ```cmd
 $ make serve-dev  # Build and launch a server container
 $ docker ps  # Look for the container name, in case you need to stop it later.
