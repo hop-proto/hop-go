@@ -105,8 +105,8 @@ func defineClientFlags(fs *flag.FlagSet, f *ClientFlags) {
 
 // ParseClientArgs defines and parses the flags from the command line for Client
 func ParseClientArgs(args []string) (*ClientFlags, error) {
-	var f *ClientFlags
-	var fs *flag.FlagSet
+	f := new(ClientFlags)
+	fs := new(flag.FlagSet)
 	defineClientFlags(fs, f)
 
 	err := fs.Parse(args[1:])
