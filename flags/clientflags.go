@@ -26,6 +26,7 @@ type ClientFlags struct {
 	RemoteArgs []string // CLI arguments related to remote port forwarding
 	LocalArgs  []string // CLI arguments related to local port forwarding
 	Headless   bool     // if no cmd/shell desired (just port forwarding)
+	Verbose    bool     // show verbose error messages
 }
 
 func mergeAddresses(f *ClientFlags, hc *config.HostConfig) error {
@@ -54,6 +55,11 @@ func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig) error {
 	if err != nil {
 		return err
 	}
+
+	if f.Cmd != "" {
+		cc.Cmd = f.Cmd
+	}
+
 	// TODO(baumanl): add merge support for all other flags/config options
 	return nil
 }
@@ -90,6 +96,7 @@ func defineClientFlags(fs *flag.FlagSet, f *ClientFlags) {
 
 	fs.StringVar(&f.Cmd, "c", "", "specific command to execute on remote server")
 	fs.BoolVar(&f.Headless, "N", false, "don't execute a remote command. Useful for just port forwarding.")
+	fs.BoolVar(&f.Verbose, "V", false, "display verbose error messages")
 
 	// TODO(baumanl): Right now all explicit commands are run within the context
 	// of a shell using "$SHELL -c <cmd>" (this allows for expanding env

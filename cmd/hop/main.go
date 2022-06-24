@@ -15,6 +15,12 @@ func main() {
 		logrus.Error(err)
 		return
 	}
+
+	// TODO (hosono) verbose logging seems to prevent hop from working. Concurrency bug?
+	if f.Verbose {
+		logrus.SetLevel(logrus.DebugLevel)
+	}
+
 	// cc will be result of merging config file settings and flags
 	cc, err := flags.LoadClientConfigFromFlags(f)
 	if err != nil {
