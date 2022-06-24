@@ -26,5 +26,5 @@ test harness code is very much WIP. For more info, see #38.
 ```cmd
 $ make serve-dev  # Build and launch a server container
 $ docker ps  # Look for the container name, in case you need to stop it later.
-$ go run cmd/hop -C ./containers/client_config
+$ go run ./cmd/hop -C ./containers/client_config root@127.0.0.1:7777
 ```
