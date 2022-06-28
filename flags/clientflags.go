@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/user"
 	"strconv"
+	"strings"
 
 	"hop.computer/hop/config"
 	"hop.computer/hop/core"
@@ -108,6 +109,14 @@ func defineClientFlags(fs *flag.FlagSet, f *ClientFlags) {
 
 	// var runCmdInShell bool
 	// fs.BoolVar(&runCmdInShell, "s", false, "run specified command...")
+
+	// TODO(drebelsky): SSH compat options all ignored for now
+	_ = fs.Bool("x", true, "")
+	_ = fs.String("oForwardAgent", "", "")
+	_ = fs.String("oPermitLocalCommand", "", "")
+	_ = fs.String("oClearAllForwardings", "", "")
+	_ = fs.String("oRemoteCommand", "", "")
+	_ = fs.String("oRequestTTY", "", "")
 }
 
 // ParseClientArgs defines and parses the flags from the command line for Client
@@ -115,6 +124,11 @@ func ParseClientArgs(args []string) (*ClientFlags, error) {
 	f := new(ClientFlags)
 	fs := new(flag.FlagSet)
 	defineClientFlags(fs, f)
+
+	// For SSH compatibility
+	var port, username string
+	fs.StringVar(&port, "p", "", "port")
+	fs.StringVar(&username, "l", "", "username")
 
 	err := fs.Parse(args[1:])
 	if err != nil {
@@ -127,6 +141,17 @@ func ParseClientArgs(args []string) (*ClientFlags, error) {
 	inputURL, err := core.ParseURL(hoststring)
 	if err != nil {
 		return nil, fmt.Errorf("invalid input %s: %s", hoststring, err)
+	}
+	if port != "" {
+		inputURL.Port = port
+	}
+	if username != "" {
+		inputURL.User = username
+	}
+
+	// Support putting the command after the hostname
+	if f.Cmd == "" {
+		f.Cmd = strings.Join(fs.Args()[1:], " ")
 	}
 	f.Address = inputURL
 	return f, nil
