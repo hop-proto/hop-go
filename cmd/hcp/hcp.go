@@ -64,15 +64,10 @@ func server(dstFile string) {
 		return
 	}
 
-	for {
-		n, err := io.Copy(remoteFile, os.Stdin)
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-		if n > 0 {
-			break
-		}
+	_, err = io.Copy(remoteFile, os.Stdin)
+	if err != nil {
+		logrus.Error(err)
+		return
 	}
 }
 
@@ -96,6 +91,7 @@ func client(srcUrl string, srcFile string, dstUrl string, dstFile string, f *fla
 		return
 	}
 
+	cc.Shell = false
 	cc.Cmd = fmt.Sprintf("/go/bin/hcp -t %s", dstFile)
 
 	localFile, err := os.Open(srcFile)
@@ -120,10 +116,18 @@ func client(srcUrl string, srcFile string, dstUrl string, dstFile string, f *fla
 
 	logrus.Info("Got below Start()")
 
-	_, err = io.Copy(os.Stdin, localFile)
+	_, err = io.Copy(client.ExecTube.Tube, localFile)
 	if err != nil {
 		logrus.Error(err)
 		return
 	}
-
+	logrus.Info("Done copying")
+	//logrus.SetLevel(logrus.DebugLevel)
+	err = client.ExecTube.Close()
+	if err != nil {
+		logrus.Error(err)
+	} else {
+		logrus.Info("ExecTube closed successfully")
+	}
+	client.Wait()
 }
