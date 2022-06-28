@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"container/heap"
 	"errors"
+	"io"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -83,7 +84,11 @@ func (r *receiver) read(buf []byte) (int, error) {
 	defer r.m.Unlock()
 	defer r.bufferCond.L.Unlock()
 
-	return r.buffer.Read(buf)
+	nbytes, err := r.buffer.Read(buf)
+	if err == nil && r.closed {
+		err = io.EOF
+	}
+	return nbytes, err
 }
 
 /* Checks if frame is in bounds of receive window. */
