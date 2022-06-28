@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -269,17 +268,12 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 			"HOME=" + user.Homedir(),
 			"TERM=" + os.Getenv("TERM"),
 		}
-		var args []string
 		var c *exec.Cmd
 		if shell {
-			cmd = "login -f " + sess.user //login(1) starts default shell for user and changes all privileges and environment variables
-			args = strings.Split(cmd, " ")
-			c = exec.Command(args[0], args[1:]...)
+			//login(1) starts default shell for user and changes all privileges and environment variables
+			c = exec.Command("login", "-f", sess.user)
 		} else {
-			args = []string{user.Shell(), "-c", cmd}
-			c = exec.Command(args[0], args[1], args[2])
-		}
-		if !shell {
+			c = exec.Command(user.Shell(), "-c", cmd)
 			c.Dir = user.Homedir()
 			c.SysProcAttr = &syscall.SysProcAttr{}
 			c.SysProcAttr.Credential = &syscall.Credential{
@@ -290,15 +284,24 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 		}
 		c.Env = env
 		logrus.Infof("Executing: %v", cmd)
-		f, err := pty.Start(c)
+		var f *os.File
+		var err error
+		if shell {
+			f, err = pty.Start(c)
+			if err != nil {
+				logrus.Errorf("S: error starting pty %v", err)
+				codex.SendFailure(tube, err)
+				return
+			}
+		} else {
+			c.Stdin = tube
+			c.Stdout = tube
+			c.Stderr = tube
+			c.Start()
+		}
 		// TODO (baumanl): something is wrong with pty (backspace no longer works
 		// and getting "error resizing pty: inappropriate ioctl for device" in
 		// docker)
-		if err != nil {
-			logrus.Errorf("S: error starting pty %v", err)
-			codex.SendFailure(tube, err)
-			return
-		}
 		codex.SendSuccess(tube)
 		go func() {
 			c.Wait()
@@ -314,11 +317,13 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 			sess.server.principals[int32(c.Process.Pid)] = sess
 		}
 		sess.server.m.Unlock()
-		go func() {
-			codex.Server(tube, f)
-			logrus.Info("signaling done")
-			sess.done <- 1
-		}()
+		if shell {
+			go func() {
+				codex.Server(tube, f)
+				logrus.Info("signaling done")
+				sess.done <- 1
+			}()
+		}
 	} else {
 		err := errors.New("could not find entry for user " + sess.user)
 		logrus.Error(err)
