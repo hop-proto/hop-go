@@ -27,7 +27,7 @@ func main() {
 		logrus.Error(err)
 		return
 	}
-	
+
 	if !isRemote && fs.NArg() < 2 {
 		logrus.Error("Usage: hcp source target")
 		return
@@ -38,9 +38,9 @@ func main() {
 		server(fs.Arg(0))
 	} else {
 		logrus.Info("Running as client")
-		srcUrl, srcFile := parsePath(fs.Arg(0))
-		dstUrl, dstFile := parsePath(fs.Arg(1))
-		client(srcUrl, srcFile, dstUrl, dstFile, f)
+		srcURL, srcFile := parsePath(fs.Arg(0))
+		dstURL, dstFile := parsePath(fs.Arg(1))
+		client(srcURL, srcFile, dstURL, dstFile, f)
 	}
 }
 
@@ -71,13 +71,13 @@ func server(dstFile string) {
 	}
 }
 
-func client(srcUrl string, srcFile string, dstUrl string, dstFile string, f *flags.ClientFlags) {
-	if !(srcUrl == "" && dstUrl != "" ) {
+func client(srcURL string, srcFile string, dstURL string, dstFile string, f *flags.ClientFlags) {
+	if !(srcURL == "" && dstURL != "") {
 		logrus.Error("TODO: Currently only supports local to remote copying")
 		return
 	}
-	
-	addr, err := core.ParseURL(dstUrl)
+
+	addr, err := core.ParseURL(dstURL)
 	if err != nil {
 		logrus.Error(err)
 		return
@@ -113,8 +113,12 @@ func client(srcUrl string, srcFile string, dstUrl string, dstFile string, f *fla
 	}
 	client.Start()
 	defer client.Wait()
-
-	logrus.Info("Got below Start()")
+	defer func() {
+		err = client.ExecTube.Close()
+		if err != nil {
+			logrus.Error(err)
+		}
+	}()
 
 	_, err = io.Copy(client.ExecTube.Tube, localFile)
 	if err != nil {
@@ -122,12 +126,4 @@ func client(srcUrl string, srcFile string, dstUrl string, dstFile string, f *fla
 		return
 	}
 	logrus.Info("Done copying")
-	//logrus.SetLevel(logrus.DebugLevel)
-	err = client.ExecTube.Close()
-	if err != nil {
-		logrus.Error(err)
-	} else {
-		logrus.Info("ExecTube closed successfully")
-	}
-	client.Wait()
 }

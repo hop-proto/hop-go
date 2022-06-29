@@ -19,13 +19,13 @@ import (
 
 // ExecTube wraps a code execution tube with additional terminal state
 type ExecTube struct {
-	Tube  	 *tubes.Reliable
-	state 	 *term.State
-	shell 	 bool
-	wg 		 *sync.WaitGroup
-	redir 	 bool
-	r     	 *io.PipeReader
-	w     	 *io.PipeWriter
+	Tube  *tubes.Reliable
+	state *term.State
+	shell bool
+	wg    *sync.WaitGroup
+	redir bool
+	r     *io.PipeReader
+	w     *io.PipeWriter
 }
 
 const (
@@ -125,7 +125,7 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 		Tube:  tube,
 		state: oldState,
 		shell: shell,
-		wg:	   wg,
+		wg:    wg,
 		redir: false,
 		r:     r,
 		w:     w,
@@ -301,6 +301,7 @@ func (e *ExecTube) Raw() {
 	}
 }
 
+// Close the ExecTube. Called automatically if ExecTube is constructed with shell=true
 func (e *ExecTube) Close() error {
 	if e.shell && e.state != nil {
 		term.Restore(int(os.Stdin.Fd()), e.state)
