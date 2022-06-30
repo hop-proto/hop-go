@@ -124,21 +124,8 @@ func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTub
 	}(&ex)
 
 	go func(ex *ExecTube) {
-		p := make([]byte, 1)
-		for {
-			nbytes, err := os.Stdin.Read(p)
-			if nbytes > 0 {
-				if ex.redir {
-					ex.w.Write(p)
-				} else {
-					ex.tube.Write(p)
-				}
-			}
-			if err != nil {
-				ex.w.Close()
-				ex.tube.Close()
-			}
-		}
+		io.Copy(tube, os.Stdin)
+		tube.Close()
 	}(&ex)
 
 	return &ex, nil
