@@ -73,7 +73,7 @@ A Muxer handles channels and interfaces betweeen individual channels and the tra
 #  Channels
 
 All data is managed via `[]byte` slices. Use `channel.Write(data)` to send the data in a non-blocking fashion -- in other words, when `Write()` completes, it is not necessarily the case that that the remote peer received the connection. `channel.Read(buf)`, on the other hand, is blocking. There are two cases when `channel.Read(buf)` will finish:
-- `len(buf)` bytes have been received and built into an ordered bytestream at the front of the read buffer managed internally by the channel (not `buf` in this example).
+- The channel has received some message: note that to read all `len(buf)` bytes, you should make use of `io.ReadFull`
 - The remote peer has closed their side of the channel, namely by sending a FIN packet. In that case, there will be an EOF error returned in the `channel.Read()` call.
 
 This behavior is consistent with `bytes.Buffer`.

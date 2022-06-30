@@ -334,10 +334,10 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 
 func (sess *hopSession) startLocal(ch *tubes.Reliable) {
 	buf := make([]byte, 4)
-	ch.Read(buf)
+	io.ReadFull(ch, buf)
 	l := binary.BigEndian.Uint32(buf[0:4])
 	arg := make([]byte, l)
-	ch.Read(arg)
+	io.ReadFull(ch, arg)
 	//Check authorization
 	if !sess.isPrincipal {
 		err := sess.checkAction(string(arg), authgrants.LocalPFAction)
@@ -352,10 +352,10 @@ func (sess *hopSession) startLocal(ch *tubes.Reliable) {
 
 func (sess *hopSession) startRemote(tube *tubes.Reliable) {
 	buf := make([]byte, 4)
-	tube.Read(buf)
+	io.ReadFull(tube, buf)
 	l := binary.BigEndian.Uint32(buf[0:4])
 	arg := make([]byte, l)
-	tube.Read(arg)
+	io.ReadFull(tube, arg)
 	//Check authorization
 	if !sess.isPrincipal {
 		err := sess.checkAction(string(arg), authgrants.RemotePFAction)

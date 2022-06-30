@@ -53,15 +53,16 @@ func SendSuccess(t *tubes.Reliable) {
 
 //GetStatus lets client waits for confirmation that cmd started or error if it failed
 func getStatus(t *tubes.Reliable) error {
+	// TODO(drebelsky): consider how to handle erros in io.ReadFull
 	resp := make([]byte, 1)
-	t.Read(resp)
+	io.ReadFull(t, resp)
 	if resp[0] == execConf {
 		return nil
 	}
 	elen := make([]byte, 4)
-	t.Read(elen)
+	io.ReadFull(t, elen)
 	buf := make([]byte, binary.BigEndian.Uint16(elen))
-	t.Read(buf)
+	io.ReadFull(t, buf)
 	return errors.New(string(buf))
 }
 

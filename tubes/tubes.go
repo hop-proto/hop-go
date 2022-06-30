@@ -217,10 +217,12 @@ func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
 		if e != nil {
 			return count, e
 		}
-		_, e = w.Write(b)
-		//TODO(baumanl): finalize that this function closes correctly according to WriteTo interface
-		if e != nil {
-			return count, e
+		if n > 0 {
+			_, e = w.Write(b)
+			//TODO(baumanl): finalize that this function closes correctly according to WriteTo interface
+			if e != nil {
+				return count, e
+			}
 		}
 	}
 }
@@ -237,13 +239,13 @@ func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, e
 //ReadMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
 	h := make([]byte, 2)
-	_, e := r.Read(h)
+	_, e := io.ReadFull(r, h)
 	if e != nil {
 		return 0, 0, 0, nil, e
 	}
 	length := binary.BigEndian.Uint16(h)
 	data := make([]byte, length)
-	_, e = r.Read(data)
+	_, e = io.ReadFull(r, data)
 	n = copy(b, data)
 	return n, 0, 0, nil, e
 }
