@@ -19,7 +19,9 @@ func main() {
 	fs := new(flag.FlagSet)
 
 	var isRemote bool
-	fs.BoolVar(&isRemote, "t", false, "run hcp in remote mode. Read from stdin and write to a file")
+	var isSource bool
+	fs.BoolVar(&isRemote, "t", false, "run hcp in remote mode")
+	fs.BoolVar(&isSource, "s", false, "if running in remote mode read from file and write to stdout")
 	flags.DefineClientFlags(fs, f)
 
 	err := fs.Parse(os.Args[1:])
@@ -35,7 +37,7 @@ func main() {
 
 	if isRemote {
 		logrus.Info("Running as server")
-		server(fs.Arg(0))
+		server(fs.Arg(0), isSource)
 	} else {
 		logrus.Info("Running as client")
 		srcURL, srcFile := parsePath(fs.Arg(0))
@@ -56,31 +58,67 @@ func parsePath(path string) (string, string) {
 	return url, file
 }
 
-func server(dstFile string) {
-	logrus.Info("Do we have echo???")
-	remoteFile, err := os.Create(dstFile)
-	if err != nil {
-		logrus.Error(err)
-		return
-	}
+func server(remoteFile string, isSource bool) {
+	if isSource {
+		remoteFd, err := os.Open(remoteFile)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
 
-	_, err = io.Copy(remoteFile, os.Stdin)
-	if err != nil {
-		logrus.Error(err)
-		return
+		_, err = io.Copy(os.Stdout, remoteFd)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+	} else {
+		remoteFd, err := os.Create(remoteFile)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+
+		n, err := io.Copy(remoteFd, os.Stdin)
+		if err != nil {
+			logrus.Error(err)
+			return
+		} else {
+			logrus.Errorf("Wrote %d bytes", n)
+		}
 	}
 }
 
 func client(srcURL string, srcFile string, dstURL string, dstFile string, f *flags.ClientFlags) {
-	if !(srcURL == "" && dstURL != "") {
-		logrus.Error("TODO: Currently only supports local to remote copying")
-		return
-	}
 
-	addr, err := core.ParseURL(dstURL)
-	if err != nil {
-		logrus.Error(err)
+	var addr *core.URL
+	var err error
+	if srcURL == "" && dstURL != "" { // local to remote case
+		addr, err = core.ParseURL(dstURL)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+	} else if srcURL != "" && dstURL == "" { // remote to local case
+		addr, err = core.ParseURL(srcURL)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+	} else if srcURL == "" && dstURL == "" { // local to local case
+		dstFd, err := os.Create(dstFile)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+		srcFd, err := os.Open(srcFile)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+		io.Copy(dstFd, srcFd)
 		return
+	} else { // TODO(hosono) remote to remote case
+		logrus.Error("TODO: remote to remote case")
 	}
 	f.Address = addr
 
@@ -92,9 +130,20 @@ func client(srcURL string, srcFile string, dstURL string, dstFile string, f *fla
 	}
 
 	cc.Shell = false
-	cc.Cmd = fmt.Sprintf("/go/bin/hcp -t %s", dstFile)
 
-	localFile, err := os.Open(srcFile)
+	if srcURL == "" {
+		cc.Cmd = fmt.Sprintf("/go/bin/hcp -t %s", dstFile)
+	} else {
+		// read from remote server
+		cc.Cmd = fmt.Sprintf("/go/bin/hcp -t -s %s", srcFile)
+	}
+
+	var localFd *os.File
+	if srcURL == "" { // local to remote, read from local filesystem
+		localFd, err = os.Open(srcFile)
+	} else { // remote to local, write to local filesystem
+		localFd, err = os.Create(dstFile)
+	}
 	if err != nil {
 		logrus.Error(err)
 		return
@@ -120,7 +169,11 @@ func client(srcURL string, srcFile string, dstURL string, dstFile string, f *fla
 		}
 	}()
 
-	_, err = io.Copy(client.ExecTube.Tube, localFile)
+	if srcURL == "" { // local to remote, read from local filesystem
+		_, err = io.Copy(client.ExecTube.Tube, localFd)
+	} else { // remote to local, write to local file system
+		_, err = io.Copy(localFd, client.ExecTube.Tube)
+	}
 	if err != nil {
 		logrus.Error(err)
 		return
