@@ -78,12 +78,10 @@ func server(remoteFile string, isSource bool) {
 			return
 		}
 
-		n, err := io.Copy(remoteFd, os.Stdin)
+		_, err = io.Copy(remoteFd, os.Stdin)
 		if err != nil {
 			logrus.Error(err)
 			return
-		} else {
-			logrus.Errorf("Wrote %d bytes", n)
 		}
 	}
 }
