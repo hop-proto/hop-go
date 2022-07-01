@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sync"
 	"testing/fstest"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -396,7 +397,9 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 	}
 	var err error
 	// if !c.Proxied {
-	c.TransportConn, err = transport.Dial("udp", address, transportConfig)
+	var dialer net.Dialer
+	dialer.Deadline = time.Now().Add(time.Second)
+	c.TransportConn, err = transport.DialWithDialer(&dialer, "udp", address, transportConfig)
 	// } else {
 	// 	c.TransportConn, err = transport.DialNP("netproxy", address, c.ProxyConn, transportConfig)
 	// }

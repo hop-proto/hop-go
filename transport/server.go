@@ -171,7 +171,7 @@ func (s *Server) readPacket() error {
 		}
 		ss, err := s.newSessionState()
 		copy(hs.sessionID[:], ss.sessionID[:])
-		ss.remoteAddr = *addr
+		ss.remoteAddr = addr
 		if err != nil {
 			logrus.Debug("could not make new session state")
 			return err
@@ -455,8 +455,8 @@ func (s *Server) handleTransport(addr *net.UDPAddr, msg []byte, plaintext []byte
 	}
 	ss.handle.writeLock.Lock()
 	defer ss.handle.writeLock.Unlock()
-	if !EqualUDPAddress(&ss.remoteAddr, addr) {
-		ss.remoteAddr = *addr
+	if !EqualUDPAddress(ss.remoteAddr, addr) {
+		ss.remoteAddr = addr
 	}
 	return n, nil
 }
