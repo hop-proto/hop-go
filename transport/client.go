@@ -182,7 +182,7 @@ func (c *Client) clientHandshakeLocked() error {
 
 	c.ss = new(SessionState)
 	c.ss.sessionID = c.hs.sessionID
-	c.ss.remoteAddr = *c.hs.remoteAddr
+	c.ss.remoteAddr = c.hs.remoteAddr
 	c.hs.deriveFinalKeys(&c.ss.clientToServerKey, &c.ss.serverToClientKey)
 	c.handshakeComplete.setTrue()
 	c.closed.setFalse()

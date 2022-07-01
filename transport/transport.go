@@ -23,7 +23,7 @@ type SessionState struct {
 	count             uint64
 	clientToServerKey [KeyLen]byte
 	serverToClientKey [KeyLen]byte
-	remoteAddr        net.UDPAddr
+	remoteAddr        *net.UDPAddr
 
 	handle *Handle
 
@@ -125,7 +125,7 @@ func (ss *SessionState) writePacket(conn UDPLike, in []byte, key *[KeyLen]byte) 
 	ss.rawWrite.Write(buf)
 
 	b := ss.rawWrite.Bytes()
-	written, _, err := conn.WriteMsgUDP(b, nil, &ss.remoteAddr)
+	written, _, err := conn.WriteMsgUDP(b, nil, ss.remoteAddr)
 	if err != nil {
 		return err
 	}

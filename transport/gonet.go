@@ -17,19 +17,12 @@ func Dial(network, address string, config ClientConfig) (*Client, error) {
 		return nil, ErrUDPOnly
 	}
 
-	// Open a new UDP socket
-	inner, err := net.ListenPacket("udp", "")
+	inner, err := net.Dial("udp", address)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get the address of the remote host
-	dst, err := net.ResolveUDPAddr("udp", address)
-	if err != nil {
-		return nil, err
-	}
-
-	return NewClient(inner.(UDPLike), dst, config), nil
+	return NewClient(inner.(*net.UDPConn), nil, config), nil
 }
 
 //DialNP is similar to Dial, but using a reliable tube as an underlying conn for the Client
@@ -40,4 +33,17 @@ func DialNP(network, address string, tube UDPLike, config ClientConfig) (*Client
 		return nil, err
 	}
 	return NewClient(tube, dst, config), nil
+}
+
+func DialWithDialer(dialer *net.Dialer, network, address string, config ClientConfig) (*Client, error) {
+	if network != "udp" && network != "subspace" {
+		return nil, ErrUDPOnly
+	}
+
+	inner, err := dialer.Dial("udp", address)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewClient(inner.(*net.UDPConn), nil, config), nil
 }
