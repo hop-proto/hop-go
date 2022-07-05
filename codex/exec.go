@@ -157,7 +157,7 @@ func (m *execInitMsg) ToBytes() []byte {
 
 //GetCmd reads execInitMsg from an EXEC_CHANNEL and returns the cmd to run
 func GetCmd(c net.Conn) (string, bool, error) {
-  //TODO (drebelsky): consider handling io errors
+	//TODO (drebelsky): consider handling io errors
 	t := make([]byte, 1)
 	io.ReadFull(c, t)
 	l := make([]byte, 4)
