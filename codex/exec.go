@@ -82,9 +82,10 @@ func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTub
 	} else {
 		oldState = nil
 	}
-	msg := newExecInitMsg(specificCmd, cmd)
+	termEnv := os.Getenv("TERM")
+	msg := newExecInitMsg(specificCmd, cmd, termEnv)
 	if cmd == "" {
-		msg = newExecInitMsg(defaultShell, cmd)
+		msg = newExecInitMsg(defaultShell, cmd, termEnv)
 	}
 	_, e = tube.Write(msg.ToBytes())
 	if e != nil {
@@ -135,28 +136,36 @@ type execInitMsg struct {
 	cmdType byte
 	cmdLen  uint32
 	cmd     string
+	termLen uint32
+	term    string
 }
 
-func newExecInitMsg(t byte, c string) *execInitMsg {
+func newExecInitMsg(t byte, c, term string) *execInitMsg {
 	return &execInitMsg{
 		cmdType: t,
 		cmdLen:  uint32(len(c)),
 		cmd:     c,
+		termLen: uint32(len(term)),
+		term:    term,
 	}
 }
 
 func (m *execInitMsg) ToBytes() []byte {
-	r := make([]byte, 5+m.cmdLen)
+	r := make([]byte, 9+m.cmdLen+m.termLen)
 	r[0] = m.cmdType
 	binary.BigEndian.PutUint32(r[1:], m.cmdLen)
 	if m.cmdLen > 0 {
 		copy(r[5:], []byte(m.cmd))
 	}
+	binary.BigEndian.PutUint32(r[5+m.cmdLen:], m.termLen)
+	if m.termLen > 0 {
+		copy(r[9+m.cmdLen:], []byte(m.term))
+	}
 	return r
 }
 
 //GetCmd reads execInitMsg from an EXEC_CHANNEL and returns the cmd to run
-func GetCmd(c net.Conn) (string, bool, error) {
+func GetCmd(c net.Conn) (string, string, bool, error) {
 	//TODO (drebelsky): consider handling io errors
 	t := make([]byte, 1)
 	io.ReadFull(c, t)
@@ -164,10 +173,13 @@ func GetCmd(c net.Conn) (string, bool, error) {
 	io.ReadFull(c, l)
 	buf := make([]byte, binary.BigEndian.Uint32(l))
 	io.ReadFull(c, buf)
+	io.ReadFull(c, l)
+	term := make([]byte, binary.BigEndian.Uint32(l))
+	io.ReadFull(c, term)
 	if t[0] == defaultShell {
-		return "", true, nil
+		return "", string(term), true, nil
 	}
-	return string(buf), false, nil
+	return string(buf), string(term), false, nil
 }
 
 //Server deals with serverside code exec channe details like pty size, copies ch -> pty and pty -> ch

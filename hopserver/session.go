@@ -238,7 +238,7 @@ func (sess *hopSession) checkAction(action string, actionType byte) error {
 }
 
 func (sess *hopSession) startCodex(tube *tubes.Reliable) {
-	cmd, shell, _ := codex.GetCmd(tube)
+	cmd, termEnv, shell, _ := codex.GetCmd(tube)
 	logrus.Info("CMD: ", cmd)
 	if !sess.isPrincipal {
 		err := sess.checkAction(cmd, authgrants.CommandAction)
@@ -266,7 +266,7 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 			"SHELL=" + user.Shell(),
 			"LOGNAME=" + user.Username(),
 			"HOME=" + user.Homedir(),
-			"TERM=" + os.Getenv("TERM"),
+			"TERM=" + termEnv,
 		}
 		var c *exec.Cmd
 		if shell {
