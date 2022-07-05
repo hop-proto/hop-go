@@ -157,12 +157,13 @@ func (m *execInitMsg) ToBytes() []byte {
 
 //GetCmd reads execInitMsg from an EXEC_CHANNEL and returns the cmd to run
 func GetCmd(c net.Conn) (string, bool, error) {
+  //TODO (drebelsky): consider handling io errors
 	t := make([]byte, 1)
-	c.Read(t)
+	io.ReadFull(c, t)
 	l := make([]byte, 4)
-	c.Read(l)
+	io.ReadFull(c, l)
 	buf := make([]byte, binary.BigEndian.Uint32(l))
-	c.Read(buf)
+	io.ReadFull(c, buf)
 	if t[0] == defaultShell {
 		return "", true, nil
 	}
