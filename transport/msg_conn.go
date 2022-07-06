@@ -1,5 +1,7 @@
 package transport
 
+import "time"
+
 // MsgReader captures the read method for a message-oriented connection.
 type MsgReader interface {
 	ReadMsg(b []byte) (int, error)
@@ -14,6 +16,7 @@ type MsgWriter interface {
 type MsgConn interface {
 	MsgReader
 	MsgWriter
+	SetReadDeadline(time.Time) error
 }
 
 // Client implements MsgConn

@@ -35,6 +35,7 @@ func DialNP(network, address string, tube UDPLike, config ClientConfig) (*Client
 	return NewClient(tube, dst, config), nil
 }
 
+// TODO(hosono) Do we need a DialNPWithDialer()??
 // DialWithDialer is similar to Dial, but uses options specified in a net.Dialer
 func DialWithDialer(dialer *net.Dialer, network, address string, config ClientConfig) (*Client, error) {
 	if network != "udp" && network != "subspace" {
@@ -44,6 +45,20 @@ func DialWithDialer(dialer *net.Dialer, network, address string, config ClientCo
 	inner, err := dialer.Dial("udp", address)
 	if err != nil {
 		return nil, err
+	}
+
+	// If dialer has set a timeout, deadline, or keep alive, use those
+	// Options set in dialer will override those in config
+	if dialer.Timeout != 0 {
+		config.HSTimeout = dialer.Timeout
+	}
+
+	if !dialer.Deadline.IsZero() {
+		config.HSDeadline = dialer.Deadline
+	}
+
+	if dialer.KeepAlive != 0 {
+		config.KeepAlive = dialer.KeepAlive
 	}
 
 	return NewClient(inner.(*net.UDPConn), nil, config), nil

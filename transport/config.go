@@ -33,6 +33,9 @@ type ClientConfig struct {
 	Verify             VerifyConfig
 	Leaf, Intermediate *certs.Certificate
 	AutoSelfSign       bool
+	HSTimeout   time.Duration
+	HSDeadline  time.Time
+	KeepAlive          time.Duration
 }
 
 const (
