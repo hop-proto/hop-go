@@ -149,7 +149,7 @@ func (s *HopServer) Serve() {
 func (s *HopServer) newSession(serverConn *transport.Handle) {
 	sess := &hopSession{
 		transportConn:   serverConn,
-		tubeMuxer:       tubes.NewMuxer(serverConn, serverConn),
+		tubeMuxer:       tubes.NewMuxer(serverConn, serverConn, 5*time.Second),
 		tubeQueue:       make(chan *tubes.Reliable),
 		done:            make(chan int),
 		controlChannels: []net.Conn{},

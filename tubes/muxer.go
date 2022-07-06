@@ -3,6 +3,7 @@ package tubes
 import (
 	"net"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -20,10 +21,11 @@ type Muxer struct {
 	stopped    bool
 	underlying transport.MsgConn
 	netConn    net.Conn
+	timeout    time.Duration
 }
 
 //NewMuxer starts a new tube muxer
-func NewMuxer(msgConn transport.MsgConn, netConn net.Conn) *Muxer {
+func NewMuxer(msgConn transport.MsgConn, netConn net.Conn, timeout time.Duration) *Muxer {
 	return &Muxer{
 		tubes:      make(map[byte]*Reliable),
 		tubeQueue:  make(chan *Reliable, 128),
@@ -32,6 +34,7 @@ func NewMuxer(msgConn transport.MsgConn, netConn net.Conn) *Muxer {
 		stopped:    false,
 		underlying: msgConn,
 		netConn:    netConn,
+		timeout: 	timeout,
 	}
 }
 
@@ -69,6 +72,9 @@ func (m *Muxer) readMsg() (*frame, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Set timeout
+	m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
 	return fromBytes(pkt)
 
 }
@@ -84,10 +90,15 @@ func (m *Muxer) sender() {
 func (m *Muxer) Start() {
 	go m.sender()
 	m.stopped = false
+
+	// Set timeout
+	m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
 	for !m.stopped {
 		frame, err := m.readMsg()
 		if err != nil {
-			continue
+			logrus.Error(err)
+			logrus.Fatal("Connection timed out")
+			break
 		}
 		tube, ok := m.getTube(frame.tubeID)
 		if !ok {

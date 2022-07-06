@@ -96,6 +96,19 @@ func (c *Client) prepareCertificates() (leaf, intermediate []byte, err error) {
 	return
 }
 
+// Set time after which connection will fail considering timeout and deadline
+func (c *Client) setHSDeadline() {
+	if !c.config.HSDeadline.IsZero() {
+		c.underlyingConn.SetReadDeadline(c.config.HSDeadline)
+	}
+
+	if c.config.HSTimeout != 0 {
+		if deadline := time.Now().Add(c.config.HSTimeout); c.config.HSDeadline.IsZero() || deadline.Before(c.config.HSDeadline) {
+			c.underlyingConn.SetReadDeadline(deadline)		
+		}
+	}
+}
+
 func (c *Client) clientHandshakeLocked() error {
 	c.hs = new(HandshakeState)
 	c.hs.remoteAddr = c.dialAddr
@@ -123,6 +136,7 @@ func (c *Client) clientHandshakeLocked() error {
 	if err != nil {
 		return err
 	}
+	c.setHSDeadline()
 
 	n, _, _, _, err = c.underlyingConn.ReadMsgUDP(buf, nil)
 	if err != nil {
@@ -152,6 +166,7 @@ func (c *Client) clientHandshakeLocked() error {
 	if err != nil {
 		return err
 	}
+	c.setHSDeadline()
 
 	// Server Auth
 	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(buf, nil)
@@ -179,6 +194,7 @@ func (c *Client) clientHandshakeLocked() error {
 		logrus.Errorf("client: unable to send client auth: %s", err)
 		return err
 	}
+	c.setHSDeadline()
 
 	c.ss = new(SessionState)
 	c.ss.sessionID = c.hs.sessionID
@@ -189,6 +205,11 @@ func (c *Client) clientHandshakeLocked() error {
 	c.hs = nil
 	c.dialAddr = nil
 
+	// Set deadline of 0 to make the connection not timeout
+	// Data timeouts are set elsewhere TODO(hosono) where???
+	c.underlyingConn.SetReadDeadline(time.Time{})
+
+	logrus.Info("Handshake Complete")
 	return nil
 }
 

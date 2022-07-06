@@ -115,7 +115,7 @@ func (s *sender) retransmit() {
 		select {
 		case <-timer.C:
 			s.l.Lock()
-			if len(s.frames) == 0 {
+			if len(s.frames) == 0 { // Keep Alive messages
 				pkt := frame{
 					dataLength: 0,
 					frameNo:    s.frameNo,
