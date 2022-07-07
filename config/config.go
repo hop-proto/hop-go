@@ -32,6 +32,7 @@ type ClientConfig struct {
 	AutoSelfSign BoolSetting
 	AgentURL     string
 	Hosts        []HostConfig
+	Cmd          string // TODO(hosono) seems redundant with Cmd in hostconfig
 }
 
 // ServerConfig represents a parsed server configuration.

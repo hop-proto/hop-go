@@ -3,6 +3,7 @@ package userauth
 
 import (
 	"encoding/binary"
+	"io"
 
 	"hop.computer/hop/tubes"
 )
@@ -42,16 +43,16 @@ func RequestAuthorization(ch *tubes.Reliable, username string) bool {
 	ch.Write(newUserAuthInitMsg(username).toBytes())
 	//add timeout
 	b := make([]byte, 1)
-	ch.Read(b)
+	io.ReadFull(ch, b)
 	return b[0] == UserAuthConf
 }
 
 //GetInitMsg lets the hop server read a user auth request
 func GetInitMsg(ch *tubes.Reliable) string {
 	lbuf := make([]byte, 4)
-	ch.Read(lbuf)
+	io.ReadFull(ch, lbuf)
 	length := binary.BigEndian.Uint16(lbuf[:])
 	buf := make([]byte, length)
-	ch.Read(buf)
+	io.ReadFull(ch, buf)
 	return string(buf)
 }

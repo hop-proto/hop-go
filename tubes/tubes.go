@@ -204,27 +204,6 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 	return r.sender.write(b)
 }
 
-//TODO(baumanl): if Reliable tubes implement io.Reader() (with Read behaving as specified) then
-//this function is not needed because io.Copy() will use dst.ReadFrom(src *Reliable) instead of src.WriteTo(dst)
-
-//WriteTo interface for io.Copy() to work
-func (r *Reliable) WriteTo(w io.Writer) (n int64, err error) {
-	var count int64
-	for {
-		b := make([]byte, 1)
-		n, e := r.Read(b)
-		count += int64(n)
-		if e != nil {
-			return count, e
-		}
-		_, e = w.Write(b)
-		//TODO(baumanl): finalize that this function closes correctly according to WriteTo interface
-		if e != nil {
-			return count, e
-		}
-	}
-}
-
 //WriteMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
 	length := len(b)
@@ -237,13 +216,13 @@ func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, e
 //ReadMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
 	h := make([]byte, 2)
-	_, e := r.Read(h)
+	_, e := io.ReadFull(r, h)
 	if e != nil {
 		return 0, 0, 0, nil, e
 	}
 	length := binary.BigEndian.Uint16(h)
 	data := make([]byte, length)
-	_, e = r.Read(data)
+	_, e = io.ReadFull(r, data)
 	n = copy(b, data)
 	return n, 0, 0, nil, e
 }

@@ -432,14 +432,14 @@ func (c *HopClient) startExecTube() error {
 	//Hop Session is tied to the life of this code execution tube.
 	// TODO(baumanl): provide support for Cmd in ClientConfig
 
-	logrus.Infof("Performing action: %v", c.hostconfig.Cmd)
+	logrus.Infof("Performing action: %v", c.config.Cmd)
 	ch, err := c.TubeMuxer.CreateTube(common.ExecTube)
 	if err != nil {
 		logrus.Error(err)
 		return err
 	}
 	c.wg.Add(1)
-	c.ExecTube, err = codex.NewExecTube(c.hostconfig.Cmd, ch, &c.wg)
+	c.ExecTube, err = codex.NewExecTube(c.config.Cmd, ch, &c.wg)
 	return err
 }
 

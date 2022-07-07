@@ -3,6 +3,7 @@ package netproxy
 import (
 	"encoding/binary"
 	"errors"
+	"io"
 	"net"
 
 	"github.com/sirupsen/logrus"
@@ -61,7 +62,7 @@ func Start(npTube *tubes.Reliable, arg string, t byte) error {
 	//TODO(baumanl): Make better conf/denial messages for NPC
 	//wait until server says it has a UDP conn to desired address
 	res := make([]byte, 1)
-	_, err := npTube.Read(res)
+	_, err := io.ReadFull(npTube, res)
 	if err != nil {
 		return err
 	}
@@ -80,11 +81,11 @@ func Start(npTube *tubes.Reliable, arg string, t byte) error {
 //Server starts a UDP Conn with remote addr and proxies traffic from ch -> udp and upd -> ch
 func Server(npTube *tubes.Reliable) {
 	b := make([]byte, 4)
-	npTube.Read(b)
+	io.ReadFull(npTube, b)
 	l := binary.BigEndian.Uint32(b[0:4])
 	logrus.Infof("Expecting %v bytes", l)
 	init := make([]byte, l)
-	npTube.Read(init)
+	io.ReadFull(npTube, init)
 	dest := fromBytes(init)
 	if _, err := net.LookupAddr(dest.info); err != nil {
 		//Couldn't resolve address with local resolver

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"container/heap"
 	"errors"
+	"io"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -70,20 +71,20 @@ func (r *receiver) processIntoBuffer() {
 
 func (r *receiver) read(buf []byte) (int, error) {
 	r.bufferCond.L.Lock()
-	for {
-		r.m.Lock()
-		logrus.Debug("BUFFER LEN: ", r.buffer.Len(), " buf len: ", len(buf), "closed? ", r.closed)
-		if r.buffer.Len() >= len(buf) || r.closed {
-			break
-		}
+	r.m.Lock()
+	if r.buffer.Len() == 0 && !r.closed {
 		r.m.Unlock()
 		r.bufferCond.Wait()
-
+		r.m.Lock()
 	}
 	defer r.m.Unlock()
 	defer r.bufferCond.L.Unlock()
 
-	return r.buffer.Read(buf)
+	nbytes, _ := r.buffer.Read(buf)
+	if r.closed {
+		return nbytes, io.EOF
+	}
+	return nbytes, nil
 }
 
 /* Checks if frame is in bounds of receive window. */

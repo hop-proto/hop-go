@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/user"
 	"strconv"
+	"strings"
 
 	"hop.computer/hop/config"
 	"hop.computer/hop/core"
@@ -26,6 +27,7 @@ type ClientFlags struct {
 	RemoteArgs []string // CLI arguments related to remote port forwarding
 	LocalArgs  []string // CLI arguments related to local port forwarding
 	Headless   bool     // if no cmd/shell desired (just port forwarding)
+	Verbose    bool     // show verbose error messages
 }
 
 func mergeAddresses(f *ClientFlags, hc *config.HostConfig) error {
@@ -54,6 +56,11 @@ func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig) error {
 	if err != nil {
 		return err
 	}
+
+	if f.Cmd != "" {
+		cc.Cmd = f.Cmd
+	}
+
 	// TODO(baumanl): add merge support for all other flags/config options
 	return nil
 }
@@ -90,6 +97,7 @@ func defineClientFlags(fs *flag.FlagSet, f *ClientFlags) {
 
 	fs.StringVar(&f.Cmd, "c", "", "specific command to execute on remote server")
 	fs.BoolVar(&f.Headless, "N", false, "don't execute a remote command. Useful for just port forwarding.")
+	fs.BoolVar(&f.Verbose, "V", false, "display verbose error messages")
 
 	// TODO(baumanl): Right now all explicit commands are run within the context
 	// of a shell using "$SHELL -c <cmd>" (this allows for expanding env
@@ -101,6 +109,14 @@ func defineClientFlags(fs *flag.FlagSet, f *ClientFlags) {
 
 	// var runCmdInShell bool
 	// fs.BoolVar(&runCmdInShell, "s", false, "run specified command...")
+
+	// TODO(drebelsky): SSH compat options all ignored for now
+	_ = fs.Bool("x", true, "")
+	_ = fs.String("oForwardAgent", "", "")
+	_ = fs.String("oPermitLocalCommand", "", "")
+	_ = fs.String("oClearAllForwardings", "", "")
+	_ = fs.String("oRemoteCommand", "", "")
+	_ = fs.String("oRequestTTY", "", "")
 }
 
 // ParseClientArgs defines and parses the flags from the command line for Client
@@ -108,6 +124,11 @@ func ParseClientArgs(args []string) (*ClientFlags, error) {
 	f := new(ClientFlags)
 	fs := new(flag.FlagSet)
 	defineClientFlags(fs, f)
+
+	// For SSH compatibility
+	var port, username string
+	fs.StringVar(&port, "p", "", "port")
+	fs.StringVar(&username, "l", "", "username")
 
 	err := fs.Parse(args[1:])
 	if err != nil {
@@ -120,6 +141,17 @@ func ParseClientArgs(args []string) (*ClientFlags, error) {
 	inputURL, err := core.ParseURL(hoststring)
 	if err != nil {
 		return nil, fmt.Errorf("invalid input %s: %s", hoststring, err)
+	}
+	if port != "" {
+		inputURL.Port = port
+	}
+	if username != "" {
+		inputURL.User = username
+	}
+
+	// Support putting the command after the hostname
+	if f.Cmd == "" {
+		f.Cmd = strings.Join(fs.Args()[1:], " ")
 	}
 	f.Address = inputURL
 	return f, nil

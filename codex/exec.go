@@ -53,15 +53,16 @@ func SendSuccess(t *tubes.Reliable) {
 
 //GetStatus lets client waits for confirmation that cmd started or error if it failed
 func getStatus(t *tubes.Reliable) error {
+	// TODO(drebelsky): consider how to handle erros in io.ReadFull
 	resp := make([]byte, 1)
-	t.Read(resp)
+	io.ReadFull(t, resp)
 	if resp[0] == execConf {
 		return nil
 	}
 	elen := make([]byte, 4)
-	t.Read(elen)
+	io.ReadFull(t, elen)
 	buf := make([]byte, binary.BigEndian.Uint16(elen))
-	t.Read(buf)
+	io.ReadFull(t, buf)
 	return errors.New(string(buf))
 }
 
@@ -123,15 +124,8 @@ func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTub
 	}(&ex)
 
 	go func(ex *ExecTube) {
-		p := make([]byte, 1)
-		for {
-			_, _ = os.Stdin.Read(p)
-			if ex.redir {
-				ex.w.Write(p)
-			} else {
-				ex.tube.Write(p)
-			}
-		}
+		io.Copy(tube, os.Stdin)
+		tube.Close()
 	}(&ex)
 
 	return &ex, nil
@@ -163,12 +157,13 @@ func (m *execInitMsg) ToBytes() []byte {
 
 //GetCmd reads execInitMsg from an EXEC_CHANNEL and returns the cmd to run
 func GetCmd(c net.Conn) (string, bool, error) {
+	//TODO (drebelsky): consider handling io errors
 	t := make([]byte, 1)
-	c.Read(t)
+	io.ReadFull(c, t)
 	l := make([]byte, 4)
-	c.Read(l)
+	io.ReadFull(c, l)
 	buf := make([]byte, binary.BigEndian.Uint32(l))
-	c.Read(buf)
+	io.ReadFull(c, buf)
 	if t[0] == defaultShell {
 		return "", true, nil
 	}
