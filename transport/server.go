@@ -2,8 +2,6 @@ package transport
 
 import (
 	"bytes"
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
 	"errors"
 	"net"
@@ -37,14 +35,15 @@ type Server struct {
 
 	closed atomicBool
 
+	// +checklocks:m
 	handshakes map[string]*HandshakeState
+	// +checklocks:m
 	sessions   map[SessionID]*SessionState
 
 	pendingConnections chan *Handle
 	outgoing           chan outgoing
 
 	cookieKey    [KeyLen]byte
-	cookieCipher cipher.Block
 }
 
 //FetchClientLeaf returns the client leaf certificate used in handshake with associated handle's sessionID
@@ -90,11 +89,13 @@ func (s *Server) fetchHandshakeState(remoteAddr *net.UDPAddr) *HandshakeState {
 	return s.fetchHandshakeStateLocked(remoteAddr)
 }
 
+// +checklocksread:s.m
 func (s *Server) fetchHandshakeStateLocked(remoteAddr *net.UDPAddr) *HandshakeState {
 	key := AddressHashKey(remoteAddr)
 	return s.handshakes[key]
 }
 
+// +checklocks:s.m
 func (s *Server) clearHandshakeStateLocked(remoteAddr *net.UDPAddr) {
 	key := AddressHashKey(remoteAddr)
 	delete(s.handshakes, key)
@@ -132,6 +133,7 @@ func (s *Server) fetchSessionState(sessionID SessionID) *SessionState {
 	return s.fetchSessionStateLocked(sessionID)
 }
 
+// +checklocksread:s.m
 func (s *Server) fetchSessionStateLocked(sessionID SessionID) *SessionState {
 	return s.sessions[sessionID]
 }
@@ -620,6 +622,9 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) init() error {
+	s.m.Lock()
+	defer s.m.Unlock()
+
 	if s.config.KeyPair == nil && s.config.GetCertificate == nil {
 		return errors.New("config.KeyPair or config.GetCertificate must be set")
 	}
@@ -652,7 +657,7 @@ func (s *Server) init() error {
 	if err != nil {
 		panic(err.Error())
 	}
-	s.cookieCipher, err = aes.NewCipher(s.cookieKey[:])
+
 	if err != nil {
 		panic(err.Error())
 	}

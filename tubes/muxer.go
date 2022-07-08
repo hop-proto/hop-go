@@ -12,6 +12,7 @@ import (
 
 //Muxer handles delivering and sending tube messages
 type Muxer struct {
+	// +checklocks:m
 	tubes map[byte]*Reliable
 	// Channels waiting for an Accept() call.
 	tubeQueue chan *Reliable

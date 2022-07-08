@@ -18,6 +18,7 @@ import (
 	"hop.computer/hop/keys"
 )
 
+// +checklocksignore
 func TestClientServerCompatibilityHandshake(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
@@ -52,6 +53,7 @@ func TestClientServerCompatibilityHandshake(t *testing.T) {
 	assert.Check(t, c.ss.serverToClientKey != zero)
 }
 
+// +checklocksignore
 func TestClientServerHSWithAgent(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	// start server

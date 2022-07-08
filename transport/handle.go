@@ -32,6 +32,7 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 
 	closed atomicBool
 
+	// +checklocks:readLock
 	buf bytes.Buffer
 }
 
