@@ -419,7 +419,7 @@ func (c *HopClient) userAuthorization() error {
 	//*****PERFORM USER AUTHORIZATION******
 	uaCh, _ := c.TubeMuxer.CreateTube(common.UserAuthTube)
 	defer uaCh.Close()
-	logrus.Info("requesting auth for", c.hostconfig.User)
+	logrus.Info("requesting auth for ", c.hostconfig.User)
 	if ok := userauth.RequestAuthorization(uaCh, c.hostconfig.User); !ok {
 		return ErrClientUnauthorized
 	}
