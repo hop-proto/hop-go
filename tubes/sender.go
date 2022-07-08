@@ -19,15 +19,15 @@ const maxFragTransPerRTO = 50
 type sender struct {
 	// The acknowledgement number sent from the other end of the connection.
 	// +checklocks:l
-	ackNo      uint64
+	ackNo uint64
 	// +checklocks:l
-	frameNo    uint32
+	frameNo uint32
 	// +checklocks:l
 	windowSize uint16
 	// +checklocks:l
-	finSent    bool
+	finSent bool
 	// +checklocks:l
-	closed     bool
+	closed bool
 	// The buffer of unacknowledged tube frames that will be retransmitted if necessary.
 	// +checklocks:l
 	frames []*frame

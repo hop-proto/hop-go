@@ -35,7 +35,7 @@ func NewMuxer(msgConn transport.MsgConn, netConn net.Conn, timeout time.Duration
 		stopped:    false,
 		underlying: msgConn,
 		netConn:    netConn,
-		timeout: 	timeout,
+		timeout:    timeout,
 	}
 }
 

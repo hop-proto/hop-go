@@ -38,12 +38,12 @@ type Server struct {
 	// +checklocks:m
 	handshakes map[string]*HandshakeState
 	// +checklocks:m
-	sessions   map[SessionID]*SessionState
+	sessions map[SessionID]*SessionState
 
 	pendingConnections chan *Handle
 	outgoing           chan outgoing
 
-	cookieKey    [KeyLen]byte
+	cookieKey [KeyLen]byte
 }
 
 //FetchClientLeaf returns the client leaf certificate used in handshake with associated handle's sessionID
@@ -65,7 +65,7 @@ func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) 
 	s.handshakes[key] = hs
 
 	// Delete handshake if the connection times out
-	go func (s *Server, remoteAddr *net.UDPAddr) {
+	go func(s *Server, remoteAddr *net.UDPAddr) {
 		timer := time.NewTimer(s.config.HandshakeTimeout)
 		<-timer.C
 		s.m.Lock()

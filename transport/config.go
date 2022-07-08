@@ -33,8 +33,8 @@ type ClientConfig struct {
 	Verify             VerifyConfig
 	Leaf, Intermediate *certs.Certificate
 	AutoSelfSign       bool
-	HSTimeout   time.Duration
-	HSDeadline  time.Time
+	HSTimeout          time.Duration
+	HSDeadline         time.Time
 	KeepAlive          time.Duration
 }
 
@@ -63,7 +63,7 @@ type ServerConfig struct {
 	MaxPendingConnections           int
 	MaxBufferedPacketsPerConnection int
 
-	HandshakeTimeout	 time.Duration
+	HandshakeTimeout     time.Duration
 	StartingReadTimeout  time.Duration
 	StartingWriteTimeout time.Duration
 
