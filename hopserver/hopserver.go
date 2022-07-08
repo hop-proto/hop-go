@@ -28,11 +28,11 @@ import (
 
 //HopServer represents state/conns needed for a hop server
 type HopServer struct {
-	m                     sync.Mutex
+	m sync.Mutex
 	// +checklocks:m
-	principals            map[int32]*hopSession
+	principals map[int32]*hopSession
 	// +checklocks:m
-	authgrants            map[keys.PublicKey]*authGrant //static key -> authgrant associated with that key
+	authgrants map[keys.PublicKey]*authGrant //static key -> authgrant associated with that key
 	// +checklocks:m
 	outstandingAuthgrants int
 
@@ -153,7 +153,7 @@ func (s *HopServer) Serve() {
 // newSession Starts a new hop session
 func (s *HopServer) newSession(serverConn *transport.Handle) {
 	sess := &hopSession{
-		transportConn:   serverConn,
+		transportConn: serverConn,
 		// TODO(hosono) choose timeout. Allow timeout to be configured
 		tubeMuxer:       tubes.NewMuxer(serverConn, serverConn, 5*time.Second),
 		tubeQueue:       make(chan *tubes.Reliable),

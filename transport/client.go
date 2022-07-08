@@ -40,7 +40,7 @@ type Client struct {
 	// +checklocks:m
 	// +checklocks:readLock
 	// +checklocks:writeLock
-	dialAddr       *net.UDPAddr
+	dialAddr *net.UDPAddr
 
 	// +checklocks:m
 	// +checklocks:readLock
@@ -120,7 +120,7 @@ func (c *Client) setHSDeadline() {
 
 	if c.config.HSTimeout != 0 {
 		if deadline := time.Now().Add(c.config.HSTimeout); c.config.HSDeadline.IsZero() || deadline.Before(c.config.HSDeadline) {
-			c.underlyingConn.SetReadDeadline(deadline)		
+			c.underlyingConn.SetReadDeadline(deadline)
 		}
 	}
 }
