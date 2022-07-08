@@ -18,12 +18,18 @@ const maxFragTransPerRTO = 50
 
 type sender struct {
 	// The acknowledgement number sent from the other end of the connection.
+	// +checklocks:l
 	ackNo      uint64
+	// +checklocks:l
 	frameNo    uint32
+	// +checklocks:l
 	windowSize uint16
+	// +checklocks:l
 	finSent    bool
+	// +checklocks:l
 	closed     bool
 	// The buffer of unacknowledged tube frames that will be retransmitted if necessary.
+	// +checklocks:l
 	frames []*frame
 
 	//TODO(baumanl): is it safe and good style to have this tube here?
@@ -32,6 +38,7 @@ type sender struct {
 
 	// Different frames can have different data lengths -- we need to know how
 	// to update the buffer when frames are acknowledged.
+	// +checklocks:l
 	frameDataLengths map[uint32]uint16
 	// The current buffer of unacknowledged bytes from the sender.
 	// A byte slice works well here because:
@@ -39,6 +46,7 @@ type sender struct {
 	// 	based on the receiving end, so being able to arbitrarily index from the front is important.
 	//	(2) the append() function when write() is called will periodically clean up the unused
 	//	memory in the front of the slice by reallocating the buffer array.
+	// +checklocks:l
 	buffer []byte
 	// The lock controls all fields of the sender.
 	l sync.Mutex
@@ -55,10 +63,8 @@ func (s *sender) unsentFramesRemaining() bool {
 
 func (s *sender) write(b []byte) (n int, err error) {
 	s.l.Lock()
-	defer func() {
-		s.l.Unlock()
-		s.ret <- 1
-	}()
+	defer func() { s.ret <- 1 }()
+	defer s.l.Unlock()
 	if s.closed {
 		return 0, errors.New("trying to write to closed tube")
 	}

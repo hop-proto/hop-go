@@ -6,6 +6,16 @@ ifeq (, $(shell command -v "$(GOLANGCI_LINT)"))
 	GOLANGCI_LINT_ERR = $(error install golangci-lint with e.g. brew install golangci/tap/golangci-lint)
 endif
 
+GOLANG_CHECKLOCKS := $$HOME/go/bin/checklocks
+ifeq (, $(shell command -v "GOLANG_CHECKLOCKS"))
+	GOLANG_CHECKLOCKS_ERR = $(error install checklocks eith e.g. go install gvisor.dev/gvisor/tools/checklocks/cmd/checklocks@go)
+endif
+
+.PHONY: vet
+vet: ## run go vet. Currently, this only checks for deadlocks
+vet:
+	go vet -vettool=$$HOME/go/bin/checklocks ./...
+
 .PHONY: lint
 lint: ## lint go code
 lint: ; $(GOLANGCI_LINT_ERR)

@@ -35,22 +35,38 @@ type Client struct {
 	closed            atomicBool
 
 	underlyingConn UDPLike
+
+	// TODO(hosono) I don't think the dialAddr needs the locks, but it's only used when locked
+	// +checklocks:m
+	// +checklocks:readLock
+	// +checklocks:writeLock
 	dialAddr       *net.UDPAddr
 
+	// +checklocks:m
+	// +checklocks:readLock
+	// +checklocks:writeLock
 	hs *HandshakeState
+
 	ss *SessionState
 
+	// +checklocks:readLock
 	readBuf bytes.Buffer
 
 	config ClientConfig
 }
 
+// +checklocksacquire:c.m
+// +checklocksacquire:c.writeLock
+// +checklocksacquire:c.readLock
 func (c *Client) lockUser() {
 	c.m.Lock()
 	c.writeLock.Lock()
 	c.readLock.Lock()
 }
 
+// +checklocksrelease:c.m
+// +checklocksrelease:c.readLock
+// +checklocksrelease:c.writeLock
 func (c *Client) unlockUser() {
 	c.m.Unlock()
 	c.readLock.Unlock()
@@ -109,6 +125,9 @@ func (c *Client) setHSDeadline() {
 	}
 }
 
+// +checklocks:c.m
+// +checklocks:c.readLock
+// +checklocks:c.writeLock
 func (c *Client) clientHandshakeLocked() error {
 	c.hs = new(HandshakeState)
 	c.hs.remoteAddr = c.dialAddr
@@ -213,6 +232,7 @@ func (c *Client) clientHandshakeLocked() error {
 	return nil
 }
 
+// +checklocks:c.writeLock
 func (c *Client) writeTransport(plaintext []byte) error {
 	err := c.ss.writePacket(c.underlyingConn, plaintext, &c.ss.clientToServerKey)
 	if err != nil {
@@ -251,7 +271,7 @@ func (c *Client) WriteMsg(b []byte) error {
 
 }
 
-// Close gracefully shutds down the connection. Repeated calls to close will error.
+// Close gracefully shuts down the connection. Repeated calls to close will error.
 func (c *Client) Close() error {
 	c.lockUser()
 	defer c.unlockUser()
