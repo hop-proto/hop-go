@@ -131,7 +131,8 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	// authgrant procedure.
 	// c.address = address
 	c.authenticator = authenticator
-	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.TransportConn, 2*time.Second)
+	// TODO(hosono) choose default timeout. Allow timeout to be configured
+	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.TransportConn, 5*time.Second)
 	go c.TubeMuxer.Start()
 	err = c.userAuthorization()
 	if err != nil {

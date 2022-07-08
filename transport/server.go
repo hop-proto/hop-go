@@ -64,12 +64,33 @@ func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) 
 		return false
 	}
 	s.handshakes[key] = hs
+
+	// Delete handshake if the connection times out
+	go func (s *Server, remoteAddr *net.UDPAddr) {
+		timer := time.NewTimer(s.config.HandshakeTimeout)
+		<-timer.C
+		s.m.Lock()
+		defer s.m.Unlock()
+		hs := s.fetchHandshakeStateLocked(remoteAddr)
+		logrus.Error("Handshake:", hs)
+		if hs != nil {
+			logrus.Errorf("Connection to %s timed out", remoteAddr)
+			s.clearHandshakeStateLocked(remoteAddr)
+		} else {
+			logrus.Infof("Connection to %s did not time out", remoteAddr)
+		}
+	}(s, remoteAddr)
+
 	return true
 }
 
 func (s *Server) fetchHandshakeState(remoteAddr *net.UDPAddr) *HandshakeState {
 	s.m.RLock()
 	defer s.m.RUnlock()
+	return s.fetchHandshakeStateLocked(remoteAddr)
+}
+
+func (s *Server) fetchHandshakeStateLocked(remoteAddr *net.UDPAddr) *HandshakeState {
 	key := AddressHashKey(remoteAddr)
 	return s.handshakes[key]
 }

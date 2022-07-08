@@ -63,6 +63,7 @@ type ServerConfig struct {
 	MaxPendingConnections           int
 	MaxBufferedPacketsPerConnection int
 
+	HandshakeTimeout	 time.Duration
 	StartingReadTimeout  time.Duration
 	StartingWriteTimeout time.Duration
 

@@ -206,7 +206,7 @@ func (c *Client) clientHandshakeLocked() error {
 	c.dialAddr = nil
 
 	// Set deadline of 0 to make the connection not timeout
-	// Data timeouts are set elsewhere TODO(hosono) where???
+	// Data timeouts are handled by the Tube Muxer
 	c.underlyingConn.SetReadDeadline(time.Time{})
 
 	logrus.Info("Handshake Complete")
