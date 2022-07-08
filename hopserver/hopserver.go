@@ -107,6 +107,8 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 			InsecureSkipVerify: true, // Do authorized keys instead
 		},
 		GetCertificate: getCert,
+		// TODO(hosono) choose default timeout. Allow caller to set timeout
+		HandshakeTimeout: time.Second,
 	}
 
 	underlying, err := transport.NewServer(udpConn, tconf)
@@ -149,6 +151,7 @@ func (s *HopServer) Serve() {
 func (s *HopServer) newSession(serverConn *transport.Handle) {
 	sess := &hopSession{
 		transportConn:   serverConn,
+		// TODO(hosono) choose timeout. Allow timeout to be configured
 		tubeMuxer:       tubes.NewMuxer(serverConn, serverConn, 5*time.Second),
 		tubeQueue:       make(chan *tubes.Reliable),
 		done:            make(chan int),
