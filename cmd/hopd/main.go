@@ -18,6 +18,11 @@ func main() {
 		logrus.Error(err)
 		return
 	}
+
+	if f.Verbose {
+		logrus.SetLevel(logrus.DebugLevel)
+	}
+
 	sc, err := flags.LoadServerConfigFromFlags(f)
 	if err != nil {
 		logrus.Fatalf("error loading config: %s", err)
