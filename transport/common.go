@@ -1,8 +1,8 @@
 package transport
 
 import (
-	"fmt"
 	"errors"
+	"fmt"
 	"os"
 
 	"golang.org/x/crypto/curve25519"
