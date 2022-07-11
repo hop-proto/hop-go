@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -27,6 +28,7 @@ func main() {
 	if err != nil {
 		logrus.Fatalf("error loading config: %s", err)
 	}
+	sc.HandshakeTimeout = 15 * time.Second
 
 	s, err := hopserver.NewHopServer(sc)
 	if err != nil {

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"sync"
 	"testing/fstest"
-	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -131,8 +130,7 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	// authgrant procedure.
 	// c.address = address
 	c.authenticator = authenticator
-	// TODO(hosono) choose default timeout. Allow timeout to be configured
-	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.TransportConn, 5*time.Second)
+	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.TransportConn, c.config.DataTimeout)
 	go c.TubeMuxer.Start()
 	err = c.userAuthorization()
 	if err != nil {
@@ -398,9 +396,8 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 	}
 	var err error
 	// if !c.Proxied {
-	// TODO(hosono) allow caller to specify timeout?
 	var dialer net.Dialer
-	dialer.Timeout = 7 * time.Second // TODO(hosono) what should the default timeout be?
+	dialer.Timeout = c.config.HandshakeTimeout
 	c.TransportConn, err = transport.DialWithDialer(&dialer, "udp", address, transportConfig)
 	// } else {
 	// 	c.TransportConn, err = transport.DialNP("netproxy", address, c.ProxyConn, transportConfig)

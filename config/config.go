@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"time"
 
 	"hop.computer/hop/common"
 	"hop.computer/hop/config/ast"
@@ -26,13 +27,15 @@ const (
 
 // ClientConfig represents a parsed client configuration.
 type ClientConfig struct {
-	CAFiles      []string
-	Key          string
-	Certificate  string
-	AutoSelfSign BoolSetting
-	AgentURL     string
-	Hosts        []HostConfig
-	Cmd          string // TODO(hosono) seems redundant with Cmd in hostconfig
+	CAFiles          []string
+	Key              string
+	Certificate      string
+	AutoSelfSign     BoolSetting
+	AgentURL         string
+	Hosts            []HostConfig
+	Cmd              string // TODO(hosono) seems redundant with Cmd in hostconfig
+	HandshakeTimeout time.Duration
+	DataTimeout      time.Duration
 }
 
 // ServerConfig represents a parsed server configuration.
@@ -45,6 +48,8 @@ type ServerConfig struct {
 	ListenAddress string
 
 	Names []NameConfig
+
+	HandshakeTimeout time.Duration
 }
 
 // HostConfig contains a definition of a host pattern in a client configuration.
