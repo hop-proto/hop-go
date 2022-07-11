@@ -76,7 +76,7 @@ func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) 
 			s.clearHandshakeStateLocked(remoteAddr)
 			ss := s.fetchSessionStateLocked(hs.sessionID)
 			if ss != nil {
-				s.clearSessionState(ss.sessionID)
+				s.clearSessionStateLocked(ss.sessionID)
 			}
 		} else {
 			logrus.Infof("Connection to %s did not time out", remoteAddr)
@@ -144,6 +144,11 @@ func (s *Server) fetchSessionStateLocked(sessionID SessionID) *SessionState {
 func (s *Server) clearSessionState(sessionID SessionID) {
 	s.m.Lock()
 	defer s.m.Unlock()
+	s.clearSessionStateLocked(sessionID)
+}
+
+// +checklocks:s.m
+func (s *Server) clearSessionStateLocked(sessionID SessionID) {
 	delete(s.sessions, sessionID)
 }
 

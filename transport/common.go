@@ -1,7 +1,9 @@
 package transport
 
 import (
+	"fmt"
 	"errors"
+	"os"
 
 	"golang.org/x/crypto/curve25519"
 
@@ -71,7 +73,9 @@ var ErrUnknownMessage = errors.New("unknown message type")
 var ErrWouldBlock = errors.New("operation would block")
 
 // ErrTimeout is returned for operations that timed out
-var ErrTimeout = errors.New("operation timed out")
+// Timeouts must wrap os.ErrDeadlineExceeded as per the net.Conn docs for SetDeadline()
+// TODO(hosono) do we need to import fmt? I can't find another way, but it's weird
+var ErrTimeout = fmt.Errorf("operation timed out [%w]", os.ErrDeadlineExceeded)
 
 // ErrReplay is returned when a message is a duplicate. This should not
 // percolate outside of the internal APIs.

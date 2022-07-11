@@ -1,7 +1,9 @@
 package tubes
 
 import (
+	"errors"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -92,15 +94,14 @@ func (m *Muxer) Start() {
 	go m.sender()
 	m.stopped = false
 
-	// Set timeout
+	// Set initial timeout
 	m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
 	for !m.stopped {
 		frame, err := m.readMsg()
-		if err != nil {
+		if errors.Is(err, os.ErrDeadlineExceeded) { // if error is a timeout
 			logrus.Error(err)
 			logrus.Fatal("Connection timed out")
-			break
-		}
+		} // TODO(hosono) What other errors are possible? Do we ignore them?
 		tube, ok := m.getTube(frame.tubeID)
 		if !ok {
 			//logrus.Info("NO CHANNEL")
