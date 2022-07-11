@@ -109,9 +109,8 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		ClientVerify: &transport.VerifyConfig{
 			InsecureSkipVerify: true, // Do authorized keys instead
 		},
-		GetCertificate: getCert,
-		// TODO(hosono) choose default timeout. Allow caller to set timeout
-		HandshakeTimeout: time.Second,
+		GetCertificate:   getCert,
+		HandshakeTimeout: sc.HandshakeTimeout,
 	}
 
 	underlying, err := transport.NewServer(udpConn, tconf)
