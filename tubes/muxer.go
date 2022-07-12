@@ -99,9 +99,11 @@ func (m *Muxer) Start() {
 	for !m.stopped {
 		frame, err := m.readMsg()
 		if errors.Is(err, os.ErrDeadlineExceeded) { // if error is a timeout
-			logrus.Error(err)
-			logrus.Fatal("Connection timed out")
-		} // TODO(hosono) What other errors are possible? Do we ignore them?
+			logrus.Fatalf("Connection timed out: %s", err)
+		} else if err != nil {
+			// TODO(hosono) Are there any recoverable errors?
+			logrus.Fatalf("Error in Muxer: %s", err)
+		}
 		tube, ok := m.getTube(frame.tubeID)
 		if !ok {
 			//logrus.Info("NO CHANNEL")
