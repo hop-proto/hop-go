@@ -1,11 +1,14 @@
 package hopserver
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"os"
+	"os/exec"
 	"sync"
 	"testing/fstest"
 	"time"
@@ -20,7 +23,6 @@ import (
 	"hop.computer/hop/keys"
 	"hop.computer/hop/pkg/glob"
 	"hop.computer/hop/transport"
-	"hop.computer/hop/tubes"
 )
 
 // DefaultHopAuthSocket is the default UDS used for Authorization grants
@@ -151,22 +153,51 @@ func (s *HopServer) Serve() {
 
 // newSession Starts a new hop session
 func (s *HopServer) newSession(serverConn *transport.Handle) {
-	sess := &hopSession{
-		transportConn: serverConn,
-		// TODO(hosono) choose timeout. Allow timeout to be configured
-		tubeMuxer:       tubes.NewMuxer(serverConn, serverConn, s.config.DataTimeout),
-		tubeQueue:       make(chan *tubes.Reliable),
-		done:            make(chan int),
-		controlChannels: []net.Conn{},
-		server:          s,
-		// authorizedKeysLocation: s.config.AuthorizedKeysLocation,
-	}
-	// if sess.authorizedKeysLocation != sess.server.config.AuthorizedKeysLocation {
-	// 	logrus.Error("Authorized Keys location mismatch")
-	// } else {
-	// 	logrus.Info("ALL GOOD AUTH KEYS LOCATION")
-	// }
-	sess.start()
+	// TODO(drebelsky): do we have a better mechanism for this?
+	session := exec.Command("./hopd", "-s")
+	stdin, err := session.StdinPipe()
+	_ = err // TODO(drebelsky) handle
+	stdout, err := session.StdoutPipe()
+	err = session.Start()
+	go func() {
+		b := make([]byte, 65535)
+		length := make([]byte, 4)
+		for {
+      n, err := serverConn.ReadMsg(b)
+			if err != nil && err != transport.ErrTimeout {
+				break
+			} else {
+				binary.BigEndian.PutUint32(length, uint32(n))
+				_, err = stdin.Write(length)
+				if err != nil {
+					break
+				}
+				_, err = stdin.Write(b[:n])
+				if err != nil {
+					break
+				}
+			}
+		}
+	}()
+	go func() {
+		b := make([]byte, 65535)
+		length := make([]byte, 4)
+		var err error
+		for {
+			_, err = io.ReadFull(stdout, length)
+			if err != nil {
+				break
+			}
+			n, err := io.ReadFull(stdout, b[:binary.BigEndian.Uint32(length)])
+			if err != nil {
+				break
+			}
+			err = serverConn.WriteMsg(b[:n])
+			if err != nil {
+				break
+			}
+		}
+	}()
 }
 
 //handles connections to the hop server UDS to allow hop client processes to get authorization grants from their principal

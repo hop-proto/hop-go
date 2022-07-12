@@ -8,7 +8,8 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"os/user"
+	osUser "os/user"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -20,7 +21,6 @@ import (
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/codex"
 	"hop.computer/hop/common"
-	"hop.computer/hop/keys"
 	"hop.computer/hop/netproxy"
 	"hop.computer/hop/portforwarding"
 	"hop.computer/hop/transport"
@@ -69,16 +69,65 @@ func (sess *hopSession) checkAuthorization() bool {
 	seemed strange to rely on the client to send the same key that it used during the handshake.
 	Instead I modified the transport layer code so that the client static is stored in the session state.
 	This way the server directly grabs the key that was used in the handshake.*/
-	leaf := sess.server.server.FetchClientLeaf(sess.transportConn) //server fetches client static key that was used in handshake
-	k := keys.PublicKey(leaf.PublicKey)
-	logrus.Info("got userauth init message: ", k.String())
+	logrus.Error("About to check fetch client leaf")
+	/*
+		leaf := sess.server.server.FetchClientLeaf(sess.transportConn) //server fetches client static key that was used in handshake
+		k := keys.PublicKey(leaf.PublicKey)
+		logrus.Info("got userauth init message: ", k.String())
+	*/
 
-	if err := sess.server.authorizeKey(username, k); err != nil {
-		logrus.Errorf("rejecting key for %q: %s", username, err)
+	if /*err := sess.server.authorizeKey(username, k); err != nil && */ false {
+		logrus.Errorf("rejecting key for %q: %s", username /*err*/, nil)
 		return false
 	}
 
 	sess.user = username
+	if user, err := osUser.Lookup(sess.user); err == nil {
+		// TODO(drebelsky): is all of this error checking necessary?
+		// TODO(drebelsky): note that this only works correctly with Go >= 1.16 on Linux
+		gid, err := strconv.Atoi(user.Gid)
+		if err != nil {
+			logrus.Errorf("Couldn't parse gid %v of user %v", user.Gid, username)
+			return false
+		}
+		err = syscall.Setgid(gid)
+		if err != nil {
+			logrus.Errorf("Couldn'set gid of process to %v", gid)
+			return false
+		}
+
+		groupIds, err := user.GroupIds()
+		var groups []int
+		if err == nil {
+			for _, gidString := range groupIds {
+				gid, err := strconv.Atoi(gidString)
+				if err == nil {
+					groups = append(groups, gid)
+				}
+			}
+		} else {
+			groups = append(groups, gid)
+		}
+		err = syscall.Setgroups(groups)
+		if err != nil {
+			logrus.Errorf("Couldn't change groups")
+			return false
+		}
+
+		uid, err := strconv.Atoi(user.Uid)
+		if err != nil {
+			logrus.Errorf("Couldn't parse uid %v of user %v", user.Uid, username)
+			return false
+		}
+		err = syscall.Setuid(uid)
+		if err != nil {
+			logrus.Errorf("Couldn'set uid of process to %v", uid)
+			return false
+		}
+	} else {
+		logrus.Errorf("Couldn't find user %v", username)
+		return false
+	}
 
 	logrus.Info("USER AUTHORIZED")
 	sess.isPrincipal = true
@@ -237,6 +286,34 @@ func (sess *hopSession) checkAction(action string, actionType byte) error {
 
 }
 
+// Returns uid, gid, group ids
+func parseUser(user *osUser.User) (uint32, uint32, []uint32, error) {
+	uid, err := strconv.ParseUint(user.Uid, 10, 32)
+	if err != nil {
+		return 0, 0, nil, errors.New("Couldn't parse uid")
+	}
+	gid, err := strconv.ParseUint(user.Gid, 10, 32)
+	if err != nil {
+		return 0, 0, nil, errors.New("Couldn't parse gid")
+	}
+
+	groupIds, err := user.GroupIds()
+	if err != nil {
+		return 0, 0, nil, errors.New("Couldn't get user's groups")
+	}
+	groups := make([]uint32, 1)
+	groups = append(groups, uint32(gid))
+	for _, gidString := range groupIds {
+		gid, err := strconv.ParseUint(gidString, 10, 32)
+		if err != nil {
+			return 0, 0, nil, errors.New("Failed to parse group id")
+		}
+		groups = append(groups, uint32(gid))
+	}
+
+	return uint32(uid), uint32(gid), groups, nil
+}
+
 func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 	cmd, termEnv, shell, _ := codex.GetCmd(tube)
 	logrus.Info("CMD: ", cmd)
@@ -251,36 +328,34 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 			return
 		}
 	}
-	cache, err := etcpwdparse.NewLoadedEtcPasswdCache() //Best way to do this? should I load this only once and then just reload on misses? What if /etc/passwd modified between accesses?
-	if err != nil {
-		err := errors.New("issue loading /etc/passwd")
-		logrus.Error(err)
-		codex.SendFailure(tube, err)
-		return
-	}
-	if user, ok := cache.LookupUserByName(sess.user); ok {
+
+	// TODO(drebelsky)
+	if user, err := osUser.Lookup(sess.user); err == nil {
 		//Default behavior is for command.Env to inherit parents environment unless given and explicit alternative.
 		//TODO(baumanl): These are minimal environment variables. SSH allows for more inheritance from client, but it gets complicated.
 		env := []string{
 			"USER=" + sess.user,
-			"SHELL=" + user.Shell(),
-			"LOGNAME=" + user.Username(),
-			"HOME=" + user.Homedir(),
+			"LOGNAME=" + user.Username,
+			"HOME=" + user.HomeDir,
 			"TERM=" + termEnv,
 		}
 		var c *exec.Cmd
 		if shell {
 			//login(1) starts default shell for user and changes all privileges and environment variables
-			c = exec.Command("login", "-f", sess.user)
+			// c = exec.Command("login", "-f", sess.user)
+			c = exec.Command("/bin/bash")
 		} else {
-			c = exec.Command(user.Shell(), "-c", cmd)
-			c.Dir = user.Homedir()
-			c.SysProcAttr = &syscall.SysProcAttr{}
-			c.SysProcAttr.Credential = &syscall.Credential{
-				Uid:    uint32(user.Uid()),
-				Gid:    uint32(user.Gid()),
-				Groups: []uint32{uint32(user.Gid())},
+			//TODO(drebelsky) How should we get the shell
+			c = exec.Command("/bin/sh", "-c", cmd)
+			//TODO(drebelsky) Should we handle the uid/gid failed parsing cases
+			//TODO(drebelsky) how much information does this function leak by sending back the errors directly
+			// uid, gid, groups, err := parseUser(user)
+			if err != nil {
+				logrus.Errorf("Failed to parse user data %v", err)
+				codex.SendFailure(tube, errors.New("Failed to parse user data"))
+				return
 			}
+			c.Dir = user.HomeDir
 		}
 		c.Env = env
 		logrus.Infof("Executing: %v", cmd)
@@ -309,14 +384,16 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 			logrus.Info("closed chan")
 		}()
 
-		sess.server.m.Lock()
-		if !sess.isPrincipal {
-			sess.server.principals[int32(c.Process.Pid)] = sess.authgrant.principalSession
-		} else {
-			logrus.Infof("S: using standard muxer")
-			sess.server.principals[int32(c.Process.Pid)] = sess
-		}
-		sess.server.m.Unlock()
+		/*
+			sess.server.m.Lock()
+			if !sess.isPrincipal {
+				sess.server.principals[int32(c.Process.Pid)] = sess.authgrant.principalSession
+			} else {
+				logrus.Infof("S: using standard muxer")
+				sess.server.principals[int32(c.Process.Pid)] = sess
+			}
+			sess.server.m.Unlock()
+		*/
 		if shell {
 			go func() {
 				codex.Server(tube, f)
@@ -403,7 +480,7 @@ func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
 		tube.Write([]byte{netproxy.NpcDen})
 		return
 	}
-	curUser, _ := user.Current()
+	curUser, _ := osUser.Current()
 	if curUser.Username != sess.user || curUser.Uid == "0" { //TODO: necessary because in tests it doesn't run as root so trying to do this causes an error
 		c.SysProcAttr = &syscall.SysProcAttr{}
 		c.SysProcAttr.Credential = &syscall.Credential{
@@ -545,4 +622,80 @@ func (sess *hopSession) LocalServer(tube *tubes.Reliable, arg string) {
 	}()
 	//handles all traffic from end dest back to local port
 	io.Copy(tube, tconn)
+}
+
+// TODO(drebelsky) a hack
+var ErrBufOverflow = errors.New("write would overflow buffer")
+
+type conn struct {
+	buffered []byte
+	out      io.Writer
+}
+
+// TODO: these are bad implementations, but they do all that the muxer needs
+func (c *conn) ReadMsg(b []byte) (int, error) {
+	if c.buffered != nil {
+		if len(c.buffered) > len(b) {
+			return 0, ErrBufOverflow
+		} else {
+			n := copy(b, c.buffered)
+			c.buffered = nil
+			return n, nil
+		}
+	}
+	length := make([]byte, 4)
+	_, err := io.ReadFull(os.Stdin, length)
+	if err != nil {
+		return 0, err
+	}
+	buf := make([]byte, binary.BigEndian.Uint32(length))
+	_, err = io.ReadFull(os.Stdin, buf)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(buf) > len(b) {
+		c.buffered = buf
+		return 0, ErrBufOverflow
+	}
+
+	copy(b, buf)
+	return len(buf), nil
+}
+
+func (c *conn) WriteMsg(b []byte) error {
+	length := make([]byte, 4)
+	binary.BigEndian.PutUint32(length, uint32(len(b)))
+	_, err := os.Stdout.Write(length)
+	if err != nil {
+		return err
+	}
+	_, err = os.Stdout.Write(b)
+	if err != nil {
+		return err
+	}
+	err = os.Stdout.Sync()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// TODO(drebelsky) debate name/location
+func StartSession() {
+	sess := &hopSession{
+		// transportConn:   serverConn,
+		tubeMuxer:       tubes.NewMuxer(&conn{nil, nil}, nil),
+		tubeQueue:       make(chan *tubes.Reliable),
+		done:            make(chan int),
+		controlChannels: []net.Conn{},
+		// server:          s,
+		// authorizedKeysLocation: s.config.AuthorizedKeysLocation,
+	}
+	// if sess.authorizedKeysLocation != sess.server.config.AuthorizedKeysLocation {
+	// 	logrus.Error("Authorized Keys location mismatch")
+	// } else {
+	// 	logrus.Info("ALL GOOD AUTH KEYS LOCATION")
+	// }
+	sess.start()
 }

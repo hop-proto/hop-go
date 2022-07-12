@@ -2,10 +2,13 @@ package tubes
 
 import (
 	"errors"
+	"encoding/binary"
 	"net"
 	"os"
 	"sync"
 	"time"
+	"errors"
+	"fmt"
 
 	"github.com/sirupsen/logrus"
 
@@ -69,9 +72,26 @@ func (m *Muxer) Accept() (*Reliable, error) {
 	return s, nil
 }
 
+// TODO: temporary replacement for fromBytes that returns an error on
+// insufficient data
+func fromNBytes(n int, b []byte) (*frame, error) {
+	dataLength := binary.BigEndian.Uint16(b[2:4])
+	if 12 + int(dataLength) > n {
+	  return nil, errors.New(fmt.Sprintf("Didn't read an entire frame: dataLength=%v n=%v", dataLength, n))
+  }
+	return &frame{
+		tubeID:     b[0],
+		flags:      metaToFlags(b[1]),
+		dataLength: dataLength,
+		data:       b[12 : 12+dataLength],
+		ackNo:      binary.BigEndian.Uint32(b[4:8]),
+		frameNo:    binary.BigEndian.Uint32(b[8:12]),
+	}, nil
+}
+
 func (m *Muxer) readMsg() (*frame, error) {
 	pkt := make([]byte, 65535)
-	_, err := m.underlying.ReadMsg(pkt)
+	n, err := m.underlying.ReadMsg(pkt)
 	if err != nil {
 		return nil, err
 	}
@@ -80,8 +100,7 @@ func (m *Muxer) readMsg() (*frame, error) {
 	if m.timeout != 0 {
 		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
 	}
-	return fromBytes(pkt)
-
+	return fromNBytes(n, pkt)
 }
 
 func (m *Muxer) sender() {

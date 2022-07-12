@@ -24,6 +24,11 @@ func main() {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
 
+	if f.SessionSpecific {
+		hopserver.StartSession()
+		return
+	}
+
 	sc, err := flags.LoadServerConfigFromFlags(f)
 	if err != nil {
 		logrus.Fatalf("error loading config: %s", err)

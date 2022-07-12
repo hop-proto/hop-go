@@ -15,6 +15,7 @@ var ErrExcessArgs = errors.New("excess arguments provided")
 type ServerFlags struct {
 	ConfigPath string
 	Verbose    bool
+	SessionSpecific bool
 	// TODO(baumanl): is it even worth allowing flags for servers? Or should they
 	// always be started from a config file?
 }
@@ -40,6 +41,7 @@ func defineServerFlags(fs *flag.FlagSet, f *ServerFlags) {
 	// fs.StringVar(&sockAddr, "s", hopserver.DefaultHopAuthSocket, "indicates custom sockaddr to use for auth grant")
 	fs.StringVar(&f.ConfigPath, "C", "", "path to server config file")
 	fs.BoolVar(&f.Verbose, "V", false, "verbose logging")
+	fs.BoolVar(&f.SessionSpecific, "s", false, "Run for a specific session")
 }
 
 func mergeServerFlagsAndConfig(f *ServerFlags, sc *config.ServerConfig) error {
