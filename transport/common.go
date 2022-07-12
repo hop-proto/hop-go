@@ -44,6 +44,8 @@ const (
 	AssociatedDataLen = HeaderLen + SessionIDLen + CounterLen
 )
 
+var ErrTransportOnly = errors.New("this error should not leave the transport layer")
+
 // ErrBufOverflow is returned when write would go off the end off a buffer.
 var ErrBufOverflow = errors.New("write would overflow buffer")
 
@@ -53,14 +55,14 @@ var ErrBufUnderflow = errors.New("read would be past end of buffer")
 // ErrUnexpectedMessage is returned when the wrong message is received during
 // the handshake, or when a handshake message is received after completing the
 // handshake.
-var ErrUnexpectedMessage = errors.New("attempted to deserialize unexpected message type")
+var ErrUnexpectedMessage = fmt.Errorf("attempted to deserialize unexpected message type [%w]", ErrTransportOnly)
 
 // ErrUnsupportedVersion is returned when the version field in a handshake
 // packet is anything besides Version.
 var ErrUnsupportedVersion = errors.New("unsupported version")
 
 // ErrInvalidMessage is returned when a message is serialized or otherwise created incorrectly.
-var ErrInvalidMessage = errors.New("invalid message")
+var ErrInvalidMessage = fmt.Errorf("invalid message [%w]", ErrTransportOnly)
 
 // ErrUnknownSession is returned when a message contains an unknown SessionID.
 var ErrUnknownSession = errors.New("unknown session")
@@ -79,7 +81,7 @@ var ErrTimeout = fmt.Errorf("operation timed out [%w]", os.ErrDeadlineExceeded)
 
 // ErrReplay is returned when a message is a duplicate. This should not
 // percolate outside of the internal APIs.
-var ErrReplay = errors.New("packet is a replay")
+var ErrReplay = fmt.Errorf("packet is a replay [%w]", ErrTransportOnly)
 
 // MessageType is a single-byte-wide enum used as the first byte of every message. It can be used to differentiate message types.
 type MessageType byte
