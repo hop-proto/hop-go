@@ -1,14 +1,13 @@
 package tubes
 
 import (
-	"errors"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"net"
 	"os"
 	"sync"
 	"time"
-	"errors"
-	"fmt"
 
 	"github.com/sirupsen/logrus"
 
@@ -76,9 +75,9 @@ func (m *Muxer) Accept() (*Reliable, error) {
 // insufficient data
 func fromNBytes(n int, b []byte) (*frame, error) {
 	dataLength := binary.BigEndian.Uint16(b[2:4])
-	if 12 + int(dataLength) > n {
-	  return nil, errors.New(fmt.Sprintf("Didn't read an entire frame: dataLength=%v n=%v", dataLength, n))
-  }
+	if 12+int(dataLength) > n {
+		return nil, errors.New(fmt.Sprintf("Didn't read an entire frame: dataLength=%v n=%v", dataLength, n))
+	}
 	return &frame{
 		tubeID:     b[0],
 		flags:      metaToFlags(b[1]),
