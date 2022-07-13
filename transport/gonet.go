@@ -5,6 +5,9 @@ import (
 	"net"
 )
 
+const subspace = "subspace"
+const udp = "udp"
+
 // Client directly implements net.Conn
 var _ net.Conn = &Client{}
 
@@ -13,11 +16,11 @@ var ErrUDPOnly = errors.New("portal requires UDP transport")
 
 // Dial matches the interface of net.Dial
 func Dial(network, address string, config ClientConfig) (*Client, error) {
-	if network != "udp" && network != "subspace" {
+	if network != udp && network != subspace {
 		return nil, ErrUDPOnly
 	}
 
-	inner, err := net.Dial("udp", address)
+	inner, err := net.Dial(udp, address)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +31,7 @@ func Dial(network, address string, config ClientConfig) (*Client, error) {
 //DialNP is similar to Dial, but using a reliable tube as an underlying conn for the Client
 func DialNP(network, address string, tube UDPLike, config ClientConfig) (*Client, error) {
 	// Figure out what address we would use to dial
-	dst, err := net.ResolveUDPAddr("udp", address)
+	dst, err := net.ResolveUDPAddr(udp, address)
 	if err != nil {
 		return nil, err
 	}
@@ -38,11 +41,11 @@ func DialNP(network, address string, tube UDPLike, config ClientConfig) (*Client
 // DialWithDialer is similar to Dial, but uses options specified in a net.Dialer
 // TODO(hosono) Do we need a DialNPWithDialer()??
 func DialWithDialer(dialer *net.Dialer, network, address string, config ClientConfig) (*Client, error) {
-	if network != "udp" && network != "subspace" {
+	if network != udp && network != subspace {
 		return nil, ErrUDPOnly
 	}
 
-	inner, err := dialer.Dial("udp", address)
+	inner, err := dialer.Dial(udp, address)
 	if err != nil {
 		return nil, err
 	}
