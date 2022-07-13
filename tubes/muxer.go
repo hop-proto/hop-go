@@ -77,7 +77,9 @@ func (m *Muxer) readMsg() (*frame, error) {
 	}
 
 	// Set timeout
-	m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
+	if m.timeout != 0 {
+		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
+	}
 	return fromBytes(pkt)
 
 }
@@ -95,7 +97,9 @@ func (m *Muxer) Start() {
 	m.stopped = false
 
 	// Set initial timeout
-	m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
+	if m.timeout != 0 {
+		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
+	}
 	for !m.stopped {
 		frame, err := m.readMsg()
 		if errors.Is(err, os.ErrDeadlineExceeded) { // if error is a timeout
