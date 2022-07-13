@@ -213,6 +213,7 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 			}
 		}
 	}()
+	session.Wait()
 }
 
 //handles connections to the hop server UDS to allow hop client processes to get authorization grants from their principal
