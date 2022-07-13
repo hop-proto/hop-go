@@ -58,32 +58,17 @@ type hopSession struct {
 	authgrant   *authGrant
 }
 
-func (sess *hopSession) checkAuthorization() bool {
+func (sess *hopSession) checkAuthorization(k *keys.PublicKey) bool {
 	uaTube, _ := sess.tubeMuxer.Accept()
 	logrus.Info("S: Accepted USER AUTH tube")
 	defer uaTube.Close()
 	username := userauth.GetInitMsg(uaTube) //client sends desired username
 	logrus.Info("S: client req to access as: ", username)
 
-	length := make([]byte, 4)
-	_, err := io.ReadFull(os.Stdin, length)
-	if err != nil {
-		return false
-	}
-	kBuf := make([]byte, binary.BigEndian.Uint32(length))
-	_, err = io.ReadFull(os.Stdin, kBuf)
-	if err != nil {
-		return false
-	}
-	io.ReadFull(os.Stdout, kBuf)
-	k, err := keys.ParseDHPublicKey(string(kBuf))
-	if err != nil {
-		return false
-	}
 	logrus.Info("got userauth init message: ", k.String())
 
 	if err := authorizeKey(username, *k); err != nil {
-		logrus.Errorf("rejecting key for %q: %s", username /*err*/, nil)
+		logrus.Errorf("rejecting key for %q: %s", username, err)
 		return false
 	}
 
@@ -175,12 +160,12 @@ func (sess *hopSession) checkAuthorization() bool {
 //start() sets up a session's muxer and handles incoming tube requests.
 //calls close when it receives a signal from the code execution tube that it is finished
 //TODO(baumanl): change closing behavior for sessions without cmd/shell --> integrate port forwarding duration
-func (sess *hopSession) start() {
+func (sess *hopSession) start(k *keys.PublicKey) {
 	go sess.tubeMuxer.Start()
 	logrus.Info("S: STARTED CHANNEL MUXER")
 
 	//User Authorization Step
-	if !sess.checkAuthorization() {
+	if !sess.checkAuthorization(k) {
 		return
 		//TODO(baumanl): Check closing behavior. how to end session completely
 	}
@@ -689,6 +674,22 @@ func (c *conn) WriteMsg(b []byte) error {
 
 // TODO(drebelsky) debate name/location
 func StartSession() {
+	// Read key from stdin
+	length := make([]byte, 4)
+	_, err := io.ReadFull(os.Stdin, length)
+	if err != nil {
+		return
+	}
+	kBuf := make([]byte, binary.BigEndian.Uint32(length))
+	_, err = io.ReadFull(os.Stdin, kBuf)
+	if err != nil {
+		return
+	}
+	k, err := keys.ParseDHPublicKey(string(kBuf))
+	if err != nil {
+		return
+	}
+
 	sess := &hopSession{
 		// transportConn:   serverConn,
 		tubeMuxer:       tubes.NewMuxer(&conn{nil, nil}, nil),
@@ -703,5 +704,5 @@ func StartSession() {
 	// } else {
 	// 	logrus.Info("ALL GOOD AUTH KEYS LOCATION")
 	// }
-	sess.start()
+	sess.start(k)
 }

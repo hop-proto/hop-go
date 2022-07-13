@@ -167,11 +167,13 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 	This way the server directly grabs the key that was used in the handshake.*/
 	logrus.Error("About to check fetch client leaf")
 	//server fetches client static key that was used in handshake
-	leafKey := s.server.FetchClientLeaf(serverConn).PublicKey
+	leafKey := keys.PublicKey(s.server.FetchClientLeaf(serverConn).PublicKey)
+	serialized := []byte(leafKey.String())
 	length := make([]byte, 4)
-	binary.BigEndian.PutUint32(length, uint32(len(leafKey)))
+	binary.BigEndian.PutUint32(length, uint32(len(serialized)))
 	_, err = stdin.Write(length)
-	_, err = stdin.Write(leafKey[:])
+	_, err = stdin.Write(serialized)
+
 	go func() {
 		b := make([]byte, 65535)
 		length := make([]byte, 4)
@@ -349,7 +351,7 @@ func authorizeKey(user string, publicKey keys.PublicKey) error {
 		return err
 	}
 	path := core.AuthorizedKeysPath(d)
-	f, err := os.Open(path[1:])
+	f, err := os.DirFS("/").Open(path[1:])
 	if err != nil {
 		return err
 	}
