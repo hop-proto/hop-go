@@ -36,9 +36,10 @@ func newTestServerConfig(t *testing.T) (*ServerConfig, *VerifyConfig) {
 	root, err := certs.ReadCertificatePEMFile("testdata/root.pem")
 	assert.NilError(t, err)
 	server := ServerConfig{
-		KeyPair:      keyPair,
-		Certificate:  certificate,
-		Intermediate: intermediate,
+		KeyPair:          keyPair,
+		Certificate:      certificate,
+		Intermediate:     intermediate,
+		HandshakeTimeout: 5 * time.Second,
 	}
 	verify := VerifyConfig{
 		Store: certs.Store{},

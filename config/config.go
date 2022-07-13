@@ -50,6 +50,7 @@ type ServerConfig struct {
 	Names []NameConfig
 
 	HandshakeTimeout time.Duration
+	DataTimeout      time.Duration
 }
 
 // HostConfig contains a definition of a host pattern in a client configuration.

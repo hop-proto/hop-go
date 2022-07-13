@@ -78,7 +78,7 @@ func (c *Handle) ReadMsg(b []byte) (int, error) {
 	}
 
 	// Wait for a message until timeout
-	if msg == nil {
+	if msg == nil && c.readTimeout.get() != 0 {
 		timer := time.NewTimer(c.readTimeout.get())
 		select {
 		case msg = <-c.recv:
@@ -134,7 +134,7 @@ func (c *Handle) Read(b []byte) (int, error) {
 	}
 
 	// Wait for a message until timeout
-	if msg == nil {
+	if msg == nil && c.readTimeout != 0 {
 		timer := time.NewTimer(c.readTimeout.get())
 		select {
 		case msg = <-c.recv:
@@ -275,6 +275,13 @@ func (c *Handle) SetReadDeadline(t time.Time) error {
 	if c.closed.isSet() {
 		return io.EOF
 	}
+
+	// a zero value for t means the connection will not timeout
+	if t.IsZero() {
+		c.readTimeout = 0
+		return nil
+	}
+
 	now := time.Now()
 	var timeout time.Duration
 	if t.After(now) {
@@ -293,6 +300,13 @@ func (c *Handle) SetWriteDeadline(t time.Time) error {
 	if c.closed.isSet() {
 		return io.EOF
 	}
+
+	// a zero value for t means the connection will not timeout
+	if t.IsZero() {
+		c.readTimeout = 0
+		return nil
+	}
+
 	now := time.Now()
 	var timeout time.Duration
 	if t.After(now) {

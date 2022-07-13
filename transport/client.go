@@ -329,9 +329,9 @@ func (c *Client) readMsg() (int, error) {
 // ReadMsg reads a single message. If b is too short to hold the message, it is
 // buffered and ErrBufOverflow is returned.
 func (c *Client) ReadMsg(b []byte) (n int, err error) {
-	// This ensures that errors that wrap ErrTransportOnly don't bubble up to the user
+	// This ensures that errors that wrap errTransportOnly don't bubble up to the user
 	defer func() {
-		if errors.Is(err, ErrTransportOnly) {
+		if errors.Is(err, errTransportOnly) {
 			err = nil
 		}
 	}()
@@ -382,9 +382,9 @@ func (c *Client) ReadMsg(b []byte) (n int, err error) {
 
 // Read implements net.Conn.
 func (c *Client) Read(b []byte) (n int, err error) {
-	// This ensures that errors that wrap ErrTransportOnly don't bubble up to the user
+	// This ensures that errors that wrap errTransportOnly don't bubble up to the user
 	defer func() {
-		if errors.Is(err, ErrTransportOnly) {
+		if errors.Is(err, errTransportOnly) {
 			err = nil
 		}
 	}()
