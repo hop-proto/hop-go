@@ -291,7 +291,7 @@ func (s *HopServer) ListenAddress() net.Addr {
 	return s.server.ListenAddress()
 }
 
-// authorizeKey returns true if the publicKey is in the authorized_keys file for
+// authorizeKey returns nil if the publicKey is in the authorized_keys file for
 // the user.
 func (s *HopServer) authorizeKey(user string, publicKey keys.PublicKey) error {
 	d, err := config.UserDirectoryFor(user)

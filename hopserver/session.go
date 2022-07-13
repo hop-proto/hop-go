@@ -395,8 +395,7 @@ func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
 		tube.Write([]byte{netproxy.NpcDen})
 		return
 	}
-	args := []string{"remotePF", arg}
-	c := exec.Command(args[0], args[1:]...)
+	c := exec.Command("remotePF", arg)
 	logrus.Infof("configuring child to run as %v", sess.user)
 	userEntry, ok := cache.LookupUserByName(sess.user)
 	if !ok {

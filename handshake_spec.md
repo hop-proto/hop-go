@@ -4,7 +4,7 @@
 
 [TOC]
 
-Draft Authors: Wilson Nguyen, Garry Wan, David Adrian, Zakir Durumeric
+Draft Authors: Wilson Nguyen, Gerry Wan, David Adrian, Zakir Durumeric
 
 ## Prerequisite Knowledge
 
