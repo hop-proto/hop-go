@@ -21,6 +21,7 @@ import (
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/codex"
 	"hop.computer/hop/common"
+	"hop.computer/hop/keys"
 	"hop.computer/hop/netproxy"
 	"hop.computer/hop/portforwarding"
 	"hop.computer/hop/transport"
@@ -64,19 +65,24 @@ func (sess *hopSession) checkAuthorization() bool {
 	username := userauth.GetInitMsg(uaTube) //client sends desired username
 	logrus.Info("S: client req to access as: ", username)
 
-	// TODO(baumanl): verify that this is the best way to get client static key.
-	/*I originally had the client just send the key over along with the username, but it
-	seemed strange to rely on the client to send the same key that it used during the handshake.
-	Instead I modified the transport layer code so that the client static is stored in the session state.
-	This way the server directly grabs the key that was used in the handshake.*/
-	logrus.Error("About to check fetch client leaf")
-	/*
-		leaf := sess.server.server.FetchClientLeaf(sess.transportConn) //server fetches client static key that was used in handshake
-		k := keys.PublicKey(leaf.PublicKey)
-		logrus.Info("got userauth init message: ", k.String())
-	*/
+	length := make([]byte, 4)
+	_, err := io.ReadFull(os.Stdin, length)
+	if err != nil {
+		return false
+	}
+	kBuf := make([]byte, binary.BigEndian.Uint32(length))
+	_, err = io.ReadFull(os.Stdin, kBuf)
+	if err != nil {
+		return false
+	}
+	io.ReadFull(os.Stdout, kBuf)
+	k, err := keys.ParseDHPublicKey(string(kBuf))
+	if err != nil {
+		return false
+	}
+	logrus.Info("got userauth init message: ", k.String())
 
-	if /*err := sess.server.authorizeKey(username, k); err != nil && */ false {
+	if err := authorizeKey(username, *k); err != nil {
 		logrus.Errorf("rejecting key for %q: %s", username /*err*/, nil)
 		return false
 	}

@@ -159,11 +159,24 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 	_ = err // TODO(drebelsky) handle
 	stdout, err := session.StdoutPipe()
 	err = session.Start()
+
+	// TODO(baumanl): verify that this is the best way to get client static key.
+	/*I originally had the client just send the key over along with the username, but it
+	seemed strange to rely on the client to send the same key that it used during the handshake.
+	Instead I modified the transport layer code so that the client static is stored in the session state.
+	This way the server directly grabs the key that was used in the handshake.*/
+	logrus.Error("About to check fetch client leaf")
+	//server fetches client static key that was used in handshake
+	leafKey := s.server.FetchClientLeaf(serverConn).PublicKey
+	length := make([]byte, 4)
+	binary.BigEndian.PutUint32(length, uint32(len(leafKey)))
+	_, err = stdin.Write(length)
+	_, err = stdin.Write(leafKey[:])
 	go func() {
 		b := make([]byte, 65535)
 		length := make([]byte, 4)
 		for {
-      n, err := serverConn.ReadMsg(b)
+			n, err := serverConn.ReadMsg(b)
 			if err != nil && err != transport.ErrTimeout {
 				break
 			} else {
@@ -329,13 +342,14 @@ func (s *HopServer) ListenAddress() net.Addr {
 
 // authorizeKey returns nil if the publicKey is in the authorized_keys file for
 // the user.
-func (s *HopServer) authorizeKey(user string, publicKey keys.PublicKey) error {
+// TODO(drebelsky) consider passing publicKey by ref
+func authorizeKey(user string, publicKey keys.PublicKey) error {
 	d, err := config.UserDirectoryFor(user)
 	if err != nil {
 		return err
 	}
 	path := core.AuthorizedKeysPath(d)
-	f, err := s.fsystem.Open(path[1:])
+	f, err := os.Open(path[1:])
 	if err != nil {
 		return err
 	}
