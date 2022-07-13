@@ -39,4 +39,5 @@ test:
 
 .PHONY: serve-dev
 serve-dev: ## launch a container running the server with code mounted in
+	go build ./cmd/hopd # the docker container can't edit the file system
 	make -C hack serve-dev
