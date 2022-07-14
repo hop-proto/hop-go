@@ -361,19 +361,19 @@ func (c *Client) ReadMsg(b []byte) (n int, err error) {
 	}
 
 	// read and decrypt into c.plaintext
-	n, err = c.readMsg()
+	plaintextLen, err := c.readMsg()
 	if err != nil {
 		return 0, err
 	}
 
 	// If the input is long enough, just copy into it
-	if len(b) >= n {
-		copy(b, c.plaintext[:n])
-		return n, nil
+	if len(b) >= plaintextLen {
+		copy(b, c.plaintext[:plaintextLen])
+		return plaintextLen, nil
 	}
 
 	// Input was too short, buffer this message and return ErrBufOverflow
-	_, err = c.readBuf.Write(c.plaintext[len(b):n])
+	_, err = c.readBuf.Write(c.plaintext[:plaintextLen])
 	if err != nil {
 		return 0, err
 	}
