@@ -414,18 +414,18 @@ func (c *Client) Read(b []byte) (n int, err error) {
 	}
 
 	// read and decrypt into c.plaintext
-	n, err = c.readMsg()
+	plaintextLen, err := c.readMsg()
 	if err != nil {
 		return 0, err
 	}
 
-	n = copy(b, c.plaintext)
-	if n == len(c.plaintext) {
+	n = copy(b, c.plaintext[:plaintextLen])
+	if n == plaintextLen {
 		return n, nil
 	}
 
 	// Buffer leftovers
-	_, err = c.readBuf.Write(c.plaintext[n:])
+	_, err = c.readBuf.Write(c.plaintext[n:plaintextLen])
 	return n, err
 }
 
