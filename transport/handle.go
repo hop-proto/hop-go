@@ -227,9 +227,24 @@ func (c *Handle) close() {
 // return io.EOF.
 //
 // TODO(dadrian): Implement
+// TODO(hosono) here is where we send a protocol close message
 func (c *Handle) Close() error {
+	// TODO(hosono) do we need the read a write locks?
+	if c.IsClosed() {
+		return io.EOF
+	}
 	c.m.Lock()
+	c.readLock.Lock()
+	c.writeLock.Lock()
 	defer c.m.Unlock()
+	defer c.readLock.Unlock()
+	defer c.writeLock.Unlock()
+
+	// Close the channels
+	close(c.recv)
+	close(c.send)
+
+	c.closed.setTrue()
 
 	return nil
 }

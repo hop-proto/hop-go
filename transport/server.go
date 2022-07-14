@@ -44,7 +44,9 @@ type Server struct {
 	pendingConnections chan *Handle
 	outgoing           chan outgoing
 
-	cookieKey [KeyLen]byte
+	cookieKey    [KeyLen]byte
+
+	wg 			 sync.WaitGroup
 }
 
 // FetchClientLeaf returns the client leaf certificate used in handshake with associated handle's sessionID
@@ -498,11 +500,10 @@ func (s *Server) Serve() error {
 	// TODO(dadrian): These should be smaller buffers
 	s.rawRead = make([]byte, 65535)
 	s.handshakeBuf = make([]byte, 65535)
-	wg := sync.WaitGroup{}
-	wg.Add(2)
+	s.wg.Add(3)
 	go func() {
-		defer wg.Done()
-		for !s.closed.Load() {
+		defer s.wg.Done()
+		for !s.closed.isSet() {
 			err := s.readPacket()
 			logrus.Debug("read a packet")
 			if err != nil {
@@ -511,14 +512,14 @@ func (s *Server) Serve() error {
 		}
 	}()
 	go func() {
-		defer wg.Done()
+		defer s.wg.Done()
 		for outgoing := range s.outgoing {
 			s.writePacket(outgoing.pkt, outgoing.dst)
 		}
 		// TODO(dadrian): Write packets
 	}()
-	wg.Done()
-	wg.Wait()
+	s.wg.Done()
+	s.wg.Wait()
 	return nil
 }
 
@@ -624,9 +625,42 @@ func (s *Server) ListenAddress() net.Addr {
 // Close stops the server, causing Serve() to return.
 //
 // TODO(dadrian): What does it do to writes?
-func (s *Server) Close() error {
-	// TODO(dadrian): #concurrency
-	s.closed.Store(true)
+func (s *Server) Close() (err error) {
+	s.m.Lock()
+	defer s.m.Unlock()
+
+	// These lines will close the go routines in s.Serve() and wait for them to exit
+	s.closed.setTrue()
+	close(s.outgoing)
+	s.wg.Wait()
+
+	for _, session := range(s.sessions) {
+		// TODO(hosono) how does this become nil?
+		if session.handle != nil {
+			session.handle.Close()
+		}
+	}
+
+	// TODO(hosono) is this the right way to drain the channel?
+	Loop:
+	for {
+		select {
+		case handle := <-s.pendingConnections:
+			if handle != nil {
+				handle.Close()
+			}
+		default:
+			break Loop
+		}
+	}
+	close(s.pendingConnections)
+
+
+	err = s.udpConn.Close()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 

@@ -1,11 +1,16 @@
 package transport
 
 import (
+	"net"
 	"testing"
+	"time"
 
+	"golang.org/x/net/nettest"
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
 
+	"hop.computer/hop/certs"
+	"hop.computer/hop/keys"
 	"hop.computer/hop/kravatte"
 )
 
@@ -14,4 +19,54 @@ func TestTransportAEAD(t *testing.T) {
 	sanse, err := kravatte.NewSANSE(key[:])
 	assert.NilError(t, err)
 	assert.Check(t, cmp.Equal(sanse.Overhead(), TagLen))
+}
+
+// Wrapper around the client nettests
+func TestTransportConn(t *testing.T) {
+	makePipe := func() (net.Conn, net.Conn, func(), error) {
+		// Start server UDP connection
+		serverPkt, err := net.ListenPacket("udp", "localhost:0")
+		assert.NilError(t, err)
+
+		// Create new server
+		serverUDP := serverPkt.(*net.UDPConn)
+		serverConfig, verifyConfig := newTestServerConfig(t)
+		serverConn, err := NewServer(serverUDP, *serverConfig)
+		assert.NilError(t, err)
+		go serverConn.Serve()
+
+		// Set up client info
+		keyPair, err := keys.ReadDHKeyFromPEMFile("testdata/leaf-key.pem")
+		assert.NilError(t, err)
+		leaf, err := certs.SelfSignLeaf(&certs.Identity{
+			PublicKey: keyPair.Public,
+		})
+		assert.NilError(t, err)
+
+		// Dial the server
+		clientConn, err := Dial("udp", serverUDP.LocalAddr().String(), ClientConfig{
+			Verify:    *verifyConfig,
+			Exchanger: keyPair,
+			Leaf:      leaf,
+		})
+		assert.NilError(t, err)
+
+		// Perform Handshake
+		err = clientConn.Handshake()
+		assert.NilError(t, err)
+
+		// Get handle from server
+		handle, err  := serverConn.AcceptTimeout(10 * time.Second)
+		assert.NilError(t, err)
+
+		stop := func() {
+			handle.Close()
+			clientConn.Close()
+			serverConn.Close()
+		}
+
+		return clientConn, handle, stop, nil
+	}
+	var mp = nettest.MakePipe(makePipe)
+	nettest.TestConn(t, mp)
 }
