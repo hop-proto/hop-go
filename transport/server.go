@@ -79,7 +79,7 @@ func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) 
 				s.clearSessionStateLocked(ss.sessionID)
 			}
 		} else {
-			logrus.Infof("Connection to %s did not time out", remoteAddr)
+			logrus.Debugf("Connection to %s did not time out", remoteAddr)
 		}
 	}(s, remoteAddr)
 
