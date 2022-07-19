@@ -9,8 +9,8 @@ import (
 	"unsafe"
 
 	"fmt"
-	"strings"
 	"strconv"
+	"strings"
 
 	"hop.computer/hop/kravatte"
 	"hop.computer/hop/transport"
@@ -21,27 +21,27 @@ const KeyLen = transport.KeyLen
 
 //export PlaintextLen
 func PlaintextLen(transportLen int) int {
-  return transport.PlaintextLen(transportLen)
+	return transport.PlaintextLen(transportLen)
 }
 
 // Convert key of the form [num num num num] to the corresponding binary string
 // Returns nil on invalid parse
 //export parseKey
 func parseKey(keyString unsafe.Pointer, keyLen C.size_t) (unsafe.Pointer, int) {
-  key := string(unsafe.Slice((*byte)(keyString), keyLen))
-  if len(key) < 3 || key[0] != '[' || key[len(key) - 1] != ']' {
-    return nil, 0
-  }
+	key := string(unsafe.Slice((*byte)(keyString), keyLen))
+	if len(key) < 3 || key[0] != '[' || key[len(key)-1] != ']' {
+		return nil, 0
+	}
 
-  res := []byte(nil)
-  for _, numS := range(strings.Split(key[1 : len(key) - 1], " ")) {
-    n, err := strconv.Atoi(numS)
-    if err != nil {
-      return nil, 0
-    }
-    res = append(res, byte(n))
-  }
-  return C.CBytes(res), len(res)
+	res := []byte(nil)
+	for _, numS := range strings.Split(key[1:len(key)-1], " ") {
+		n, err := strconv.Atoi(numS)
+		if err != nil {
+			return nil, 0
+		}
+		res = append(res, byte(n))
+	}
+	return C.CBytes(res), len(res)
 }
 
 //export freeKey
@@ -63,17 +63,17 @@ const ErrPlaintextSize = 8
 // Returns number of bytes read, error
 //export readPacket
 func readPacket(
-  plaintext_buf unsafe.Pointer, plaintext_len C.int,
-  pkt_buf unsafe.Pointer, pkt_len C.int,
-  key_buf unsafe.Pointer, key_len C.int,
+	plaintext_buf unsafe.Pointer, plaintext_len C.int,
+	pkt_buf unsafe.Pointer, pkt_len C.int,
+	key_buf unsafe.Pointer, key_len C.int,
 ) (int, int) {
-  if key_len != KeyLen {
-    fmt.Printf("%v %v\n", key_len, KeyLen)
-    return 0, ErrKeyLen
-  }
+	if key_len != KeyLen {
+		fmt.Printf("%v %v\n", key_len, KeyLen)
+		return 0, ErrKeyLen
+	}
 	key := unsafe.Slice((*byte)(key_buf), KeyLen)
-  plaintext := unsafe.Slice((*byte)(plaintext_buf), plaintext_len)
-  pkt := unsafe.Slice((*byte)(pkt_buf), pkt_len)
+	plaintext := unsafe.Slice((*byte)(plaintext_buf), plaintext_len)
+	pkt := unsafe.Slice((*byte)(pkt_buf), pkt_len)
 	plaintextLen := transport.PlaintextLen(len(pkt))
 	ciphertextLen := plaintextLen + transport.TagLen
 	if plaintextLen > len(plaintext) {
@@ -122,4 +122,3 @@ func readPacket(
 
 // We need an empty main function so that the library compiles
 func main() {}
-
