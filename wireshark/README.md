@@ -30,6 +30,9 @@ Run `tcpdump -i any -w outputfile.pcap` to get a packet dump
 4. Launch Wireshark
   * If you get the error `Lua: Error during loading:`, the path name to your plugins directory and `attempt to call a nil value`, you can either follow the longer instructions in the bullet point to step three or edit `%APPDATA%/Wireshark/plugins/hop.lua`'s first line so that the path is a valid windows path (e.g., should start with `C:/` not `/cygdrive/c`)
 
+# Running
+When running Wireshark, you can secondary click on a HOP packet to edit the HOP decoding preferences to set the ephemeral keys. Both keys should be in the form of `[num num num]` (with the number of `num`s being equal to the length of the ephemeral key and each byte being separated by a space)
+
 # TODO
 Reliable Tube reassembly
 
