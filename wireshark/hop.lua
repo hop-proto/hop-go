@@ -77,6 +77,9 @@ hop_tube.fields.exec_res = ProtoField.uint8("hop_tube.exec_res", "Exec Response 
 hop_tube.fields.exec_err_len = ProtoField.uint32("hop_tube.exec.err_len", "Exec Err Length")
 hop_tube.fields.exec_err = ProtoField.string("hop_tube.exec_err", "Exec Err")
 
+-- TODO: debate name/severity
+hop_tube.experts.data_short = ProtoExpert.new("hop_tube.data_short", "Hop tube data short", expert.group.MALFORMED, expert.severity.ERROR)
+
 -- Function to handle client hellos
 function client_hello(tree, buffer)
 	tree:add(hop.fields.version, buffer(1,1))
@@ -183,7 +186,13 @@ function hop_tube.dissector(buffer, pinfo, ptree)
   subtree:add(hop_tube.fields.data_length, data_length)
   data_length = data_length:uint()
   subtree:add(hop_tube.fields.frame_no, buffer(8, 4))
-  local data_tree = subtree:add(hop_tube.fields.data, buffer(12, data_length))
+  local data_tree
+  if data_length + 12 > buffer:len() then
+    data_tree = subtree:add(hop_tube.fields.data, buffer(12, buffer:len() - 12))
+    data_tree:add_proto_expert_info(hop_tube.experts.data_short)
+  else
+    data_tree = subtree:add(hop_tube.fields.data, buffer(12, data_length))
+  end
   -- If this is an initiate packet (REQ/RES set)
   if bit.band(flags, 12) ~= 0 then
     subtree:add(hop_tube.fields.type, buffer(6, 1))
