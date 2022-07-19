@@ -6,6 +6,9 @@ package.loadlib(package_loc, "luaopen_libcompat")()
 local hop = Proto("hop", "Hop Data")
 local hop_tube = Proto("hop_tube", "Hop Tube Data")
 
+hop.prefs.client_to_server_key = Pref.string("Client to Server Key", "", "The key used to encrypt traffic from the client to the server")
+hop.prefs.server_to_client_key = Pref.string("Server to client Key", "", "The key used to encrypt traffic from the server to the client")
+
 -- Hop message types
 local msg_type_name = {
 	[0x01] = "Client Hello",
@@ -37,6 +40,7 @@ hop.fields.certificates = ProtoField.bytes("hop.certificates", "Certificates")
 hop.fields.certificates_auth_tag = ProtoField.bytes("hop.certificates_auth_tag", "Certificates Authentication Tag")
 hop.fields.counter = ProtoField.uint64("hop.conter", "Counter", base.DEC)
 hop.fields.encrypted_data = ProtoField.bytes("hop.encrypted_data", "Encrypted Data")
+hop.fields.decrypted_data = ProtoField.bytes("hop.decrypted_data", "Decrypted Data")
 
 local tube_type_name = {
 	[1] = "ExecTube",
