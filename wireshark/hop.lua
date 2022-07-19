@@ -1,9 +1,6 @@
 -- Hop Dissector for Wireshark
-<<<<<<< Updated upstream
-=======
 --
 package.loadlib(package_loc, "luaopen_libcompat")()
->>>>>>> Stashed changes
 
 -- Define the protocols
 local hop = Proto("hop", "Hop Data")
@@ -129,8 +126,6 @@ function transport(tree, buffer, pinfo, ptree)
 	tree:add(hop.fields.session_id, buffer(4,4))
 	tree:add(hop.fields.counter, buffer(8, 8))
 	tree:add(hop.fields.encrypted_data, buffer(16, buffer:len()-32))
-<<<<<<< Updated upstream
-=======
 
 	local pt, err = read_packet(buffer:bytes():raw(), convert_key(hop.prefs.client_to_server_key))
 	if err ~= 0 then
@@ -141,7 +136,6 @@ function transport(tree, buffer, pinfo, ptree)
     tree:add(hop.fields.decrypted_data, decrypted(0, decrypted:len()))
     Dissector.get("hop_tube"):call(decrypted, pinfo, ptree)
   end
->>>>>>> Stashed changes
 	tree:add(hop.fields.mac, buffer(buffer:len()-16,16))
 end
 
