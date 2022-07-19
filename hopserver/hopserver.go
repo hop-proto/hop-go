@@ -207,7 +207,7 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 			if err != nil {
 				break
 			}
-			err = serverConn.WriteMsg(b[:n])
+			err = serverConn.WriteMsg(append([]byte(nil), b[:n]...))
 			if err != nil {
 				break
 			}
