@@ -165,7 +165,6 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 	seemed strange to rely on the client to send the same key that it used during the handshake.
 	Instead I modified the transport layer code so that the client static is stored in the session state.
 	This way the server directly grabs the key that was used in the handshake.*/
-	logrus.Error("About to check fetch client leaf")
 	//server fetches client static key that was used in handshake
 	leafKey := keys.PublicKey(s.server.FetchClientLeaf(serverConn).PublicKey)
 	serialized := []byte(leafKey.String())
