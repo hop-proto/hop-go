@@ -1,9 +1,6 @@
 package tubes
 
 import (
-	"encoding/binary"
-	"errors"
-	"fmt"
 	"net"
 	"os"
 	"sync"
