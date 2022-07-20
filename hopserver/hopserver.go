@@ -154,7 +154,7 @@ func (s *HopServer) Serve() {
 // newSession Starts a new hop session
 func (s *HopServer) newSession(serverConn *transport.Handle) {
 	// TODO(drebelsky): do we have a better mechanism for this?
-	session := exec.Command("./hopd", "-s")
+	session := exec.Command(os.Args[0], "-s")
 	stdin, err := session.StdinPipe()
 	_ = err // TODO(drebelsky) handle
 	stdout, err := session.StdoutPipe()

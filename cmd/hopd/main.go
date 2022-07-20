@@ -14,6 +14,9 @@ import (
 
 func main() {
 	logrus.SetLevel(logrus.InfoLevel)
+	if len(os.Args) < 1 || len(os.Args[0]) < 1 || os.Args[0][0] != '/' {
+		logrus.Fatal("hopd must be run using an absolute path")
+	}
 	f, err := flags.ParseServerArgs(os.Args)
 	if err != nil {
 		logrus.Error(err)
