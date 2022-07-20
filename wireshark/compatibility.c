@@ -1,3 +1,4 @@
+//go:build exclude
 #include <ctype.h>
 #include <stdlib.h>
 
