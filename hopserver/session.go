@@ -1,6 +1,7 @@
 package hopserver
 
 import (
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -620,7 +621,8 @@ var ErrBufOverflow = errors.New("write would overflow buffer")
 
 type conn struct {
 	buffered []byte
-	out      io.Writer
+	in       *bufio.Reader
+	out      *bufio.Writer
 }
 
 // TODO: these are bad implementations, but they do all that the muxer needs
@@ -635,12 +637,12 @@ func (c *conn) ReadMsg(b []byte) (int, error) {
 		}
 	}
 	length := make([]byte, 4)
-	_, err := io.ReadFull(os.Stdin, length)
+	_, err := io.ReadFull(c.in, length)
 	if err != nil {
 		return 0, err
 	}
 	buf := make([]byte, binary.BigEndian.Uint32(length))
-	_, err = io.ReadFull(os.Stdin, buf)
+	_, err = io.ReadFull(c.in, buf)
 	if err != nil {
 		return 0, err
 	}
@@ -657,15 +659,15 @@ func (c *conn) ReadMsg(b []byte) (int, error) {
 func (c *conn) WriteMsg(b []byte) error {
 	length := make([]byte, 4)
 	binary.BigEndian.PutUint32(length, uint32(len(b)))
-	_, err := os.Stdout.Write(length)
+	_, err := c.out.Write(length)
 	if err != nil {
 		return err
 	}
-	_, err = os.Stdout.Write(b)
+	_, err = c.out.Write(b)
 	if err != nil {
 		return err
 	}
-	err = os.Stdout.Sync()
+	err = c.out.Flush()
 	if err != nil {
 		return err
 	}
@@ -692,7 +694,7 @@ func StartSession() {
 
 	sess := &hopSession{
 		// transportConn:   serverConn,
-		tubeMuxer:       tubes.NewMuxer(&conn{nil, nil}, nil),
+		tubeMuxer:       tubes.NewMuxer(&conn{nil, bufio.NewReader(os.Stdin), bufio.NewWriter(os.Stdout)}, nil),
 		tubeQueue:       make(chan *tubes.Reliable),
 		done:            make(chan int),
 		controlChannels: []net.Conn{},
