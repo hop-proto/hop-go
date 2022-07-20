@@ -647,7 +647,7 @@ func (c *conn) WriteMsg(b []byte) error {
 
 // TODO(drebelsky) debate name/location
 
-// Start a hopserver session
+// StartSession starts a hopserver session
 func StartSession() {
 	// Read key from stdin
 	length := make([]byte, 4)
