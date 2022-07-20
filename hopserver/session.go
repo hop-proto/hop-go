@@ -278,34 +278,6 @@ func (sess *hopSession) checkAction(action string, actionType byte) error {
 
 }
 
-// Returns uid, gid, group ids
-func parseUser(user *osUser.User) (uint32, uint32, []uint32, error) {
-	uid, err := strconv.ParseUint(user.Uid, 10, 32)
-	if err != nil {
-		return 0, 0, nil, errors.New("Couldn't parse uid")
-	}
-	gid, err := strconv.ParseUint(user.Gid, 10, 32)
-	if err != nil {
-		return 0, 0, nil, errors.New("Couldn't parse gid")
-	}
-
-	groupIds, err := user.GroupIds()
-	if err != nil {
-		return 0, 0, nil, errors.New("Couldn't get user's groups")
-	}
-	groups := make([]uint32, 1)
-	groups = append(groups, uint32(gid))
-	for _, gidString := range groupIds {
-		gid, err := strconv.ParseUint(gidString, 10, 32)
-		if err != nil {
-			return 0, 0, nil, errors.New("Failed to parse group id")
-		}
-		groups = append(groups, uint32(gid))
-	}
-
-	return uint32(uid), uint32(gid), groups, nil
-}
-
 func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 	cmd, termEnv, shell, _ := codex.GetCmd(tube)
 	logrus.Info("CMD: ", cmd)
@@ -344,7 +316,7 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 			// uid, gid, groups, err := parseUser(user)
 			if err != nil {
 				logrus.Errorf("Failed to parse user data %v", err)
-				codex.SendFailure(tube, errors.New("Failed to parse user data"))
+				codex.SendFailure(tube, errors.New("failed to parse user data"))
 				return
 			}
 			c.Dir = user.HomeDir
@@ -617,7 +589,7 @@ func (sess *hopSession) LocalServer(tube *tubes.Reliable, arg string) {
 }
 
 // TODO(drebelsky) a hack
-var ErrBufOverflow = errors.New("write would overflow buffer")
+var errBufOverflow = errors.New("write would overflow buffer")
 
 type conn struct {
 	buffered []byte
@@ -629,12 +601,11 @@ type conn struct {
 func (c *conn) ReadMsg(b []byte) (int, error) {
 	if c.buffered != nil {
 		if len(c.buffered) > len(b) {
-			return 0, ErrBufOverflow
-		} else {
-			n := copy(b, c.buffered)
-			c.buffered = nil
-			return n, nil
+			return 0, errBufOverflow
 		}
+		n := copy(b, c.buffered)
+		c.buffered = nil
+		return n, nil
 	}
 	length := make([]byte, 4)
 	_, err := io.ReadFull(c.in, length)
@@ -649,7 +620,7 @@ func (c *conn) ReadMsg(b []byte) (int, error) {
 
 	if len(buf) > len(b) {
 		c.buffered = buf
-		return 0, ErrBufOverflow
+		return 0, errBufOverflow
 	}
 
 	copy(b, buf)
@@ -675,6 +646,8 @@ func (c *conn) WriteMsg(b []byte) error {
 }
 
 // TODO(drebelsky) debate name/location
+
+// Start a hopserver session
 func StartSession() {
 	// Read key from stdin
 	length := make([]byte, 4)
@@ -682,12 +655,12 @@ func StartSession() {
 	if err != nil {
 		return
 	}
-	kBuf := make([]byte, binary.BigEndian.Uint32(length))
-	_, err = io.ReadFull(os.Stdin, kBuf)
+	keyBuf := make([]byte, binary.BigEndian.Uint32(length))
+	_, err = io.ReadFull(os.Stdin, keyBuf)
 	if err != nil {
 		return
 	}
-	k, err := keys.ParseDHPublicKey(string(kBuf))
+	k, err := keys.ParseDHPublicKey(string(keyBuf))
 	if err != nil {
 		return
 	}

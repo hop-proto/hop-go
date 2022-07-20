@@ -156,9 +156,18 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 	// TODO(drebelsky): do we have a better mechanism for this?
 	session := exec.Command(os.Args[0], "-s")
 	stdin, err := session.StdinPipe()
-	_ = err // TODO(drebelsky) handle
+	// TODO(drebelsky) is there a more reasonable way to signal the error conditions
+	if err != nil {
+		return
+	}
 	stdout, err := session.StdoutPipe()
+	if err != nil {
+		return
+	}
 	err = session.Start()
+	if err != nil {
+		return
+	}
 
 	// TODO(baumanl): verify that this is the best way to get client static key.
 	/*I originally had the client just send the key over along with the username, but it
@@ -171,7 +180,14 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 	length := make([]byte, 4)
 	binary.BigEndian.PutUint32(length, uint32(len(serialized)))
 	_, err = stdin.Write(length)
+	// TODO(drebelsky): If either of these fail, we should figure out how to kill the subprocess
+	if err != nil {
+		return
+	}
 	_, err = stdin.Write(serialized)
+	if err != nil {
+		return
+	}
 
 	go func() {
 		b := make([]byte, 65535)
