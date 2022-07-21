@@ -32,6 +32,7 @@ type hopSession struct {
 	tubeQueue       chan tubes.Tube
 	done            chan int
 	controlChannels []net.Conn
+	forwardTable    *portforwarding.FwdMapping
 
 	ID sessID
 
@@ -89,6 +90,7 @@ func (sess *hopSession) checkAuthorization() bool {
 // calls close when it receives a signal from the code execution tube that it is finished
 // TODO(baumanl): change closing behavior for sessions without cmd/shell --> integrate port forwarding duration
 func (sess *hopSession) start() {
+	sess.forwardTable = portforwarding.NewFwdMapping()
 	// starting tube muxer, but not yet accepting incoming tubes
 	go func() {
 		err := sess.tubeMuxer.Start()
@@ -149,10 +151,10 @@ func (sess *hopSession) start() {
 				go sess.handleAgc(r)
 			case common.PrincipalProxyTube:
 				go sess.startPTProxy(r, proxyQueue)
-			case common.RemotePFTube:
-				panic("unimplemented: remote pf")
-			case common.LocalPFTube:
-				panic("unimplmented: local pf")
+			case common.PFControlTube:
+				go sess.startPFControl(tube)
+			case common.PFTube:
+				go sess.startPF(tube)
 			case common.WinSizeTube:
 				go sess.startSizeTube(r)
 			default:
@@ -327,4 +329,14 @@ func (sess *hopSession) startSizeTube(ch *tubes.Reliable) {
 
 func (sess *hopSession) newAuthGrantTube() (*tubes.Reliable, error) {
 	return sess.tubeMuxer.CreateReliableTube(common.AuthGrantTube)
+}
+// TODO(drebelsky): authorize; also look at what the already existing things are doing
+// TODO(drebelsky): should this exist here or somewhere else?
+func (sess *hopSession) startPFControl(ch *tubes.Reliable) {
+	portforwarding.HandleServerControl(ch, sess.forwardTable, sess.tubeMuxer)
+	// TODO: respond?
+}
+
+func (sess *hopSession) startPF(ch *tubes.Reliable) {
+	portforwarding.HandlePF(ch, sess.forwardTable)
 }

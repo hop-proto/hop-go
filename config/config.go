@@ -14,6 +14,7 @@ import (
 	"hop.computer/hop/core"
 	"hop.computer/hop/pkg/glob"
 	"hop.computer/hop/pkg/thunks"
+	"hop.computer/hop/portforwarding"
 )
 
 // ClientConfig represents a parsed client configuration.
@@ -65,6 +66,8 @@ type HostConfigOptional struct {
 	Key          *string
 	Patterns     []string
 	Port         int
+	RemoteFwds   []*portforwarding.Forward
+	LocalFwds    []*portforwarding.Forward
 	User         *string
 	// something for principal vs. delegate
 	IsPrincipal *bool

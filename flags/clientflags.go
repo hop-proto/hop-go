@@ -15,6 +15,7 @@ import (
 
 	"hop.computer/hop/config"
 	"hop.computer/hop/core"
+	"hop.computer/hop/portforwarding"
 )
 
 // ErrMissingInputURL is returned when hoststring is missing
@@ -28,8 +29,8 @@ type ClientFlags struct {
 	Address *core.URL
 
 	// TODO(dadrian): What are these args?
-	RemoteArgs []string // CLI arguments related to remote port forwarding
-	LocalArgs  []string // CLI arguments related to local port forwarding
+	RemoteFwds []*portforwarding.Forward // CLI arguments related to remote port forwarding
+	LocalFwds  []*portforwarding.Forward // CLI arguments related to local port forwarding
 	Headless   bool     // if no cmd desired (just port forwarding)
 	UsePty     bool     // whether or not to request a remote PTY be allocated
 	Verbose    bool     // show verbose error messages
@@ -72,6 +73,8 @@ func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig, dc *conf
 	}
 
 	hc.UsePty = &f.UsePty
+	hc.LocalFwds = f.LocalFwds
+	hc.RemoteFwds = f.RemoteFwds
 
 	// TODO(baumanl): add merge support for all other flags/config options
 	return hc.Unwrap(), nil
@@ -104,12 +107,20 @@ func LoadClientConfigFromFlags(f *ClientFlags) (*config.HostConfig, error) {
 // defineClientFlags calls fs.StringVar for Client
 func defineClientFlags(fs *flag.FlagSet, f *ClientFlags) {
 	fs.Func("R", "perform remote port forwarding", func(s string) error {
-		f.RemoteArgs = append(f.RemoteArgs, s)
+		fwd, err := portforwarding.ParseFwd(s)
+		if err != nil {
+			return err
+		}
+		f.RemoteFwds = append(f.RemoteFwds, fwd)
 		return nil
 	})
 
 	fs.Func("L", "perform local port forwarding", func(s string) error {
-		f.LocalArgs = append(f.LocalArgs, s)
+		fwd, err := portforwarding.ParseFwd(s)
+		if err != nil {
+			return err
+		}
+		f.LocalFwds = append(f.LocalFwds, fwd)
 		return nil
 	})
 

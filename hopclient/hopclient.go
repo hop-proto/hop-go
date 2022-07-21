@@ -20,6 +20,7 @@ import (
 	"hop.computer/hop/core"
 	"hop.computer/hop/keys"
 	"hop.computer/hop/pkg/combinators"
+	"hop.computer/hop/portforwarding"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
 	"hop.computer/hop/userauth"
@@ -47,6 +48,8 @@ type HopClient struct { // nolint:maligned
 	ExecTube  *codex.ExecTube
 
 	hostconfig *config.HostConfig
+
+	forwardingTable *portforwarding.FwdMapping
 }
 
 // NewHopClient creates a new client object
@@ -55,6 +58,7 @@ func NewHopClient(config *config.HostConfig) (*HopClient, error) {
 		hostconfig:      config,
 		wg:              sync.WaitGroup{},
 		Fsystem:         nil,
+		forwardingTable: portforwarding.NewFwdMapping(),
 		checkIntentLock: sync.Mutex{},
 	}
 	logrus.Info("C: created client: ", client.hostconfig.Hostname)
@@ -237,6 +241,15 @@ func (c *HopClient) Start() error {
 		return ErrClientStartingExecTube
 	}
 
+	// TODO refactor
+	logrus.Error("Sending msgs")
+	ch, err := c.TubeMuxer.CreateTube(common.PFControlTube)
+	if err != nil {
+		logrus.Error(err)
+		return err
+	}
+	portforwarding.InitiatePF(ch, c.forwardingTable, c.config.LocalFwds, c.config.RemoteFwds, c.TubeMuxer)
+
 	// handle incoming tubes
 	go c.HandleTubes()
 	c.Wait() // client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
@@ -333,7 +346,9 @@ func (c *HopClient) HandleTubes() {
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
 			go c.newPrincipalInstanceSetup(r)
 		} else if t.Type() == common.RemotePFTube {
-			panic("client RemotePFTubes: unimplemented")
+			go c.handleRemote(t)
+		} else if t.Type() == common.PFTube {
+			go portforwarding.HandlePF(t, c.forwardingTable)
 		} else {
 			// Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
 			e := t.Close()
