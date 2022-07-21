@@ -2,8 +2,6 @@ package transport
 
 import (
 	"bytes"
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
 	"errors"
 	"net"
@@ -37,14 +35,15 @@ type Server struct {
 
 	closed atomicBool
 
+	// +checklocks:m
 	handshakes map[string]*HandshakeState
-	sessions   map[SessionID]*SessionState
+	// +checklocks:m
+	sessions map[SessionID]*SessionState
 
 	pendingConnections chan *Handle
 	outgoing           chan outgoing
 
-	cookieKey    [KeyLen]byte
-	cookieCipher cipher.Block
+	cookieKey [KeyLen]byte
 }
 
 //FetchClientLeaf returns the client leaf certificate used in handshake with associated handle's sessionID
@@ -64,16 +63,42 @@ func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) 
 		return false
 	}
 	s.handshakes[key] = hs
+
+	// Delete handshake if the connection times out
+	go func(s *Server, remoteAddr *net.UDPAddr) {
+		timer := time.NewTimer(s.config.HandshakeTimeout)
+		<-timer.C
+		s.m.Lock()
+		defer s.m.Unlock()
+		hs := s.fetchHandshakeStateLocked(remoteAddr)
+		if hs != nil {
+			logrus.Errorf("Connection to %s timed out", remoteAddr)
+			s.clearHandshakeStateLocked(remoteAddr)
+			ss := s.fetchSessionStateLocked(hs.sessionID)
+			if ss != nil {
+				s.clearSessionStateLocked(ss.sessionID)
+			}
+		} else {
+			logrus.Debugf("Connection to %s did not time out", remoteAddr)
+		}
+	}(s, remoteAddr)
+
 	return true
 }
 
 func (s *Server) fetchHandshakeState(remoteAddr *net.UDPAddr) *HandshakeState {
 	s.m.RLock()
 	defer s.m.RUnlock()
+	return s.fetchHandshakeStateLocked(remoteAddr)
+}
+
+// +checklocksread:s.m
+func (s *Server) fetchHandshakeStateLocked(remoteAddr *net.UDPAddr) *HandshakeState {
 	key := AddressHashKey(remoteAddr)
 	return s.handshakes[key]
 }
 
+// +checklocks:s.m
 func (s *Server) clearHandshakeStateLocked(remoteAddr *net.UDPAddr) {
 	key := AddressHashKey(remoteAddr)
 	delete(s.handshakes, key)
@@ -111,6 +136,7 @@ func (s *Server) fetchSessionState(sessionID SessionID) *SessionState {
 	return s.fetchSessionStateLocked(sessionID)
 }
 
+// +checklocksread:s.m
 func (s *Server) fetchSessionStateLocked(sessionID SessionID) *SessionState {
 	return s.sessions[sessionID]
 }
@@ -118,6 +144,11 @@ func (s *Server) fetchSessionStateLocked(sessionID SessionID) *SessionState {
 func (s *Server) clearSessionState(sessionID SessionID) {
 	s.m.Lock()
 	defer s.m.Unlock()
+	s.clearSessionStateLocked(sessionID)
+}
+
+// +checklocks:s.m
+func (s *Server) clearSessionStateLocked(sessionID SessionID) {
 	delete(s.sessions, sessionID)
 }
 
@@ -171,7 +202,7 @@ func (s *Server) readPacket() error {
 		}
 		ss, err := s.newSessionState()
 		copy(hs.sessionID[:], ss.sessionID[:])
-		ss.remoteAddr = *addr
+		ss.remoteAddr = addr
 		if err != nil {
 			logrus.Debug("could not make new session state")
 			return err
@@ -455,8 +486,8 @@ func (s *Server) handleTransport(addr *net.UDPAddr, msg []byte, plaintext []byte
 	}
 	ss.handle.writeLock.Lock()
 	defer ss.handle.writeLock.Unlock()
-	if !EqualUDPAddress(&ss.remoteAddr, addr) {
-		ss.remoteAddr = *addr
+	if !EqualUDPAddress(ss.remoteAddr, addr) {
+		ss.remoteAddr = addr
 	}
 	return n, nil
 }
@@ -599,6 +630,9 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) init() error {
+	s.m.Lock()
+	defer s.m.Unlock()
+
 	if s.config.KeyPair == nil && s.config.GetCertificate == nil {
 		return errors.New("config.KeyPair or config.GetCertificate must be set")
 	}
@@ -631,7 +665,7 @@ func (s *Server) init() error {
 	if err != nil {
 		panic(err.Error())
 	}
-	s.cookieCipher, err = aes.NewCipher(s.cookieKey[:])
+
 	if err != nil {
 		panic(err.Error())
 	}

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
@@ -127,9 +128,10 @@ func (s *TestServer) StartTransport(t *testing.T) {
 	if s.TransportConfig == nil { // Default
 		logrus.Info("Using default transport config.")
 		s.Transport, err = transport.NewServer(s.UDPConn, transport.ServerConfig{
-			Certificate:  s.Leaf,
-			Intermediate: s.Intermediate,
-			KeyPair:      s.LeafKeyPair,
+			Certificate:      s.Leaf,
+			Intermediate:     s.Intermediate,
+			KeyPair:          s.LeafKeyPair,
+			HandshakeTimeout: time.Second,
 		})
 	} else {
 		logrus.Info("Using custom transport config.")

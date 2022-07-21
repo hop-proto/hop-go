@@ -35,22 +35,44 @@ type Client struct {
 	closed            atomicBool
 
 	underlyingConn UDPLike
-	dialAddr       *net.UDPAddr
 
+	// TODO(hosono) I don't think the dialAddr needs the locks, but it's only used when locked
+	// +checklocks:m
+	// +checklocks:readLock
+	// +checklocks:writeLock
+	dialAddr *net.UDPAddr
+
+	// +checklocks:m
+	// +checklocks:readLock
+	// +checklocks:writeLock
 	hs *HandshakeState
+
 	ss *SessionState
 
+	// +checklocks:readLock
 	readBuf bytes.Buffer
+
+	// +checklocks:readLock
+	ciphertext []byte
+
+	// +checklocks:readLock
+	plaintext []byte
 
 	config ClientConfig
 }
 
+// +checklocksacquire:c.m
+// +checklocksacquire:c.writeLock
+// +checklocksacquire:c.readLock
 func (c *Client) lockUser() {
 	c.m.Lock()
 	c.writeLock.Lock()
 	c.readLock.Lock()
 }
 
+// +checklocksrelease:c.m
+// +checklocksrelease:c.readLock
+// +checklocksrelease:c.writeLock
 func (c *Client) unlockUser() {
 	c.m.Unlock()
 	c.readLock.Unlock()
@@ -96,6 +118,22 @@ func (c *Client) prepareCertificates() (leaf, intermediate []byte, err error) {
 	return
 }
 
+// Set time after which connection will fail considering timeout and deadline
+func (c *Client) setHSDeadline() {
+	if !c.config.HSDeadline.IsZero() {
+		c.underlyingConn.SetReadDeadline(c.config.HSDeadline)
+	}
+
+	if c.config.HSTimeout != 0 {
+		if deadline := time.Now().Add(c.config.HSTimeout); c.config.HSDeadline.IsZero() || deadline.Before(c.config.HSDeadline) {
+			c.underlyingConn.SetReadDeadline(deadline)
+		}
+	}
+}
+
+// +checklocks:c.m
+// +checklocks:c.readLock
+// +checklocks:c.writeLock
 func (c *Client) clientHandshakeLocked() error {
 	c.hs = new(HandshakeState)
 	c.hs.remoteAddr = c.dialAddr
@@ -123,6 +161,7 @@ func (c *Client) clientHandshakeLocked() error {
 	if err != nil {
 		return err
 	}
+	c.setHSDeadline()
 
 	n, _, _, _, err = c.underlyingConn.ReadMsgUDP(buf, nil)
 	if err != nil {
@@ -152,6 +191,7 @@ func (c *Client) clientHandshakeLocked() error {
 	if err != nil {
 		return err
 	}
+	c.setHSDeadline()
 
 	// Server Auth
 	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(buf, nil)
@@ -179,19 +219,26 @@ func (c *Client) clientHandshakeLocked() error {
 		logrus.Errorf("client: unable to send client auth: %s", err)
 		return err
 	}
+	c.setHSDeadline()
 
 	c.ss = new(SessionState)
 	c.ss.sessionID = c.hs.sessionID
-	c.ss.remoteAddr = *c.hs.remoteAddr
+	c.ss.remoteAddr = c.hs.remoteAddr
 	c.hs.deriveFinalKeys(&c.ss.clientToServerKey, &c.ss.serverToClientKey)
 	c.handshakeComplete.setTrue()
 	c.closed.setFalse()
 	c.hs = nil
 	c.dialAddr = nil
 
+	// Set deadline of 0 to make the connection not timeout
+	// Data timeouts are handled by the Tube Muxer
+	c.underlyingConn.SetReadDeadline(time.Time{})
+
+	logrus.Info("Handshake Complete")
 	return nil
 }
 
+// +checklocks:c.writeLock
 func (c *Client) writeTransport(plaintext []byte) error {
 	err := c.ss.writePacket(c.underlyingConn, plaintext, &c.ss.clientToServerKey)
 	if err != nil {
@@ -230,7 +277,7 @@ func (c *Client) WriteMsg(b []byte) error {
 
 }
 
-// Close gracefully shutds down the connection. Repeated calls to close will error.
+// Close gracefully shuts down the connection. Repeated calls to close will error.
 func (c *Client) Close() error {
 	c.lockUser()
 	defer c.unlockUser()
@@ -249,11 +296,47 @@ func (c *Client) Close() error {
 	return c.underlyingConn.Close()
 }
 
+// readMsg reads one packet from the underlying connection, and writes it into c.plaintext
+// It returns the number of bytes written into c.plaintext and any errors
+// readMsg performs minimal error checking and should only be called when the
+// connection is open and the handshake is complete.
+// It uses both c.ciphertext and c.plaintext as scratch space
+// +checklocks:c.readLock
+func (c *Client) readMsg() (int, error) {
+	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(c.ciphertext, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	plaintextLen := PlaintextLen(msgLen)
+	if plaintextLen < 0 {
+		return 0, ErrInvalidMessage
+	}
+
+	n, err := c.ss.readPacket(c.plaintext, c.ciphertext[:msgLen], &c.ss.serverToClientKey)
+	if err != nil {
+		return n, err
+	}
+
+	// TODO(hosono) can this error actually happen?
+	if n != plaintextLen {
+		return n, ErrInvalidMessage
+	}
+
+	return n, nil
+}
+
 // ReadMsg reads a single message. If b is too short to hold the message, it is
 // buffered and ErrBufOverflow is returned.
-func (c *Client) ReadMsg(b []byte) (int, error) {
+func (c *Client) ReadMsg(b []byte) (n int, err error) {
+	// This ensures that errors that wrap errTransportOnly don't bubble up to the user
+	defer func() {
+		if errors.Is(err, errTransportOnly) {
+			err = nil
+		}
+	}()
+
 	// TODO(dadrian): Close the connection on bad reads / certain unrecoverable
-	// errors.
 	if !c.handshakeComplete.isSet() {
 		err := c.Handshake()
 		if err != nil {
@@ -277,36 +360,20 @@ func (c *Client) ReadMsg(b []byte) (int, error) {
 		return 0, io.EOF
 	}
 
-	// TODO(dadrian): Avoid allocation
-	ciphertext := make([]byte, 65535)
-	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(ciphertext, nil)
+	// read and decrypt into c.plaintext
+	plaintextLen, err := c.readMsg()
 	if err != nil {
 		return 0, err
-	}
-	plaintextLen := PlaintextLen(msgLen)
-	if plaintextLen < 0 {
-		return 0, ErrInvalidMessage
-	}
-	// TODO(dadrian): If this implements io.Reader, we can probably avoid a
-	// copy.
-	// TODO(dadrian): Avoid an allocation
-	plaintext := make([]byte, plaintextLen)
-	n, err := c.ss.readPacket(plaintext, ciphertext[:msgLen], &c.ss.serverToClientKey)
-	if err != nil {
-		return 0, err
-	}
-	if n != plaintextLen {
-		return 0, ErrInvalidMessage
 	}
 
 	// If the input is long enough, just copy into it
 	if len(b) >= plaintextLen {
-		copy(b, plaintext[:n])
-		return n, nil
+		copy(b, c.plaintext[:plaintextLen])
+		return plaintextLen, nil
 	}
 
 	// Input was too short, buffer this message and return ErrBufOverflow
-	_, err = c.readBuf.Write(plaintext[n:])
+	_, err = c.readBuf.Write(c.plaintext[:plaintextLen])
 	if err != nil {
 		return 0, err
 	}
@@ -314,7 +381,14 @@ func (c *Client) ReadMsg(b []byte) (int, error) {
 }
 
 // Read implements net.Conn.
-func (c *Client) Read(b []byte) (int, error) {
+func (c *Client) Read(b []byte) (n int, err error) {
+	// This ensures that errors that wrap errTransportOnly don't bubble up to the user
+	defer func() {
+		if errors.Is(err, errTransportOnly) {
+			err = nil
+		}
+	}()
+
 	// TODO(dadrian): Close the connection on bad reads?
 	if !c.handshakeComplete.isSet() {
 		err := c.Handshake()
@@ -323,13 +397,11 @@ func (c *Client) Read(b []byte) (int, error) {
 			return 0, err
 		}
 	}
+
 	// TODO(dadrian): #concurrency
-	// TODO(dadrian): Avoid allocation?
 	c.readLock.Lock()
 	defer c.readLock.Unlock()
-	if c.closed.isSet() {
-		return 0, io.EOF
-	}
+
 	if c.readBuf.Len() > 0 {
 		n, err := c.readBuf.Read(b)
 		if c.readBuf.Len() == 0 {
@@ -337,30 +409,23 @@ func (c *Client) Read(b []byte) (int, error) {
 		}
 		return n, err
 	}
-	ciphertext := make([]byte, 65535)
-	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(ciphertext, nil)
+	if c.closed.isSet() {
+		return 0, io.EOF
+	}
+
+	// read and decrypt into c.plaintext
+	plaintextLen, err := c.readMsg()
 	if err != nil {
 		return 0, err
 	}
-	plaintextLen := PlaintextLen(msgLen)
-	if plaintextLen < 0 {
-		return 0, ErrInvalidMessage
-	}
-	// TODO(dadrian): If this implements io.Reader, we can probably avoid a
-	// copy.
-	// TODO(dadrian): Avoid an allocation
-	plaintext := make([]byte, plaintextLen)
-	c.ss.readPacket(plaintext, ciphertext[:msgLen], &c.ss.serverToClientKey)
-	if err != nil {
-		return 0, err
-	}
-	n := copy(b, plaintext)
-	if n == len(plaintext) {
+
+	n = copy(b, c.plaintext[:plaintextLen])
+	if n == plaintextLen {
 		return n, nil
 	}
+
 	// Buffer leftovers
-	// TODO(dadrian): Handle this error?
-	_, err = c.readBuf.Write(plaintext[n:])
+	_, err = c.readBuf.Write(c.plaintext[n:plaintextLen])
 	return n, err
 }
 
@@ -406,6 +471,8 @@ func NewClient(conn UDPLike, server *net.UDPAddr, config ClientConfig) *Client {
 		underlyingConn: conn,
 		dialAddr:       server,
 		config:         config,
+		ciphertext:     make([]byte, 65535),
+		plaintext:      make([]byte, PlaintextLen(65535)),
 	}
 	return c
 }

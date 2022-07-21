@@ -28,9 +28,12 @@ import (
 
 //HopServer represents state/conns needed for a hop server
 type HopServer struct {
-	m                     sync.Mutex
-	principals            map[int32]*hopSession
-	authgrants            map[keys.PublicKey]*authGrant //static key -> authgrant associated with that key
+	m sync.Mutex
+	// +checklocks:m
+	principals map[int32]*hopSession
+	// +checklocks:m
+	authgrants map[keys.PublicKey]*authGrant //static key -> authgrant associated with that key
+	// +checklocks:m
 	outstandingAuthgrants int
 
 	config *config.ServerConfig
@@ -106,7 +109,8 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		ClientVerify: &transport.VerifyConfig{
 			InsecureSkipVerify: true, // Do authorized keys instead
 		},
-		GetCertificate: getCert,
+		GetCertificate:   getCert,
+		HandshakeTimeout: sc.HandshakeTimeout,
 	}
 
 	underlying, err := transport.NewServer(udpConn, tconf)
@@ -148,8 +152,9 @@ func (s *HopServer) Serve() {
 // newSession Starts a new hop session
 func (s *HopServer) newSession(serverConn *transport.Handle) {
 	sess := &hopSession{
-		transportConn:   serverConn,
-		tubeMuxer:       tubes.NewMuxer(serverConn, serverConn),
+		transportConn: serverConn,
+		// TODO(hosono) choose timeout. Allow timeout to be configured
+		tubeMuxer:       tubes.NewMuxer(serverConn, serverConn, s.config.DataTimeout),
 		tubeQueue:       make(chan *tubes.Reliable),
 		done:            make(chan int),
 		controlChannels: []net.Conn{},

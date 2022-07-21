@@ -130,7 +130,7 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	// authgrant procedure.
 	// c.address = address
 	c.authenticator = authenticator
-	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.TransportConn)
+	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.TransportConn, c.config.DataTimeout)
 	go c.TubeMuxer.Start()
 	err = c.userAuthorization()
 	if err != nil {
@@ -396,7 +396,9 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 	}
 	var err error
 	// if !c.Proxied {
-	c.TransportConn, err = transport.Dial("udp", address, transportConfig)
+	var dialer net.Dialer
+	dialer.Timeout = c.config.HandshakeTimeout
+	c.TransportConn, err = transport.DialWithDialer(&dialer, "udp", address, transportConfig)
 	// } else {
 	// 	c.TransportConn, err = transport.DialNP("netproxy", address, c.ProxyConn, transportConfig)
 	// }
@@ -419,7 +421,7 @@ func (c *HopClient) userAuthorization() error {
 	//*****PERFORM USER AUTHORIZATION******
 	uaCh, _ := c.TubeMuxer.CreateTube(common.UserAuthTube)
 	defer uaCh.Close()
-	logrus.Info("requesting auth for ", c.hostconfig.User)
+	logrus.Infof("requesting auth for %s", c.hostconfig.User)
 	if ok := userauth.RequestAuthorization(uaCh, c.hostconfig.User); !ok {
 		return ErrClientUnauthorized
 	}

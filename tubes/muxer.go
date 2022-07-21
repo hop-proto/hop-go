@@ -1,8 +1,11 @@
 package tubes
 
 import (
+	"errors"
 	"net"
+	"os"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -11,6 +14,7 @@ import (
 
 //Muxer handles delivering and sending tube messages
 type Muxer struct {
+	// +checklocks:m
 	tubes map[byte]*Reliable
 	// Channels waiting for an Accept() call.
 	tubeQueue chan *Reliable
@@ -20,10 +24,11 @@ type Muxer struct {
 	stopped    bool
 	underlying transport.MsgConn
 	netConn    net.Conn
+	timeout    time.Duration
 }
 
 //NewMuxer starts a new tube muxer
-func NewMuxer(msgConn transport.MsgConn, netConn net.Conn) *Muxer {
+func NewMuxer(msgConn transport.MsgConn, netConn net.Conn, timeout time.Duration) *Muxer {
 	return &Muxer{
 		tubes:      make(map[byte]*Reliable),
 		tubeQueue:  make(chan *Reliable, 128),
@@ -32,6 +37,7 @@ func NewMuxer(msgConn transport.MsgConn, netConn net.Conn) *Muxer {
 		stopped:    false,
 		underlying: msgConn,
 		netConn:    netConn,
+		timeout:    timeout,
 	}
 }
 
@@ -69,6 +75,11 @@ func (m *Muxer) readMsg() (*frame, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Set timeout
+	if m.timeout != 0 {
+		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
+	}
 	return fromBytes(pkt)
 
 }
@@ -84,10 +95,18 @@ func (m *Muxer) sender() {
 func (m *Muxer) Start() {
 	go m.sender()
 	m.stopped = false
+
+	// Set initial timeout
+	if m.timeout != 0 {
+		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
+	}
 	for !m.stopped {
 		frame, err := m.readMsg()
-		if err != nil {
-			continue
+		if errors.Is(err, os.ErrDeadlineExceeded) { // if error is a timeout
+			logrus.Fatalf("Connection timed out: %s", err)
+		} else if err != nil {
+			// TODO(hosono) Are there any recoverable errors?
+			logrus.Fatalf("Error in Muxer: %s", err)
 		}
 		tube, ok := m.getTube(frame.tubeID)
 		if !ok {

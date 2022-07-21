@@ -5,6 +5,8 @@ import (
 	"net"
 )
 
+const udp = "udp"
+
 // Client directly implements net.Conn
 var _ net.Conn = &Client{}
 
@@ -13,35 +15,53 @@ var ErrUDPOnly = errors.New("portal requires UDP transport")
 
 // Dial matches the interface of net.Dial
 func Dial(network, address string, config ClientConfig) (*Client, error) {
-	if network != "udp" && network != "subspace" {
+	if network != udp {
 		return nil, ErrUDPOnly
 	}
 
-	// Figure out what address we would use to dial
-	throwaway, err := net.Dial("udp", address)
+	inner, err := net.Dial(udp, address)
 	if err != nil {
 		return nil, err
 	}
-	localAddr := throwaway.LocalAddr()
-	remoteAddr := throwaway.RemoteAddr()
-	throwaway.Close()
 
-	// Recreate as a non-connected socket
-	inner, err := net.ListenUDP("udp", localAddr.(*net.UDPAddr))
-	if err != nil {
-		return nil, err
-	}
-	return NewClient(inner, remoteAddr.(*net.UDPAddr), config), nil
+	return NewClient(inner.(*net.UDPConn), nil, config), nil
 }
 
 //DialNP is similar to Dial, but using a reliable tube as an underlying conn for the Client
 func DialNP(network, address string, tube UDPLike, config ClientConfig) (*Client, error) {
 	// Figure out what address we would use to dial
-	throwaway, err := net.Dial("udp", address)
+	dst, err := net.ResolveUDPAddr(udp, address)
 	if err != nil {
 		return nil, err
 	}
-	remoteAddr := throwaway.RemoteAddr()
-	throwaway.Close()
-	return NewClient(tube, remoteAddr.(*net.UDPAddr), config), nil
+	return NewClient(tube, dst, config), nil
+}
+
+// DialWithDialer is similar to Dial, but uses options specified in a net.Dialer
+// TODO(hosono) Do we need a DialNPWithDialer()??
+func DialWithDialer(dialer *net.Dialer, network, address string, config ClientConfig) (*Client, error) {
+	if network != udp {
+		return nil, ErrUDPOnly
+	}
+
+	inner, err := dialer.Dial(udp, address)
+	if err != nil {
+		return nil, err
+	}
+
+	// If dialer has set a timeout, deadline, or keep alive, use those
+	// Options set in dialer will override those in config
+	if dialer.Timeout != 0 {
+		config.HSTimeout = dialer.Timeout
+	}
+
+	if !dialer.Deadline.IsZero() {
+		config.HSDeadline = dialer.Deadline
+	}
+
+	if dialer.KeepAlive != 0 {
+		config.KeepAlive = dialer.KeepAlive
+	}
+
+	return NewClient(inner.(*net.UDPConn), nil, config), nil
 }

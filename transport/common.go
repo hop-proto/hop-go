@@ -2,6 +2,8 @@ package transport
 
 import (
 	"errors"
+	"fmt"
+	"os"
 
 	"golang.org/x/crypto/curve25519"
 
@@ -42,6 +44,10 @@ const (
 	AssociatedDataLen = HeaderLen + SessionIDLen + CounterLen
 )
 
+// errTransportOnly is an error that should not leave the transport layer.
+// Any errors that wrap errTransportOnly should not be returned to callers outside of the transport layer
+var errTransportOnly = errors.New("this error should not leave the transport layer")
+
 // ErrBufOverflow is returned when write would go off the end off a buffer.
 var ErrBufOverflow = errors.New("write would overflow buffer")
 
@@ -51,14 +57,14 @@ var ErrBufUnderflow = errors.New("read would be past end of buffer")
 // ErrUnexpectedMessage is returned when the wrong message is received during
 // the handshake, or when a handshake message is received after completing the
 // handshake.
-var ErrUnexpectedMessage = errors.New("attempted to deserialize unexpected message type")
+var ErrUnexpectedMessage = fmt.Errorf("attempted to deserialize unexpected message type [%w]", errTransportOnly)
 
 // ErrUnsupportedVersion is returned when the version field in a handshake
 // packet is anything besides Version.
 var ErrUnsupportedVersion = errors.New("unsupported version")
 
 // ErrInvalidMessage is returned when a message is serialized or otherwise created incorrectly.
-var ErrInvalidMessage = errors.New("invalid message")
+var ErrInvalidMessage = fmt.Errorf("invalid message [%w]", errTransportOnly)
 
 // ErrUnknownSession is returned when a message contains an unknown SessionID.
 var ErrUnknownSession = errors.New("unknown session")
@@ -71,11 +77,13 @@ var ErrUnknownMessage = errors.New("unknown message type")
 var ErrWouldBlock = errors.New("operation would block")
 
 // ErrTimeout is returned for operations that timed out
-var ErrTimeout = errors.New("operation timed out")
+// Timeouts must wrap os.ErrDeadlineExceeded as per the net.Conn docs for SetDeadline()
+// TODO(hosono) do we need to import fmt? I can't find another way, but it's weird
+var ErrTimeout = fmt.Errorf("operation timed out [%w]", os.ErrDeadlineExceeded)
 
 // ErrReplay is returned when a message is a duplicate. This should not
 // percolate outside of the internal APIs.
-var ErrReplay = errors.New("packet is a replay")
+var ErrReplay = fmt.Errorf("packet is a replay [%w]", errTransportOnly)
 
 // MessageType is a single-byte-wide enum used as the first byte of every message. It can be used to differentiate message types.
 type MessageType byte

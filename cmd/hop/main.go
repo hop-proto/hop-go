@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -27,6 +28,8 @@ func main() {
 		logrus.Error(err)
 		return
 	}
+	cc.HandshakeTimeout = 15 * time.Second
+	cc.DataTimeout = 15 * time.Second
 
 	client, err := hopclient.NewHopClient(cc, f.Address.Host)
 	if err != nil {
