@@ -28,7 +28,9 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 
 	sessionID SessionID
 
+	// +checklocks:readLock
 	recv chan []byte
+	// +checklocks:writeLock
 	send chan []byte
 
 	closed atomic.Bool
@@ -161,12 +163,17 @@ func (c *Handle) Read(b []byte) (int, error) {
 // WriteMsg writes b as a single packet. If b is too long, WriteMsg returns
 // ErrBufOverlow.
 func (c *Handle) WriteMsg(b []byte) error {
+	c.writeLock.Lock()
+	defer c.writeLock.Unlock()
+
+	if c.closed.isSet() {
+		return io.EOF
+	}
+
 	if len(b) > MaxPlaintextSize {
 		return ErrBufOverflow
 	}
-	if c.closed.Load() {
-		return io.EOF
-	}
+
 	select {
 	case c.send <- b:
 		return nil
@@ -229,7 +236,6 @@ func (c *Handle) close() {
 // TODO(dadrian): Implement
 // TODO(hosono) here is where we send a protocol close message
 func (c *Handle) Close() error {
-	// TODO(hosono) do we need the read a write locks?
 	if c.IsClosed() {
 		return io.EOF
 	}
@@ -243,6 +249,9 @@ func (c *Handle) Close() error {
 	// Close the channels
 	close(c.recv)
 	close(c.send)
+
+	// Wait for the sending goroutine to exit
+	c.writeWg.Wait()
 
 	c.closed.setTrue()
 

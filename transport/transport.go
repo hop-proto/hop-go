@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net"
+	"sync"
 
 	"github.com/sirupsen/logrus"
 
@@ -30,6 +31,7 @@ type SessionState struct {
 	//clientStatic keys.PublicKey //needed after handshake for user authorization step
 	clientLeaf certs.Certificate
 
+	m	sync.Mutex
 	rawWrite bytes.Buffer
 }
 
@@ -91,6 +93,9 @@ func (ss *SessionState) readCounter(b []byte) (count uint64) {
 }
 
 func (ss *SessionState) writePacket(conn UDPLike, in []byte, key *[KeyLen]byte) error {
+	ss.m.Lock()
+	defer ss.m.Unlock()
+
 	length := HeaderLen + SessionIDLen + CounterLen + len(in) + TagLen
 	ss.rawWrite.Reset()
 	if ss.rawWrite.Cap() < length {

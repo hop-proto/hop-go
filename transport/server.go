@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"errors"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -14,15 +15,10 @@ import (
 	"hop.computer/hop/certs"
 )
 
-type outgoing struct {
-	pkt []byte
-	dst *net.UDPAddr
-}
-
 // Server implements a Hop server capable of multiplexing roaming Hop
 // connections.
 //
-// To run, call Start.
+// To run, call Serve.
 //
 // TODO(dadrian): Figure out how much this should reflect the Listener API.
 type Server struct {
@@ -31,18 +27,19 @@ type Server struct {
 	rawRead      []byte
 	handshakeBuf []byte
 
-	udpConn *net.UDPConn
+	// +checklocks:m
+	udpConn UDPLike
 	config  ServerConfig
 
 	closed atomic.Bool
 
 	// +checklocks:m
 	handshakes map[string]*HandshakeState
-	// +checklocks:m
-	sessions map[SessionID]*SessionState
+	// +checkreadlocks:m
+	sessions   map[SessionID]*SessionState
 
+	// +checklocks:m
 	pendingConnections chan *Handle
-	outgoing           chan outgoing
 
 	cookieKey    [KeyLen]byte
 
@@ -474,8 +471,13 @@ func (s *Server) handleTransport(addr *net.UDPAddr, msg []byte, plaintext []byte
 	if ss == nil {
 		return 0, ErrUnknownSession
 	}
+
 	ss.handle.m.Lock()
 	defer ss.handle.m.Unlock()
+	if ss.handle.IsClosed() {
+		return 0, io.EOF
+	}
+
 	n, err := s.readPacketFromSession(ss, plaintext, msg, &ss.clientToServerKey)
 	if err != nil {
 		return 0, err
@@ -500,7 +502,7 @@ func (s *Server) Serve() error {
 	// TODO(dadrian): These should be smaller buffers
 	s.rawRead = make([]byte, 65535)
 	s.handshakeBuf = make([]byte, 65535)
-	s.wg.Add(3)
+	s.wg.Add(2)
 	go func() {
 		defer s.wg.Done()
 		for !s.closed.isSet() {
@@ -510,13 +512,7 @@ func (s *Server) Serve() error {
 				logrus.Errorf("server: %s", err)
 			}
 		}
-	}()
-	go func() {
-		defer s.wg.Done()
-		for outgoing := range s.outgoing {
-			s.writePacket(outgoing.pkt, outgoing.dst)
-		}
-		// TODO(dadrian): Write packets
+		logrus.Error("SERVER READ ROUTINE EXITED")
 	}()
 	s.wg.Done()
 	s.wg.Wait()
@@ -582,8 +578,6 @@ func (s *Server) createHandleLocked(ss *SessionState) *Handle {
 }
 
 func (s *Server) lockHandleAndWriteToSession(ss *SessionState, plaintext []byte) error {
-	ss.handle.writeLock.Lock()
-	defer ss.handle.writeLock.Unlock()
 	err := ss.writePacket(s.udpConn, plaintext, &ss.serverToClientKey)
 	return err
 }
@@ -622,39 +616,46 @@ func (s *Server) ListenAddress() net.Addr {
 	return s.udpConn.LocalAddr()
 }
 
+// CloseSession gracefully closes one hop session
+// TODO(hosono) we still need a protocol close message
+func (s *Server) CloseSession(sessionID SessionID) error {
+	s.m.Lock()
+	defer s.m.Unlock()
+	return s.closeSessionLocked(sessionID)
+}
+
+// +checklocks:s.s
+func (s *Server) closeSessionLocked(sessionID SessionID) error {
+	ss := s.fetchSessionStateLocked(sessionID)
+	err := ss.handle.Close()
+	s.clearSessionStateLocked(sessionID)
+	return err
+}
+
 // Close stops the server, causing Serve() to return.
 //
 // TODO(dadrian): What does it do to writes?
 func (s *Server) Close() (err error) {
+	// This will end the reading goroutine and wait for it to exit
+	s.closed.setTrue()
+	s.wg.Wait()
+
+	// TODO(hosono) fix the weirdness around locking stuff
 	s.m.Lock()
 	defer s.m.Unlock()
 
-	// These lines will close the go routines in s.Serve() and wait for them to exit
-	s.closed.setTrue()
-	close(s.outgoing)
-	s.wg.Wait()
-
 	for _, session := range(s.sessions) {
-		// TODO(hosono) how does this become nil?
-		if session.handle != nil {
-			session.handle.Close()
-		}
+		s.closeSessionLocked(session.sessionID)
 	}
 
-	// TODO(hosono) is this the right way to drain the channel?
-	Loop:
-	for {
-		select {
-		case handle := <-s.pendingConnections:
-			if handle != nil {
-				handle.Close()
-			}
-		default:
-			break Loop
-		}
-	}
 	close(s.pendingConnections)
-
+	for handle := range(s.pendingConnections) {
+		if handle != nil {
+			err = handle.Close()
+		} else {
+			logrus.Error("server: nil handle in pending connections")
+		}
+	}
 
 	err = s.udpConn.Close()
 	if err != nil {
@@ -709,13 +710,12 @@ func (s *Server) init() error {
 	s.sessions = make(map[SessionID]*SessionState)
 
 	s.pendingConnections = make(chan *Handle, s.config.maxPendingConnections())
-	s.outgoing = make(chan outgoing) // TODO(dadrian): Is this the appropriate size?
 	return nil
 }
 
 // NewServer returns a Server listening on the provided UDP connection. The
 // returned Server object is a valid net.Listener.
-func NewServer(conn *net.UDPConn, config ServerConfig) (*Server, error) {
+func NewServer(conn UDPLike, config ServerConfig) (*Server, error) {
 	s := Server{
 		udpConn: conn,
 		config:  config,

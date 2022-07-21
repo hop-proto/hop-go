@@ -99,7 +99,7 @@ func (r *ReliableUDP) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int
 			err := r.writeCtx.Err()
 			if errors.Is(err, context.DeadlineExceeded) {
 				return 0, 0, os.ErrDeadlineExceeded
-			} else if errors.Is(err, context.Canceled) {
+			} else if err == nil || errors.Is(err, context.Canceled) {
 				continue
 			} else {
 				panic(err)
@@ -109,10 +109,13 @@ func (r *ReliableUDP) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int
 }
 
 func (r *ReliableUDP) Close() error {
-	//r.l.Lock()
-	//defer r.l.Unlock()
-
 	r.SetDeadline(time.Unix(1, 0))
+	r.timeoutLock.Lock()
+	r.dataLock.Lock()
+	defer r.timeoutLock.Unlock()
+	defer r.dataLock.Unlock()
+
+	time.Sleep(time.Millisecond)
 
 	if r.closed.isSet() {
 		return io.EOF

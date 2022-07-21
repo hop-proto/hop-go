@@ -250,6 +250,10 @@ func (c *Client) writeTransport(plaintext []byte) error {
 
 // Write implements net.Conn.
 func (c *Client) Write(b []byte) (int, error) {
+	if c.closed.isSet() {
+		return 0, io.EOF
+	}
+
 	err := c.WriteMsg(b)
 	if err != nil {
 		return 0, err
@@ -259,7 +263,11 @@ func (c *Client) Write(b []byte) (int, error) {
 
 // WriteMsg implements MsgConn. It send a single packet.
 func (c *Client) WriteMsg(b []byte) error {
-	if !c.handshakeComplete.Load() {
+	if c.closed.isSet() {
+		return io.EOF
+	}
+
+	if !c.handshakeComplete.isSet() {
 		err := c.Handshake()
 		if err != nil {
 			return err
@@ -267,9 +275,6 @@ func (c *Client) WriteMsg(b []byte) error {
 	}
 	c.writeLock.Lock()
 	defer c.writeLock.Unlock()
-	if c.closed.Load() {
-		return io.EOF
-	}
 	err := c.writeTransport(b)
 	if err != nil {
 		return err
