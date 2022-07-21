@@ -41,6 +41,7 @@ type Server struct {
 	// +checklocks:m
 	handles map[SessionID]*Handle
 
+	// +checklocks:m
 	pendingConnections chan *Handle
 
 	// +checklocks:cookieLock

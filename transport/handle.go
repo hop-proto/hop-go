@@ -250,7 +250,6 @@ func (c *Handle) Start() {
 
 // Close closes the connection. Future operations on non-buffered data will return io.EOF.
 func (c *Handle) Close() error {
-	// TODO(hosono) do we need the read a write locks?
 	if c.IsClosed() {
 		return io.EOF
 	}
@@ -264,6 +263,9 @@ func (c *Handle) Close() error {
 	// Close the channels
 	close(c.recv)
 	close(c.send)
+
+	// Wait for the sending goroutine to exit
+	c.writeWg.Wait()
 
 	c.closed.setTrue()
 
