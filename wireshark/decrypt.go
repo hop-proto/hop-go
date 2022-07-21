@@ -9,8 +9,6 @@ import (
 	"unsafe"
 
 	"fmt"
-	"strconv"
-	"strings"
 
 	"hop.computer/hop/kravatte"
 	"hop.computer/hop/transport"
@@ -29,17 +27,10 @@ func PlaintextLen(transportLen int) int {
 //export parseKey
 func parseKey(keyString unsafe.Pointer, keyLen C.size_t) (unsafe.Pointer, int) {
 	key := string(unsafe.Slice((*byte)(keyString), keyLen))
-	if len(key) < 3 || key[0] != '[' || key[len(key)-1] != ']' {
+	var res []byte
+	_, err := fmt.Sscanf(key, "%x", &res)
+	if err != nil {
 		return nil, 0
-	}
-
-	res := []byte(nil)
-	for _, numS := range strings.Split(key[1:len(key)-1], " ") {
-		n, err := strconv.Atoi(numS)
-		if err != nil {
-			return nil, 0
-		}
-		res = append(res, byte(n))
 	}
 	return C.CBytes(res), len(res)
 }
