@@ -131,7 +131,7 @@ func (s *TestServer) StartTransport(t *testing.T) {
 			Certificate:      s.Leaf,
 			Intermediate:     s.Intermediate,
 			KeyPair:          s.LeafKeyPair,
-			HandshakeTimeout: 15 * time.Second,
+			HandshakeTimeout: time.Second,
 		})
 	} else {
 		logrus.Info("Using custom transport config.")
