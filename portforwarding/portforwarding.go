@@ -9,40 +9,44 @@ import (
 	"sync"
 
 	"github.com/sirupsen/logrus"
+
 	"hop.computer/hop/common"
 	"hop.computer/hop/tubes"
 )
 
+type fwdType byte
+
 const (
-	pfTCP  = 1
-	pfUDP  = 2
-	pfUNIX = 3
+	pfTCP = 1
+	//pfUDP          = 2
+	pfUNIX fwdType = 3
 )
 
-type FwdType byte
-
 // TODO(drebelsky): We may be able to use net.addr eventually, but for now this works
-type Addr struct {
-	netType FwdType
+type addr struct {
+	netType fwdType
 	addr    string
 }
 
+// Forward encapsulates the concept of a forward between two addresses
 type Forward struct {
-	listen  Addr
-	connect Addr
+	listen  addr
+	connect addr
 }
 
+// FwdMapping contains the maps of active inbound and outbound forwards
 type FwdMapping struct {
-	inbound  map[Addr]Addr
+	inbound  map[addr]addr
 	im       sync.Mutex
-	outbound map[Addr]Addr
+	outbound map[addr]addr
 	om       sync.Mutex
 }
 
+// NewFwdMapping creates a new fwd mapping
 func NewFwdMapping() *FwdMapping {
 	return &FwdMapping{
-		inbound:  make(map[Addr]Addr),
-		outbound: make(map[Addr]Addr),
+		inbound:  make(map[addr]addr),
+		outbound: make(map[addr]addr),
 	}
 }
 
@@ -51,13 +55,13 @@ const (
 	failure = 1
 )
 
-func readPacket(r io.Reader) (*Addr, error) {
+func readPacket(r io.Reader) (*addr, error) {
 	b := make([]byte, 1)
 	_, err := io.ReadFull(r, b)
 	if err != nil {
 		return nil, err
 	}
-	pfType := FwdType(b[0])
+	pfType := fwdType(b[0])
 
 	var hostLen uint16
 	err = binary.Read(r, binary.BigEndian, &hostLen)
@@ -71,13 +75,13 @@ func readPacket(r io.Reader) (*Addr, error) {
 		return nil, err
 	}
 
-	return &Addr{
+	return &addr{
 		pfType,
 		string(host),
 	}, nil
 }
 
-func toBytes(f *Addr) []byte {
+func toBytes(f *addr) []byte {
 	length := make([]byte, 2)
 	binary.BigEndian.PutUint16(length, uint16(len(f.addr)))
 	var res []byte
@@ -113,7 +117,7 @@ func writeFlags(w io.Writer, start, notify bool) (err error) {
 	return err
 }
 
-func listen(local, remote *Addr, table *FwdMapping, muxer *tubes.Muxer) bool {
+func listen(local, remote *addr, table *FwdMapping, muxer *tubes.Muxer) bool {
 	// only supports tcp right now
 	ln, err := net.Listen("tcp", local.addr)
 	if err != nil {
@@ -166,6 +170,7 @@ func listen(local, remote *Addr, table *FwdMapping, muxer *tubes.Muxer) bool {
 	return true
 }
 
+// HandleServerControl handles PFControl tubes for the server
 func HandleServerControl(ch *tubes.Reliable, table *FwdMapping, muxer *tubes.Muxer) {
 	for {
 		start, notify, err := readFlags(ch)
@@ -211,6 +216,7 @@ func HandleServerControl(ch *tubes.Reliable, table *FwdMapping, muxer *tubes.Mux
 	}
 }
 
+// HandlePF handles communication for PFTube tubes
 func HandlePF(ch *tubes.Reliable, table *FwdMapping) {
 	remote, err := readPacket(ch)
 	_ = remote
@@ -251,6 +257,7 @@ func HandlePF(ch *tubes.Reliable, table *FwdMapping) {
 	}()
 }
 
+// InitiatePF handles initiating forwards for a client
 func InitiatePF(ch *tubes.Reliable, table *FwdMapping, local, remote []*Forward, muxer *tubes.Muxer) {
 	// We write all of the local forwards first to avoid unnecessarily blocking on the responses
 	for _, fwd := range local {
@@ -429,6 +436,5 @@ func ParseForward(arg string) (forward *Forward, err error) {
 		err = ErrInvalidPFArgs
 		return
 	}
-
-	return
+	return forward, err
 }
