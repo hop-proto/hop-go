@@ -7,3 +7,4 @@ cmd/hopd/hopd
 cmd/hop-keygen/hop-keygen
 cmd/remotePF/remotePF
 cmd/log.txt
+wireshark/lib*
