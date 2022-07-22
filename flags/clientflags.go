@@ -107,7 +107,7 @@ func LoadClientConfigFromFlags(f *ClientFlags) (*config.HostConfig, error) {
 // defineClientFlags calls fs.StringVar for Client
 func defineClientFlags(fs *flag.FlagSet, f *ClientFlags) {
 	fs.Func("R", "perform remote port forwarding", func(s string) error {
-		fwd, err := portforwarding.ParseFwd(s)
+		fwd, err := portforwarding.ParseForward(s)
 		if err != nil {
 			return err
 		}
@@ -116,7 +116,7 @@ func defineClientFlags(fs *flag.FlagSet, f *ClientFlags) {
 	})
 
 	fs.Func("L", "perform local port forwarding", func(s string) error {
-		fwd, err := portforwarding.ParseFwd(s)
+		fwd, err := portforwarding.ParseForward(s)
 		if err != nil {
 			return err
 		}
