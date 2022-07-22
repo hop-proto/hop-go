@@ -12,7 +12,7 @@ Run `make install`
 * This does some minor "magic" that may be slightly fragile with regard to setting the path to the shared library for the lua script to use---alternatively, one could do the following three steps
   1. Run `make libcompat.so` (or `make libcompat.dynlib` on Mac)
     * (Optionally move this file somewhere convenient)
-  2. Add the line `local package_loc = /full/path/to/the/sharedlibrary.so` to the top of `hop.lua`
+  2. Add the line `local package_loc = "/full/path/to/the/sharedlibrary.so"` to the top of `hop.lua`
   3. Copy `hop.lua` into `$HOME/.local/lib/wireshark/plugins`
 Launch Wireshark
 Run `tcpdump -i any -w outputfile.pcap` to get a packet dump
@@ -25,7 +25,7 @@ Run `tcpdump -i any -w outputfile.pcap` to get a packet dump
   * This does some minor "magic" that may be slightly fragile with regard to setting the path to the shared library for the lua script to use---alternatively, one could do the following three steps
     1. Run `env <SAME FLAGS AS ABOVE (except INSTALL_DIR is optional)> make libcompat.dll`
       * (Optionally move this file somewhere convenient)
-    2. Add the line `local package_loc = /full/path/to/the/sharedlibrary.dll` to the top of `hop.lua`
+    2. Add the line `local package_loc = "/full/path/to/the/sharedlibrary.dll"` to the top of `hop.lua`
     3. Copy `hop.lua` into the wiresharks plugin location (`%APPDATA%/Wireshark/plugins`)
 4. Launch Wireshark
   * If you get the error `Lua: Error during loading:`, the path name to your plugins directory and `attempt to call a nil value`, you can either follow the longer instructions in the bullet point to step three or edit `%APPDATA%/Wireshark/plugins/hop.lua`'s first line so that the path is a valid windows path (e.g., should start with `C:/` not `/cygdrive/c`)
