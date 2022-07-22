@@ -22,6 +22,17 @@ const (
 	pfUNIX fwdType = 3
 )
 
+func getNetwork(netType fwdType) string {
+	switch netType {
+	case pfTCP:
+		return "tcp"
+	case pfUNIX:
+		return "unix"
+	default:
+	}
+	return ""
+}
+
 // TODO(drebelsky): We may be able to use net.addr eventually, but for now this works
 type addr struct {
 	netType fwdType
@@ -118,8 +129,7 @@ func writeFlags(w io.Writer, start, notify bool) (err error) {
 }
 
 func listen(local, remote *addr, table *FwdMapping, muxer *tubes.Muxer) bool {
-	// only supports tcp right now
-	ln, err := net.Listen("tcp", local.addr)
+	ln, err := net.Listen(getNetwork(local.netType), local.addr)
 	if err != nil {
 		return false
 	}
@@ -240,7 +250,7 @@ func HandlePF(ch *tubes.Reliable, table *FwdMapping) {
 		return
 	}
 
-	conn, err := net.Dial("tcp", local.addr)
+	conn, err := net.Dial(getNetwork(local.netType), local.addr)
 	if err != nil {
 		ch.Write([]byte{failure})
 		ch.Close()
