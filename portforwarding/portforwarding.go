@@ -411,20 +411,20 @@ func ParseForward(arg string) (forward *Forward, err error) {
 		return
 	case 1: // all that remains is listen_port (connect_socket already parsed)
 		//listen_port:connect_socket				(1 no netType)
-		forward.listen.addr = loopback + ":" + parts[0]
+		forward.listen.addr = net.JoinHostPort(loopback, parts[0])
 
 	case 2: // listen or connect was a socket. 2 args remain
 		if forward.connect.netType == pfTCP {
-			forward.connect.addr = parts[0] + ":" + parts[1]
+			forward.connect.addr = net.JoinHostPort(parts[0], parts[1])
 		} else if forward.listen.netType == pfTCP {
-			forward.listen.addr = parts[0] + ":" + parts[1]
+			forward.listen.addr = net.JoinHostPort(parts[0], parts[1])
 		}
 	case 3: //listen_port:connect_host:connect_port (3 no netType)
-		forward.listen.addr = loopback + ":" + parts[0]
-		forward.connect.addr = parts[1] + ":" + parts[2]
+		forward.listen.addr = net.JoinHostPort(loopback, parts[0])
+		forward.connect.addr = net.JoinHostPort(parts[1], parts[2])
 	case 4: //listen_address:listen_port:connect_host:connect_port (4 no netType)
-		forward.listen.addr = parts[0] + ":" + parts[1]
-		forward.connect.addr = parts[2] + ":" + parts[3]
+		forward.listen.addr = net.JoinHostPort(parts[0], parts[1])
+		forward.connect.addr = net.JoinHostPort(parts[2], parts[3])
 	default:
 		err = ErrInvalidPFArgs
 		return
