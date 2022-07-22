@@ -1,11 +1,11 @@
 package portforwarding
 
 import (
-	"errors"
-	"strings"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
+	"strings"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -18,6 +18,7 @@ const (
 	pfUDP  = 2
 	pfUNIX = 3
 )
+
 type FwdType byte
 
 // TODO(drebelsky): We may be able to use net.addr eventually, but for now this works
@@ -277,8 +278,6 @@ func InitiatePF(ch *tubes.Reliable, table *FwdMapping, local, remote []*Forward,
 		}
 	}
 }
-
-
 
 //ErrInvalidPortForwardingArgs returned when client receives unsupported -L or -R options
 var ErrInvalidPortForwardingArgs = errors.New("port forwarding currently only supported with port:host:hostport format")
