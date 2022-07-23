@@ -6,25 +6,28 @@ import (
 	"os"
 	"time"
 	"sync"
-	"context"
-	"errors"
 )
 
 // ReliableUDP is an in memory reliable datagram service
 // Essentially, it's a UDP connection where every datagram is delivered reliably and in order
 // This is only used for testing purposes
 type ReliableUDP struct {
+	// +checklocks:writeLock
 	send 			chan []byte
+	// +checklocks:readLock
 	recv 			chan []byte
 	closed 			atomicBool
-	dataLock		sync.Mutex
+	readLock		sync.Mutex
+	writeLock		sync.Mutex
 	timeoutLock		sync.Mutex
 
-	readCtx			context.Context
-	readCancel 		context.CancelFunc
+	// +checklocks:timeoutLock
+	readTimer 		*time.Timer
+	readExpired		atomicBool
 
-	writeCtx 		context.Context
-	writeCancel		context.CancelFunc
+	// +checklocks:timeoutLock
+	writeTimer 		*time.Timer
+	writeExpired	atomicBool
 }
 
 var _ UDPLike = &ReliableUDP{}
@@ -35,39 +38,30 @@ func (r *ReliableUDP) Read(b []byte) (n int, err error) {
 }
 
 func (r *ReliableUDP) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
-	r.dataLock.Lock()
-	defer r.dataLock.Unlock()
+	r.readLock.Lock()
+	defer r.readLock.Unlock()
 
-	if r.closed.isSet() {
-		return 0, 0, 0, nil, io.EOF
-	}
-
-	select {
-	case <- r.readCtx.Done():
-		return 0, 0, 0, nil, os.ErrDeadlineExceeded
-	default:
-	}
+	addr = &net.UDPAddr{}
 
 	for {
+		if r.closed.isSet() {
+			return 0, 0, 0, addr, io.EOF
+		}
+		if r.readExpired.isSet() {
+			return 0, 0, 0, addr, os.ErrDeadlineExceeded
+		}
 		select {
-		case msg, ok := <- r.recv:
+		case msg, ok := <- r.recv: 
 			if !ok {
-				return 0, 0, 0, nil, io.EOF
+				return 0, 0, 0, addr, io.EOF
 			}
 			n = copy(b, msg)
 			if n < len(msg) {
 				panic("buffer too small!")
 			}
-			return n, 0, 0, nil, nil
-		case <-r.readCtx.Done():
-			err := r.readCtx.Err()
-			if errors.Is(err, context.DeadlineExceeded) {
-				return 0, 0, 0, nil, os.ErrDeadlineExceeded
-			} else if err == nil || errors.Is(err, context.Canceled) {
-				continue
-			} else {
-				panic(err)
-			}
+			return n, 0, 0, addr, nil
+		default:
+			time.Sleep(time.Millisecond)
 		}
 	}
 }
@@ -78,50 +72,41 @@ func (r *ReliableUDP) Write(b []byte) (n int, err error) {
 }
 
 func (r *ReliableUDP) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
-	r.dataLock.Lock()
-	defer r.dataLock.Unlock()
-
-	if r.closed.isSet() {
-		return 0, 0, io.EOF
-	}
-
-	select {
-	case <- r.writeCtx.Done():
-		return 0, 0, os.ErrDeadlineExceeded
-	default:
-	}
+	r.writeLock.Lock()
+	defer r.writeLock.Unlock()
 
 	for {
+		if r.closed.isSet() {
+			return 0, 0, io.EOF
+		}
+		if r.writeExpired.isSet() {
+			return 0, 0, os.ErrDeadlineExceeded
+		}
 		select {
 		case r.send <-append([]byte(nil), b...):
 			return len(b), 0, nil
-		case <-r.writeCtx.Done():
-			err := r.writeCtx.Err()
-			if errors.Is(err, context.DeadlineExceeded) {
-				return 0, 0, os.ErrDeadlineExceeded
-			} else if err == nil || errors.Is(err, context.Canceled) {
-				continue
-			} else {
-				panic(err)
-			}
+		default:
+			time.Sleep(time.Millisecond)
 		}
 	}
 }
 
 func (r *ReliableUDP) Close() error {
-	r.SetDeadline(time.Unix(1, 0))
-	r.timeoutLock.Lock()
-	r.dataLock.Lock()
-	defer r.timeoutLock.Unlock()
-	defer r.dataLock.Unlock()
-
-	time.Sleep(time.Millisecond)
-
 	if r.closed.isSet() {
 		return io.EOF
 	}
-	close(r.send)
+
 	r.closed.setTrue()
+	r.timeoutLock.Lock()
+	r.readLock.Lock()
+	r.writeLock.Lock()
+	defer r.timeoutLock.Unlock()
+	defer r.readLock.Unlock()
+	defer r.writeLock.Unlock()
+
+	//time.Sleep(time.Millisecond)
+
+	close(r.send)
 	return nil
 }
 
@@ -143,17 +128,31 @@ func (r *ReliableUDP) SetReadDeadline(t time.Time) error {
 	r.timeoutLock.Lock()
 	defer r.timeoutLock.Unlock()
 
-	r.readCancel()
+	if r.readTimer != nil {
+		if !r.readTimer.Stop() {
+			select {
+			case <-r.readTimer.C:
+			default:
+			}
+		}
+	}
+
 
 	if t.IsZero() {
-		r.readCtx, r.readCancel = context.WithCancel(context.Background())
+		r.readExpired.setFalse()
+	} else if t.Before(time.Now()) {
+		r.readExpired.setTrue()
 	} else {
-		select {
-		case <- r.readCtx.Done():
-			r.readCtx, r.readCancel = context.WithDeadline(context.Background(), t)
-		default:
-			r.readCtx, r.readCancel = context.WithDeadline(r.readCtx, t)
+		r.readExpired.setFalse()
+		if r.readTimer != nil {
+			r.readTimer.Reset(t.Sub(time.Now()))
+		} else {
+			f := func() {
+				r.readExpired.setTrue()
+			}
+			r.readTimer = time.AfterFunc(t.Sub(time.Now()), f)
 		}
+
 	}
 
 	return nil
@@ -163,17 +162,31 @@ func (r *ReliableUDP) SetWriteDeadline(t time.Time) error {
 	r.timeoutLock.Lock()
 	defer r.timeoutLock.Unlock()
 
-	r.writeCancel()
+	if r.writeTimer != nil {
+		if !r.writeTimer.Stop() {
+			select {
+			case <-r.writeTimer.C:
+			default:
+			}
+		}
+	}
+
 
 	if t.IsZero() {
-		r.writeCtx, r.writeCancel = context.WithCancel(context.Background())
+		r.writeExpired.setFalse()
+	} else if t.Before(time.Now()) {
+		r.writeExpired.setTrue()
 	} else {
-		select {
-		case <- r.writeCtx.Done():
-			r.writeCtx, r.writeCancel = context.WithDeadline(context.Background(), t)
-		default:
-			r.writeCtx, r.writeCancel = context.WithDeadline(r.writeCtx, t)
+		r.writeExpired.setFalse()
+		if r.writeTimer != nil {
+			r.writeTimer.Reset(t.Sub(time.Now()))
+		} else {
+			f := func() {
+				r.writeExpired.setTrue()
+			}
+			r.writeTimer = time.AfterFunc(t.Sub(time.Now()), f)
 		}
+
 	}
 
 	return nil
@@ -183,26 +196,14 @@ func MakeRelaibleUDPConn() (c1, c2 *ReliableUDP) {
 	ch1 := make(chan []byte, 1 << 16)
 	ch2 := make(chan []byte, 1 << 16)
 
-	c1ReadCtx, c1ReadCancel := context.WithCancel(context.Background())
-	c1WriteCtx, c1WriteCancel := context.WithCancel(context.Background())
 	c1 = &ReliableUDP {
 		send: ch1,
 		recv: ch2,
-		readCtx: c1ReadCtx,
-		readCancel: c1ReadCancel,
-		writeCtx: c1WriteCtx,
-		writeCancel: c1WriteCancel,
 	}
 
-	c2ReadCtx, c2ReadCancel := context.WithCancel(context.Background())
-	c2WriteCtx, c2WriteCancel := context.WithCancel(context.Background())
 	c2 = &ReliableUDP {
 		send: ch2,
 		recv: ch1,
-		readCtx: c2ReadCtx,
-		readCancel: c2ReadCancel,
-		writeCtx: c2WriteCtx,
-		writeCancel: c2WriteCancel,
 	}
 
 	return c1, c2
