@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -60,6 +61,9 @@ type Client struct {
 	plaintext  []byte
 
 	recv *common.DeadlineChan[[]byte]
+
+	recv 	chan []byte
+	ctrl 	chan []byte
 
 	config ClientConfig
 }
@@ -386,6 +390,42 @@ func (c *Client) handleControlMsg(msg ControlMessage) (err error) {
 		logrus.Errorf("client: invalid control message: %x", msg)
 		go c.Close()
 		return ErrInvalidMessage
+	}
+}
+
+func (c *Client) listen() {
+	c.wg.Add(1)
+	defer c.wg.Done()
+	for !c.closed.IsSet() {
+		c.underlyingConn.SetReadDeadline(time.Now().Add(time.Second))
+		n, mt, err := c.readMsg()
+
+		// timing out the connection allows us to check if it has been closed
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			continue
+		} else if err != nil {
+			logrus.Errorf("client: %s", err)
+			continue
+		}
+
+		switch mt {
+		case MessageTypeTransport:
+			select {
+			case c.recv <- append([]byte(nil), c.plaintext[:n]...):
+				break
+			default:
+				logrus.Warn("client: recv queue full. dropping message")
+			}
+		case MessageTypeControl:
+			select {
+			case c.ctrl <- append([]byte(nil), c.plaintext[:n]...):
+				break
+			default:
+				logrus.Warn("client: ctrl queue full. dropping message")
+			}
+		default:
+			logrus.Panicf("client: unexpected message %x", mt)
+		}
 	}
 }
 
