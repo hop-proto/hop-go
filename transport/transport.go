@@ -32,6 +32,7 @@ type SessionState struct {
 	clientLeaf certs.Certificate
 
 	m	sync.Mutex
+	// +checklocks:m
 	rawWrite bytes.Buffer
 }
 
@@ -92,7 +93,7 @@ func (ss *SessionState) readCounter(b []byte) (count uint64) {
 	return
 }
 
-func (ss *SessionState) writePacket(conn UDPLike, in []byte, key *[KeyLen]byte) error {
+func (ss *SessionState) writePacket(conn UDPLike, msgType MessageType, in []byte, key *[KeyLen]byte) error {
 	ss.m.Lock()
 	defer ss.m.Unlock()
 
@@ -102,7 +103,7 @@ func (ss *SessionState) writePacket(conn UDPLike, in []byte, key *[KeyLen]byte) 
 		ss.rawWrite.Grow(length)
 	}
 
-	ss.rawWrite.WriteByte(byte(MessageTypeTransport))
+	ss.rawWrite.WriteByte(byte(msgType))
 	ss.rawWrite.WriteByte(0)
 	ss.rawWrite.WriteByte(0)
 	ss.rawWrite.WriteByte(0)
@@ -142,26 +143,27 @@ func (ss *SessionState) writePacket(conn UDPLike, in []byte, key *[KeyLen]byte) 
 	return nil
 }
 
-func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (int, error) {
+func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (int, MessageType, error) {
 	plaintextLen := PlaintextLen(len(pkt))
 	ciphertextLen := plaintextLen + TagLen
 	if plaintextLen > len(plaintext) {
-		return 0, ErrBufOverflow
+		return 0, 0x0, ErrBufOverflow
 	}
 
 	// Header
 	b := pkt
-	if mt := MessageType(b[0]); mt != MessageTypeTransport {
-		return 0, ErrUnexpectedMessage
+	var mt MessageType
+	if mt = MessageType(b[0]); mt != MessageTypeTransport && mt != MessageTypeControl {
+		return 0, 0x0, ErrUnexpectedMessage
 	}
 	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
-		return 0, ErrInvalidMessage
+		return 0, 0x0, ErrInvalidMessage
 	}
 	b = b[HeaderLen:]
 
 	// SessionID
 	if !bytes.Equal(ss.sessionID[:], b[:SessionIDLen]) {
-		return 0, ErrUnknownSession
+		return 0, 0x0, ErrUnknownSession
 	}
 	b = b[SessionIDLen:]
 
@@ -170,13 +172,13 @@ func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (in
 	logrus.Debugf("ss: read packet with count %d", count)
 	if !ss.window.Check(count) {
 		logrus.Debugf("ss: rejecting replayed packet")
-		return 0, ErrReplay
+		return 0, 0x0, ErrReplay
 	}
 	b = b[CounterLen:]
 
 	aead, err := kravatte.NewSANSE(key[:])
 	if err != nil {
-		return 0, err
+		return 0, 0x0, err
 	}
 	enc := b[:ciphertextLen]
 	logrus.Debugf("read enc: %x", enc)
@@ -186,12 +188,12 @@ func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (in
 	}
 	out, err := aead.Open(plaintext[:0], nil, enc, pkt[:AssociatedDataLen])
 	if err != nil {
-		return 0, err
+		return 0, 0x0, err
 	}
 	if len(out) != plaintextLen {
 		logrus.Panicf("len(out) = %d, expected plaintextLen = %d", len(out), plaintextLen)
 	}
 	ss.window.Mark(count)
 
-	return plaintextLen, nil
+	return plaintextLen, mt, nil
 }

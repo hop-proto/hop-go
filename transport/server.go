@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/certs"
+	"hop.computer/hop/common"
 )
 
 // Server implements a Hop server capable of multiplexing roaming Hop
@@ -27,18 +29,16 @@ type Server struct {
 	rawRead      []byte
 	handshakeBuf []byte
 
-	// +checklocks:m
 	udpConn UDPLike
 	config  ServerConfig
 
-	closed atomic.Bool
+	closed common.AtomicBool
 
 	// +checklocks:m
 	handshakes map[string]*HandshakeState
-	// +checkreadlocks:m
+	// +checklocks:m
 	sessions   map[SessionID]*SessionState
 
-	// +checklocks:m
 	pendingConnections chan *Handle
 
 	cookieKey    [KeyLen]byte
@@ -158,6 +158,7 @@ func (s *Server) writePacket(pkt []byte, dst *net.UDPAddr) error {
 }
 
 func (s *Server) readPacket() error {
+	s.udpConn.SetReadDeadline(time.Now().Add(time.Second))
 	msgLen, oobn, flags, addr, err := s.udpConn.ReadMsgUDP(s.rawRead, nil)
 	if err != nil {
 		return err
@@ -228,11 +229,11 @@ func (s *Server) readPacket() error {
 	case MessageTypeServerHello, MessageTypeServerAuth:
 		// Server-side should not receive messages only sent by the server
 		return ErrUnexpectedMessage
-	case MessageTypeTransport:
-		logrus.Debugf("server: received transport message from %s", addr)
+	case MessageTypeTransport, MessageTypeControl:
+		logrus.Debugf("server: received transport/control message from %s", addr)
 		// TODO(dadrian): Avoid allocation
 		plaintext := make([]byte, 65535)
-		_, err := s.handleTransport(addr, s.rawRead[:msgLen], plaintext)
+		_, err := s.handleSessionMessage(addr, s.rawRead[:msgLen], plaintext)
 		if err != nil {
 			return err
 		}
@@ -457,16 +458,16 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	return pos, hs, nil
 }
 
-func (s *Server) readPacketFromSession(ss *SessionState, plaintext []byte, pkt []byte, key *[KeyLen]byte) (int, error) {
+func (s *Server) readPacketFromSession(ss *SessionState, plaintext []byte, pkt []byte, key *[KeyLen]byte) (int, MessageType, error) {
 	return ss.readPacket(plaintext, pkt, &ss.clientToServerKey)
 }
 
-func (s *Server) handleTransport(addr *net.UDPAddr, msg []byte, plaintext []byte) (int, error) {
+func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte, plaintext []byte) (int, error) {
 	sessionID, err := PeekSession(msg)
 	if err != nil {
 		return 0, err
 	}
-	logrus.Debugf("server: transport message for session %x", sessionID)
+	logrus.Debugf("server: transport/control message for session %x", sessionID)
 	ss := s.fetchSessionState(sessionID)
 	if ss == nil {
 		return 0, ErrUnknownSession
@@ -478,17 +479,32 @@ func (s *Server) handleTransport(addr *net.UDPAddr, msg []byte, plaintext []byte
 		return 0, io.EOF
 	}
 
-	n, err := s.readPacketFromSession(ss, plaintext, msg, &ss.clientToServerKey)
+	n, mt, err := s.readPacketFromSession(ss, plaintext, msg, &ss.clientToServerKey)
 	if err != nil {
 		return 0, err
 	}
-	logrus.Debugf("server: session %x: plaintext: %x from: %s", ss.sessionID, plaintext[:n], addr)
-	select {
-	case ss.handle.recv <- plaintext[:n]:
-		break
+
+	logrus.Debugf("server: session %x: plaintext: %x type: %x from: %s", ss.sessionID, plaintext[:n], mt, addr)
+
+	switch mt {
+	case MessageTypeTransport:
+		select {
+		case ss.handle.recv <- plaintext[:n]:
+			break
+		default:
+			logrus.Warnf("session %x: recv queue full, dropping packet", sessionID)
+		}
+	case MessageTypeControl:
+		select {
+		case ss.handle.ctrl <- plaintext[:n]:
+			break
+		default:
+			logrus.Warnf("session %x: ctrl queue full, dropping packet", sessionID)
+		}
 	default:
-		logrus.Warnf("session %x: recv queue full, dropping packet", sessionID)
+		return 0, ErrInvalidMessage
 	}
+
 	ss.handle.writeLock.Lock()
 	defer ss.handle.writeLock.Unlock()
 	if !EqualUDPAddress(ss.remoteAddr, addr) {
@@ -505,14 +521,19 @@ func (s *Server) Serve() error {
 	s.wg.Add(2)
 	go func() {
 		defer s.wg.Done()
-		for !s.closed.isSet() {
+		for !s.closed.IsSet() {
 			err := s.readPacket()
 			logrus.Debug("read a packet")
-			if err != nil {
+			if errors.Is(err, io.EOF) {
+				logrus.Error("Connection has been closed")
+				break
+			} else if errors.Is(err, os.ErrDeadlineExceeded) {
+				// timing out allows us to periodically check if the connection is closed
+				continue
+			} else if err != nil {
 				logrus.Errorf("server: %s", err)
 			}
 		}
-		logrus.Error("SERVER READ ROUTINE EXITED")
 	}()
 	s.wg.Done()
 	s.wg.Wait()
@@ -570,15 +591,16 @@ func (s *Server) createHandleLocked(ss *SessionState) *Handle {
 		sessionID:    ss.sessionID,
 		recv:         make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
 		send:         make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
-		readTimeout:  atomicTimeout(s.config.StartingReadTimeout),
-		writeTimeout: atomicTimeout(s.config.StartingWriteTimeout),
+		ctrl:         make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
+		readTimeout:  common.AtomicTimeout(s.config.StartingReadTimeout),
+		writeTimeout: common.AtomicTimeout(s.config.StartingWriteTimeout),
 	}
 	ss.handle = handle
 	return handle
 }
 
 func (s *Server) lockHandleAndWriteToSession(ss *SessionState, plaintext []byte) error {
-	err := ss.writePacket(s.udpConn, plaintext, &ss.serverToClientKey)
+	err := ss.writePacket(s.udpConn, MessageTypeTransport, plaintext, &ss.serverToClientKey)
 	return err
 }
 
@@ -594,9 +616,9 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 			// Should never happen
 			return nil, ErrUnknownSession
 		}
-		ss.handle.writeWg.Add(1)
+		ss.handle.wg.Add(2)
 		go func(ss *SessionState) {
-			defer ss.handle.writeWg.Done()
+			defer ss.handle.wg.Done()
 			for plaintext := range ss.handle.send {
 				err := s.lockHandleAndWriteToSession(ss, plaintext)
 				if err != nil {
@@ -605,6 +627,13 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 				}
 			}
 		}(ss)
+		go func(h *Handle) {
+			defer h.wg.Done()
+			for _ = range h.ctrl {
+				// TODO(hosono) handle other control messages
+				h.Close()
+			}
+		}(ss.handle)
 		return handle, nil
 	case <-timer.C:
 		return nil, ErrTimeout
@@ -624,7 +653,7 @@ func (s *Server) CloseSession(sessionID SessionID) error {
 	return s.closeSessionLocked(sessionID)
 }
 
-// +checklocks:s.s
+// +checklocks:s.m
 func (s *Server) closeSessionLocked(sessionID SessionID) error {
 	ss := s.fetchSessionStateLocked(sessionID)
 	err := ss.handle.Close()
@@ -637,7 +666,7 @@ func (s *Server) closeSessionLocked(sessionID SessionID) error {
 // TODO(dadrian): What does it do to writes?
 func (s *Server) Close() (err error) {
 	// This will end the reading goroutine and wait for it to exit
-	s.closed.setTrue()
+	s.closed.SetTrue()
 	s.wg.Wait()
 
 	// TODO(hosono) fix the weirdness around locking stuff

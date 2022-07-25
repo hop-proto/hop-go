@@ -6,6 +6,8 @@ import (
 	"os"
 	"time"
 	"sync"
+
+	"hop.computer/hop/common"
 )
 
 // ReliableUDP is an in memory reliable datagram service
@@ -16,18 +18,18 @@ type ReliableUDP struct {
 	send 			chan []byte
 	// +checklocks:readLock
 	recv 			chan []byte
-	closed 			atomicBool
+	closed 			common.AtomicBool
 	readLock		sync.Mutex
 	writeLock		sync.Mutex
 	timeoutLock		sync.Mutex
 
 	// +checklocks:timeoutLock
 	readTimer 		*time.Timer
-	readExpired		atomicBool
+	readExpired		common.AtomicBool
 
 	// +checklocks:timeoutLock
 	writeTimer 		*time.Timer
-	writeExpired	atomicBool
+	writeExpired	common.AtomicBool
 }
 
 var _ UDPLike = &ReliableUDP{}
@@ -44,10 +46,10 @@ func (r *ReliableUDP) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.U
 	addr = &net.UDPAddr{}
 
 	for {
-		if r.closed.isSet() {
+		if r.closed.IsSet() {
 			return 0, 0, 0, addr, io.EOF
 		}
-		if r.readExpired.isSet() {
+		if r.readExpired.IsSet() {
 			return 0, 0, 0, addr, os.ErrDeadlineExceeded
 		}
 		select {
@@ -76,10 +78,10 @@ func (r *ReliableUDP) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int
 	defer r.writeLock.Unlock()
 
 	for {
-		if r.closed.isSet() {
+		if r.closed.IsSet() {
 			return 0, 0, io.EOF
 		}
-		if r.writeExpired.isSet() {
+		if r.writeExpired.IsSet() {
 			return 0, 0, os.ErrDeadlineExceeded
 		}
 		select {
@@ -92,11 +94,11 @@ func (r *ReliableUDP) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int
 }
 
 func (r *ReliableUDP) Close() error {
-	if r.closed.isSet() {
+	if r.closed.IsSet() {
 		return io.EOF
 	}
 
-	r.closed.setTrue()
+	r.closed.SetTrue()
 	r.timeoutLock.Lock()
 	r.readLock.Lock()
 	r.writeLock.Lock()
@@ -139,16 +141,16 @@ func (r *ReliableUDP) SetReadDeadline(t time.Time) error {
 
 
 	if t.IsZero() {
-		r.readExpired.setFalse()
+		r.readExpired.SetFalse()
 	} else if t.Before(time.Now()) {
-		r.readExpired.setTrue()
+		r.readExpired.SetTrue()
 	} else {
-		r.readExpired.setFalse()
+		r.readExpired.SetFalse()
 		if r.readTimer != nil {
 			r.readTimer.Reset(t.Sub(time.Now()))
 		} else {
 			f := func() {
-				r.readExpired.setTrue()
+				r.readExpired.SetTrue()
 			}
 			r.readTimer = time.AfterFunc(t.Sub(time.Now()), f)
 		}
@@ -173,16 +175,16 @@ func (r *ReliableUDP) SetWriteDeadline(t time.Time) error {
 
 
 	if t.IsZero() {
-		r.writeExpired.setFalse()
+		r.writeExpired.SetFalse()
 	} else if t.Before(time.Now()) {
-		r.writeExpired.setTrue()
+		r.writeExpired.SetTrue()
 	} else {
-		r.writeExpired.setFalse()
+		r.writeExpired.SetFalse()
 		if r.writeTimer != nil {
 			r.writeTimer.Reset(t.Sub(time.Now()))
 		} else {
 			f := func() {
-				r.writeExpired.setTrue()
+				r.writeExpired.SetTrue()
 			}
 			r.writeTimer = time.AfterFunc(t.Sub(time.Now()), f)
 		}

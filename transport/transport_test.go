@@ -21,42 +21,13 @@ func TestTransportAEAD(t *testing.T) {
 	assert.Check(t, cmp.Equal(sanse.Overhead(), TagLen))
 }
 
-type UDPOverTCP struct {
-	net.TCPConn
-}
-
-func (u *UDPOverTCP) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
-	n, err = u.Write(b)
-	return n, 0, err
-}
-
-func (u *UDPOverTCP) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
-	n, err = u.Read(b)
-	remoteAddr := net.UDPAddr{
-		IP: []byte{1, 2, 3, 4},
-		Port: 0,
-	}
-	return n, 0, 0, &remoteAddr, err
-}
-
 // Wrapper around the client nettests
-func TestTransportConn(t *testing.T) {
+func DontTestTransportConn(t *testing.T) {
 	makePipe := func() (net.Conn, net.Conn, func(), error) {
-		// Start server UDP connection
-		serverListener, err := net.ListenTCP("tcp", &net.TCPAddr{})
-		assert.NilError(t, err)
 
-		clientTCP, err := net.Dial("tcp", serverListener.Addr().String())
-		assert.NilError(t, err)
-
-		serverTCP, err := serverListener.AcceptTCP()
-		assert.NilError(t, err)
-
-		err = serverListener.Close()
-		assert.NilError(t, err)
+		serverUDP, clientUDP := MakeRelaibleUDPConn()
 
 		// Create new server
-		serverUDP := &UDPOverTCP{*serverTCP}
 		serverConfig, verifyConfig := newTestServerConfig(t)
 		serverConn, err := NewServer(serverUDP, *serverConfig)
 		assert.NilError(t, err)
@@ -71,17 +42,7 @@ func TestTransportConn(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Dial the server
-		clientNewTCP, ok := clientTCP.(*net.TCPConn)
-		if !ok {
-			t.Error("Failed to converted clientTCP from net.Conn to net.TCPConn")
-		}
-		clientUDP := &UDPOverTCP{*clientNewTCP}
-		// TODO(hosono) pass in a real address
-		remoteAddr := net.UDPAddr{
-			IP: []byte{1, 2, 3, 4},
-			Port: 0,
-		}
-		clientConn := NewClient(clientUDP, &remoteAddr, ClientConfig{
+		clientConn := NewClient(clientUDP, nil, ClientConfig{
 			Verify:    *verifyConfig,
 			Exchanger: keyPair,
 			Leaf:      leaf,
@@ -92,7 +53,7 @@ func TestTransportConn(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Get handle from server
-		handle, err  := serverConn.AcceptTimeout(10 * time.Second)
+		handle, err  := serverConn.AcceptTimeout(time.Second)
 		assert.NilError(t, err)
 
 		stop := func() {
@@ -103,9 +64,8 @@ func TestTransportConn(t *testing.T) {
 
 		return clientConn, handle, stop, nil
 	}
-	var mp = nettest.MakePipe(makePipe)
 
-	reliableUDPMakePipe := func() (net.Conn, net.Conn, func(), error) {
+	makeReliableUDPPipe := func() (net.Conn, net.Conn, func(), error) {
 		c1, c2 := MakeRelaibleUDPConn()
 		stop := func() {
 			c1.Close()
@@ -114,7 +74,9 @@ func TestTransportConn(t *testing.T) {
 		return c1, c2, stop, nil
 	}
 
+	var mp = nettest.MakePipe(makePipe)
+	mp = nettest.MakePipe(makeReliableUDPPipe)
 	mp = nettest.MakePipe(makePipe)
-	mp = nettest.MakePipe(reliableUDPMakePipe)
+
 	nettest.TestConn(t, mp)
 }

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"hop.computer/hop/common"
 )
 
 // Handle implements net.Conn and MsgConn for connections accepted by a Server.
@@ -21,19 +23,18 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 
 	// TODO(dadrian): This might need to be a real condition variable. We don't
 	// currently wait on it, but we Add/Done in the actual send write function.
-	writeWg sync.WaitGroup
+	wg sync.WaitGroup
 
-	readTimeout  atomicTimeout
-	writeTimeout atomicTimeout
+	readTimeout  common.AtomicTimeout
+	writeTimeout common.AtomicTimeout
 
 	sessionID SessionID
 
-	// +checklocks:readLock
-	recv chan []byte
-	// +checklocks:writeLock
-	send chan []byte
+	recv chan []byte // incoming transport messages
+	send chan []byte // outgoing transport messages
+	ctrl chan []byte // incoming control messages
 
-	closed atomic.Bool
+	closed common.AtomicBool
 
 	// +checklocks:readLock
 	buf bytes.Buffer
@@ -47,7 +48,7 @@ var _ net.Conn = &Handle{}
 
 // IsClosed returns closed member variable value
 func (c *Handle) IsClosed() bool {
-	return c.closed.Load()
+	return c.closed.IsSet()
 }
 
 // ReadMsg implements the MsgReader interface. If b is too short to hold the
@@ -75,14 +76,14 @@ func (c *Handle) ReadMsg(b []byte) (int, error) {
 	case msg = <-c.recv:
 		break
 	default:
-		if c.closed.Load() {
+		if c.closed.IsSet() {
 			return 0, io.EOF
 		}
 	}
 
 	// Wait for a message until timeout
-	if msg == nil && c.readTimeout.get() != 0 {
-		timer := time.NewTimer(c.readTimeout.get())
+	if msg == nil && c.readTimeout.Get() != 0 {
+		timer := time.NewTimer(c.readTimeout.Get())
 		select {
 		case msg = <-c.recv:
 			if !timer.Stop() {
@@ -131,14 +132,14 @@ func (c *Handle) Read(b []byte) (int, error) {
 	case msg = <-c.recv:
 		break
 	default:
-		if c.closed.Load() {
+		if c.closed.IsSet() {
 			return 0, io.EOF
 		}
 	}
 
 	// Wait for a message until timeout
 	if msg == nil && c.readTimeout != 0 {
-		timer := time.NewTimer(c.readTimeout.get())
+		timer := time.NewTimer(c.readTimeout.Get())
 		select {
 		case msg = <-c.recv:
 			if !timer.Stop() {
@@ -166,7 +167,7 @@ func (c *Handle) WriteMsg(b []byte) error {
 	c.writeLock.Lock()
 	defer c.writeLock.Unlock()
 
-	if c.closed.isSet() {
+	if c.closed.IsSet() {
 		return io.EOF
 	}
 
@@ -178,12 +179,12 @@ func (c *Handle) WriteMsg(b []byte) error {
 	case c.send <- b:
 		return nil
 	default:
-		if c.closed.Load() {
+		if c.closed.IsSet() {
 			return io.EOF
 		}
 	}
 
-	timer := time.NewTimer(c.writeTimeout.get())
+	timer := time.NewTimer(c.writeTimeout.Get())
 	select {
 	case c.send <- b:
 		if !timer.Stop() {
@@ -191,7 +192,7 @@ func (c *Handle) WriteMsg(b []byte) error {
 		}
 		return nil
 	case <-timer.C:
-		if c.closed.Load() {
+		if c.closed.IsSet() {
 			return io.EOF
 		}
 		return ErrTimeout
@@ -202,7 +203,7 @@ func (c *Handle) WriteMsg(b []byte) error {
 // MaxPlaintextLength and send them using WriteMsg. Each call to WriteMsg is
 // subject to the timeout.
 func (c *Handle) Write(b []byte) (int, error) {
-	if c.closed.Load() {
+	if c.closed.IsSet() {
 		return 0, io.EOF
 	}
 	if len(b) <= MaxPlaintextSize {
@@ -249,11 +250,12 @@ func (c *Handle) Close() error {
 	// Close the channels
 	close(c.recv)
 	close(c.send)
+	close(c.ctrl)
 
 	// Wait for the sending goroutine to exit
-	c.writeWg.Wait()
+	c.wg.Wait()
 
-	c.closed.setTrue()
+	c.closed.SetTrue()
 
 	return nil
 }
@@ -278,7 +280,7 @@ func (c *Handle) RemoteAddr() net.Addr {
 //
 // TODO(dadrian): Implement as a deadline.
 func (c *Handle) SetDeadline(t time.Time) error {
-	if c.closed.Load() {
+	if c.closed.IsSet() {
 		return io.EOF
 	}
 	now := time.Now()
@@ -286,8 +288,8 @@ func (c *Handle) SetDeadline(t time.Time) error {
 	if t.After(now) {
 		timeout = t.Sub(now)
 	}
-	c.readTimeout.set(timeout)
-	c.writeTimeout.set(timeout)
+	c.readTimeout.Set(timeout)
+	c.writeTimeout.Set(timeout)
 	return nil
 }
 
@@ -297,7 +299,7 @@ func (c *Handle) SetDeadline(t time.Time) error {
 //
 // TODO(dadrian): Implement as a deadline.
 func (c *Handle) SetReadDeadline(t time.Time) error {
-	if c.closed.Load() {
+	if c.closed.IsSet() {
 		return io.EOF
 	}
 
@@ -312,7 +314,7 @@ func (c *Handle) SetReadDeadline(t time.Time) error {
 	if t.After(now) {
 		timeout = t.Sub(now)
 	}
-	c.readTimeout.set(timeout)
+	c.readTimeout.Set(timeout)
 	return nil
 }
 
@@ -322,7 +324,7 @@ func (c *Handle) SetReadDeadline(t time.Time) error {
 //
 // TODO(dadrian): Implement as a deadline.
 func (c *Handle) SetWriteDeadline(t time.Time) error {
-	if c.closed.Load() {
+	if c.closed.IsSet() {
 		return io.EOF
 	}
 
@@ -337,6 +339,6 @@ func (c *Handle) SetWriteDeadline(t time.Time) error {
 	if t.After(now) {
 		timeout = t.Sub(now)
 	}
-	c.writeTimeout.set(timeout)
+	c.writeTimeout.Set(timeout)
 	return nil
 }

@@ -78,7 +78,6 @@ var ErrWouldBlock = errors.New("operation would block")
 
 // ErrTimeout is returned for operations that timed out
 // Timeouts must wrap os.ErrDeadlineExceeded as per the net.Conn docs for SetDeadline()
-// TODO(hosono) do we need to import fmt? I can't find another way, but it's weird
 var ErrTimeout = fmt.Errorf("operation timed out [%w]", os.ErrDeadlineExceeded)
 
 // ErrReplay is returned when a message is a duplicate. This should not
@@ -96,6 +95,7 @@ const (
 	MessageTypeServerAuth  MessageType = 0x04
 	MessageTypeClientAuth  MessageType = 0x05
 	MessageTypeTransport   MessageType = 0x10
+	MessageTypeControl	   MessageType = 0xff // TODO(hosono) what should this byte be?
 )
 
 // IsHandshakeType returns true if the message type is part of the handshake, not the transport.
