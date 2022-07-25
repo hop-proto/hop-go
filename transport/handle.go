@@ -263,11 +263,12 @@ func (c *Handle) Close() error {
 	// Close the channels
 	close(c.recv)
 	close(c.send)
+	close(c.ctrl)
 
 	// Wait for the sending goroutine to exit
-	c.writeWg.Wait()
+	c.wg.Wait()
 
-	c.closed.setTrue()
+	c.closed.SetTrue()
 
 	if c.state == closed {
 		return io.EOF

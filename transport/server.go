@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,7 +32,7 @@ type Server struct {
 	udpConn UDPLike
 	config  ServerConfig
 
-	closed atomic.Bool
+	closed common.AtomicBool
 
 	// +checklocks:m
 	handshakes map[string]*HandshakeState
@@ -41,7 +42,6 @@ type Server struct {
 	// +checklocks:m
 	handles map[SessionID]*Handle
 
-	// +checklocks:m
 	pendingConnections chan *Handle
 
 	// +checklocks:cookieLock
@@ -165,6 +165,7 @@ func (s *Server) writePacket(pkt []byte, dst *net.UDPAddr) error {
 
 // +checklocks:s.serveLock
 func (s *Server) readPacket() error {
+	s.udpConn.SetReadDeadline(time.Now().Add(time.Second))
 	msgLen, oobn, flags, addr, err := s.udpConn.ReadMsgUDP(s.rawRead, nil)
 	if err != nil {
 		return err
