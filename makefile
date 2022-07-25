@@ -35,7 +35,7 @@ install:
 .PHONY: test
 test: ## test
 test:
-	go test ./... -timeout 120s
+	go test -race ./... -timeout 120s
 
 .PHONY: serve-dev
 serve-dev: ## launch a container running the server with code mounted in
