@@ -43,8 +43,7 @@ func TestClientServerCompatibilityHandshake(t *testing.T) {
 	err = c.Handshake()
 	assert.Check(t, err)
 	time.Sleep(time.Second)
-	ss, ok := s.sessions[c.ss.sessionID]
-	assert.Assert(t, ok)
+	ss := s.fetchSessionState(c.ss.sessionID)
 	assert.DeepEqual(t, c.ss.sessionID, ss.sessionID)
 	var zero [KeyLen]byte
 	assert.Check(t, cmp.Equal(c.ss.clientToServerKey, ss.clientToServerKey))
@@ -122,8 +121,7 @@ func TestClientServerHSWithAgent(t *testing.T) {
 	err = c.Handshake()
 	assert.Check(t, err)
 	time.Sleep(time.Second)
-	ss, ok := s.sessions[c.ss.sessionID]
-	assert.Assert(t, ok)
+	ss := s.fetchSessionState(c.ss.sessionID)
 	assert.DeepEqual(t, c.ss.sessionID, ss.sessionID)
 	var zero [KeyLen]byte
 	assert.Check(t, cmp.Equal(c.ss.clientToServerKey, ss.clientToServerKey))
