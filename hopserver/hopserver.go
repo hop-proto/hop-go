@@ -1,14 +1,11 @@
 package hopserver
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"net"
 	"os"
-	"os/exec"
 	"sync"
 	"testing/fstest"
 	"time"
@@ -172,84 +169,14 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 		// }
 		sess.start(nil)
 	} else {
-		// TODO(drebelsky): do we have a better mechanism for this?
-		session := exec.Command(os.Args[0], "-s")
-		stdin, err := session.StdinPipe()
-		// TODO(drebelsky) is there a more reasonable way to signal the error conditions
-		if err != nil {
-			return
-		}
-		stdout, err := session.StdoutPipe()
-		if err != nil {
-			return
-		}
-		err = session.Start()
-		if err != nil {
-			return
-		}
-
 		// TODO(baumanl): verify that this is the best way to get client static key.
 		/*I originally had the client just send the key over along with the username, but it
 		seemed strange to rely on the client to send the same key that it used during the handshake.
 		Instead I modified the transport layer code so that the client static is stored in the session state.
 		This way the server directly grabs the key that was used in the handshake.*/
 		//server fetches client static key that was used in handshake
-		leafKey := keys.PublicKey(s.server.FetchClientLeaf(serverConn).PublicKey)
-		serialized := []byte(leafKey.String())
-		length := make([]byte, 4)
-		binary.BigEndian.PutUint32(length, uint32(len(serialized)))
-		_, err = stdin.Write(length)
-		// TODO(drebelsky): If either of these fail, we should figure out how to kill the subprocess
-		if err != nil {
-			return
-		}
-		_, err = stdin.Write(serialized)
-		if err != nil {
-			return
-		}
-
-		go func() {
-			b := make([]byte, 65535)
-			length := make([]byte, 4)
-			for {
-				n, err := serverConn.ReadMsg(b)
-				if err != nil {
-					if !errors.Is(err, transport.ErrTimeout) {
-						break
-					}
-				} else if n != 0 {
-					binary.BigEndian.PutUint32(length, uint32(n))
-					_, err = stdin.Write(length)
-					if err != nil {
-						break
-					}
-					_, err = stdin.Write(b[:n])
-					if err != nil {
-						break
-					}
-				}
-			}
-		}()
-		go func() {
-			b := make([]byte, 65535)
-			length := make([]byte, 4)
-			var err error
-			for {
-				_, err = io.ReadFull(stdout, length)
-				if err != nil {
-					break
-				}
-				n, err := io.ReadFull(stdout, b[:binary.BigEndian.Uint32(length)])
-				if err != nil {
-					break
-				}
-				err = serverConn.WriteMsg(append([]byte(nil), b[:n]...))
-				if err != nil {
-					break
-				}
-			}
-		}()
-		session.Wait()
+		key := keys.PublicKey(s.server.FetchClientLeaf(serverConn).PublicKey)
+		launchSubprocessSession(serverConn, key)
 	}
 }
 

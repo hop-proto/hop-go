@@ -596,66 +596,6 @@ func (sess *hopSession) LocalServer(tube *tubes.Reliable, arg string) {
 	io.Copy(tube, tconn)
 }
 
-// TODO(drebelsky) a hack
-type conn struct {
-	buffered []byte
-	in       *bufio.Reader
-	out      *bufio.Writer
-}
-
-// TODO: these are bad implementations, but they do all that the muxer needs
-func (c *conn) ReadMsg(b []byte) (int, error) {
-	if c.buffered != nil {
-		if len(c.buffered) > len(b) {
-			return 0, transport.ErrBufOverflow
-		}
-		n := copy(b, c.buffered)
-		c.buffered = nil
-		return n, nil
-	}
-	length := make([]byte, 4)
-	_, err := io.ReadFull(c.in, length)
-	if err != nil {
-		return 0, err
-	}
-	buf := make([]byte, binary.BigEndian.Uint32(length))
-	_, err = io.ReadFull(c.in, buf)
-	if err != nil {
-		return 0, err
-	}
-
-	if len(buf) > len(b) {
-		c.buffered = buf
-		return 0, transport.ErrBufOverflow
-	}
-
-	copy(b, buf)
-	return len(buf), nil
-}
-
-func (c *conn) WriteMsg(b []byte) error {
-	length := make([]byte, 4)
-	binary.BigEndian.PutUint32(length, uint32(len(b)))
-	_, err := c.out.Write(length)
-	if err != nil {
-		return err
-	}
-	_, err = c.out.Write(b)
-	if err != nil {
-		return err
-	}
-	err = c.out.Flush()
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (c *conn) SetReadDeadline(time.Time) error {
-	// TODO
-	return nil
-}
-
 // TODO(drebelsky) debate name/location
 
 // StartSession starts a hopserver session
@@ -679,7 +619,7 @@ func StartSession() {
 	sess := &hopSession{
 		// transportConn:   serverConn,
 		// TODO: inherit timeout
-		tubeMuxer:       tubes.NewMuxer(&conn{nil, bufio.NewReader(os.Stdin), bufio.NewWriter(os.Stdout)}, nil, time.Second*5),
+		tubeMuxer:       tubes.NewMuxer(&sessionConn{nil, bufio.NewReader(os.Stdin), bufio.NewWriter(os.Stdout)}, nil, time.Second*5),
 		tubeQueue:       make(chan *tubes.Reliable),
 		done:            make(chan int),
 		controlChannels: []net.Conn{},
