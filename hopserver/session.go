@@ -69,7 +69,7 @@ func (sess *hopSession) checkAuthorization(k *keys.PublicKey) bool {
 
 	logrus.Info("got userauth init message: ", k.String())
 
-	if err := authorizeKey(username, *k, sess.server); err != nil && false {
+	if err := authorizeKey(username, *k, sess.server); err != nil {
 		logrus.Errorf("rejecting key for %q: %s", username, err)
 		return false
 	}
