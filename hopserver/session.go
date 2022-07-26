@@ -589,8 +589,6 @@ func (sess *hopSession) LocalServer(tube *tubes.Reliable, arg string) {
 }
 
 // TODO(drebelsky) a hack
-var errBufOverflow = errors.New("write would overflow buffer")
-
 type conn struct {
 	buffered []byte
 	in       *bufio.Reader
@@ -601,7 +599,7 @@ type conn struct {
 func (c *conn) ReadMsg(b []byte) (int, error) {
 	if c.buffered != nil {
 		if len(c.buffered) > len(b) {
-			return 0, errBufOverflow
+			return 0, transport.ErrBufOverflow
 		}
 		n := copy(b, c.buffered)
 		c.buffered = nil
@@ -620,7 +618,7 @@ func (c *conn) ReadMsg(b []byte) (int, error) {
 
 	if len(buf) > len(b) {
 		c.buffered = buf
-		return 0, errBufOverflow
+		return 0, transport.ErrBufOverflow
 	}
 
 	copy(b, buf)
