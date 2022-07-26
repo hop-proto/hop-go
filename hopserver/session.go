@@ -317,23 +317,18 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 			"TERM=" + termEnv,
 		}
 		var c *exec.Cmd
-		if shell {
-			//login(1) starts default shell for user and changes all privileges and environment variables
-			// c = exec.Command("login", "-f", sess.user)
-			c = exec.Command("/bin/bash")
-		} else {
-			//TODO(drebelsky) How should we get the shell
-			c = exec.Command("/bin/sh", "-c", cmd)
-			//TODO(drebelsky) Should we handle the uid/gid failed parsing cases
-			//TODO(drebelsky) how much information does this function leak by sending back the errors directly
-			// uid, gid, groups, err := parseUser(user)
-			if err != nil {
-				logrus.Errorf("Failed to parse user data %v", err)
-				codex.SendFailure(tube, errors.New("failed to parse user data"))
-				return
+		shellPath := "/bin/sh"
+		if cache, err := etcpwdparse.NewLoadedEtcPasswdCache(); err == nil {
+			if user, ok := cache.LookupUserByName(sess.user); ok {
+				shellPath = user.Shell()
 			}
-			c.Dir = user.HomeDir
 		}
+		if shell {
+			c = exec.Command(shellPath)
+		} else {
+			c = exec.Command(shellPath, "-c", cmd)
+		}
+		c.Dir = user.HomeDir
 		c.Env = env
 		logrus.Infof("Executing: %v", cmd)
 		var f *os.File
