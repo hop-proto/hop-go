@@ -601,13 +601,7 @@ func (sess *hopSession) LocalServer(tube *tubes.Reliable, arg string) {
 // StartSession starts a hopserver session
 func StartSession() {
 	// Read key from stdin
-	length := make([]byte, 4)
-	_, err := io.ReadFull(os.Stdin, length)
-	if err != nil {
-		return
-	}
-	keyBuf := make([]byte, binary.BigEndian.Uint32(length))
-	_, err = io.ReadFull(os.Stdin, keyBuf)
+	keyBuf, err := readPacket(os.Stdin, nil)
 	if err != nil {
 		return
 	}
