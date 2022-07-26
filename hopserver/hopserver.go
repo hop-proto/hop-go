@@ -318,7 +318,6 @@ func authorizeKey(user string, publicKey keys.PublicKey, server *HopServer) erro
 	path := core.AuthorizedKeysPath(d)
 	var fs fs.FS
 	if server != nil {
-		logrus.Error("Have fsystem")
 		fs = server.fsystem
 	} else {
 		fs = os.DirFS("/")
