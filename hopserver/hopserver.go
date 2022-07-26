@@ -198,7 +198,7 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 				if !errors.Is(err, transport.ErrTimeout) {
 					break
 				}
-			} else {
+			} else if n != 0 {
 				binary.BigEndian.PutUint32(length, uint32(n))
 				_, err = stdin.Write(length)
 				if err != nil {

@@ -643,6 +643,11 @@ func (c *conn) WriteMsg(b []byte) error {
 	return nil
 }
 
+func (c *conn) SetReadDeadline(time.Time) error {
+	// TODO
+	return nil
+}
+
 // TODO(drebelsky) debate name/location
 
 // StartSession starts a hopserver session
@@ -665,7 +670,8 @@ func StartSession() {
 
 	sess := &hopSession{
 		// transportConn:   serverConn,
-		tubeMuxer:       tubes.NewMuxer(&conn{nil, bufio.NewReader(os.Stdin), bufio.NewWriter(os.Stdout)}, nil),
+		// TODO: inherit timeout
+		tubeMuxer:       tubes.NewMuxer(&conn{nil, bufio.NewReader(os.Stdin), bufio.NewWriter(os.Stdout)}, nil, time.Second*5),
 		tubeQueue:       make(chan *tubes.Reliable),
 		done:            make(chan int),
 		controlChannels: []net.Conn{},

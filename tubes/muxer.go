@@ -1,6 +1,7 @@
 package tubes
 
 import (
+	"errors"
 	"net"
 	"os"
 	"sync"
