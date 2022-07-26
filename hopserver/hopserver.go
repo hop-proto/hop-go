@@ -383,13 +383,20 @@ func (s *HopServer) ListenAddress() net.Addr {
 // authorizeKey returns nil if the publicKey is in the authorized_keys file for
 // the user.
 // TODO(drebelsky) consider passing publicKey by ref
-func authorizeKey(user string, publicKey keys.PublicKey) error {
+func authorizeKey(user string, publicKey keys.PublicKey, server *HopServer) error {
 	d, err := config.UserDirectoryFor(user)
 	if err != nil {
 		return err
 	}
 	path := core.AuthorizedKeysPath(d)
-	f, err := os.DirFS("/").Open(path[1:])
+	var fs fs.FS
+	if server != nil {
+		logrus.Error("Have fsystem")
+		fs = server.fsystem
+	} else {
+		fs = os.DirFS("/")
+	}
+	f, err := fs.Open(path[1:])
 	if err != nil {
 		return err
 	}

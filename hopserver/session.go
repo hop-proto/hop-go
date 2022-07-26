@@ -24,6 +24,7 @@ import (
 	"hop.computer/hop/common"
 	"hop.computer/hop/keys"
 	"hop.computer/hop/netproxy"
+	"hop.computer/hop/pkg/thunks"
 	"hop.computer/hop/portforwarding"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
@@ -68,13 +69,13 @@ func (sess *hopSession) checkAuthorization(k *keys.PublicKey) bool {
 
 	logrus.Info("got userauth init message: ", k.String())
 
-	if err := authorizeKey(username, *k); err != nil && false {
+	if err := authorizeKey(username, *k, sess.server); err != nil && false {
 		logrus.Errorf("rejecting key for %q: %s", username, err)
 		return false
 	}
 
 	sess.user = username
-	if user, err := osUser.Lookup(sess.user); err == nil {
+	if user, err := thunks.LookupUser(sess.user); err == nil {
 		// TODO(drebelsky): is all of this error checking necessary?
 		// TODO(drebelsky): note that this only works correctly with Go >= 1.16 on Linux
 		gid, err := strconv.Atoi(user.Gid)
@@ -306,7 +307,7 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 	}
 
 	// TODO(drebelsky)
-	if user, err := osUser.Lookup(sess.user); err == nil {
+	if user, err := thunks.LookupUser(sess.user); err == nil {
 		//Default behavior is for command.Env to inherit parents environment unless given and explicit alternative.
 		//TODO(baumanl): These are minimal environment variables. SSH allows for more inheritance from client, but it gets complicated.
 		env := []string{

@@ -143,8 +143,10 @@ func (s *TestServer) StartTransport(t *testing.T) {
 
 // StartHopServer starts hop server with optional config (otherwise default)
 func (s *TestServer) StartHopServer(t *testing.T) {
-	var err error
+	// TODO(drebelsky): consider how we want to test in the case where we create children
+	s.Config.NoChild = true
 
+	var err error
 	if s.Transport == nil {
 		logrus.Info("Setting up Hop Server with just config.")
 		// all certs necessary need to be loaded into fsystem. (not currently implemented)
