@@ -194,8 +194,10 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 		length := make([]byte, 4)
 		for {
 			n, err := serverConn.ReadMsg(b)
-			if err != nil && !errors.Is(err, transport.ErrTimeout) {
-				break
+			if err != nil {
+				if !errors.Is(err, transport.ErrTimeout) {
+					break
+				}
 			} else {
 				binary.BigEndian.PutUint32(length, uint32(n))
 				_, err = stdin.Write(length)
