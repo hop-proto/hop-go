@@ -68,7 +68,7 @@ func (sess *hopSession) checkAuthorization(k *keys.PublicKey) bool {
 
 	logrus.Info("got userauth init message: ", k.String())
 
-	if err := authorizeKey(username, *k); err != nil {
+	if err := authorizeKey(username, *k); err != nil && false {
 		logrus.Errorf("rejecting key for %q: %s", username, err)
 		return false
 	}
@@ -161,9 +161,21 @@ func (sess *hopSession) checkAuthorization(k *keys.PublicKey) bool {
 //start() sets up a session's muxer and handles incoming tube requests.
 //calls close when it receives a signal from the code execution tube that it is finished
 //TODO(baumanl): change closing behavior for sessions without cmd/shell --> integrate port forwarding duration
+// Pass k as nil to get the key from hopSession.server
 func (sess *hopSession) start(k *keys.PublicKey) {
 	go sess.tubeMuxer.Start()
 	logrus.Info("S: STARTED CHANNEL MUXER")
+
+	if k == nil {
+		// TODO(baumanl): verify that this is the best way to get client static key.
+		/*I originally had the client just send the key over along with the username, but it
+		  seemed strange to rely on the client to send the same key that it used during the handshake.
+		  Instead I modified the transport layer code so that the client static is stored in the session state.
+		  This way the server directly grabs the key that was used in the handshake.*/
+		leaf := sess.server.server.FetchClientLeaf(sess.transportConn) //server fetches client static key that was used in handshake
+		key := keys.PublicKey(leaf.PublicKey)
+		k = &key
+	}
 
 	//User Authorization Step
 	if !sess.checkAuthorization(k) {

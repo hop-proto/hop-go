@@ -51,6 +51,13 @@ type ServerConfig struct {
 
 	HandshakeTimeout time.Duration
 	DataTimeout      time.Duration
+
+	// NoChild is true if we don't want to create a subprocess per session
+	// TODO(drebelsky): There is currently no flag or config setting to adjust
+	// this, but this lets us change it in the testing harness/for debugging
+	// purposes
+	// We use the boolean this way since the default value for a boolean is false
+	NoChild bool
 }
 
 // HostConfig contains a definition of a host pattern in a client configuration.
