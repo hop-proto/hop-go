@@ -83,7 +83,7 @@ func (sess *hopSession) checkAuthorization(k *keys.PublicKey) bool {
 			logrus.Errorf("Couldn't parse gid %v of user %v", user.Gid, username)
 			return false
 		}
-		err = syscall.Setgid(gid)
+		err = thunks.Setgid(gid)
 		if err != nil {
 			logrus.Errorf("Couldn'set gid of process to %v", gid)
 			return false
@@ -101,7 +101,7 @@ func (sess *hopSession) checkAuthorization(k *keys.PublicKey) bool {
 		} else {
 			groups = append(groups, gid)
 		}
-		err = syscall.Setgroups(groups)
+		err = thunks.Setgroups(groups)
 		if err != nil {
 			logrus.Errorf("Couldn't change groups")
 			return false
@@ -112,7 +112,7 @@ func (sess *hopSession) checkAuthorization(k *keys.PublicKey) bool {
 			logrus.Errorf("Couldn't parse uid %v of user %v", user.Uid, username)
 			return false
 		}
-		err = syscall.Setuid(uid)
+		err = thunks.Setuid(uid)
 		if err != nil {
 			logrus.Errorf("Couldn'set uid of process to %v", uid)
 			return false
