@@ -13,8 +13,8 @@ var ErrExcessArgs = errors.New("excess arguments provided")
 
 // ServerFlags holds CLI args for Hop server.
 type ServerFlags struct {
-	ConfigPath string
-	Verbose    bool
+	ConfigPath      string
+	Verbose         bool
 	SessionSpecific bool
 	// TODO(baumanl): is it even worth allowing flags for servers? Or should they
 	// always be started from a config file?
