@@ -12,6 +12,7 @@ import (
 )
 
 const numLoops = 1024
+var ErrTest = errors.New("this is a test error")
 
 var ErrTest = errors.New("this is a test error")
 
