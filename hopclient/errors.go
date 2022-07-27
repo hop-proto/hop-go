@@ -19,5 +19,8 @@ var ErrClientStartingUnderlying = errors.New("error starting underlying conn")
 // ErrClientUnauthorized is returned by client when it is not authorized to perform the action it requested
 var ErrClientUnauthorized = errors.New("client not authorized")
 
+// ErrClientStartingTermTube is returned by client when it fails to start a tube for term control messages
+var ErrClientStartingTermTube = errors.New("failed to start term control tube")
+
 // ErrClientStartingExecTube is returned by client when cmd execution and/or I/O redirection fails
 var ErrClientStartingExecTube = errors.New("failed to start session")

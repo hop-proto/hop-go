@@ -238,7 +238,7 @@ func (sess *hopSession) checkAction(action string, actionType byte) error {
 }
 
 func (sess *hopSession) startCodex(tube *tubes.Reliable) {
-	cmd, termEnv, shell, _ := codex.GetCmd(tube)
+	cmd, termEnv, shell, size, _ := codex.GetCmd(tube)
 	logrus.Info("CMD: ", cmd)
 	if !sess.isPrincipal {
 		err := sess.checkAction(cmd, authgrants.CommandAction)
@@ -287,7 +287,11 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 		var f *os.File
 		var err error
 		if shell {
-			f, err = pty.Start(c)
+			if size != nil {
+				f, err = pty.StartWithSize(c, size)
+			} else {
+				f, err = pty.Start(c)
+			}
 			if err != nil {
 				logrus.Errorf("S: error starting pty %v", err)
 				codex.SendFailure(tube, err)
