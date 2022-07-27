@@ -116,7 +116,7 @@ func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTub
 
 	// Send SIGWINCH to channels
 	go func() {
-		ch := make(chan os.Signal)
+		ch := make(chan os.Signal, 1)
 		signal.Notify(ch, syscall.SIGWINCH)
 		b := make([]byte, 9)
 		b[0] = byte(typeWinch)
@@ -243,7 +243,7 @@ const (
 	typeWinch msgType = 2 // Window size changed (SIGWINCH)
 )
 
-var errUnknownMsg = errors.New("Unknown message type encountered in codex stream")
+var errUnknownMsg = errors.New("unknown message type encountered in codex stream")
 
 func readSize(r io.Reader) (*pty.Winsize, error) {
 	b := make([]byte, 8)
