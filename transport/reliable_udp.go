@@ -99,16 +99,6 @@ func (r *ReliableUDP) Close() error {
 	}
 
 	r.closed.SetTrue()
-	r.timeoutLock.Lock()
-	r.readLock.Lock()
-	r.writeLock.Lock()
-	defer r.timeoutLock.Unlock()
-	defer r.readLock.Unlock()
-	defer r.writeLock.Unlock()
-
-	//time.Sleep(time.Millisecond)
-
-	close(r.send)
 	return nil
 }
 

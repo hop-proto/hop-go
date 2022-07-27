@@ -58,10 +58,7 @@ type Client struct {
 	// +checklocks:readLock
 	readBuf bytes.Buffer
 
-	// +checklocks:readLock
 	ciphertext []byte
-
-	// +checklocks:readLock
 	plaintext []byte
 
 	recv 	chan []byte
@@ -304,7 +301,7 @@ func (c *Client) Close() error {
 	c.lockUser()
 	defer c.unlockUser()
 
-	//c.writeControl([]byte{0})
+	c.writeControl([]byte{0})
 
 	c.closed.SetTrue()
 	c.handshakeComplete.SetFalse()
@@ -320,10 +317,8 @@ func (c *Client) listen() {
 	c.wg.Add(1)
 	defer c.wg.Done()
 	for !c.closed.IsSet() {
-		c.underlyingConn.SetReadDeadline(time.Now().Add(time.Second))
 		n, mt, err := c.readMsg()
 
-		// timing out the connection allows us to check if it has been closed
 		if errors.Is(err, os.ErrDeadlineExceeded) {
 			continue
 		} else if err != nil {
@@ -342,11 +337,15 @@ func (c *Client) listen() {
 		case MessageTypeControl:
 			select {
 			case c.ctrl <- append([]byte(nil), c.plaintext[:n]...):
+				// TODO(hosono) handle other control messages?
+				c.Close()
 				break
 			default:
 				logrus.Warn("client: ctrl queue full. dropping message")
 			}
 		default:
+			// TODO(hosono) Maybe silently discard instead of panic?
+			// Messages must be authenticated to reach this point
 			logrus.Panicf("client: unexpected message %x", mt)
 		}
 	}
@@ -357,7 +356,6 @@ func (c *Client) listen() {
 // readMsg performs minimal error checking and should only be called when the
 // connection is open and the handshake is complete.
 // It uses both c.ciphertext and c.plaintext as scratch space
-// +checklocks:c.readLock
 func (c *Client) readMsg() (int, MessageType, error) {
 	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(c.ciphertext, nil)
 	if err != nil {
@@ -392,6 +390,10 @@ func (c *Client) ReadMsg(b []byte) (n int, err error) {
 		}
 	}()
 
+	if c.closed.IsSet() {
+		return 0, io.EOF
+	}
+
 	// TODO(dadrian): Close the connection on bad reads / certain unrecoverable
 	if !c.handshakeComplete.IsSet() {
 		err := c.Handshake()
@@ -410,10 +412,6 @@ func (c *Client) ReadMsg(b []byte) (n int, err error) {
 		n, err := c.readBuf.Read(b)
 		c.readBuf.Reset()
 		return n, err
-	}
-
-	if c.closed.IsSet() {
-		return 0, io.EOF
 	}
 
 	plaintext := <- c.recv
@@ -437,6 +435,10 @@ func (c *Client) Read(b []byte) (n int, err error) {
 			err = nil
 		}
 	}()
+
+	if c.closed.IsSet() {
+		return 0, io.EOF
+	}
 
 	// TODO(dadrian): Close the connection on bad reads?
 	if !c.handshakeComplete.IsSet() {

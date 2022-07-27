@@ -33,6 +33,7 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	recv chan []byte // incoming transport messages
 	send chan []byte // outgoing transport messages
 	ctrl chan []byte // incoming control messages
+	ctrl_out chan []byte // outgoing control messages
 
 	closed common.AtomicBool
 
@@ -82,13 +83,15 @@ func (c *Handle) ReadMsg(b []byte) (int, error) {
 	}
 
 	// Wait for a message until timeout
-	if msg == nil && c.readTimeout.Get() != 0 {
+	if msg == nil { 
 		timer := time.NewTimer(c.readTimeout.Get())
-		select {
-		case msg = <-c.recv:
+		if c.readTimeout.Get() == 0 {
 			if !timer.Stop() {
 				<-timer.C
 			}
+		}
+		select {
+		case msg = <-c.recv:
 			break
 		case <-timer.C:
 			return 0, ErrTimeout
@@ -247,10 +250,13 @@ func (c *Handle) Close() error {
 	defer c.readLock.Unlock()
 	defer c.writeLock.Unlock()
 
+	c.ctrl_out <- []byte{0}
+
 	// Close the channels
-	close(c.recv)
+	//close(c.recv)
 	close(c.send)
 	close(c.ctrl)
+	close(c.ctrl_out)
 
 	// Wait for the sending goroutine to exit
 	c.wg.Wait()

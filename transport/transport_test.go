@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -21,49 +22,141 @@ func TestTransportAEAD(t *testing.T) {
 	assert.Check(t, cmp.Equal(sanse.Overhead(), TagLen))
 }
 
+func makeConn(t *testing.T) (*Client, *Handle, *Server, func(), error) {
+	serverUDP, clientUDP := MakeRelaibleUDPConn()
+
+	// Create new server
+	serverConfig, verifyConfig := newTestServerConfig(t)
+	serverConn, err := NewServer(serverUDP, *serverConfig)
+	assert.NilError(t, err)
+	go serverConn.Serve()
+
+	// Set up client info
+	keyPair, err := keys.ReadDHKeyFromPEMFile("testdata/leaf-key.pem")
+	assert.NilError(t, err)
+	leaf, err := certs.SelfSignLeaf(&certs.Identity{
+		PublicKey: keyPair.Public,
+	})
+	assert.NilError(t, err)
+
+	// Dial the server
+	clientConn := NewClient(clientUDP, nil, ClientConfig{
+		Verify:    *verifyConfig,
+		Exchanger: keyPair,
+		Leaf:      leaf,
+	})
+
+	// Perform Handshake
+	err = clientConn.Handshake()
+	assert.NilError(t, err)
+
+	// Get handle from server
+	handle, err  := serverConn.AcceptTimeout(time.Second)
+	assert.NilError(t, err)
+
+	stop := func() {
+		serverConn.CloseSession(handle.sessionID)
+		clientConn.Close()
+		serverConn.Close()
+	}
+
+	return clientConn, handle, serverConn, stop, nil
+}
+
+// Tests that closing the client connection causes server reads to error
+func TestClientClose(t *testing.T) {
+	client, handle, _, stop, err := makeConn(t)
+	assert.NilError(t, err)
+
+	client.Close()
+	assert.Equal(t, client.closed.IsSet(), true)
+
+	time.Sleep(time.Second)
+
+	b := make([]byte, 1024)
+
+	n, err := client.Read(b)
+	assert.ErrorType(t, err, io.EOF)
+	assert.Equal(t, n, 0)
+
+	n, err = client.ReadMsg(b)
+	assert.ErrorType(t, err, io.EOF)
+	assert.Equal(t, n, 0)
+
+	n, err = handle.Read(b)
+	assert.ErrorType(t, err, io.EOF)
+	assert.Equal(t, n, 0)
+
+	n, err = handle.ReadMsg(b)
+	assert.ErrorType(t, err, io.EOF)
+	assert.Equal(t, n, 0)
+
+	stop()
+}
+
+// Tests that closing the handle causes client reads to error
+func TestHandleClose(t *testing.T) {
+	client, handle, _, stop, err := makeConn(t)
+	assert.NilError(t, err)
+
+	handle.Close()
+	assert.Equal(t, handle.IsClosed(), true)
+
+	time.Sleep(time.Second)
+
+	b := make([]byte, 1024)
+
+	n, err := handle.Read(b)
+	assert.ErrorType(t, err, io.EOF)
+	assert.Equal(t, n, 0)
+
+	n, err = handle.ReadMsg(b)
+	assert.ErrorType(t, err, io.EOF)
+	assert.Equal(t, n, 0)
+
+	n, err = client.Read(b)
+	assert.ErrorType(t, err, io.EOF)
+	assert.Equal(t, n, 0)
+
+	n, err = client.ReadMsg(b)
+	assert.ErrorType(t, err, io.EOF)
+	assert.Equal(t, n, 0)
+
+	stop()
+}
+
+// Tests that closing the server causes the handle and clients to close
+func TestServerClose(t *testing.T) {
+	client, handle, server, stop, err := makeConn(t)
+	assert.NilError(t, err)
+
+	server.Close()
+	assert.Equal(t, server.closed.IsSet(), true)
+
+	b := make([]byte, 1024)
+
+	// TODO(hosono) maybe this should panic?
+	n, err := handle.Read(b)
+	assert.ErrorType(t, err, io.EOF)
+	assert.Equal(t, n, 0)
+
+	n, err = handle.ReadMsg(b)
+	assert.ErrorType(t, err, io.EOF)
+	assert.Equal(t, n, 0)
+
+	n, err = client.Read(b)
+	assert.ErrorType(t, err, io.EOF)
+	assert.Equal(t, n, 0)
+
+	n, err = client.ReadMsg(b)
+	assert.ErrorType(t, err, io.EOF)
+	assert.Equal(t, n, 0)
+
+	stop()
+}
+
 // Wrapper around the client nettests
 func DontTestTransportConn(t *testing.T) {
-	makePipe := func() (net.Conn, net.Conn, func(), error) {
-
-		serverUDP, clientUDP := MakeRelaibleUDPConn()
-
-		// Create new server
-		serverConfig, verifyConfig := newTestServerConfig(t)
-		serverConn, err := NewServer(serverUDP, *serverConfig)
-		assert.NilError(t, err)
-		go serverConn.Serve()
-
-		// Set up client info
-		keyPair, err := keys.ReadDHKeyFromPEMFile("testdata/leaf-key.pem")
-		assert.NilError(t, err)
-		leaf, err := certs.SelfSignLeaf(&certs.Identity{
-			PublicKey: keyPair.Public,
-		})
-		assert.NilError(t, err)
-
-		// Dial the server
-		clientConn := NewClient(clientUDP, nil, ClientConfig{
-			Verify:    *verifyConfig,
-			Exchanger: keyPair,
-			Leaf:      leaf,
-		})
-
-		// Perform Handshake
-		err = clientConn.Handshake()
-		assert.NilError(t, err)
-
-		// Get handle from server
-		handle, err  := serverConn.AcceptTimeout(time.Second)
-		assert.NilError(t, err)
-
-		stop := func() {
-			serverConn.CloseSession(handle.sessionID)
-			clientConn.Close()
-			serverConn.Close()
-		}
-
-		return clientConn, handle, stop, nil
-	}
 
 	makeReliableUDPPipe := func() (net.Conn, net.Conn, func(), error) {
 		c1, c2 := MakeRelaibleUDPConn()
@@ -72,6 +165,11 @@ func DontTestTransportConn(t *testing.T) {
 			c2.Close()
 		}
 		return c1, c2, stop, nil
+	}
+
+	makePipe := func() (net.Conn, net.Conn, func(), error) {
+		c1, c2, _, stop, err := makeConn(t)
+		return c1, c2, stop, err
 	}
 
 	var mp = nettest.MakePipe(makePipe)

@@ -524,10 +524,7 @@ func (s *Server) Serve() error {
 		for !s.closed.IsSet() {
 			err := s.readPacket()
 			logrus.Debug("read a packet")
-			if errors.Is(err, io.EOF) {
-				logrus.Error("Connection has been closed")
-				break
-			} else if errors.Is(err, os.ErrDeadlineExceeded) {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
 				// timing out allows us to periodically check if the connection is closed
 				continue
 			} else if err != nil {
@@ -592,6 +589,7 @@ func (s *Server) createHandleLocked(ss *SessionState) *Handle {
 		recv:         make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
 		send:         make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
 		ctrl:         make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
+		ctrl_out:	  make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
 		readTimeout:  common.AtomicTimeout(s.config.StartingReadTimeout),
 		writeTimeout: common.AtomicTimeout(s.config.StartingWriteTimeout),
 	}
@@ -599,8 +597,8 @@ func (s *Server) createHandleLocked(ss *SessionState) *Handle {
 	return handle
 }
 
-func (s *Server) lockHandleAndWriteToSession(ss *SessionState, plaintext []byte) error {
-	err := ss.writePacket(s.udpConn, MessageTypeTransport, plaintext, &ss.serverToClientKey)
+func (s *Server) lockHandleAndWriteToSession(ss *SessionState, mt MessageType, plaintext []byte) error {
+	err := ss.writePacket(s.udpConn, mt, plaintext, &ss.serverToClientKey)
 	return err
 }
 
@@ -620,20 +618,30 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 		go func(ss *SessionState) {
 			defer ss.handle.wg.Done()
 			for plaintext := range ss.handle.send {
-				err := s.lockHandleAndWriteToSession(ss, plaintext)
+				err := s.lockHandleAndWriteToSession(ss, MessageTypeTransport, plaintext)
 				if err != nil {
 					logrus.Errorf("server: unable to write packet: %s", err)
 					// TODO(dadrian): Should this affect connection state?
 				}
 			}
 		}(ss)
-		go func(h *Handle) {
-			defer h.wg.Done()
-			for _ = range h.ctrl {
-				// TODO(hosono) handle other control messages
-				h.Close()
+		go func(ss *SessionState) {
+			defer ss.handle.wg.Done()
+			for plaintext := range ss.handle.ctrl_out {
+				err := s.lockHandleAndWriteToSession(ss, MessageTypeControl, plaintext)
+				if err != nil {
+					logrus.Errorf("server: unable to write control packet: %s", err)
+					// TODO(dadrian): Should this affect connection state?
+				}
 			}
-		}(ss.handle)
+		}(ss)
+		go func(ss *SessionState) {
+			for _ = range ss.handle.ctrl {
+				// TODO(hosono) handle other control messages
+				ss.handle.wg.Done()
+				ss.handle.Close()
+			}
+		}(ss)
 		return handle, nil
 	case <-timer.C:
 		return nil, ErrTimeout
