@@ -283,7 +283,7 @@ type dataWriter struct {
 	buf  *bytes.Buffer
 }
 
-var errWriteTooLarge error = errors.New("Write is too large to serialize")
+var errWriteTooLarge = errors.New("Write is too large to serialize")
 
 func (w *dataWriter) Write(b []byte) (int, error) {
 	// TODO(drebelsky): we should be able to split b
