@@ -1,7 +1,6 @@
 package common
 
 import (
-	"errors"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -23,8 +22,6 @@ func (t *AtomicTimeout) Set(d time.Duration) {
 func (t *AtomicTimeout) Get() time.Duration {
 	return time.Duration(atomic.LoadInt64((*int64)(t)))
 }
-
-var ErrCanceled = errors.New("operation canceled")
 
 type Deadline struct {
 	chanLock	sync.Mutex
@@ -55,7 +52,7 @@ func (d *Deadline) Done() chan error {
 	return ch
 }
 
-func (d *Deadline) finish(err error) {
+func (d *Deadline) Cancel(err error) {
 	d.chanLock.Lock()
 	defer d.chanLock.Unlock()
 
@@ -71,11 +68,7 @@ func (d *Deadline) finish(err error) {
 }
 
 func (d *Deadline) timeout() {
-	d.finish(os.ErrDeadlineExceeded)
-}
-
-func (d *Deadline) Cancel() {
-	d.finish(ErrCanceled)
+	d.Cancel(os.ErrDeadlineExceeded)
 }
 
 func (d *Deadline) SetDeadline(t time.Time) error {

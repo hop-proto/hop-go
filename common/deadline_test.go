@@ -1,6 +1,7 @@
 package common
 
 import (
+	"errors"
 	"os"
 	"sync"
 	"testing"
@@ -10,6 +11,7 @@ import (
 )
 
 const numLoops = 1024
+var ErrTest = errors.New("this is a test error")
 
 func TestFutureDeadline(t *testing.T) {
 	deadline := NewDeadline(time.Time{})
@@ -86,11 +88,11 @@ func TestCancel(t *testing.T) {
 		go func () {
 			defer wg.Done()
 			err := <-deadline.Done()
-			assert.ErrorType(t, err, ErrCanceled)
+			assert.ErrorType(t, err, ErrTest)
 		}()
 	}
 
-	deadline.Cancel()
+	deadline.Cancel(ErrTest)
 	wg.Wait()
 }
 
@@ -113,7 +115,7 @@ func TestDoneOnTimedOut(t *testing.T) {
 
 func TestDoneOnCanceled(t *testing.T) {
 	deadline := NewDeadline(time.Time{})
-	deadline.Cancel()
+	deadline.Cancel(ErrTest)
 
 	wg := sync.WaitGroup{}
 	wg.Add(numLoops)
@@ -121,7 +123,7 @@ func TestDoneOnCanceled(t *testing.T) {
 		go func () {
 			defer wg.Done()
 			err := <-deadline.Done()
-			assert.ErrorType(t, err, ErrCanceled)
+			assert.ErrorType(t, err, ErrTest)
 		}()
 	}
 
