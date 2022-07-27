@@ -260,10 +260,13 @@ func (c *Handle) Close() error {
 	defer c.readLock.Unlock()
 	defer c.writeLock.Unlock()
 
+	c.ctrl_out <- []byte{0}
+
 	// Close the channels
-	close(c.recv)
+	//close(c.recv)
 	close(c.send)
 	close(c.ctrl)
+	close(c.ctrl_out)
 
 	// Wait for the sending goroutine to exit
 	c.wg.Wait()

@@ -397,10 +397,8 @@ func (c *Client) listen() {
 	c.wg.Add(1)
 	defer c.wg.Done()
 	for !c.closed.IsSet() {
-		c.underlyingConn.SetReadDeadline(time.Now().Add(time.Second))
 		n, mt, err := c.readMsg()
 
-		// timing out the connection allows us to check if it has been closed
 		if errors.Is(err, os.ErrDeadlineExceeded) {
 			continue
 		} else if err != nil {
@@ -419,11 +417,15 @@ func (c *Client) listen() {
 		case MessageTypeControl:
 			select {
 			case c.ctrl <- append([]byte(nil), c.plaintext[:n]...):
+				// TODO(hosono) handle other control messages?
+				c.Close()
 				break
 			default:
 				logrus.Warn("client: ctrl queue full. dropping message")
 			}
 		default:
+			// TODO(hosono) Maybe silently discard instead of panic?
+			// Messages must be authenticated to reach this point
 			logrus.Panicf("client: unexpected message %x", mt)
 		}
 	}
