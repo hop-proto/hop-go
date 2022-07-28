@@ -27,6 +27,9 @@ build: ## compile
 build:
 	go build ./...
 
+.PHONY: install
+install:
+
 .PHONY: test
 test: ## test
 test:
