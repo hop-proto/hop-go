@@ -164,8 +164,9 @@ func listen(local, remote *addr, table *FwdMapping, muxer *tubes.Muxer) bool {
 				break
 			}
 			if b[0] != 0 {
+				conn.Close()
 				tube.Close()
-				break
+				continue
 			}
 			go func() {
 				io.Copy(conn, tube)
