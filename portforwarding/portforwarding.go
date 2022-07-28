@@ -269,26 +269,26 @@ func HandlePF(ch *tubes.Reliable, table *FwdMapping) {
 
 // InitiatePF handles initiating forwards for a client
 func InitiatePF(ch *tubes.Reliable, table *FwdMapping, local, remote []*Forward, muxer *tubes.Muxer) {
-	// We write all of the local forwards first to avoid unnecessarily blocking on the responses
-	for _, fwd := range local {
+	// We write all of the remote forwards first to avoid unnecessarily blocking on the responses
+	for _, fwd := range remote {
 		writeFlags(ch, true, false)
-		ch.Write(toBytes(&fwd.listen))
 		ch.Write(toBytes(&fwd.connect))
+		ch.Write(toBytes(&fwd.listen))
 	}
-	for _, fwd := range local {
+	for _, fwd := range remote {
 		b := make([]byte, 1)
 		io.ReadFull(ch, b)
 		if b[0] == success {
 			table.im.Lock()
-			table.inbound[fwd.connect] = fwd.listen
+			table.inbound[fwd.listen] = fwd.connect
 			table.im.Unlock()
 		}
 	}
-	for _, fwd := range remote {
-		if listen(&fwd.connect, &fwd.listen, table, muxer) {
+	for _, fwd := range local {
+		if listen(&fwd.listen, &fwd.connect, table, muxer) {
 			writeFlags(ch, true, true)
-			ch.Write(toBytes(&fwd.connect))
 			ch.Write(toBytes(&fwd.listen))
+			ch.Write(toBytes(&fwd.connect))
 			b := make([]byte, 1)
 			io.ReadFull(ch, b)
 			// TODO: handle cancelling
