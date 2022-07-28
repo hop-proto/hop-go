@@ -330,11 +330,11 @@ func (sess *hopSession) startSizeTube(ch *tubes.Reliable) {
 func (sess *hopSession) newAuthGrantTube() (*tubes.Reliable, error) {
 	return sess.tubeMuxer.CreateReliableTube(common.AuthGrantTube)
 }
+
 // TODO(drebelsky): authorize; also look at what the already existing things are doing
 // TODO(drebelsky): should this exist here or somewhere else?
 func (sess *hopSession) startPFControl(ch *tubes.Reliable) {
 	portforwarding.HandleServerControl(ch, sess.forwardTable, sess.tubeMuxer)
-	// TODO: respond?
 }
 
 func (sess *hopSession) startPF(ch *tubes.Reliable) {
