@@ -45,11 +45,18 @@ type Forward struct {
 	connect addr
 }
 
+// listener contains the state necessary to handle closing a forward
+type listener struct {
+	done     chan int
+	listener net.Listener
+	remote   addr
+}
+
 // FwdMapping contains the maps of active inbound and outbound forwards
 type FwdMapping struct {
 	inbound  map[addr]addr
 	im       sync.Mutex
-	outbound map[addr]addr
+	outbound map[addr]*listener
 	om       sync.Mutex
 }
 
@@ -57,7 +64,7 @@ type FwdMapping struct {
 func NewFwdMapping() *FwdMapping {
 	return &FwdMapping{
 		inbound:  make(map[addr]addr),
-		outbound: make(map[addr]addr),
+		outbound: make(map[addr]*listener),
 	}
 }
 
@@ -133,14 +140,20 @@ func listen(local, remote *addr, table *FwdMapping, muxer *tubes.Muxer) bool {
 	if err != nil {
 		return false
 	}
+	done := make(chan int, 1)
 	table.om.Lock()
-	table.outbound[*local] = *remote
+	table.outbound[*local] = &listener{done, ln, *remote}
 	table.om.Unlock()
 	go func() {
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
-				break
+				select {
+				case <-done:
+					break
+				default:
+					continue
+				}
 			}
 			tube, err := muxer.CreateTube(common.PFTube)
 			if err != nil {
@@ -214,10 +227,13 @@ func HandleServerControl(ch *tubes.Reliable, table *FwdMapping, muxer *tubes.Mux
 		} else {
 			status := byte(success)
 			table.om.Lock()
-			table.outbound[*local] = *remote
 			listed, ok := table.outbound[*local]
-			if ok && listed == *remote {
+			if ok && listed.remote == *remote {
 				delete(table.outbound, *local)
+				listed.done <- 1
+				if err := listed.listener.Close(); err != nil {
+					status = failure
+				}
 			} else {
 				status = failure
 			}
