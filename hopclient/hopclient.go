@@ -71,7 +71,7 @@ func NewHopClientOverride(config *config.ClientConfig, host *core.URL) (*HopClie
 		// Proxied:    false,
 	}
 	logrus.Info("C: created client: ", client.hostconfig.Hostname)
-	if host.Port != "" || host.User != "" {
+	if host.Port != "" || host.User != "" || host.Host != "" {
 		// We create a copy of the hostconfig because we don't want to modify the
 		// host config with the host everywhere
 		hostconfig := *client.hostconfig
@@ -82,6 +82,9 @@ func NewHopClientOverride(config *config.ClientConfig, host *core.URL) (*HopClie
 		}
 		if host.User != "" {
 			hostconfig.User = host.User
+		}
+		if host.Host != "" {
+			hostconfig.Hostname = host.Host
 		}
 		client.hostconfig = &hostconfig
 	}
