@@ -31,7 +31,7 @@ func main() {
 	cc.HandshakeTimeout = 15 * time.Second
 	cc.DataTimeout = 15 * time.Second
 
-	client, err := hopclient.NewHopClient(cc, f.Address.Host)
+	client, err := hopclient.NewHopClientWithURL(cc, f.Address)
 	if err != nil {
 		logrus.Error(err)
 		return
