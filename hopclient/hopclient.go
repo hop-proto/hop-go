@@ -56,13 +56,13 @@ type HopClient struct { // nolint:maligned
 
 // NewHopClient creates a new client object
 func NewHopClient(config *config.ClientConfig, hostname string) (*HopClient, error) {
-	return NewHopClientOverride(config, &core.URL{Host: hostname})
+	return NewHopClientWithURL(config, &core.URL{Host: hostname})
 }
 
-// NewHopClientOverride creates a new client object, like NewHopClient, but
+// NewHopClientWithURL creates a new client object, like NewHopClient, but
 // takes in a core.URL to allow overriding the port/user for the hostconfig
 // matching host.Host
-func NewHopClientOverride(config *config.ClientConfig, host *core.URL) (*HopClient, error) {
+func NewHopClientWithURL(config *config.ClientConfig, host *core.URL) (*HopClient, error) {
 	client := &HopClient{
 		config:     config,
 		hostconfig: config.MatchHost(host.Host),
