@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"testing/fstest"
 
@@ -55,14 +56,35 @@ type HopClient struct { // nolint:maligned
 
 // NewHopClient creates a new client object
 func NewHopClient(config *config.ClientConfig, hostname string) (*HopClient, error) {
+	return NewHopClientOverride(config, &core.URL{Host: hostname})
+}
+
+// NewHopClientOverride creates a new client object, like NewHopClient, but
+// takes in a core.URL to allow overriding the port/user for the hostconfig
+// matching host.Host
+func NewHopClientOverride(config *config.ClientConfig, host *core.URL) (*HopClient, error) {
 	client := &HopClient{
 		config:     config,
-		hostconfig: config.MatchHost(hostname),
+		hostconfig: config.MatchHost(host.Host),
 		wg:         sync.WaitGroup{},
 		Fsystem:    nil,
 		// Proxied:    false,
 	}
 	logrus.Info("C: created client: ", client.hostconfig.Hostname)
+	if host.Port != "" || host.User != "" {
+		// We create a copy of the hostconfig because we don't want to modify the
+		// host config with the host everywhere
+		hostconfig := *client.hostconfig
+		if host.Port != "" {
+			if port, err := strconv.Atoi(host.Port); err == nil {
+				hostconfig.Port = port
+			}
+		}
+		if host.User != "" {
+			hostconfig.User = host.User
+		}
+		client.hostconfig = &hostconfig
+	}
 	// if !config.NonPricipal {
 	// 	// Do nothing, keys are passed at Dial time
 	// } else {
