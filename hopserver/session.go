@@ -304,6 +304,8 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 				return
 			}
 		} else {
+			// Signal nil to sess.pty so that window sizes don't indefinitely buffer
+			sess.pty <- nil
 			c.Stdin = tube
 			c.Stdout = tube
 			c.Stderr = tube
