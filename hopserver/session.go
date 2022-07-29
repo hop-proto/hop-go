@@ -311,9 +311,7 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 			c.Stderr = tube
 			c.Start()
 		}
-		// TODO (baumanl): something is wrong with pty (backspace no longer works
-		// and getting "error resizing pty: inappropriate ioctl for device" in
-		// docker)
+
 		codex.SendSuccess(tube)
 		go func() {
 			c.Wait()
