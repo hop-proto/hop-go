@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -28,8 +27,8 @@ type ExecTube struct {
 }
 
 const (
-	defaultShell = byte(1)
-	specificCmd  = byte(2)
+	usePtyFlag  = 0x1
+	hasSizeFlag = 0x2
 )
 
 const (
@@ -68,7 +67,7 @@ func getStatus(t *tubes.Reliable) error {
 
 //NewExecTube sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
 //Stores state in an ExecChan struct so stdin can be manipulated during authgrant process
-func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTube, error) {
+func NewExecTube(cmd string, tube *tubes.Reliable, winTube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTube, error) {
 	// TODO(baumanl): if no actual attached terminal then this causes issues.
 	var oldState *term.State
 	var e error
@@ -83,10 +82,9 @@ func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTub
 		oldState = nil
 	}
 	termEnv := os.Getenv("TERM")
-	msg := newExecInitMsg(specificCmd, cmd, termEnv)
-	if cmd == "" {
-		msg = newExecInitMsg(defaultShell, cmd, termEnv)
-	}
+	usePty := cmd == ""
+	size, _ := pty.GetsizeFull(os.Stdin) // ignoring the error is okay here becaus then size is set to nil
+	msg := newExecInitMsg(usePty, cmd, termEnv, size)
 	_, e = tube.Write(msg.ToBytes())
 	if e != nil {
 		logrus.Error(e)
@@ -102,6 +100,21 @@ func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTub
 		logrus.Error("C: server failed to start cmd with error: ", err)
 		return nil, err
 	}
+
+	// Send window size updates to window channel
+	go func() {
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, syscall.SIGWINCH)
+		b := make([]byte, 8)
+		for range ch {
+			if size, err := pty.GetsizeFull(os.Stdin); err == nil {
+				serializeSize(b, size)
+				if _, err = winTube.Write(b); err != nil {
+					break
+				}
+			}
+		}
+	}()
 
 	r, w := io.Pipe()
 	ex := ExecTube{
@@ -133,26 +146,37 @@ func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTub
 }
 
 type execInitMsg struct {
-	cmdType byte
+	usePty  bool
 	cmdLen  uint32
 	cmd     string
 	termLen uint32
 	term    string
+	size    *pty.Winsize
 }
 
-func newExecInitMsg(t byte, c, term string) *execInitMsg {
+func newExecInitMsg(usePty bool, c, term string, size *pty.Winsize) *execInitMsg {
 	return &execInitMsg{
-		cmdType: t,
+		usePty:  usePty,
 		cmdLen:  uint32(len(c)),
 		cmd:     c,
 		termLen: uint32(len(term)),
 		term:    term,
+		size:    size,
 	}
 }
 
 func (m *execInitMsg) ToBytes() []byte {
-	r := make([]byte, 9+m.cmdLen+m.termLen)
-	r[0] = m.cmdType
+	length := 9 + m.cmdLen + m.termLen
+	if m.size != nil {
+		length += 8
+	}
+	r := make([]byte, length)
+	if m.usePty {
+		r[0] |= usePtyFlag
+	}
+	if m.size != nil {
+		r[0] |= hasSizeFlag
+	}
 	binary.BigEndian.PutUint32(r[1:], m.cmdLen)
 	if m.cmdLen > 0 {
 		copy(r[5:], []byte(m.cmd))
@@ -161,14 +185,20 @@ func (m *execInitMsg) ToBytes() []byte {
 	if m.termLen > 0 {
 		copy(r[9+m.cmdLen:], []byte(m.term))
 	}
+	if m.size != nil {
+		sizeStart := int(9+m.cmdLen) + len(m.term)
+		serializeSize(r[sizeStart:], m.size)
+	}
 	return r
 }
 
 //GetCmd reads execInitMsg from an EXEC_CHANNEL and returns the cmd to run
-func GetCmd(c net.Conn) (string, string, bool, error) {
+func GetCmd(c net.Conn) (string, string, bool, *pty.Winsize, error) {
 	//TODO (drebelsky): consider handling io errors
 	t := make([]byte, 1)
 	io.ReadFull(c, t)
+	usePty := (t[0] & usePtyFlag) != 0
+	hasSize := (t[0] & hasSizeFlag) != 0
 	l := make([]byte, 4)
 	io.ReadFull(c, l)
 	buf := make([]byte, binary.BigEndian.Uint32(l))
@@ -176,29 +206,49 @@ func GetCmd(c net.Conn) (string, string, bool, error) {
 	io.ReadFull(c, l)
 	term := make([]byte, binary.BigEndian.Uint32(l))
 	io.ReadFull(c, term)
-	if t[0] == defaultShell {
-		return "", string(term), true, nil
+	var size *pty.Winsize
+	if hasSize {
+		size, _ = readSize(c)
 	}
-	return string(buf), string(term), false, nil
+	return string(buf), string(term), usePty, size, nil
 }
 
-//Server deals with serverside code exec channe details like pty size, copies ch -> pty and pty -> ch
+func readSize(r io.Reader) (*pty.Winsize, error) {
+	b := make([]byte, 8)
+	_, err := io.ReadFull(r, b)
+	if err != nil {
+		return nil, err
+	}
+	return &pty.Winsize{
+		Rows: binary.BigEndian.Uint16(b),
+		Cols: binary.BigEndian.Uint16(b[2:]),
+		X:    binary.BigEndian.Uint16(b[4:]),
+		Y:    binary.BigEndian.Uint16(b[6:]),
+	}, nil
+}
+
+// serializeSize serializes a *pty.Winsize, into the start of b; it assumes b
+// has space for (at least) 8 bytes
+func serializeSize(b []byte, size *pty.Winsize) {
+	binary.BigEndian.PutUint16(b, size.Rows)
+	binary.BigEndian.PutUint16(b[2:], size.Cols)
+	binary.BigEndian.PutUint16(b[4:], size.X)
+	binary.BigEndian.PutUint16(b[6:], size.Y)
+}
+
+//HandleSize deals with resizing the pty according to messages from a WinSize tube
+func HandleSize(tube *tubes.Reliable, ptyFile *os.File) {
+	for {
+		if size, err := readSize(tube); err == nil {
+			pty.Setsize(ptyFile, size)
+		}
+	}
+}
+
+//Server deals with serverside code exec channel details like pty size, copies ch -> pty and pty -> ch
 func Server(tube *tubes.Reliable, f *os.File) {
 	defer tube.Close()
 	defer func() { _ = f.Close() }() // Best effort.
-	// Handle pty size.
-	//TODO(baumanl): Check that this is working properly
-	ch2 := make(chan os.Signal, 1)
-	signal.Notify(ch2, syscall.SIGWINCH)
-	go func() {
-		for range ch2 {
-			if err := pty.InheritSize(os.Stdin, f); err != nil {
-				log.Printf("error resizing pty: %s", err)
-			}
-		}
-	}()
-	ch2 <- syscall.SIGWINCH                         // Initial resize.
-	defer func() { signal.Stop(ch2); close(ch2) }() // Cleanup signals when done.
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {

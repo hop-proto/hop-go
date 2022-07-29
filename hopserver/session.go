@@ -55,6 +55,9 @@ type hopSession struct {
 
 	isPrincipal bool
 	authgrant   *authGrant
+
+	// We use a channel (with size 1) to avoid reading window sizes before we've created the pty
+	pty chan *os.File
 }
 
 func (sess *hopSession) checkAuthorization() bool {
@@ -160,6 +163,8 @@ func (sess *hopSession) start() {
 				go sess.startRemote(tube)
 			case common.LocalPFTube:
 				go sess.startLocal(tube)
+			case common.WinSizeTube:
+				go sess.startSizeTube(tube)
 			default:
 				tube.Close() //Close unrecognized tube types
 			}
@@ -238,7 +243,7 @@ func (sess *hopSession) checkAction(action string, actionType byte) error {
 }
 
 func (sess *hopSession) startCodex(tube *tubes.Reliable) {
-	cmd, termEnv, shell, _ := codex.GetCmd(tube)
+	cmd, termEnv, shell, size, _ := codex.GetCmd(tube)
 	logrus.Info("CMD: ", cmd)
 	if !sess.isPrincipal {
 		err := sess.checkAction(cmd, authgrants.CommandAction)
@@ -287,21 +292,26 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 		var f *os.File
 		var err error
 		if shell {
-			f, err = pty.Start(c)
+			if size != nil {
+				f, err = pty.StartWithSize(c, size)
+			} else {
+				f, err = pty.Start(c)
+			}
+			sess.pty <- f
 			if err != nil {
 				logrus.Errorf("S: error starting pty %v", err)
 				codex.SendFailure(tube, err)
 				return
 			}
 		} else {
+			// Signal nil to sess.pty so that window sizes don't indefinitely buffer
+			sess.pty <- nil
 			c.Stdin = tube
 			c.Stdout = tube
 			c.Stderr = tube
 			c.Start()
 		}
-		// TODO (baumanl): something is wrong with pty (backspace no longer works
-		// and getting "error resizing pty: inappropriate ioctl for device" in
-		// docker)
+
 		codex.SendSuccess(tube)
 		go func() {
 			c.Wait()
@@ -370,6 +380,10 @@ func (sess *hopSession) startRemote(tube *tubes.Reliable) {
 
 func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
 	netproxy.Server(ch)
+}
+
+func (sess *hopSession) startSizeTube(ch *tubes.Reliable) {
+	codex.HandleSize(ch, <-sess.pty)
 }
 
 //RemoteServer starts listening on given port and pipes the traffic back over the tube

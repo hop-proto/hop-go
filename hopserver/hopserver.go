@@ -159,6 +159,7 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 		done:            make(chan int),
 		controlChannels: []net.Conn{},
 		server:          s,
+		pty:             make(chan *os.File, 1),
 		// authorizedKeysLocation: s.config.AuthorizedKeysLocation,
 	}
 	// if sess.authorizedKeysLocation != sess.server.config.AuthorizedKeysLocation {
