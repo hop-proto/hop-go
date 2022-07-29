@@ -250,28 +250,41 @@ func (c *Handle) Start() {
 
 // Close closes the connection. Future operations on non-buffered data will return io.EOF.
 func (c *Handle) Close() error {
-	if c.IsClosed() {
+	c.server.m.Lock()
+	defer c.server.m.Unlock()
+	return c.closeLocked()
+}
+
+// Note that the lock here refers to the server's lock
+// +checklocks:c.server.m
+func (c *Handle) closeLocked() error {
+	if c.closed.IsSet() {
 		return io.EOF
 	}
+
+	c.ctrl_out.Send([]byte{0})
+
+	c.recv.Close()
+	c.send.Close()
+	c.ctrl.Close()
+	c.ctrl_out.Close()
+
 	c.m.Lock()
 	c.readLock.Lock()
 	c.writeLock.Lock()
-	defer c.m.Unlock()
-	defer c.readLock.Unlock()
-	defer c.writeLock.Unlock()
-
-	c.ctrl_out <- []byte{0}
 
 	// Close the channels
-	//close(c.recv)
-	close(c.send)
-	close(c.ctrl)
-	close(c.ctrl_out)
+
+	c.closed.SetTrue()
+
+	c.m.Unlock()
+	c.readLock.Unlock()
+	c.writeLock.Unlock()
 
 	// Wait for the sending goroutine to exit
 	c.wg.Wait()
 
-	c.closed.SetTrue()
+	c.server.clearSessionStateLocked(c.sessionID)
 
 	if c.state == closed {
 		return io.EOF
