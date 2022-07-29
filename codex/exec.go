@@ -27,8 +27,8 @@ type ExecTube struct {
 }
 
 const (
-	defaultShell = byte(1)
-	specificCmd  = byte(2)
+	usePtyFlag  = 0x1
+	hasSizeFlag = 0x2
 )
 
 const (
@@ -82,12 +82,9 @@ func NewExecTube(cmd string, tube *tubes.Reliable, winTube *tubes.Reliable, wg *
 		oldState = nil
 	}
 	termEnv := os.Getenv("TERM")
-	initType := specificCmd
-	if cmd == "" {
-		initType = defaultShell
-	}
+	usePty := cmd == ""
 	size, _ := pty.GetsizeFull(os.Stdin) // ignoring the error is okay here becaus then size is set to nil
-	msg := newExecInitMsg(initType, cmd, termEnv, size)
+	msg := newExecInitMsg(usePty, cmd, termEnv, size)
 	_, e = tube.Write(msg.ToBytes())
 	if e != nil {
 		logrus.Error(e)
@@ -149,7 +146,7 @@ func NewExecTube(cmd string, tube *tubes.Reliable, winTube *tubes.Reliable, wg *
 }
 
 type execInitMsg struct {
-	cmdType byte
+	usePty  bool
 	cmdLen  uint32
 	cmd     string
 	termLen uint32
@@ -157,9 +154,9 @@ type execInitMsg struct {
 	size    *pty.Winsize
 }
 
-func newExecInitMsg(t byte, c, term string, size *pty.Winsize) *execInitMsg {
+func newExecInitMsg(usePty bool, c, term string, size *pty.Winsize) *execInitMsg {
 	return &execInitMsg{
-		cmdType: t,
+		usePty:  usePty,
 		cmdLen:  uint32(len(c)),
 		cmd:     c,
 		termLen: uint32(len(term)),
@@ -169,14 +166,17 @@ func newExecInitMsg(t byte, c, term string, size *pty.Winsize) *execInitMsg {
 }
 
 func (m *execInitMsg) ToBytes() []byte {
-	// TODO(drebelsky): merge cmdType and hasSize into a single flags byte
-	length := 10 + m.cmdLen + m.termLen
-	// TODO(drebelsky): debate whether we should write a size if the cmdType is specificCmd
+	length := 9 + m.cmdLen + m.termLen
 	if m.size != nil {
 		length += 8
 	}
 	r := make([]byte, length)
-	r[0] = m.cmdType
+	if m.usePty {
+		r[0] |= usePtyFlag
+	}
+	if m.size != nil {
+		r[0] |= hasSizeFlag
+	}
 	binary.BigEndian.PutUint32(r[1:], m.cmdLen)
 	if m.cmdLen > 0 {
 		copy(r[5:], []byte(m.cmd))
@@ -185,12 +185,9 @@ func (m *execInitMsg) ToBytes() []byte {
 	if m.termLen > 0 {
 		copy(r[9+m.cmdLen:], []byte(m.term))
 	}
-	sizeStart := int(9+m.cmdLen) + len(m.term)
 	if m.size != nil {
-		r[sizeStart] = 1
-		serializeSize(r[sizeStart+1:], m.size)
-	} else {
-		r[sizeStart] = 0
+		sizeStart := int(9+m.cmdLen) + len(m.term)
+		serializeSize(r[sizeStart:], m.size)
 	}
 	return r
 }
@@ -200,6 +197,8 @@ func GetCmd(c net.Conn) (string, string, bool, *pty.Winsize, error) {
 	//TODO (drebelsky): consider handling io errors
 	t := make([]byte, 1)
 	io.ReadFull(c, t)
+	usePty := (t[0] & usePtyFlag) != 0
+	hasSize := (t[0] & hasSizeFlag) != 0
 	l := make([]byte, 4)
 	io.ReadFull(c, l)
 	buf := make([]byte, binary.BigEndian.Uint32(l))
@@ -207,16 +206,11 @@ func GetCmd(c net.Conn) (string, string, bool, *pty.Winsize, error) {
 	io.ReadFull(c, l)
 	term := make([]byte, binary.BigEndian.Uint32(l))
 	io.ReadFull(c, term)
-	hasSize := make([]byte, 1)
-	io.ReadFull(c, hasSize)
 	var size *pty.Winsize
-	if hasSize[0] == 1 {
+	if hasSize {
 		size, _ = readSize(c)
 	}
-	if t[0] == defaultShell {
-		return "", string(term), true, size, nil
-	}
-	return string(buf), string(term), false, size, nil
+	return string(buf), string(term), usePty, size, nil
 }
 
 func readSize(r io.Reader) (*pty.Winsize, error) {
