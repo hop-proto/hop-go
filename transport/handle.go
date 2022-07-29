@@ -25,20 +25,19 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	// currently wait on it, but we Add/Done in the actual send write function.
 	wg sync.WaitGroup
 
-	readTimeout  common.AtomicTimeout
-	writeTimeout common.AtomicTimeout
-
 	sessionID SessionID
 
-	recv chan []byte // incoming transport messages
-	send chan []byte // outgoing transport messages
-	ctrl chan []byte // incoming control messages
-	ctrl_out chan []byte // outgoing control messages
+	recv *common.DeadlineChan // incoming transport messages
+	send *common.DeadlineChan // outgoing transport messages
+	ctrl *common.DeadlineChan // incoming control messages
+	ctrl_out *common.DeadlineChan // outgoing control messages
 
 	closed common.AtomicBool
 
 	// +checklocks:readLock
 	buf bytes.Buffer
+
+	server	*Server
 }
 
 var _ MsgReader = &Handle{}
@@ -72,30 +71,9 @@ func (c *Handle) ReadMsg(b []byte) (int, error) {
 
 	// Check and see if there are pending messages. This causes the queue to get
 	// drained even if the connection is closed.
-	var msg []byte
-	select {
-	case msg = <-c.recv:
-		break
-	default:
-		if c.closed.IsSet() {
-			return 0, io.EOF
-		}
-	}
-
-	// Wait for a message until timeout
-	if msg == nil { 
-		timer := time.NewTimer(c.readTimeout.Get())
-		if c.readTimeout.Get() == 0 {
-			if !timer.Stop() {
-				<-timer.C
-			}
-		}
-		select {
-		case msg = <-c.recv:
-			break
-		case <-timer.C:
-			return 0, ErrTimeout
-		}
+	msg, err := c.recv.Recv()
+	if err != nil {
+		return 0, err
 	}
 
 	// If the input is long enough, just copy into it
@@ -105,7 +83,7 @@ func (c *Handle) ReadMsg(b []byte) (int, error) {
 	}
 
 	// Input was too short, buffer this message and return ErrBufOverflow
-	_, err := c.buf.Write(msg)
+	_, err = c.buf.Write(msg)
 	if err != nil {
 		return 0, err
 	}
@@ -126,32 +104,11 @@ func (c *Handle) Read(b []byte) (int, error) {
 		return n, err
 	}
 
-	// There must not be buffered data, fetch a message off the channel
-	var msg []byte
-
 	// Check and see if there are pending messages. This causes the queue to get
 	// drained even if the connection is closed.
-	select {
-	case msg = <-c.recv:
-		break
-	default:
-		if c.closed.IsSet() {
-			return 0, io.EOF
-		}
-	}
-
-	// Wait for a message until timeout
-	if msg == nil && c.readTimeout != 0 {
-		timer := time.NewTimer(c.readTimeout.Get())
-		select {
-		case msg = <-c.recv:
-			if !timer.Stop() {
-				<-timer.C
-			}
-			break
-		case <-timer.C:
-			return 0, ErrTimeout
-		}
+	msg, err := c.recv.Recv()
+	if err != nil {
+		return 0, err
 	}
 
 	// Copy as much data as possible into the output data
@@ -160,7 +117,7 @@ func (c *Handle) Read(b []byte) (int, error) {
 		return n, nil
 	}
 	// If there was leftover data, buffer it
-	_, err := c.buf.Write(msg[n:])
+	_, err = c.buf.Write(msg[n:])
 	return n, err
 }
 
@@ -178,28 +135,7 @@ func (c *Handle) WriteMsg(b []byte) error {
 		return ErrBufOverflow
 	}
 
-	select {
-	case c.send <- b:
-		return nil
-	default:
-		if c.closed.IsSet() {
-			return io.EOF
-		}
-	}
-
-	timer := time.NewTimer(c.writeTimeout.Get())
-	select {
-	case c.send <- b:
-		if !timer.Stop() {
-			<-timer.C
-		}
-		return nil
-	case <-timer.C:
-		if c.closed.IsSet() {
-			return io.EOF
-		}
-		return ErrTimeout
-	}
+	return c.send.Send(b)
 }
 
 // Write implements io.Writer. It will split b into segments of length
@@ -227,124 +163,74 @@ func (c *Handle) Write(b []byte) (int, error) {
 	return total, nil
 }
 
-func (c *Handle) close() {
-	// TODO(dadrian): Implement
-	// Remove the reference to the session, so it can be cleaned up
-	// Close all the channels
-	// Set the closed state
-}
-
 // Close closes the connection. Future operations on non-buffered data will
 // return io.EOF.
-//
-// TODO(dadrian): Implement
-// TODO(hosono) here is where we send a protocol close message
 func (c *Handle) Close() error {
-	if c.IsClosed() {
+	c.server.m.Lock()
+	defer c.server.m.Unlock()
+	return c.closeLocked()
+}
+
+// Note that the lock here refers to the server's lock
+// +checklocks:c.server.m
+func (c *Handle) closeLocked() error {
+	if c.closed.IsSet() {
 		return io.EOF
 	}
+
+	c.ctrl_out.Send([]byte{0})
+
+	c.recv.Close()
+	c.send.Close()
+	c.ctrl.Close()
+	c.ctrl_out.Close()
+
 	c.m.Lock()
 	c.readLock.Lock()
 	c.writeLock.Lock()
-	defer c.m.Unlock()
-	defer c.readLock.Unlock()
-	defer c.writeLock.Unlock()
-
-	c.ctrl_out <- []byte{0}
 
 	// Close the channels
-	//close(c.recv)
-	close(c.send)
-	close(c.ctrl)
-	close(c.ctrl_out)
+
+	c.closed.SetTrue()
+
+	c.m.Unlock()
+	c.readLock.Unlock()
+	c.writeLock.Unlock()
 
 	// Wait for the sending goroutine to exit
 	c.wg.Wait()
 
-	c.closed.SetTrue()
+	c.server.clearSessionStateLocked(c.sessionID)
 
 	return nil
 }
 
 // LocalAddr implements net.Conn.
-//
-// TODO(dadrian): Implement
 func (c *Handle) LocalAddr() net.Addr {
-	panic("unimplemented")
+	return c.server.udpConn.LocalAddr()
 }
 
 // RemoteAddr implements net.Conn.
-//
-// TODO(dadrian): Implement
 func (c *Handle) RemoteAddr() net.Addr {
-	panic("unimplemented")
+	return c.server.udpConn.RemoteAddr()
 }
 
-// SetDeadline sets a deadline at which future operations will stop. It *might*
-// not affect in-progress operations. It is implemented as a timeout, not a
-// deadline.
-//
-// TODO(dadrian): Implement as a deadline.
+// SetDeadline sets a deadline at which future operations will stop.
+// Pending operations will be canceled
 func (c *Handle) SetDeadline(t time.Time) error {
-	if c.closed.IsSet() {
-		return io.EOF
-	}
-	now := time.Now()
-	var timeout time.Duration
-	if t.After(now) {
-		timeout = t.Sub(now)
-	}
-	c.readTimeout.Set(timeout)
-	c.writeTimeout.Set(timeout)
+	c.SetReadDeadline(t)
+	c.SetWriteDeadline(t)
 	return nil
 }
 
-// SetReadDeadline sets a deadline at which future read operations will stop. It
-// *might* not affect in-progress operations. It is implemented as a timeout,
-// not a deadline.
-//
-// TODO(dadrian): Implement as a deadline.
+// SetReadDeadline sets a deadline at which future read operations will stop
+// Pending reads will be canceled
 func (c *Handle) SetReadDeadline(t time.Time) error {
-	if c.closed.IsSet() {
-		return io.EOF
-	}
-
-	// a zero value for t means the connection will not timeout
-	if t.IsZero() {
-		c.readTimeout = 0
-		return nil
-	}
-
-	now := time.Now()
-	var timeout time.Duration
-	if t.After(now) {
-		timeout = t.Sub(now)
-	}
-	c.readTimeout.Set(timeout)
-	return nil
+	return c.recv.SetDeadline(t)
 }
 
-// SetWriteDeadline sets a deadline at which future read operations will stop. It
-// *might* not affect in-progress operations. It is implemented as a timeout,
-// not a deadline.
-//
-// TODO(dadrian): Implement as a deadline.
+// SetWriteDeadline sets a deadline at which future read operations will stop
+// Pending writes will be canceled
 func (c *Handle) SetWriteDeadline(t time.Time) error {
-	if c.closed.IsSet() {
-		return io.EOF
-	}
-
-	// a zero value for t means the connection will not timeout
-	if t.IsZero() {
-		c.readTimeout = 0
-		return nil
-	}
-
-	now := time.Now()
-	var timeout time.Duration
-	if t.After(now) {
-		timeout = t.Sub(now)
-	}
-	c.writeTimeout.Set(timeout)
-	return nil
+	return c.send.SetDeadline(t)
 }

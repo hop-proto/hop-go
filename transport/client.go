@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -61,8 +60,8 @@ type Client struct {
 	ciphertext []byte
 	plaintext []byte
 
-	recv 	chan []byte
-	ctrl 	chan []byte
+	recv	*common.DeadlineChan
+	ctrl	*common.DeadlineChan
 
 	config ClientConfig
 }
@@ -298,6 +297,9 @@ func (c *Client) Close() error {
 		return io.EOF
 	}
 
+	c.recv.Cancel(io.EOF)
+	c.ctrl.Cancel(io.EOF)
+
 	c.lockUser()
 	defer c.unlockUser()
 
@@ -319,9 +321,7 @@ func (c *Client) listen() {
 	for !c.closed.IsSet() {
 		n, mt, err := c.readMsg()
 
-		if errors.Is(err, os.ErrDeadlineExceeded) {
-			continue
-		} else if err != nil {
+		if err != nil {
 			logrus.Errorf("client: %s", err)
 			continue
 		}
@@ -329,16 +329,16 @@ func (c *Client) listen() {
 		switch mt {
 		case MessageTypeTransport:
 			select {
-			case c.recv <- append([]byte(nil), c.plaintext[:n]...):
+			case c.recv.C <- append([]byte(nil), c.plaintext[:n]...):
 				break
 			default:
 				logrus.Warn("client: recv queue full. dropping message")
 			}
 		case MessageTypeControl:
 			select {
-			case c.ctrl <- append([]byte(nil), c.plaintext[:n]...):
+			case c.ctrl.C <- append([]byte(nil), c.plaintext[:n]...):
 				// TODO(hosono) handle other control messages?
-				c.Close()
+				c.recv.Cancel(io.EOF)
 				break
 			default:
 				logrus.Warn("client: ctrl queue full. dropping message")
@@ -414,7 +414,10 @@ func (c *Client) ReadMsg(b []byte) (n int, err error) {
 		return n, err
 	}
 
-	plaintext := <- c.recv
+	plaintext, err := c.recv.Recv()
+	if err != nil{
+		return 0, err
+	}
 
 	// If the input is long enough, just copy into it
 	if len(b) >= len(plaintext) {
@@ -423,7 +426,7 @@ func (c *Client) ReadMsg(b []byte) (n int, err error) {
 	}
 
 	// Input was too short, buffer this message and return ErrBufOverflow
-	c.recv <- plaintext
+	c.recv.C <- plaintext
 	return 0, ErrBufOverflow
 }
 
@@ -464,8 +467,10 @@ func (c *Client) Read(b []byte) (n int, err error) {
 		return 0, io.EOF
 	}
 
-	// read and decrypt into c.plaintext
-	plaintext := <-c.recv
+	plaintext, err := c.recv.Recv()
+	if err != nil {
+		return 0, err
+	}
 
 	n = copy(b, plaintext)
 	if n == len(plaintext) {
@@ -473,7 +478,8 @@ func (c *Client) Read(b []byte) (n int, err error) {
 	}
 
 	// Buffer leftovers
-	c.recv <- plaintext[n:]
+	// TODO(hosono) this is a bad way to deal with this
+	c.recv.C <- plaintext[n:]
 	return n, err
 }
 
@@ -522,8 +528,8 @@ func NewClient(conn UDPLike, server *net.UDPAddr, config ClientConfig) *Client {
 		ciphertext:     make([]byte, 65535),
 		plaintext:      make([]byte, PlaintextLen(65535)),
 		// TODO(hosono) make it possible to set these lengths
-		recv:			make(chan []byte, 2048),
-		ctrl:			make(chan []byte, 2048),
+		recv: 			common.NewDeadlineChan(2048),
+		ctrl: 			common.NewDeadlineChan(2048),
 	}
 	return c
 }

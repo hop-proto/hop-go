@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -158,7 +157,6 @@ func (s *Server) writePacket(pkt []byte, dst *net.UDPAddr) error {
 }
 
 func (s *Server) readPacket() error {
-	s.udpConn.SetReadDeadline(time.Now().Add(time.Second))
 	msgLen, oobn, flags, addr, err := s.udpConn.ReadMsgUDP(s.rawRead, nil)
 	if err != nil {
 		return err
@@ -469,7 +467,7 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte, plaintext [
 	}
 	logrus.Debugf("server: transport/control message for session %x", sessionID)
 	ss := s.fetchSessionState(sessionID)
-	if ss == nil {
+	if ss == nil || ss.handle == nil{
 		return 0, ErrUnknownSession
 	}
 
@@ -489,14 +487,14 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte, plaintext [
 	switch mt {
 	case MessageTypeTransport:
 		select {
-		case ss.handle.recv <- plaintext[:n]:
+		case ss.handle.recv.C <- plaintext[:n]:
 			break
 		default:
 			logrus.Warnf("session %x: recv queue full, dropping packet", sessionID)
 		}
 	case MessageTypeControl:
 		select {
-		case ss.handle.ctrl <- plaintext[:n]:
+		case ss.handle.ctrl.C <- plaintext[:n]:
 			break
 		default:
 			logrus.Warnf("session %x: ctrl queue full, dropping packet", sessionID)
@@ -524,9 +522,10 @@ func (s *Server) Serve() error {
 		for !s.closed.IsSet() {
 			err := s.readPacket()
 			logrus.Debug("read a packet")
-			if errors.Is(err, os.ErrDeadlineExceeded) {
-				// timing out allows us to periodically check if the connection is closed
-				continue
+			if errors.Is(err, io.EOF) {
+				// TODO(hosono) can this happen outside of testing?
+				logrus.Error("Read EOF from UDP conn")
+				break
 			} else if err != nil {
 				logrus.Errorf("server: %s", err)
 			}
@@ -557,6 +556,11 @@ func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
 func (s *Server) finishHandshake(hs *HandshakeState) error {
 	s.m.Lock()
 	defer s.m.Unlock()
+
+	if s.closed.IsSet() {
+		return io.EOF
+	}
+
 	defer s.clearHandshakeStateLocked(hs.remoteAddr)
 	ss := s.fetchSessionStateLocked(hs.sessionID)
 	if ss == nil {
@@ -578,7 +582,7 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	default:
 		logrus.Warnf("server: session %x: pending connections queue is full, dropping handshake", ss.sessionID)
 		s.clearSessionState(ss.sessionID)
-		ss.handle.close()
+		ss.handle.Close()
 	}
 	return nil
 }
@@ -586,12 +590,11 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 func (s *Server) createHandleLocked(ss *SessionState) *Handle {
 	handle := &Handle{
 		sessionID:    ss.sessionID,
-		recv:         make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
-		send:         make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
-		ctrl:         make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
-		ctrl_out:	  make(chan []byte, s.config.maxBufferedPacketsPerConnection()),
-		readTimeout:  common.AtomicTimeout(s.config.StartingReadTimeout),
-		writeTimeout: common.AtomicTimeout(s.config.StartingWriteTimeout),
+		recv:         common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
+		send:         common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
+		ctrl:         common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
+		ctrl_out:     common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
+		server:		  s,
 	}
 	ss.handle = handle
 	return handle
@@ -617,7 +620,7 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 		ss.handle.wg.Add(2)
 		go func(ss *SessionState) {
 			defer ss.handle.wg.Done()
-			for plaintext := range ss.handle.send {
+			for plaintext := range ss.handle.send.C {
 				err := s.lockHandleAndWriteToSession(ss, MessageTypeTransport, plaintext)
 				if err != nil {
 					logrus.Errorf("server: unable to write packet: %s", err)
@@ -627,7 +630,7 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 		}(ss)
 		go func(ss *SessionState) {
 			defer ss.handle.wg.Done()
-			for plaintext := range ss.handle.ctrl_out {
+			for plaintext := range ss.handle.ctrl_out.C {
 				err := s.lockHandleAndWriteToSession(ss, MessageTypeControl, plaintext)
 				if err != nil {
 					logrus.Errorf("server: unable to write control packet: %s", err)
@@ -636,10 +639,12 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 			}
 		}(ss)
 		go func(ss *SessionState) {
-			for _ = range ss.handle.ctrl {
+			// TODO(hosono) technically this goroutine is leaked,
+			// but it should go away since Close also closes ctrl
+			// this isn't really the best way to do this, but it does work
+			for range(ss.handle.ctrl.C) {
 				// TODO(hosono) handle other control messages
-				ss.handle.wg.Done()
-				ss.handle.Close()
+				ss.handle.recv.Cancel(io.EOF)
 			}
 		}(ss)
 		return handle, nil
@@ -664,7 +669,10 @@ func (s *Server) CloseSession(sessionID SessionID) error {
 // +checklocks:s.m
 func (s *Server) closeSessionLocked(sessionID SessionID) error {
 	ss := s.fetchSessionStateLocked(sessionID)
-	err := ss.handle.Close()
+	if ss == nil || ss.handle == nil{
+		return ErrUnknownSession
+	}
+	err := ss.handle.closeLocked()
 	s.clearSessionStateLocked(sessionID)
 	return err
 }
@@ -674,12 +682,17 @@ func (s *Server) closeSessionLocked(sessionID SessionID) error {
 // TODO(dadrian): What does it do to writes?
 func (s *Server) Close() (err error) {
 	// This will end the reading goroutine and wait for it to exit
+	if s.closed.IsSet() {
+		return io.EOF
+	}
 	s.closed.SetTrue()
+
+	// This will ensure there are no pending reads
+	s.udpConn.SetReadDeadline(time.Now())
 	s.wg.Wait()
 
 	// TODO(hosono) fix the weirdness around locking stuff
 	s.m.Lock()
-	defer s.m.Unlock()
 
 	for _, session := range(s.sessions) {
 		s.closeSessionLocked(session.sessionID)
@@ -688,16 +701,15 @@ func (s *Server) Close() (err error) {
 	close(s.pendingConnections)
 	for handle := range(s.pendingConnections) {
 		if handle != nil {
-			err = handle.Close()
+			err = handle.closeLocked()
 		} else {
 			logrus.Error("server: nil handle in pending connections")
 		}
 	}
 
-	err = s.udpConn.Close()
-	if err != nil {
-		return err
-	}
+	s.m.Unlock()
+
+	s.udpConn.Close()
 
 	return nil
 }

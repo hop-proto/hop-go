@@ -155,26 +155,28 @@ func TestServerClose(t *testing.T) {
 	stop()
 }
 
-// Wrapper around the client nettests
-func DontTestTransportConn(t *testing.T) {
-
-	makeReliableUDPPipe := func() (net.Conn, net.Conn, func(), error) {
-		c1, c2 := MakeRelaibleUDPConn()
-		stop := func() {
-			c1.Close()
-			c2.Close()
-		}
-		return c1, c2, stop, nil
+func makeReliableUDPPipe() (net.Conn, net.Conn, func(), error) {
+	c1, c2 := MakeRelaibleUDPConn()
+	stop := func() {
+		c1.Close()
+		c2.Close()
 	}
+	return c1, c2, stop, nil
+}
+
+func TestReliableUDP(t *testing.T) {
+	mp := nettest.MakePipe(makeReliableUDPPipe)
+	nettest.TestConn(t, mp)
+}
+
+// Wrapper around the client nettests
+func TestTransportConn(t *testing.T) {
 
 	makePipe := func() (net.Conn, net.Conn, func(), error) {
 		c1, c2, _, stop, err := makeConn(t)
 		return c1, c2, stop, err
 	}
 
-	var mp = nettest.MakePipe(makePipe)
-	mp = nettest.MakePipe(makeReliableUDPPipe)
-	mp = nettest.MakePipe(makePipe)
-
+	mp := nettest.MakePipe(makePipe)
 	nettest.TestConn(t, mp)
 }

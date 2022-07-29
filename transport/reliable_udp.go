@@ -3,9 +3,8 @@ package transport
 import (
 	"io"
 	"net"
-	"os"
-	"time"
 	"sync"
+	"time"
 
 	"hop.computer/hop/common"
 )
@@ -18,18 +17,13 @@ type ReliableUDP struct {
 	send 			chan []byte
 	// +checklocks:readLock
 	recv 			chan []byte
-	closed 			common.AtomicBool
 	readLock		sync.Mutex
 	writeLock		sync.Mutex
-	timeoutLock		sync.Mutex
 
-	// +checklocks:timeoutLock
-	readTimer 		*time.Timer
-	readExpired		common.AtomicBool
+	readDeadline 	*common.Deadline
+	writeDeadline 	*common.Deadline
 
-	// +checklocks:timeoutLock
-	writeTimer 		*time.Timer
-	writeExpired	common.AtomicBool
+	closed 			common.AtomicBool
 }
 
 var _ UDPLike = &ReliableUDP{}
@@ -45,25 +39,28 @@ func (r *ReliableUDP) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.U
 
 	addr = &net.UDPAddr{}
 
-	for {
-		if r.closed.IsSet() {
-			return 0, 0, 0, addr, io.EOF
-		}
-		if r.readExpired.IsSet() {
-			return 0, 0, 0, addr, os.ErrDeadlineExceeded
-		}
+	if r.closed.IsSet() {
+		return 0, 0, 0, addr, io.EOF
+	}
+
+	ch := r.readDeadline.Done()
+	select {
+	case err = <-ch:
+		return
+	default:
 		select {
+		case err = <-ch:
+			return
 		case msg, ok := <- r.recv: 
 			if !ok {
-				return 0, 0, 0, addr, io.EOF
+				err = io.EOF
+				return
 			}
 			n = copy(b, msg)
 			if n < len(msg) {
 				panic("buffer too small!")
 			}
-			return n, 0, 0, addr, nil
-		default:
-			time.Sleep(time.Millisecond)
+			return
 		}
 	}
 }
@@ -77,18 +74,22 @@ func (r *ReliableUDP) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int
 	r.writeLock.Lock()
 	defer r.writeLock.Unlock()
 
-	for {
-		if r.closed.IsSet() {
-			return 0, 0, io.EOF
-		}
-		if r.writeExpired.IsSet() {
-			return 0, 0, os.ErrDeadlineExceeded
-		}
+	if r.closed.IsSet() {
+		err = io.EOF
+		return
+	}
+
+	// This is how we give priority to receiving from Done over sending on send
+	select {
+	case err = <-r.writeDeadline.Done():
+		return
+	default:
 		select {
+		case err = <-r.writeDeadline.Done():
+			return
 		case r.send <-append([]byte(nil), b...):
-			return len(b), 0, nil
-		default:
-			time.Sleep(time.Millisecond)
+			n = len(b)
+			return
 		}
 	}
 }
@@ -99,6 +100,13 @@ func (r *ReliableUDP) Close() error {
 	}
 
 	r.closed.SetTrue()
+	r.writeDeadline.Cancel(io.EOF)
+	r.readDeadline.Cancel(io.EOF)
+
+	r.writeLock.Lock()
+	defer r.writeLock.Unlock()
+
+	//close(r.send)
 	return nil
 }
 
@@ -117,71 +125,11 @@ func (r *ReliableUDP) SetDeadline(t time.Time) error {
 }
 
 func (r *ReliableUDP) SetReadDeadline(t time.Time) error {
-	r.timeoutLock.Lock()
-	defer r.timeoutLock.Unlock()
-
-	if r.readTimer != nil {
-		if !r.readTimer.Stop() {
-			select {
-			case <-r.readTimer.C:
-			default:
-			}
-		}
-	}
-
-
-	if t.IsZero() {
-		r.readExpired.SetFalse()
-	} else if t.Before(time.Now()) {
-		r.readExpired.SetTrue()
-	} else {
-		r.readExpired.SetFalse()
-		if r.readTimer != nil {
-			r.readTimer.Reset(t.Sub(time.Now()))
-		} else {
-			f := func() {
-				r.readExpired.SetTrue()
-			}
-			r.readTimer = time.AfterFunc(t.Sub(time.Now()), f)
-		}
-
-	}
-
-	return nil
+	return r.readDeadline.SetDeadline(t)
 }
 
 func (r *ReliableUDP) SetWriteDeadline(t time.Time) error {
-	r.timeoutLock.Lock()
-	defer r.timeoutLock.Unlock()
-
-	if r.writeTimer != nil {
-		if !r.writeTimer.Stop() {
-			select {
-			case <-r.writeTimer.C:
-			default:
-			}
-		}
-	}
-
-
-	if t.IsZero() {
-		r.writeExpired.SetFalse()
-	} else if t.Before(time.Now()) {
-		r.writeExpired.SetTrue()
-	} else {
-		r.writeExpired.SetFalse()
-		if r.writeTimer != nil {
-			r.writeTimer.Reset(t.Sub(time.Now()))
-		} else {
-			f := func() {
-				r.writeExpired.SetTrue()
-			}
-			r.writeTimer = time.AfterFunc(t.Sub(time.Now()), f)
-		}
-
-	}
-
-	return nil
+	return r.writeDeadline.SetDeadline(t)
 }
 
 func MakeRelaibleUDPConn() (c1, c2 *ReliableUDP) {
@@ -191,11 +139,15 @@ func MakeRelaibleUDPConn() (c1, c2 *ReliableUDP) {
 	c1 = &ReliableUDP {
 		send: ch1,
 		recv: ch2,
+		readDeadline: common.NewDeadline(time.Time{}),
+		writeDeadline: common.NewDeadline(time.Time{}),
 	}
 
 	c2 = &ReliableUDP {
 		send: ch2,
 		recv: ch1,
+		readDeadline: common.NewDeadline(time.Time{}),
+		writeDeadline: common.NewDeadline(time.Time{}),
 	}
 
 	return c1, c2

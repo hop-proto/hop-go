@@ -129,3 +129,77 @@ func TestDoneOnCanceled(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestDeadlineRecv(t *testing.T) {
+	ch := NewDeadlineChan(numLoops)
+
+	wg := sync.WaitGroup{}
+	wg.Add(numLoops)
+	for i := 0; i < numLoops; i++ {
+		ch.C <- []byte{77}
+		go func () {
+			defer wg.Done()
+			val, err := ch.Recv()
+			assert.NilError(t, err)
+			assert.DeepEqual(t, val[0], byte(77))
+		}()
+	}
+
+	wg.Wait()
+}
+
+func TestDeadlineRecvCancel(t *testing.T) {
+	ch := NewDeadlineChan(numLoops)
+
+	ch.Cancel(ErrTest)
+
+	wg := sync.WaitGroup{}
+	wg.Add(numLoops)
+	for i := 0; i < numLoops; i++ {
+		ch.C <- make([]byte, i)
+		go func () {
+			defer wg.Done()
+			_, err := ch.Recv()
+			assert.ErrorType(t, err, ErrTest)
+		}()
+	}
+
+	wg.Wait()
+}
+func TestDeadlineSend(t *testing.T) {
+	ch := NewDeadlineChan(numLoops)
+
+	wg := sync.WaitGroup{}
+	wg.Add(numLoops)
+	for i := 0; i < numLoops; i++ {
+		go func () {
+			defer wg.Done()
+			err := ch.Send([]byte{77})
+			assert.NilError(t, err)
+		}()
+	}
+
+	wg.Wait()
+	ch.Close()
+	for val := range(ch.C) {
+		assert.DeepEqual(t, val[0], byte(77))
+	}
+}
+
+func TestDeadlineSendCancel(t *testing.T) {
+	ch := NewDeadlineChan(numLoops)
+
+	ch.Cancel(ErrTest)
+
+	wg := sync.WaitGroup{}
+	wg.Add(numLoops)
+	for i := 0; i < numLoops; i++ {
+		go func () {
+			defer wg.Done()
+			err := ch.Send([]byte{77})
+			assert.ErrorType(t, err, ErrTest)
+		}()
+	}
+
+	wg.Wait()
+}

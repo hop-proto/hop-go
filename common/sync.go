@@ -1,6 +1,7 @@
 package common
 
 import (
+	"io"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -100,6 +101,7 @@ func (d *Deadline) SetDeadline(t time.Time) error {
 	return nil
 }
 
+
 func NewDeadline(t time.Time) *Deadline {
 	d := &Deadline{}
 	d.timer = time.AfterFunc(time.Hour, d.timeout)
@@ -110,3 +112,59 @@ func NewDeadline(t time.Time) *Deadline {
 	d.SetDeadline(t)
 	return d
 }
+
+type DeadlineChan struct {
+	deadline 	*Deadline
+	C 			chan []byte
+}
+
+func (d *DeadlineChan) Recv() (b []byte , err error) {
+	errChan := d.deadline.Done()
+	select{
+	case err = <-errChan:
+		return
+	default:
+		select {
+		case err = <-errChan:
+			return
+		case b = <-d.C:
+			return
+		}
+	}
+}
+
+func (d *DeadlineChan) Send(b []byte) (err error) {
+	errChan := d.deadline.Done()
+	select{
+	case err = <-errChan:
+		return
+	default:
+		select {
+		case err = <-errChan:
+			return
+		case d.C <- b:
+			return
+		}
+	}
+}
+
+func (d *DeadlineChan) SetDeadline(t time.Time) error {
+	return d.deadline.SetDeadline(t)
+}
+
+func (d *DeadlineChan) Cancel(err error) {
+	d.deadline.Cancel(err)
+}
+
+func (d *DeadlineChan) Close() {
+	d.deadline.Cancel(io.EOF)
+	close(d.C)
+}
+
+func NewDeadlineChan(size int) *DeadlineChan {
+	return &DeadlineChan{
+		deadline: NewDeadline(time.Time{}),
+		C:	make(chan []byte, size),
+	}
+}
+
