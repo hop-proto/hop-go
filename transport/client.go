@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -62,8 +61,8 @@ type Client struct {
 
 	recv *common.DeadlineChan[[]byte]
 
-	recv 	chan []byte
-	ctrl 	chan []byte
+	recv	*common.DeadlineChan
+	ctrl	*common.DeadlineChan
 
 	config ClientConfig
 }
@@ -399,9 +398,7 @@ func (c *Client) listen() {
 	for !c.closed.IsSet() {
 		n, mt, err := c.readMsg()
 
-		if errors.Is(err, os.ErrDeadlineExceeded) {
-			continue
-		} else if err != nil {
+		if err != nil {
 			logrus.Errorf("client: %s", err)
 			continue
 		}
@@ -409,16 +406,16 @@ func (c *Client) listen() {
 		switch mt {
 		case MessageTypeTransport:
 			select {
-			case c.recv <- append([]byte(nil), c.plaintext[:n]...):
+			case c.recv.C <- append([]byte(nil), c.plaintext[:n]...):
 				break
 			default:
 				logrus.Warn("client: recv queue full. dropping message")
 			}
 		case MessageTypeControl:
 			select {
-			case c.ctrl <- append([]byte(nil), c.plaintext[:n]...):
+			case c.ctrl.C <- append([]byte(nil), c.plaintext[:n]...):
 				// TODO(hosono) handle other control messages?
-				c.Close()
+				c.recv.Cancel(io.EOF)
 				break
 			default:
 				logrus.Warn("client: ctrl queue full. dropping message")
