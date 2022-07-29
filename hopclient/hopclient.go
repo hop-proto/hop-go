@@ -465,8 +465,13 @@ func (c *HopClient) startExecTube() error {
 		logrus.Error(err)
 		return err
 	}
+	winSizeTube, err := c.TubeMuxer.CreateTube(common.WinSizeTube)
+	if err != nil {
+		logrus.Error(err)
+		return err
+	}
 	c.wg.Add(1)
-	c.ExecTube, err = codex.NewExecTube(c.config.Cmd, ch, &c.wg)
+	c.ExecTube, err = codex.NewExecTube(c.config.Cmd, ch, winSizeTube, &c.wg)
 	return err
 }
 

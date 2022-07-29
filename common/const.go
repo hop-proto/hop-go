@@ -34,4 +34,5 @@ const (
 	UserAuthTube  = 4
 	LocalPFTube   = 5
 	RemotePFTube  = 6
+	WinSizeTube   = 7 // Used for notifying server of window size changes
 )

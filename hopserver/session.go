@@ -55,6 +55,9 @@ type hopSession struct {
 
 	isPrincipal bool
 	authgrant   *authGrant
+
+	// We use a channel (with size 1) to avoid reading window sizes before we've created the pty
+	pty chan *os.File
 }
 
 func (sess *hopSession) checkAuthorization() bool {
@@ -160,6 +163,8 @@ func (sess *hopSession) start() {
 				go sess.startRemote(tube)
 			case common.LocalPFTube:
 				go sess.startLocal(tube)
+			case common.WinSizeTube:
+				go sess.startSizeTube(tube)
 			default:
 				tube.Close() //Close unrecognized tube types
 			}
@@ -292,6 +297,7 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 			} else {
 				f, err = pty.Start(c)
 			}
+			sess.pty <- f
 			if err != nil {
 				logrus.Errorf("S: error starting pty %v", err)
 				codex.SendFailure(tube, err)
@@ -374,6 +380,10 @@ func (sess *hopSession) startRemote(tube *tubes.Reliable) {
 
 func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
 	netproxy.Server(ch)
+}
+
+func (sess *hopSession) startSizeTube(ch *tubes.Reliable) {
+  codex.HandleSize(ch, <-sess.pty)
 }
 
 //RemoteServer starts listening on given port and pipes the traffic back over the tube

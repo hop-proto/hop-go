@@ -1,15 +1,14 @@
 package codex
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
+	"os/signal"
+	"syscall"
 	"net"
 	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 
 	"github.com/creack/pty"
 	"github.com/sirupsen/logrus"
@@ -68,7 +67,7 @@ func getStatus(t *tubes.Reliable) error {
 
 //NewExecTube sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
 //Stores state in an ExecChan struct so stdin can be manipulated during authgrant process
-func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTube, error) {
+func NewExecTube(cmd string, tube *tubes.Reliable, winTube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTube, error) {
 	// TODO(baumanl): if no actual attached terminal then this causes issues.
 	var oldState *term.State
 	var e error
@@ -105,6 +104,21 @@ func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTub
 		return nil, err
 	}
 
+	// Send window size updates to window channel
+	go func() {
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, syscall.SIGWINCH)
+		b := make([]byte, 8)
+		for range ch {
+			if size, err := pty.GetsizeFull(os.Stdin); err == nil {
+				serializeSize(b, size)
+				if _, err = winTube.Write(b); err != nil {
+					break
+				}
+			}
+		}
+	}()
+
 	r, w := io.Pipe()
 	ex := ExecTube{
 		tube:  tube,
@@ -113,22 +127,6 @@ func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTub
 		r:     r,
 		w:     w,
 	}
-
-	// Send SIGWINCH to channels
-	go func() {
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, syscall.SIGWINCH)
-		b := make([]byte, 9)
-		b[0] = byte(typeWinch)
-		for range ch {
-			if size, err := pty.GetsizeFull(os.Stdin); err == nil {
-				serializeSize(b[1:], size)
-				if _, err = tube.Write(b); err != nil {
-					break
-				}
-			}
-		}
-	}()
 
 	go func(ex *ExecTube) {
 		defer wg.Done()
@@ -143,7 +141,7 @@ func NewExecTube(cmd string, tube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTub
 	}(&ex)
 
 	go func(ex *ExecTube) {
-		io.Copy(&dataWriter{tube, bytes.NewBuffer(nil)}, os.Stdin)
+		io.Copy(tube, os.Stdin)
 		tube.Close()
 	}(&ex)
 
@@ -235,16 +233,6 @@ func max(a, b int) int {
 	return b
 }
 
-type msgType byte
-
-const (
-	typeData          = 0 // Data message
-	typeInt           = 1 // SIGINT
-	typeWinch msgType = 2 // Window size changed (SIGWINCH)
-)
-
-var errUnknownMsg = errors.New("unknown message type encountered in codex stream")
-
 func readSize(r io.Reader) (*pty.Winsize, error) {
 	b := make([]byte, 8)
 	_, err := io.ReadFull(r, b)
@@ -268,76 +256,12 @@ func serializeSize(b []byte, size *pty.Winsize) {
 	binary.BigEndian.PutUint16(b[6:], size.Y)
 }
 
-// encapsulates reading from a Codex type tube such that we can handle the
-// different types of messages
-type dataReader struct {
-	tube *tubes.Reliable
-	pty  *os.File
-	// TODO(drebelsky): debate the size for this
-	dataLeft uint16 // how much data can be read directly out of the stream
-}
-
-// encapsulates writing data to a Codex tube
-type dataWriter struct {
-	tube *tubes.Reliable
-	buf  *bytes.Buffer
-}
-
-var errWriteTooLarge = errors.New("Write is too large to serialize")
-
-func (w *dataWriter) Write(b []byte) (int, error) {
-	// TODO(drebelsky): we should be able to split b
-	if len(b) > 65535 {
-		return 0, errWriteTooLarge
-	}
-	w.buf.Reset()
-	if w.buf.Cap() < len(b)+3 {
-		w.buf.Grow(len(b) + 3)
-	}
-	w.buf.WriteByte(typeData)
-	// TODO(drebelsky): debate merit of using binary.BigEndian instead
-	w.buf.WriteByte(byte((len(b) >> 8) & 0xff))
-	w.buf.WriteByte(byte(len(b) & 0xff))
-	w.buf.Write(b)
-	n, err := w.tube.Write(w.buf.Bytes())
-	return max(n-3, 0), err
-}
-
-func (r *dataReader) Read(b []byte) (n int, err error) {
-	if r.dataLeft > 0 {
-		n, err = io.ReadFull(r.tube, b[:min(len(b), int(r.dataLeft))])
-		r.dataLeft -= uint16(n)
-		return
-	}
-	mType := make([]byte, 1)
-	for {
-		_, err = io.ReadFull(r.tube, mType)
-		if err != nil {
-			return
-		}
-		switch msgType(mType[0]) {
-		case typeData:
-			lengthBuf := make([]byte, 2)
-			_, err = io.ReadFull(r.tube, lengthBuf)
-			if err != nil {
-				return
-			}
-			length := binary.BigEndian.Uint16(lengthBuf)
-			n, err = io.ReadFull(r.tube, b[:min(len(b), int(length))])
-			r.dataLeft = length - uint16(n)
-			return
-		case typeInt:
-			// TODO(drebelsky)
-			panic("Interrupts are not yet supported")
-		case typeWinch:
-			size, e := readSize(r.tube)
-			if e == nil {
-				pty.Setsize(r.pty, size)
-			}
-		default:
-			return 0, errUnknownMsg
-		}
-	}
+func HandleSize(tube *tubes.Reliable, ptyFile *os.File) {
+  for {
+    if size, err := readSize(tube); err == nil {
+      pty.Setsize(ptyFile, size)
+    }
+  }
 }
 
 //Server deals with serverside code exec channel details like pty size, copies ch -> pty and pty -> ch
@@ -347,7 +271,7 @@ func Server(tube *tubes.Reliable, f *os.File) {
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
-		_, e := io.Copy(f, &dataReader{tube, f, 0})
+		_, e := io.Copy(f, tube)
 		logrus.Info("io.Copy(f, tube) stopped with error: ", e)
 		wg.Done()
 	}()
