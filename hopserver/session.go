@@ -383,7 +383,7 @@ func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
 }
 
 func (sess *hopSession) startSizeTube(ch *tubes.Reliable) {
-  codex.HandleSize(ch, <-sess.pty)
+	codex.HandleSize(ch, <-sess.pty)
 }
 
 //RemoteServer starts listening on given port and pipes the traffic back over the tube

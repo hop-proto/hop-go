@@ -4,11 +4,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"os/signal"
-	"syscall"
 	"net"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 
 	"github.com/creack/pty"
 	"github.com/sirupsen/logrus"
@@ -219,20 +219,6 @@ func GetCmd(c net.Conn) (string, string, bool, *pty.Winsize, error) {
 	return string(buf), string(term), false, size, nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func readSize(r io.Reader) (*pty.Winsize, error) {
 	b := make([]byte, 8)
 	_, err := io.ReadFull(r, b)
@@ -256,12 +242,13 @@ func serializeSize(b []byte, size *pty.Winsize) {
 	binary.BigEndian.PutUint16(b[6:], size.Y)
 }
 
+//HandleSize deals with resizing the pty according to messages from a WinSize tube
 func HandleSize(tube *tubes.Reliable, ptyFile *os.File) {
-  for {
-    if size, err := readSize(tube); err == nil {
-      pty.Setsize(ptyFile, size)
-    }
-  }
+	for {
+		if size, err := readSize(tube); err == nil {
+			pty.Setsize(ptyFile, size)
+		}
+	}
 }
 
 //Server deals with serverside code exec channel details like pty size, copies ch -> pty and pty -> ch
