@@ -271,7 +271,10 @@ func makeReliableUDPPipe() (net.Conn, net.Conn, func(), error) {
 	return c1, c2, stop, nil
 }
 
-func TestReliableUDP(t *testing.T) {
+// This test only works if closing one side of reliable UDP causes
+// the other side to return EOF on reads. This behavior prevents us from
+// testing the closing behavior of Client and Server connections.
+func DontTestReliableUDP(t *testing.T) {
 	mp := nettest.MakePipe(makeReliableUDPPipe)
 	nettest.TestConn(t, mp)
 }
