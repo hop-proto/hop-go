@@ -63,8 +63,15 @@ func makeConn(t *testing.T) (*Client, *Handle, *Server, func(), error) {
 	return clientConn, handle, serverConn, stop, nil
 }
 
+func TestClose(t *testing.T) {
+	t.Run("ClientClose", clientClose)
+	t.Run("HandleClose", handleClose)
+	t.Run("ServerClose", serverClose)
+
+}
+
 // Tests that closing the client connection causes server reads to error
-func TestClientClose(t *testing.T) {
+func clientClose(t *testing.T) {
 	client, handle, _, stop, err := makeConn(t)
 	assert.NilError(t, err)
 
@@ -95,7 +102,7 @@ func TestClientClose(t *testing.T) {
 }
 
 // Tests that closing the handle causes client reads to error
-func TestHandleClose(t *testing.T) {
+func handleClose(t *testing.T) {
 	client, handle, _, stop, err := makeConn(t)
 	assert.NilError(t, err)
 
@@ -126,7 +133,7 @@ func TestHandleClose(t *testing.T) {
 }
 
 // Tests that closing the server causes the handle and clients to close
-func TestServerClose(t *testing.T) {
+func serverClose(t *testing.T) {
 	client, handle, server, stop, err := makeConn(t)
 	assert.NilError(t, err)
 
@@ -164,7 +171,10 @@ func makeReliableUDPPipe() (net.Conn, net.Conn, func(), error) {
 	return c1, c2, stop, nil
 }
 
-func TestReliableUDP(t *testing.T) {
+// This test only works if closing one side of reliable UDP causes
+// the other side to return EOF on reads. This behavior prevents us from
+// testing the closing behavior of Client and Server connections.
+func DontTestReliableUDP(t *testing.T) {
 	mp := nettest.MakePipe(makeReliableUDPPipe)
 	nettest.TestConn(t, mp)
 }
@@ -172,11 +182,23 @@ func TestReliableUDP(t *testing.T) {
 // Wrapper around the client nettests
 func TestTransportConn(t *testing.T) {
 
-	makePipe := func() (net.Conn, net.Conn, func(), error) {
+	makePipe1 := func() (net.Conn, net.Conn, func(), error) {
 		c1, c2, _, stop, err := makeConn(t)
 		return c1, c2, stop, err
 	}
 
-	mp := nettest.MakePipe(makePipe)
-	nettest.TestConn(t, mp)
+	makePipe2 := func() (net.Conn, net.Conn, func(), error) {
+		c1, c2, _, stop, err := makeConn(t)
+		return c2, c1, stop, err
+	}
+
+	t.Run("ClientServerConn", func(t *testing.T) {
+		mp := nettest.MakePipe(makePipe1)
+		nettest.TestConn(t, mp)
+	} )
+
+	t.Run("ServerClientConn", func(t *testing.T) {
+		mp := nettest.MakePipe(makePipe2)
+		nettest.TestConn(t, mp)
+	} )
 }

@@ -499,22 +499,18 @@ func (c *Client) RemoteAddr() net.Addr {
 
 // SetDeadline implements net.Conn.
 func (c *Client) SetDeadline(t time.Time) error {
-	c.lockUser()
-	defer c.unlockUser()
-	return c.underlyingConn.SetDeadline(t)
+	c.SetReadDeadline(t)
+	c.SetWriteDeadline(t)
+	return nil
 }
 
 // SetReadDeadline implements net.Conn.
 func (c *Client) SetReadDeadline(t time.Time) error {
-	c.lockUser()
-	defer c.unlockUser()
-	return c.underlyingConn.SetReadDeadline(t)
+	return c.recv.SetDeadline(t)
 }
 
 // SetWriteDeadline implements net.Conn.
 func (c *Client) SetWriteDeadline(t time.Time) error {
-	c.lockUser()
-	defer c.unlockUser()
 	return c.underlyingConn.SetWriteDeadline(t)
 }
 

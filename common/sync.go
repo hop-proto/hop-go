@@ -119,6 +119,15 @@ type DeadlineChan struct {
 }
 
 func (d *DeadlineChan) Recv() (b []byte , err error) {
+
+	// Return buffered data even if the channel is canceled
+	select {
+	case b = <-d.C:
+		return
+	default:
+		break
+	}
+
 	errChan := d.deadline.Done()
 	select{
 	case err = <-errChan:
@@ -158,7 +167,6 @@ func (d *DeadlineChan) Cancel(err error) {
 
 func (d *DeadlineChan) Close() {
 	d.deadline.Cancel(io.EOF)
-	close(d.C)
 }
 
 func NewDeadlineChan(size int) *DeadlineChan {

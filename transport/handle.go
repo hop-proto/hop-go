@@ -141,12 +141,17 @@ func (c *Handle) WriteMsg(b []byte) error {
 // Write implements io.Writer. It will split b into segments of length
 // MaxPlaintextLength and send them using WriteMsg. Each call to WriteMsg is
 // subject to the timeout.
-func (c *Handle) Write(b []byte) (int, error) {
+func (c *Handle) Write(buf []byte) (int, error) {
 	if c.closed.IsSet() {
 		return 0, io.EOF
 	}
+	b := append([]byte{}, buf...)
 	if len(b) <= MaxPlaintextSize {
-		return len(b), c.WriteMsg(b)
+		err := c.WriteMsg(b)
+		if err != nil {
+			return 0, err
+		}
+		return len(b), nil
 	}
 	total := 0
 	for i := MaxPlaintextSize; i < len(b); i += MaxPlaintextSize {
@@ -154,7 +159,7 @@ func (c *Handle) Write(b []byte) (int, error) {
 		if end > len(b) {
 			end = len(b)
 		}
-		err := c.WriteMsg(b[i:end])
+		err := c.WriteMsg((b[i:end]))
 		if err != nil {
 			return total, err
 		}

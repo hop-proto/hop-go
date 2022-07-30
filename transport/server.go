@@ -620,8 +620,14 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 		ss.handle.wg.Add(2)
 		go func(ss *SessionState) {
 			defer ss.handle.wg.Done()
-			for plaintext := range ss.handle.send.C {
-				err := s.lockHandleAndWriteToSession(ss, MessageTypeTransport, plaintext)
+			for {
+				plaintext, err := ss.handle.send.Recv()
+				if err != nil {
+					logrus.Errorf("server handle sender: %s", err)
+					// TODO(hosono) log this error?
+					break
+				}
+				err = s.lockHandleAndWriteToSession(ss, MessageTypeTransport, plaintext)
 				if err != nil {
 					logrus.Errorf("server: unable to write packet: %s", err)
 					// TODO(dadrian): Should this affect connection state?
@@ -630,8 +636,12 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 		}(ss)
 		go func(ss *SessionState) {
 			defer ss.handle.wg.Done()
-			for plaintext := range ss.handle.ctrl_out.C {
-				err := s.lockHandleAndWriteToSession(ss, MessageTypeControl, plaintext)
+			for {
+				plaintext, err := ss.handle.ctrl_out.Recv()
+				if err != nil {
+					break
+				}
+				err = s.lockHandleAndWriteToSession(ss, MessageTypeControl, plaintext)
 				if err != nil {
 					logrus.Errorf("server: unable to write control packet: %s", err)
 					// TODO(dadrian): Should this affect connection state?
@@ -642,9 +652,11 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 			// TODO(hosono) technically this goroutine is leaked,
 			// but it should go away since Close also closes ctrl
 			// this isn't really the best way to do this, but it does work
-			for range(ss.handle.ctrl.C) {
+			for {
 				// TODO(hosono) handle other control messages
+				_, _ = ss.handle.ctrl.Recv()
 				ss.handle.recv.Cancel(io.EOF)
+				break
 			}
 		}(ss)
 		return handle, nil
