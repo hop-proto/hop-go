@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -678,6 +679,13 @@ func (s *Server) CloseSession(sessionID SessionID) error {
 		return h.Close()
 	}
 	return nil
+}
+
+// This wrapper is needed to make checklocks happy
+// +checklocks:s.m
+// +checklocksalias:c.server.m=s.m
+func (s *Server) closeHandleWrapper(c *Handle) error {
+	return c.closeLocked()
 }
 
 // Close stops the server, causing Serve() to return.
