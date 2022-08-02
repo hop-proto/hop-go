@@ -12,6 +12,7 @@ import (
 )
 
 const numLoops = 1024
+
 var ErrTest = errors.New("this is a test error")
 
 var ErrTest = errors.New("this is a test error")
@@ -261,7 +262,7 @@ func TestDeadlineRecv(t *testing.T) {
 	wg.Add(numLoops)
 	for i := 0; i < numLoops; i++ {
 		ch.C <- []byte{77}
-		go func () {
+		go func() {
 			defer wg.Done()
 			val, err := ch.Recv()
 			assert.NilError(t, err)
@@ -280,8 +281,7 @@ func TestDeadlineRecvCancel(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(numLoops)
 	for i := 0; i < numLoops; i++ {
-		ch.C <- make([]byte, i)
-		go func () {
+		go func() {
 			defer wg.Done()
 			_, err := ch.Recv()
 			assert.ErrorType(t, err, ErrTest)
@@ -296,7 +296,7 @@ func TestDeadlineSend(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(numLoops)
 	for i := 0; i < numLoops; i++ {
-		go func () {
+		go func() {
 			defer wg.Done()
 			err := ch.Send([]byte{77})
 			assert.NilError(t, err)
@@ -305,7 +305,12 @@ func TestDeadlineSend(t *testing.T) {
 
 	wg.Wait()
 	ch.Close()
-	for val := range(ch.C) {
+	for {
+		val, err := ch.Recv()
+		if err != nil {
+			assert.ErrorType(t, err, io.EOF)
+			break
+		}
 		assert.DeepEqual(t, val[0], byte(77))
 	}
 }
@@ -318,7 +323,7 @@ func TestDeadlineSendCancel(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(numLoops)
 	for i := 0; i < numLoops; i++ {
-		go func () {
+		go func() {
 			defer wg.Done()
 			err := ch.Send([]byte{77})
 			assert.ErrorType(t, err, ErrTest)

@@ -262,27 +262,19 @@ func (c *Handle) closeLocked() error {
 		return io.EOF
 	}
 
-	c.ctrl_out.Send([]byte{0})
-
 	c.recv.Close()
 	c.send.Close()
 	c.ctrl.Close()
-	c.ctrl_out.Close()
-
-	c.m.Lock()
-	c.readLock.Lock()
-	c.writeLock.Lock()
-
-	// Close the channels
 
 	c.closed.SetTrue()
 
-	c.m.Unlock()
-	c.readLock.Unlock()
-	c.writeLock.Unlock()
-
 	// Wait for the sending goroutine to exit
-	c.wg.Wait()
+	c.sendWg.Wait()
+
+	c.ctrlOut.Send([]byte{0})
+	c.ctrlOut.Close()
+
+	c.ctrlWg.Wait()
 
 	c.server.clearSessionStateLocked(c.sessionID)
 

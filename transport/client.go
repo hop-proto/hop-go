@@ -61,8 +61,8 @@ type Client struct {
 
 	recv *common.DeadlineChan[[]byte]
 
-	recv	*common.DeadlineChan
-	ctrl	*common.DeadlineChan
+	recv *common.DeadlineChan
+	ctrl *common.DeadlineChan
 
 	config ClientConfig
 }
