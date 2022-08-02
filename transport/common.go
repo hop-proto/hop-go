@@ -95,7 +95,7 @@ const (
 	MessageTypeServerAuth  MessageType = 0x04
 	MessageTypeClientAuth  MessageType = 0x05
 	MessageTypeTransport   MessageType = 0x10
-	MessageTypeControl	   MessageType = 0xff // TODO(hosono) what should this byte be?
+	MessageTypeControl     MessageType = 0xff // TODO(hosono) what should this byte be?
 )
 
 // IsHandshakeType returns true if the message type is part of the handshake, not the transport.

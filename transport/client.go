@@ -37,7 +37,7 @@ type Client struct {
 	handshakeComplete common.AtomicBool
 	closed            common.AtomicBool
 
-	wg 				sync.WaitGroup
+	wg sync.WaitGroup
 
 	underlyingConn UDPLike
 
@@ -58,10 +58,10 @@ type Client struct {
 	readBuf bytes.Buffer
 
 	ciphertext []byte
-	plaintext []byte
+	plaintext  []byte
 
-	recv	*common.DeadlineChan
-	ctrl	*common.DeadlineChan
+	recv *common.DeadlineChan
+	ctrl *common.DeadlineChan
 
 	config ClientConfig
 }
@@ -312,7 +312,12 @@ func (c *Client) Close() error {
 	// it fails.
 	//
 	// TODO(dadrian): Do we send a protocol close message?
-	return c.underlyingConn.Close()
+	err := c.underlyingConn.Close()
+
+	// Wait for c.listen() to finish
+	c.wg.Wait()
+
+	return err
 }
 
 func (c *Client) listen() {
@@ -415,7 +420,7 @@ func (c *Client) ReadMsg(b []byte) (n int, err error) {
 	}
 
 	plaintext, err := c.recv.Recv()
-	if err != nil{
+	if err != nil {
 		return 0, err
 	}
 
@@ -439,10 +444,6 @@ func (c *Client) Read(b []byte) (n int, err error) {
 		}
 	}()
 
-	if c.closed.IsSet() {
-		return 0, io.EOF
-	}
-
 	// TODO(dadrian): Close the connection on bad reads?
 	if !c.handshakeComplete.IsSet() {
 		err := c.Handshake()
@@ -463,10 +464,8 @@ func (c *Client) Read(b []byte) (n int, err error) {
 		}
 		return n, err
 	}
-	if c.closed.IsSet() {
-		return 0, io.EOF
-	}
 
+	// This will cause an EOF error if the connection is closed
 	plaintext, err := c.recv.Recv()
 	if err != nil {
 		return 0, err
@@ -524,8 +523,8 @@ func NewClient(conn UDPLike, server *net.UDPAddr, config ClientConfig) *Client {
 		ciphertext:     make([]byte, 65535),
 		plaintext:      make([]byte, PlaintextLen(65535)),
 		// TODO(hosono) make it possible to set these lengths
-		recv: 			common.NewDeadlineChan(2048),
-		ctrl: 			common.NewDeadlineChan(2048),
+		recv: common.NewDeadlineChan(2048),
+		ctrl: common.NewDeadlineChan(2048),
 	}
 	return c
 }

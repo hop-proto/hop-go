@@ -51,7 +51,7 @@ func makeConn(t *testing.T) (*Client, *Handle, *Server, func(), error) {
 	assert.NilError(t, err)
 
 	// Get handle from server
-	handle, err  := serverConn.AcceptTimeout(time.Second)
+	handle, err := serverConn.AcceptTimeout(time.Second)
 	assert.NilError(t, err)
 
 	stop := func() {
@@ -195,10 +195,10 @@ func TestTransportConn(t *testing.T) {
 	t.Run("ClientServerConn", func(t *testing.T) {
 		mp := nettest.MakePipe(makePipe1)
 		nettest.TestConn(t, mp)
-	} )
+	})
 
 	t.Run("ServerClientConn", func(t *testing.T) {
 		mp := nettest.MakePipe(makePipe2)
 		nettest.TestConn(t, mp)
-	} )
+	})
 }

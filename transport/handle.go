@@ -23,21 +23,23 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 
 	// TODO(dadrian): This might need to be a real condition variable. We don't
 	// currently wait on it, but we Add/Done in the actual send write function.
-	wg sync.WaitGroup
+	sendWg sync.WaitGroup
+	// TODO(hosono) should these be condition variables?
+	ctrlWg sync.WaitGroup
 
 	sessionID SessionID
 
-	recv *common.DeadlineChan // incoming transport messages
-	send *common.DeadlineChan // outgoing transport messages
-	ctrl *common.DeadlineChan // incoming control messages
-	ctrl_out *common.DeadlineChan // outgoing control messages
+	recv    *common.DeadlineChan // incoming transport messages
+	send    *common.DeadlineChan // outgoing transport messages
+	ctrl    *common.DeadlineChan // incoming control messages
+	ctrlOut *common.DeadlineChan // outgoing control messages
 
 	closed common.AtomicBool
 
 	// +checklocks:readLock
 	buf bytes.Buffer
 
-	server	*Server
+	server *Server
 }
 
 var _ MsgReader = &Handle{}
@@ -135,7 +137,8 @@ func (c *Handle) WriteMsg(b []byte) error {
 		return ErrBufOverflow
 	}
 
-	return c.send.Send(b)
+	buf := append([]byte{}, b...)
+	return c.send.Send(buf)
 }
 
 // Write implements io.Writer. It will split b into segments of length
@@ -183,27 +186,19 @@ func (c *Handle) closeLocked() error {
 		return io.EOF
 	}
 
-	c.ctrl_out.Send([]byte{0})
-
 	c.recv.Close()
 	c.send.Close()
 	c.ctrl.Close()
-	c.ctrl_out.Close()
-
-	c.m.Lock()
-	c.readLock.Lock()
-	c.writeLock.Lock()
-
-	// Close the channels
 
 	c.closed.SetTrue()
 
-	c.m.Unlock()
-	c.readLock.Unlock()
-	c.writeLock.Unlock()
-
 	// Wait for the sending goroutine to exit
-	c.wg.Wait()
+	c.sendWg.Wait()
+
+	c.ctrlOut.Send([]byte{0})
+	c.ctrlOut.Close()
+
+	c.ctrlWg.Wait()
 
 	c.server.clearSessionStateLocked(c.sessionID)
 

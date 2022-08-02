@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,13 +37,13 @@ type Server struct {
 	// +checklocks:m
 	handshakes map[string]*HandshakeState
 	// +checklocks:m
-	sessions   map[SessionID]*SessionState
+	sessions map[SessionID]*SessionState
 
 	pendingConnections chan *Handle
 
-	cookieKey    [KeyLen]byte
+	cookieKey [KeyLen]byte
 
-	wg 			 sync.WaitGroup
+	wg sync.WaitGroup
 }
 
 // FetchClientLeaf returns the client leaf certificate used in handshake with associated handle's sessionID
@@ -467,7 +468,7 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte, plaintext [
 	}
 	logrus.Debugf("server: transport/control message for session %x", sessionID)
 	ss := s.fetchSessionState(sessionID)
-	if ss == nil || ss.handle == nil{
+	if ss == nil || ss.handle == nil {
 		return 0, ErrUnknownSession
 	}
 
@@ -589,12 +590,12 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 
 func (s *Server) createHandleLocked(ss *SessionState) *Handle {
 	handle := &Handle{
-		sessionID:    ss.sessionID,
-		recv:         common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
-		send:         common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
-		ctrl:         common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
-		ctrl_out:     common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
-		server:		  s,
+		sessionID: ss.sessionID,
+		recv:      common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
+		send:      common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
+		ctrl:      common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
+		ctrlOut:   common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
+		server:    s,
 	}
 	ss.handle = handle
 	return handle
@@ -617,16 +618,21 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 			// Should never happen
 			return nil, ErrUnknownSession
 		}
-		ss.handle.wg.Add(2)
+		ss.handle.sendWg.Add(1)
 		go func(ss *SessionState) {
-			defer ss.handle.wg.Done()
+			defer ss.handle.sendWg.Done()
 			for {
 				plaintext, err := ss.handle.send.Recv()
 				if err != nil {
-					logrus.Errorf("server handle sender: %s", err)
-					// TODO(hosono) log this error?
-					break
+					if errors.Is(err, io.EOF) {
+						break
+					} else if errors.Is(err, os.ErrDeadlineExceeded) {
+						continue
+					} else {
+						logrus.Errorf("server: error receiving from send channel: %s", err)
+					}
 				}
+
 				err = s.lockHandleAndWriteToSession(ss, MessageTypeTransport, plaintext)
 				if err != nil {
 					logrus.Errorf("server: unable to write packet: %s", err)
@@ -634,16 +640,25 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 				}
 			}
 		}(ss)
+
+		ss.handle.ctrlWg.Add(1)
 		go func(ss *SessionState) {
-			defer ss.handle.wg.Done()
+			defer ss.handle.ctrlWg.Done()
 			for {
-				plaintext, err := ss.handle.ctrl_out.Recv()
+				plaintext, err := ss.handle.ctrlOut.Recv()
 				if err != nil {
-					break
+					if errors.Is(err, io.EOF) {
+						break
+					} else if errors.Is(err, os.ErrDeadlineExceeded) {
+						continue
+					} else {
+						logrus.Errorf("server: error receiving from send channel: %s", err)
+					}
 				}
+
 				err = s.lockHandleAndWriteToSession(ss, MessageTypeControl, plaintext)
 				if err != nil {
-					logrus.Errorf("server: unable to write control packet: %s", err)
+					logrus.Errorf("server: unable to write packet: %s", err)
 					// TODO(dadrian): Should this affect connection state?
 				}
 			}
@@ -681,12 +696,19 @@ func (s *Server) CloseSession(sessionID SessionID) error {
 // +checklocks:s.m
 func (s *Server) closeSessionLocked(sessionID SessionID) error {
 	ss := s.fetchSessionStateLocked(sessionID)
-	if ss == nil || ss.handle == nil{
+	if ss == nil || ss.handle == nil {
 		return ErrUnknownSession
 	}
-	err := ss.handle.closeLocked()
+	err := s.closeHandleWrapper(ss.handle)
 	s.clearSessionStateLocked(sessionID)
 	return err
+}
+
+// This wrapper is needed to make checklocks happy
+// +checklocks:s.m
+// +checklocksalias:c.server.m=s.m
+func (s *Server) closeHandleWrapper(c *Handle) error {
+	return c.closeLocked()
 }
 
 // Close stops the server, causing Serve() to return.
@@ -706,14 +728,17 @@ func (s *Server) Close() (err error) {
 	// TODO(hosono) fix the weirdness around locking stuff
 	s.m.Lock()
 
-	for _, session := range(s.sessions) {
+	for _, session := range s.sessions {
 		s.closeSessionLocked(session.sessionID)
 	}
 
 	close(s.pendingConnections)
-	for handle := range(s.pendingConnections) {
+	for handle := range s.pendingConnections {
 		if handle != nil {
-			err = handle.closeLocked()
+			err = s.closeHandleWrapper(handle)
+			if err != nil {
+				logrus.Errorf("error closing handle: %s", err)
+			}
 		} else {
 			logrus.Error("server: nil handle in pending connections")
 		}

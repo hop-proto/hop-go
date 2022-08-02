@@ -31,7 +31,7 @@ type SessionState struct {
 	//clientStatic keys.PublicKey //needed after handshake for user authorization step
 	clientLeaf certs.Certificate
 
-	m	sync.Mutex
+	m sync.Mutex
 	// +checklocks:m
 	rawWrite bytes.Buffer
 }

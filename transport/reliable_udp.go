@@ -14,30 +14,44 @@ import (
 // This is only used for testing purposes
 type ReliableUDP struct {
 	// +checklocks:writeLock
-	send 			chan []byte
+	send chan []byte
 	// +checklocks:readLock
-	recv 			chan []byte
-	readLock		sync.Mutex
-	writeLock		sync.Mutex
+	recv      chan []byte
+	readLock  sync.Mutex
+	writeLock sync.Mutex
 
-	readDeadline 	*common.Deadline
-	writeDeadline 	*common.Deadline
+	readDeadline  *common.Deadline
+	writeDeadline *common.Deadline
 
-	closed 			common.AtomicBool
+	closed common.AtomicBool
 }
 
 var _ UDPLike = &ReliableUDP{}
 
+// Read reads data into b
 func (r *ReliableUDP) Read(b []byte) (n int, err error) {
 	n, _, _, _, err = r.ReadMsgUDP(b, nil)
 	return n, err
 }
 
+// ReadMsgUDP implements to UDPLike interface
 func (r *ReliableUDP) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
 	r.readLock.Lock()
 	defer r.readLock.Unlock()
 
 	addr = &net.UDPAddr{}
+
+	// return buffered packets even after closed
+	select {
+	case msg := <-r.recv:
+		n = copy(b, msg)
+		if n < len(msg) {
+			panic("buffer too small")
+		}
+		return
+	default:
+		break
+	}
 
 	if r.closed.IsSet() {
 		return 0, 0, 0, addr, io.EOF
@@ -51,7 +65,7 @@ func (r *ReliableUDP) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.U
 		select {
 		case err = <-ch:
 			return
-		case msg, ok := <- r.recv: 
+		case msg, ok := <-r.recv:
 			if !ok {
 				err = io.EOF
 				return
@@ -65,11 +79,13 @@ func (r *ReliableUDP) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.U
 	}
 }
 
+// Write writes data to the connection
 func (r *ReliableUDP) Write(b []byte) (n int, err error) {
 	n, _, err = r.WriteMsgUDP(b, nil, nil)
 	return n, err
 }
 
+// WriteMsgUDP implements the UDPLike interface
 func (r *ReliableUDP) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
 	r.writeLock.Lock()
 	defer r.writeLock.Unlock()
@@ -87,13 +103,16 @@ func (r *ReliableUDP) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int
 		select {
 		case err = <-r.writeDeadline.Done():
 			return
-		case r.send <-append([]byte(nil), b...):
+		case r.send <- append([]byte(nil), b...):
 			n = len(b)
 			return
 		}
 	}
 }
 
+// Close closes the connection and cancels pending reads and writes.
+// Reads from the remote host will not return io.EOF since there is no
+// closing behavior defined in UDP
 func (r *ReliableUDP) Close() error {
 	if r.closed.IsSet() {
 		return io.EOF
@@ -110,43 +129,50 @@ func (r *ReliableUDP) Close() error {
 	return nil
 }
 
+// LocalAddr implements to UDPLike interface
 func (r *ReliableUDP) LocalAddr() net.Addr {
 	return nil
 }
 
+// RemoteAddr implements to UDPLike interface
 func (r *ReliableUDP) RemoteAddr() net.Addr {
 	return nil
 }
 
+// SetDeadline implements to UDPLike interface
 func (r *ReliableUDP) SetDeadline(t time.Time) error {
 	r.SetReadDeadline(t)
 	r.SetWriteDeadline(t)
 	return nil
 }
 
+// SetReadDeadline implements to UDPLike interface
 func (r *ReliableUDP) SetReadDeadline(t time.Time) error {
 	return r.readDeadline.SetDeadline(t)
 }
 
+// SetWriteDeadline implements to UDPLike interface
 func (r *ReliableUDP) SetWriteDeadline(t time.Time) error {
 	return r.writeDeadline.SetDeadline(t)
 }
 
+// MakeRelaibleUDPConn returns two pointers to ReliableUDP structs
+// Writes and reads from one connection can be seen on the other one
 func MakeRelaibleUDPConn() (c1, c2 *ReliableUDP) {
-	ch1 := make(chan []byte, 1 << 16)
-	ch2 := make(chan []byte, 1 << 16)
+	ch1 := make(chan []byte, 1<<16)
+	ch2 := make(chan []byte, 1<<16)
 
-	c1 = &ReliableUDP {
-		send: ch1,
-		recv: ch2,
-		readDeadline: common.NewDeadline(time.Time{}),
+	c1 = &ReliableUDP{
+		send:          ch1,
+		recv:          ch2,
+		readDeadline:  common.NewDeadline(time.Time{}),
 		writeDeadline: common.NewDeadline(time.Time{}),
 	}
 
-	c2 = &ReliableUDP {
-		send: ch2,
-		recv: ch1,
-		readDeadline: common.NewDeadline(time.Time{}),
+	c2 = &ReliableUDP{
+		send:          ch2,
+		recv:          ch1,
+		readDeadline:  common.NewDeadline(time.Time{}),
 		writeDeadline: common.NewDeadline(time.Time{}),
 	}
 
