@@ -34,5 +34,3 @@ jobs:
           args: --deadline 1m
       - name: test
         run: make test
-      - name: vet
-        run: make vet
