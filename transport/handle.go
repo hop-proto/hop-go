@@ -171,6 +171,14 @@ func (c *Handle) Write(buf []byte) (int, error) {
 	return total, nil
 }
 
+func (c *Handle) writeControl(msg ControlMessage) error {
+	if c.closed.IsSet() {
+		return io.EOF
+	}
+	plaintext := []byte{byte(msg)}
+	return c.ctrlOut.Send(plaintext)
+}
+
 // Close closes the connection. Future operations on non-buffered data will
 // return io.EOF.
 func (c *Handle) Close() error {
@@ -190,17 +198,17 @@ func (c *Handle) closeLocked() error {
 	c.send.Close()
 	c.ctrl.Close()
 
-	c.closed.SetTrue()
-
-	// Wait for the sending goroutine to exit
+	// Wait for the sending goroutines to exit
 	c.sendWg.Wait()
 
-	c.ctrlOut.Send([]byte{0})
+	c.writeControl(ControlMessageClose)
 	c.ctrlOut.Close()
 
 	c.ctrlWg.Wait()
 
 	c.server.clearSessionStateLocked(c.sessionID)
+
+	c.closed.SetTrue()
 
 	return nil
 }

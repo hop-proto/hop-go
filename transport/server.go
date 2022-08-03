@@ -665,9 +665,21 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 			// this isn't really the best way to do this, but it does work
 			for {
 				// TODO(hosono) handle other control messages
-				_, _ = ss.handle.ctrl.Recv()
-				ss.handle.recv.Cancel(io.EOF)
-				break
+				msg, err := ss.handle.ctrl.Recv()
+				if err != nil {
+					break
+				}
+				if len(msg) != 1 {
+					logrus.Fatal("server: control message with unexpected length ", msg)
+				}
+				ctrlMsg := ControlMessage(msg[0])
+				switch ctrlMsg {
+				case ControlMessageClose:
+					ss.handle.recv.Cancel(io.EOF)
+					break
+				default:
+					logrus.Fatal("server: unexpected control message ", msg)
+				}
 			}
 		}(ss)
 		return handle, nil

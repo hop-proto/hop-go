@@ -61,7 +61,6 @@ type Client struct {
 	plaintext  []byte
 
 	recv *common.DeadlineChan
-	ctrl *common.DeadlineChan
 
 	config ClientConfig
 }
@@ -252,7 +251,8 @@ func (c *Client) writeTransport(plaintext []byte) error {
 }
 
 // +checklocks:c.writeLock
-func (c *Client) writeControl(plaintext []byte) error {
+func (c *Client) writeControl(msg ControlMessage) error {
+	plaintext := []byte{byte(msg)}
 	return c.ss.writePacket(c.underlyingConn, MessageTypeControl, plaintext, &c.ss.clientToServerKey)
 }
 
@@ -298,12 +298,11 @@ func (c *Client) Close() error {
 	}
 
 	c.recv.Cancel(io.EOF)
-	c.ctrl.Cancel(io.EOF)
 
 	c.lockUser()
 	defer c.unlockUser()
 
-	c.writeControl([]byte{0})
+	c.writeControl(ControlMessageClose)
 
 	c.closed.SetTrue()
 	c.handshakeComplete.SetFalse()
@@ -340,19 +339,25 @@ func (c *Client) listen() {
 				logrus.Warn("client: recv queue full. dropping message")
 			}
 		case MessageTypeControl:
-			select {
-			case c.ctrl.C <- append([]byte(nil), c.plaintext[:n]...):
-				// TODO(hosono) handle other control messages?
-				c.recv.Cancel(io.EOF)
-				break
-			default:
-				logrus.Warn("client: ctrl queue full. dropping message")
+			if n != 1 {
+				logrus.Fatalf("client: malformed control message: %s", c.plaintext[:n])
 			}
+			msg := ControlMessage(c.plaintext[0])
+			c.handleControlMsg(msg)
 		default:
 			// TODO(hosono) Maybe silently discard instead of panic?
 			// Messages must be authenticated to reach this point
 			logrus.Panicf("client: unexpected message %x", mt)
 		}
+	}
+}
+
+func (c *Client) handleControlMsg(msg ControlMessage) error {
+	switch msg {
+	case ControlMessageClose:
+		return c.recv.Close()
+	default:
+		return nil
 	}
 }
 
@@ -518,7 +523,6 @@ func NewClient(conn UDPLike, server *net.UDPAddr, config ClientConfig) *Client {
 		ciphertext:     make([]byte, 65535),
 		plaintext:      make([]byte, PlaintextLen(65535)),
 		recv: common.NewDeadlineChan(config.maxBufferedPackets()),
-		ctrl: common.NewDeadlineChan(config.maxBufferedPackets()),
 	}
 	return c
 }
