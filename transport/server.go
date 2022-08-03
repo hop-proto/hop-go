@@ -523,11 +523,7 @@ func (s *Server) Serve() error {
 		for !s.closed.IsSet() {
 			err := s.readPacket()
 			logrus.Debug("read a packet")
-			if errors.Is(err, io.EOF) {
-				// TODO(hosono) can this happen outside of testing?
-				logrus.Error("Read EOF from UDP conn")
-				break
-			} else if err != nil {
+			if err != nil {
 				logrus.Errorf("server: %s", err)
 			}
 		}

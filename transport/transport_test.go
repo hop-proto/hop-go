@@ -142,7 +142,6 @@ func serverClose(t *testing.T) {
 
 	b := make([]byte, 1024)
 
-	// TODO(hosono) maybe this should panic?
 	n, err := handle.Read(b)
 	assert.ErrorType(t, err, io.EOF)
 	assert.Equal(t, n, 0)
