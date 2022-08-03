@@ -7,6 +7,7 @@ require (
 	github.com/creack/pty v1.1.18
 	github.com/docker/docker v20.10.14+incompatible
 	github.com/docker/go-connections v0.4.0
+	github.com/mattn/go-isatty v0.0.14
 	github.com/sbinet/pstree v0.3.0
 	github.com/sirupsen/logrus v1.8.1
 	github.com/tockins/interact v0.0.0-20171114182912-f8fb5795b5d7

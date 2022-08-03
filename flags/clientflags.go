@@ -5,9 +5,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"os/user"
 	"strconv"
 	"strings"
+
+	istty "github.com/mattn/go-isatty"
 
 	"hop.computer/hop/config"
 	"hop.computer/hop/core"
@@ -26,7 +29,8 @@ type ClientFlags struct {
 	// TODO(dadrian): What are these args?
 	RemoteArgs []string // CLI arguments related to remote port forwarding
 	LocalArgs  []string // CLI arguments related to local port forwarding
-	Headless   bool     // if no cmd/shell desired (just port forwarding)
+	Headless   bool     // if no cmd desired (just port forwarding)
+	UsePty     bool     // whether or not to request a remote PTY be allocated
 	Verbose    bool     // show verbose error messages
 }
 
@@ -60,6 +64,8 @@ func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig) error {
 	if f.Cmd != "" {
 		cc.Cmd = f.Cmd
 	}
+
+	cc.UsePty = f.UsePty
 
 	// TODO(baumanl): add merge support for all other flags/config options
 	return nil
@@ -129,6 +135,10 @@ func ParseClientArgs(args []string) (*ClientFlags, error) {
 	var port, username string
 	fs.StringVar(&port, "p", "", "port")
 	fs.StringVar(&username, "l", "", "username")
+	var reqPty, forcePty, noPty bool
+	fs.BoolVar(&reqPty, "t", false, "Request a pseudo-terminal allocation (defaults to true if no command is specified and there is a local tty unless -N is specified)")
+	fs.BoolVar(&forcePty, "tt", false, "Force request a pseudo-terminal allocation, even if the local side is not a tty")
+	fs.BoolVar(&noPty, "T", false, "Don't request a pseudo-terminal allocation (overrides default)")
 
 	err := fs.Parse(args[1:])
 	if err != nil {
@@ -154,5 +164,17 @@ func ParseClientArgs(args []string) (*ClientFlags, error) {
 		f.Cmd = strings.Join(fs.Args()[1:], " ")
 	}
 	f.Address = inputURL
+
+	// Handle pty allocation
+	switch {
+	case forcePty:
+		f.UsePty = true
+	case reqPty:
+		f.UsePty = istty.IsTerminal(os.Stdin.Fd())
+	case noPty:
+		f.UsePty = false
+	default:
+		f.UsePty = f.Cmd == "" && istty.IsTerminal(os.Stdin.Fd()) && !f.Headless
+	}
 	return f, nil
 }

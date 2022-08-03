@@ -471,7 +471,7 @@ func (c *HopClient) startExecTube() error {
 		return err
 	}
 	c.wg.Add(1)
-	c.ExecTube, err = codex.NewExecTube(c.config.Cmd, ch, winSizeTube, &c.wg)
+	c.ExecTube, err = codex.NewExecTube(c.config.Cmd, c.config.UsePty, ch, winSizeTube, &c.wg)
 	return err
 }
 
