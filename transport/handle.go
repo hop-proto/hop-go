@@ -27,8 +27,6 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	// TODO(hosono) should these be condition variables?
 	ctrlWg sync.WaitGroup
 
-	sessionID SessionID
-
 	recv    *common.DeadlineChan // incoming transport messages
 	send    *common.DeadlineChan // outgoing transport messages
 	ctrl    *common.DeadlineChan // incoming control messages
@@ -207,7 +205,7 @@ func (c *Handle) closeLocked() error {
 
 	c.ctrlWg.Wait()
 
-	c.server.clearSessionStateLocked(c.sessionID)
+	c.server.clearHandleLocked(c.ss.sessionID)
 
 	c.closed.SetTrue()
 

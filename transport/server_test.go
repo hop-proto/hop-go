@@ -88,9 +88,9 @@ func TestMultipleHandshakes(t *testing.T) {
 			time.Sleep(time.Second)
 			assert.NilError(t, err, "error in client %d", i)
 
-			ss := s.fetchSessionState(c.ss.sessionID)
-			assert.Check(t, cmp.Equal(c.ss.clientToServerKey, ss.clientToServerKey))
-			assert.Check(t, cmp.Equal(c.ss.serverToClientKey, ss.serverToClientKey))
+			h := s.fetchHandle(c.ss.sessionID)
+			assert.Check(t, cmp.Equal(c.ss.clientToServerKey, h.ss.clientToServerKey))
+			assert.Check(t, cmp.Equal(c.ss.serverToClientKey, h.ss.serverToClientKey))
 			assert.Check(t, c.ss.clientToServerKey != zero)
 			assert.Check(t, c.ss.serverToClientKey != zero)
 		}(i)

@@ -55,7 +55,7 @@ func makeConn(t *testing.T) (*Client, *Handle, *Server, func(), error) {
 	assert.NilError(t, err)
 
 	stop := func() {
-		serverConn.CloseSession(handle.sessionID)
+		serverConn.CloseSession(handle.ss.sessionID)
 		clientConn.Close()
 		serverConn.Close()
 	}

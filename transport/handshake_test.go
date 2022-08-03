@@ -43,11 +43,11 @@ func TestClientServerCompatibilityHandshake(t *testing.T) {
 	err = c.Handshake()
 	assert.Check(t, err)
 	time.Sleep(time.Second)
-	ss := s.fetchSessionState(c.ss.sessionID)
-	assert.DeepEqual(t, c.ss.sessionID, ss.sessionID)
+	h := s.fetchHandle(c.ss.sessionID)
+	assert.DeepEqual(t, c.ss.sessionID, h.ss.sessionID)
 	var zero [KeyLen]byte
-	assert.Check(t, cmp.Equal(c.ss.clientToServerKey, ss.clientToServerKey))
-	assert.Check(t, cmp.Equal(c.ss.serverToClientKey, ss.serverToClientKey))
+	assert.Check(t, cmp.Equal(c.ss.clientToServerKey, h.ss.clientToServerKey))
+	assert.Check(t, cmp.Equal(c.ss.serverToClientKey, h.ss.serverToClientKey))
 	assert.Check(t, c.ss.clientToServerKey != zero)
 	assert.Check(t, c.ss.serverToClientKey != zero)
 }
@@ -121,11 +121,11 @@ func TestClientServerHSWithAgent(t *testing.T) {
 	err = c.Handshake()
 	assert.Check(t, err)
 	time.Sleep(time.Second)
-	ss := s.fetchSessionState(c.ss.sessionID)
-	assert.DeepEqual(t, c.ss.sessionID, ss.sessionID)
+	h := s.fetchHandle(c.ss.sessionID)
+	assert.DeepEqual(t, c.ss.sessionID, h.ss.sessionID)
 	var zero [KeyLen]byte
-	assert.Check(t, cmp.Equal(c.ss.clientToServerKey, ss.clientToServerKey))
-	assert.Check(t, cmp.Equal(c.ss.serverToClientKey, ss.serverToClientKey))
+	assert.Check(t, cmp.Equal(c.ss.clientToServerKey, h.ss.clientToServerKey))
+	assert.Check(t, cmp.Equal(c.ss.serverToClientKey, h.ss.serverToClientKey))
 	assert.Check(t, c.ss.clientToServerKey != zero)
 	assert.Check(t, c.ss.serverToClientKey != zero)
 }

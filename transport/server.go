@@ -35,7 +35,10 @@ type Server struct {
 	closed common.AtomicBool
 
 	// +checklocks:m
-	handshakes map[string]*HandshakeState
+	handshakes map[string]*HandshakeState 
+	// TODO(hosono) what should the keys of this map be?
+	// Currently it's the string representation of the remote address
+
 	// +checklocks:m
 	handles    map[SessionID]*Handle
 
@@ -46,7 +49,12 @@ type Server struct {
 	wg sync.WaitGroup
 }
 
+<<<<<<< HEAD
 // FetchClientLeaf returns the client leaf certificate used in handshake with associated handle's sessionID
+=======
+// TODO(hosono) delete this. I don't think we need this
+//FetchClientLeaf returns the client leaf certificate used in handshake with associated handle's sessionID
+>>>>>>> 53cc52e (refactored handle and session state)
 func (s *Server) FetchClientLeaf(h *Handle) certs.Certificate {
 	s.m.RLock()
 	defer s.m.RUnlock()
@@ -62,25 +70,41 @@ func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) 
 		return false
 	}
 	s.handshakes[key] = hs
+	hs.remoteAddr = remoteAddr
+
+	// Give the handshake a sessionID
+	handshakeSet := false
+	for i := 0; i < 100; i++ {
+		n, err := rand.Read(hs.sessionID[:])
+		if n != SessionIDLen || err != nil {
+			panic("could not read random data")
+		}
+		if _, exists := s.handles[hs.sessionID]; !exists {
+			s.handles[hs.sessionID] = s.createHandleLocked(hs)
+			handshakeSet = true
+			break
+		} 
+	}
+	if !handshakeSet {
+		return false
+	}
 
 	// Delete handshake if the connection times out
-	go func(s *Server, remoteAddr *net.UDPAddr) {
-		timer := time.NewTimer(s.config.HandshakeTimeout)
-		<-timer.C
+	time.AfterFunc(s.config.HandshakeTimeout, func (){
 		s.m.Lock()
 		defer s.m.Unlock()
 		hs := s.fetchHandshakeStateLocked(remoteAddr)
 		if hs != nil {
 			logrus.Errorf("Connection to %s timed out", remoteAddr)
 			s.clearHandshakeStateLocked(remoteAddr)
-			ss := s.fetchSessionStateLocked(hs.sessionID)
-			if ss != nil {
-				s.clearSessionStateLocked(ss.sessionID)
+			h := s.fetchHandleLocked(hs.sessionID)
+			if h != nil {
+				s.clearHandleLocked(h.ss.sessionID)
 			}
 		} else {
 			logrus.Debugf("Connection to %s did not time out", remoteAddr)
 		}
-	}(s, remoteAddr)
+	})
 
 	return true
 }
@@ -100,56 +124,33 @@ func (s *Server) fetchHandshakeStateLocked(remoteAddr *net.UDPAddr) *HandshakeSt
 // +checklocks:s.m
 func (s *Server) clearHandshakeStateLocked(remoteAddr *net.UDPAddr) {
 	key := AddressHashKey(remoteAddr)
+	hs := s.handshakes[key]
+	if s.handles[hs.sessionID] == nil {
+		delete(s.handles, hs.sessionID)
+	}
 	delete(s.handshakes, key)
 }
 
-func (s *Server) newSessionState() (*SessionState, error) {
-	ss := new(SessionState)
-	for {
-		// TODO(dadrian): Remove potential infinite loop
-		n, err := rand.Read(ss.sessionID[:])
-		if n != 4 || err != nil {
-			panic("could not read random data")
-		}
-		unimplemented()
-	}
-	return ss, nil
-}
-
-// TODO(hosono)
-/*
-func (s *Server) setSessionState(ss *SessionState) bool {
-	s.m.Lock()
-	defer s.m.Unlock()
-	_, exists := s.sessions[ss.sessionID]
-	if exists {
-		return false
-	}
-	s.sessions[ss.sessionID] = ss
-	return true
-}
-*/
-
-func (s *Server) fetchSessionState(sessionID SessionID) *SessionState {
+func (s *Server) fetchHandle(sessionID SessionID) *Handle{
 	s.m.RLock()
 	defer s.m.RUnlock()
-	return s.fetchSessionStateLocked(sessionID)
+	return s.fetchHandleLocked(sessionID)
 }
 
 // +checklocksread:s.m
-func (s *Server) fetchSessionStateLocked(sessionID SessionID) *SessionState {
-	return s.sessions[sessionID]
+func (s *Server) fetchHandleLocked(sessionID SessionID) *Handle {
+	return s.handles[sessionID]
 }
 
-func (s *Server) clearSessionState(sessionID SessionID) {
+func (s *Server) clearHandle(sessionID SessionID) {
 	s.m.Lock()
 	defer s.m.Unlock()
-	s.clearSessionStateLocked(sessionID)
+	s.clearHandleLocked(sessionID)
 }
 
 // +checklocks:s.m
-func (s *Server) clearSessionStateLocked(sessionID SessionID) {
-	delete(s.sessions, sessionID)
+func (s *Server) clearHandleLocked(sessionID SessionID) {
+	delete(s.handles, sessionID)
 }
 
 func (s *Server) writePacket(pkt []byte, dst *net.UDPAddr) error {
@@ -197,16 +198,8 @@ func (s *Server) readPacket() error {
 		}
 		hs.certVerify = s.config.ClientVerify
 		if !s.setHandshakeState(addr, hs) {
-			logrus.Debugf("server: already have handshake in progress with %s", addr.String())
+			logrus.Debugf("server: failed to make new handshake with %s", addr.String())
 			return ErrUnexpectedMessage
-		}
-		id, err := s.newSessionID()
-		hs.sessionID = id
-		hs.remoteAddr = addr
-		ss.remoteAddr = addr
-		if err != nil {
-			logrus.Debug("could not make new session state")
-			return err
 		}
 		n, err = s.writeServerAuth(s.handshakeBuf, hs)
 		if err != nil {
@@ -381,8 +374,8 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		logrus.Debugf("server: mismatched session ID for %s: expected %x, got %x", addr, hs.sessionID, sessionID)
 		return pos, nil, ErrUnexpectedMessage
 	}
-	ss := s.fetchSessionState(hs.sessionID)
-	if ss == nil {
+	h := s.fetchHandle(hs.sessionID)
+	if h == nil {
 		logrus.Debugf("server: could not find session ID %x", hs.sessionID)
 		return pos, nil, ErrUnexpectedMessage
 	}
@@ -468,35 +461,35 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte, plaintext [
 		return 0, err
 	}
 	logrus.Debugf("server: transport/control message for session %x", sessionID)
-	ss := s.fetchSessionState(sessionID)
-	if ss == nil || ss.handle == nil {
+	h := s.fetchHandle(sessionID)
+	if h == nil {
 		return 0, ErrUnknownSession
 	}
 
-	ss.handle.m.Lock()
-	defer ss.handle.m.Unlock()
-	if ss.handle.IsClosed() {
+	h.m.Lock()
+	defer h.m.Unlock()
+	if h.IsClosed() {
 		return 0, io.EOF
 	}
 
-	n, mt, err := s.readPacketFromSession(ss, plaintext, msg, &ss.clientToServerKey)
+	n, mt, err := s.readPacketFromSession(h.ss, plaintext, msg, &h.ss.clientToServerKey)
 	if err != nil {
 		return 0, err
 	}
 
-	logrus.Debugf("server: session %x: plaintext: %x type: %x from: %s", ss.sessionID, plaintext[:n], mt, addr)
+	logrus.Debugf("server: session %x: plaintext: %x type: %x from: %s", h.ss.sessionID, plaintext[:n], mt, addr)
 
 	switch mt {
 	case MessageTypeTransport:
 		select {
-		case ss.handle.recv.C <- plaintext[:n]:
+		case h.recv.C <- plaintext[:n]:
 			break
 		default:
 			logrus.Warnf("session %x: recv queue full, dropping packet", sessionID)
 		}
 	case MessageTypeControl:
 		select {
-		case ss.handle.ctrl.C <- plaintext[:n]:
+		case h.ctrl.C <- plaintext[:n]:
 			break
 		default:
 			logrus.Warnf("session %x: ctrl queue full, dropping packet", sessionID)
@@ -505,10 +498,10 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte, plaintext [
 		return 0, ErrInvalidMessage
 	}
 
-	ss.handle.writeLock.Lock()
-	defer ss.handle.writeLock.Unlock()
-	if !EqualUDPAddress(ss.remoteAddr, addr) {
-		ss.remoteAddr = addr
+	h.writeLock.Lock()
+	defer h.writeLock.Unlock()
+	if !EqualUDPAddress(h.ss.remoteAddr, addr) {
+		h.ss.remoteAddr = addr
 	}
 	return n, nil
 }
@@ -560,41 +553,46 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	}
 
 	defer s.clearHandshakeStateLocked(hs.remoteAddr)
-	ss := s.fetchSessionStateLocked(hs.sessionID)
-	if ss == nil {
+	h, exists := s.handles[hs.sessionID]
+	if !exists {
 		return ErrUnknownSession
-	}
-	logrus.Debugf("server: finishing handshake for session %x", ss.sessionID)
-	err := hs.deriveFinalKeys(&ss.clientToServerKey, &ss.serverToClientKey)
+	} 
+
+	logrus.Debugf("server: finishing handshake for session %x", h.ss.sessionID)
+
+	err := hs.deriveFinalKeys(&h.ss.clientToServerKey, &h.ss.serverToClientKey)
 	if err != nil {
 		return err
 	}
-	ss.clientLeaf = hs.clientLeaf
+	h.ss.clientLeaf = hs.clientLeaf
 	//hs.leaf
 	// TODO(dadrian): Create this earlier on so that the handshake fails earlier
 	// if the queue is full.
-	h := s.createHandleLocked(ss)
 	select {
 	case s.pendingConnections <- h:
 		break
 	default:
-		logrus.Warnf("server: session %x: pending connections queue is full, dropping handshake", ss.sessionID)
-		s.clearSessionState(ss.sessionID)
-		ss.handle.Close()
+		logrus.Warnf("server: session %x: pending connections queue is full, dropping handshake", h.ss.sessionID)
+		s.clearHandle(h.ss.sessionID)
+		h.Close()
 	}
 	return nil
 }
 
-func (s *Server) createHandleLocked(ss *SessionState) *Handle {
+// +checklocks:s.m
+func (s *Server) createHandleLocked(hs *HandshakeState) *Handle {
 	handle := &Handle{
-		sessionID: ss.sessionID,
 		recv:      common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
 		send:      common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
 		ctrl:      common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
 		ctrlOut:   common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
+		ss:		   &SessionState{},
 		server:    s,
 	}
-	ss.handle = handle
+
+	s.handles[hs.sessionID] = handle
+	handle.ss.sessionID = hs.sessionID
+	handle.ss.remoteAddr = hs.remoteAddr
 	return handle
 }
 
@@ -610,16 +608,16 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 	select {
 	case handle := <-s.pendingConnections:
 		logrus.Debug("got a handle")
-		ss := s.fetchSessionState(handle.sessionID)
-		if ss.handle != handle {
+		h := s.fetchHandle(handle.ss.sessionID)
+		if h != handle {
 			// Should never happen
 			return nil, ErrUnknownSession
 		}
-		ss.handle.sendWg.Add(1)
-		go func(ss *SessionState) {
-			defer ss.handle.sendWg.Done()
+		h.sendWg.Add(1)
+		go func(h *Handle) {
+			defer h.sendWg.Done()
 			for {
-				plaintext, err := ss.handle.send.Recv()
+				plaintext, err := h.send.Recv()
 				if err != nil {
 					if errors.Is(err, io.EOF) {
 						break
@@ -630,19 +628,19 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 					}
 				}
 
-				err = s.lockHandleAndWriteToSession(ss, MessageTypeTransport, plaintext)
+				err = s.lockHandleAndWriteToSession(h.ss, MessageTypeTransport, plaintext)
 				if err != nil {
 					logrus.Errorf("server: unable to write packet: %s", err)
 					// TODO(dadrian): Should this affect connection state?
 				}
 			}
-		}(ss)
+		}(h)
 
-		ss.handle.ctrlWg.Add(1)
-		go func(ss *SessionState) {
-			defer ss.handle.ctrlWg.Done()
+		h.ctrlWg.Add(1)
+		go func(h *Handle) {
+			defer h.ctrlWg.Done()
 			for {
-				plaintext, err := ss.handle.ctrlOut.Recv()
+				plaintext, err := h.ctrlOut.Recv()
 				if err != nil {
 					if errors.Is(err, io.EOF) {
 						break
@@ -653,20 +651,20 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 					}
 				}
 
-				err = s.lockHandleAndWriteToSession(ss, MessageTypeControl, plaintext)
+				err = s.lockHandleAndWriteToSession(h.ss, MessageTypeControl, plaintext)
 				if err != nil {
 					logrus.Errorf("server: unable to write packet: %s", err)
 					// TODO(dadrian): Should this affect connection state?
 				}
 			}
-		}(ss)
-		go func(ss *SessionState) {
+		}(h)
+		go func(h *Handle) {
 			// TODO(hosono) technically this goroutine is leaked,
 			// but it should go away since Close also closes ctrl
 			// this isn't really the best way to do this, but it does work
 			for {
 				// TODO(hosono) handle other control messages
-				msg, err := ss.handle.ctrl.Recv()
+				msg, err := h.ctrl.Recv()
 				if err != nil {
 					break
 				}
@@ -676,13 +674,13 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 				ctrlMsg := ControlMessage(msg[0])
 				switch ctrlMsg {
 				case ControlMessageClose:
-					ss.handle.recv.Cancel(io.EOF)
+					h.recv.Cancel(io.EOF)
 					break
 				default:
 					logrus.Fatal("server: unexpected control message ", msg)
 				}
 			}
-		}(ss)
+		}(h)
 		return handle, nil
 	case <-timer.C:
 		return nil, ErrTimeout
@@ -704,12 +702,12 @@ func (s *Server) CloseSession(sessionID SessionID) error {
 
 // +checklocks:s.m
 func (s *Server) closeSessionLocked(sessionID SessionID) error {
-	ss := s.fetchSessionStateLocked(sessionID)
-	if ss == nil || ss.handle == nil {
+	h := s.fetchHandleLocked(sessionID)
+	if h == nil {
 		return ErrUnknownSession
 	}
-	err := s.closeHandleWrapper(ss.handle)
-	s.clearSessionStateLocked(sessionID)
+	err := s.closeHandleWrapper(h)
+	s.clearHandleLocked(sessionID)
 	return err
 }
 
@@ -737,8 +735,10 @@ func (s *Server) Close() (err error) {
 	// TODO(hosono) fix the weirdness around locking stuff
 	s.m.Lock()
 
-	for _, session := range s.sessions {
-		s.closeSessionLocked(session.sessionID)
+	for _, h := range s.handles{
+		if h != nil {
+			s.closeSessionLocked(h.ss.sessionID)
+		}
 	}
 
 	close(s.pendingConnections)
@@ -802,7 +802,7 @@ func (s *Server) init() error {
 	}
 
 	s.handshakes = make(map[string]*HandshakeState)
-	s.sessions = make(map[SessionID]*SessionState)
+	s.handles = make(map[SessionID]*Handle)
 
 	s.pendingConnections = make(chan *Handle, s.config.maxPendingConnections())
 	return nil
