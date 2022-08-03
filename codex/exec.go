@@ -71,8 +71,11 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 	// TODO(baumanl): if no actual attached terminal then this causes issues.
 	var oldState *term.State
 	var e error
+	var termEnv string
+	var size *pty.Winsize
 	if usePty {
-		// stdin is from a terminal
+		termEnv = os.Getenv("TERM")
+		size, _ = pty.GetsizeFull(os.Stdin) // ignoring the error is okay here becaus then size is set to nil
 		oldState, e = term.MakeRaw(int(os.Stdin.Fd()))
 		if e != nil {
 			logrus.Errorf("C: error with terminal state: %v", e)
@@ -81,8 +84,6 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 	} else {
 		oldState = nil
 	}
-	termEnv := os.Getenv("TERM")
-	size, _ := pty.GetsizeFull(os.Stdin) // ignoring the error is okay here becaus then size is set to nil
 	msg := newExecInitMsg(usePty, cmd, termEnv, size)
 	_, e = tube.Write(msg.ToBytes())
 	if e != nil {
@@ -100,20 +101,22 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 		return nil, err
 	}
 
-	// Send window size updates to window channel
-	go func() {
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, syscall.SIGWINCH)
-		b := make([]byte, 8)
-		for range ch {
-			if size, err := pty.GetsizeFull(os.Stdin); err == nil {
-				serializeSize(b, size)
-				if _, err = winTube.Write(b); err != nil {
-					break
+	if usePty {
+		// Send window size updates to window channel
+		go func() {
+			ch := make(chan os.Signal, 1)
+			signal.Notify(ch, syscall.SIGWINCH)
+			b := make([]byte, 8)
+			for range ch {
+				if size, err := pty.GetsizeFull(os.Stdin); err == nil {
+					serializeSize(b, size)
+					if _, err = winTube.Write(b); err != nil {
+						break
+					}
 				}
 			}
-		}
-	}()
+		}()
+	}
 
 	r, w := io.Pipe()
 	ex := ExecTube{
