@@ -395,10 +395,6 @@ func (c *Client) ReadMsg(b []byte) (n int, err error) {
 		}
 	}()
 
-	if c.closed.IsSet() {
-		return 0, io.EOF
-	}
-
 	// TODO(dadrian): Close the connection on bad reads / certain unrecoverable
 	if !c.handshakeComplete.IsSet() {
 		err := c.Handshake()
@@ -419,6 +415,7 @@ func (c *Client) ReadMsg(b []byte) (n int, err error) {
 		return n, err
 	}
 
+	// This will cause an EOF error if the connection is closed
 	plaintext, err := c.recv.Recv()
 	if err != nil {
 		return 0, err
@@ -431,7 +428,7 @@ func (c *Client) ReadMsg(b []byte) (n int, err error) {
 	}
 
 	// Input was too short, buffer this message and return ErrBufOverflow
-	c.recv.C <- plaintext
+	_, err = c.readBuf.Write(plaintext)
 	return 0, ErrBufOverflow
 }
 
@@ -453,7 +450,6 @@ func (c *Client) Read(b []byte) (n int, err error) {
 		}
 	}
 
-	// TODO(dadrian): #concurrency
 	c.readLock.Lock()
 	defer c.readLock.Unlock()
 
@@ -477,8 +473,7 @@ func (c *Client) Read(b []byte) (n int, err error) {
 	}
 
 	// Buffer leftovers
-	// TODO(hosono) this is a bad way to deal with this
-	c.recv.C <- plaintext[n:]
+	_, err = c.readBuf.Write(plaintext[n:])
 	return n, err
 }
 
