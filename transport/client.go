@@ -62,7 +62,6 @@ type Client struct {
 	recv *common.DeadlineChan[[]byte]
 
 	recv *common.DeadlineChan
-	ctrl *common.DeadlineChan
 
 	config ClientConfig
 }
@@ -412,19 +411,25 @@ func (c *Client) listen() {
 				logrus.Warn("client: recv queue full. dropping message")
 			}
 		case MessageTypeControl:
-			select {
-			case c.ctrl.C <- append([]byte(nil), c.plaintext[:n]...):
-				// TODO(hosono) handle other control messages?
-				c.recv.Cancel(io.EOF)
-				break
-			default:
-				logrus.Warn("client: ctrl queue full. dropping message")
+			if n != 1 {
+				logrus.Fatalf("client: malformed control message: %s", c.plaintext[:n])
 			}
+			msg := ControlMessage(c.plaintext[0])
+			c.handleControlMsg(msg)
 		default:
 			// TODO(hosono) Maybe silently discard instead of panic?
 			// Messages must be authenticated to reach this point
 			logrus.Panicf("client: unexpected message %x", mt)
 		}
+	}
+}
+
+func (c *Client) handleControlMsg(msg ControlMessage) error {
+	switch msg {
+	case ControlMessageClose:
+		return c.recv.Close()
+	default:
+		return nil
 	}
 }
 
