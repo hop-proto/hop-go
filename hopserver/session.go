@@ -124,7 +124,13 @@ func (sess *hopSession) checkAuthorization() bool {
 //calls close when it receives a signal from the code execution tube that it is finished
 //TODO(baumanl): change closing behavior for sessions without cmd/shell --> integrate port forwarding duration
 func (sess *hopSession) start() {
-	go sess.tubeMuxer.Start()
+	go func() {
+		err := sess.tubeMuxer.Start()
+		sess.done <- 1
+		if err != nil {
+			logrus.Error(err)
+		}
+	}()
 	logrus.Info("S: STARTED CHANNEL MUXER")
 
 	//User Authorization Step

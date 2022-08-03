@@ -1,9 +1,7 @@
 package tubes
 
 import (
-	"errors"
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -92,7 +90,7 @@ func (m *Muxer) sender() {
 }
 
 //Start allows a muxer to start listening and handling incoming tube requests and messages
-func (m *Muxer) Start() {
+func (m *Muxer) Start() error {
 	go m.sender()
 	m.stopped = false
 
@@ -102,11 +100,9 @@ func (m *Muxer) Start() {
 	}
 	for !m.stopped {
 		frame, err := m.readMsg()
-		if errors.Is(err, os.ErrDeadlineExceeded) { // if error is a timeout
-			logrus.Fatalf("Connection timed out: %s", err)
-		} else if err != nil {
-			// TODO(hosono) Are there any recoverable errors?
-			logrus.Fatalf("Error in Muxer: %s", err)
+		if err != nil {
+			// TODO(hosono) Are there any recoverable errors? (os.ErrDeadlineExceeded isn't)
+			return err
 		}
 		tube, ok := m.getTube(frame.tubeID)
 		if !ok {
@@ -116,8 +112,7 @@ func (m *Muxer) Start() {
 			if initFrame.flags.REQ {
 
 				if err != nil {
-					logrus.Panic(err)
-					panic(err)
+					return err
 				}
 				tube = newReliableTubeWithTubeID(m.underlying, m.netConn, m.sendQueue, initFrame.tubeType, initFrame.tubeID)
 				m.addTube(tube)
@@ -131,7 +126,7 @@ func (m *Muxer) Start() {
 				initFrame, err := fromInitiateBytes(frame.toBytes())
 				//logrus.Info("RECEIVING INITIATE FRAME ", initFrame.tubeID, " ", initFrame.frameNo, " ", frame.flags.REQ, " ", frame.flags.RESP)
 				if err != nil {
-					panic(err)
+					return err
 				}
 				go tube.receiveInitiatePkt(initFrame)
 			} else {
@@ -141,6 +136,7 @@ func (m *Muxer) Start() {
 		}
 
 	}
+	return nil
 }
 
 //Stop ensures all the muxer tubes are closed
