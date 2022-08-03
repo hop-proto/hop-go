@@ -517,9 +517,8 @@ func NewClient(conn UDPLike, server *net.UDPAddr, config ClientConfig) *Client {
 		config:         config,
 		ciphertext:     make([]byte, 65535),
 		plaintext:      make([]byte, PlaintextLen(65535)),
-		// TODO(hosono) make it possible to set these lengths
-		recv: common.NewDeadlineChan(2048),
-		ctrl: common.NewDeadlineChan(2048),
+		recv: common.NewDeadlineChan(config.maxBufferedPackets()),
+		ctrl: common.NewDeadlineChan(config.maxBufferedPackets()),
 	}
 	return c
 }
