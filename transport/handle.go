@@ -274,7 +274,7 @@ func (c *Handle) closeLocked() error {
 
 	c.ctrlWg.Wait()
 
-	c.server.clearSessionStateLocked(c.sessionID)
+	c.server.clearHandleLocked(c.ss.sessionID)
 
 	if c.state == closed {
 		return io.EOF
