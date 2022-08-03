@@ -34,6 +34,7 @@ type ClientConfig struct {
 	AgentURL         string
 	Hosts            []HostConfig
 	Cmd              string // TODO(hosono) seems redundant with Cmd in hostconfig
+	UsePty           bool
 	HandshakeTimeout time.Duration
 	DataTimeout      time.Duration
 }
@@ -68,7 +69,7 @@ type HostConfig struct {
 
 	// TODO(baumanl): Add application layer hop config options to grammar
 	Cmd      string // what command to run on connect
-	Headless bool   // run without shell
+	Headless bool   // run without command
 	// something for principal vs. delegate
 	// something for remote port forward
 	// something for local port forward

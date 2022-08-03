@@ -274,7 +274,7 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 			"TERM=" + termEnv,
 		}
 		var c *exec.Cmd
-		if shell {
+		if cmd == "" {
 			//login(1) starts default shell for user and changes all privileges and environment variables
 			c = exec.Command("login", "-f", sess.user)
 		} else {
