@@ -1,115 +1,87 @@
 package tubes
 
 import (
-	"errors"
-	"fmt"
-	"net"
-	"os"
-	"sync"
-	"time"
+	"errors" "fmt" "net" "os" "sync" "time"
 
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/transport"
 )
 
-//Muxer handles delivering and sending tube messages
-type Muxer struct {
-	// +checklocks:m
-	tubes map[byte]*Reliable
-	// Channels waiting for an Accept() call.
-	tubeQueue chan *Reliable
-	m         sync.Mutex
-	// All hop tubes write raw bytes for a tube packet to this golang chan.
-	sendQueue  chan []byte
-	stopped    bool
-	underlying transport.MsgConn
-	netConn    net.Conn
-	timeout    time.Duration
+//Muxer handles delivering and sending tube messages type Muxer struct {
+	// +checklocks:m tubes map[byte]*Reliable // Channels waiting for
+	an Accept() call.  tubeQueue chan *Reliable m	      sync.Mutex
+	// All hop tubes write raw bytes for a tube packet to this
+	golang chan.  sendQueue  chan []byte stopped	bool underlying
+	transport.MsgConn netConn    net.Conn timeout	 time.Duration
 }
 
-//NewMuxer starts a new tube muxer
-func NewMuxer(msgConn transport.MsgConn, netConn net.Conn, timeout time.Duration) *Muxer {
+//NewMuxer starts a new tube muxer func NewMuxer(msgConn
+transport.MsgConn, netConn net.Conn, timeout time.Duration) *Muxer {
 	return &Muxer{
-		tubes:      make(map[byte]*Reliable),
-		tubeQueue:  make(chan *Reliable, 128),
-		m:          sync.Mutex{},
-		sendQueue:  make(chan []byte),
-		stopped:    false,
-		underlying: msgConn,
-		netConn:    netConn,
-		timeout:    timeout,
+		tubes:	    make(map[byte]*Reliable), tubeQueue:
+		make(chan *Reliable, 128), m:	       sync.Mutex{},
+		sendQueue:  make(chan []byte), stopped:    false,
+		underlying: msgConn, netConn:	 netConn, timeout:
+		timeout,
 	}
 }
 
 func (m *Muxer) addTube(c *Reliable) {
-	m.m.Lock()
-	m.tubes[c.id] = c
-	m.m.Unlock()
+	m.m.Lock() m.tubes[c.id] = c m.m.Unlock()
 }
 
 func (m *Muxer) getTube(tubeID byte) (*Reliable, bool) {
-	m.m.Lock()
-	defer m.m.Unlock()
-	c, ok := m.tubes[tubeID]
-	return c, ok
+	m.m.Lock() defer m.m.Unlock() c, ok := m.tubes[tubeID] return
+	c, ok
 }
 
-//CreateTube starts a new reliable tube
-func (m *Muxer) CreateTube(tType TubeType) (*Reliable, error) {
-	r, err := newReliableTube(m.underlying, m.netConn, m.sendQueue, tType)
-	m.addTube(r)
-	logrus.Infof("Created Tube: %v", r.id)
+//CreateTube starts a new reliable tube func (m *Muxer) CreateTube(tType
+TubeType) (*Reliable, error) {
+	r, err := newReliableTube(m.underlying, m.netConn, m.sendQueue,
+	tType) m.addTube(r) logrus.Infof("Created Tube: %v", r.id)
 	return r, err
 }
 
-//Accept blocks for and accepts a new reliable tube
-func (m *Muxer) Accept() (*Reliable, error) {
-	s := <-m.tubeQueue
-	logrus.Infof("Accepted Tube: %v", s.id)
+//Accept blocks for and accepts a new reliable tube func (m *Muxer)
+Accept() (*Reliable, error) {
+	s := <-m.tubeQueue logrus.Infof("Accepted Tube: %v", s.id)
 	return s, nil
 }
 
 func (m *Muxer) readMsg() (*frame, error) {
-	pkt := make([]byte, 65535)
-	_, err := m.underlying.ReadMsg(pkt)
+	pkt := make([]byte, 65535) _, err := m.underlying.ReadMsg(pkt)
 	if err != nil {
 		return nil, err
 	}
 
-	// Set timeout
-	if m.timeout != 0 {
+	// Set timeout if m.timeout != 0 {
 		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
-	}
-	return fromBytes(pkt)
+	} return fromBytes(pkt)
 
 }
 
 func (m *Muxer) sender() {
 	for !m.stopped {
-		rawBytes := <-m.sendQueue
-		m.underlying.WriteMsg(rawBytes)
+		rawBytes := <-m.sendQueue m.underlying.WriteMsg(rawBytes)
 	}
 }
 
-//Start allows a muxer to start listening and handling incoming tube requests and messages
-func (m *Muxer) Start() error {
-	go m.sender()
-	m.stopped = false
+//Start allows a muxer to start listening and handling incoming tube
+requests and messages func (m *Muxer) Start() error {
+	go m.sender() m.stopped = false
 
-	// Set initial timeout
-	if m.timeout != 0 {
+	// Set initial timeout if m.timeout != 0 {
 		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
-	}
-	for !m.stopped {
-		frame, err := m.readMsg()
-		if err != nil {
+	} for !m.stopped {
+		frame, err := m.readMsg() if err != nil {
 			// TODO(hosono) Are there any recoverable errors?
-			if errors.Is(err, os.ErrDeadlineExceeded) { // if error is a timeout
-				return fmt.Errorf("Connection timed out: %s", err)
-			} else {
-				return fmt.Errorf("Error in Muxer: %s", err)
+			if errors.Is(err, os.ErrDeadlineExceeded) { //
+			if error is a timeout
+				return fmt.Errorf("connection timed out:
+				%s", err)
 			}
+      return fmt.Errorf("error in Muxer: %s", err)
 		}
 		tube, ok := m.getTube(frame.tubeID)
 		if !ok {
