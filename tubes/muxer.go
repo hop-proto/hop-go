@@ -106,10 +106,9 @@ func (m *Muxer) Start() error {
 		if err != nil {
 			// TODO(hosono) Are there any recoverable errors?
 			if errors.Is(err, os.ErrDeadlineExceeded) { // if error is a timeout
-				return fmt.Errorf("Connection timed out: %s", err)
-			} else {
-				return fmt.Errorf("Error in Muxer: %s", err)
+				return fmt.Errorf("connection timed out: %s", err)
 			}
+			return fmt.Errorf("error in Muxer: %s", err)
 		}
 		tube, ok := m.getTube(frame.tubeID)
 		if !ok {
