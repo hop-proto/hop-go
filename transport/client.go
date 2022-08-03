@@ -522,7 +522,7 @@ func NewClient(conn UDPLike, server *net.UDPAddr, config ClientConfig) *Client {
 		config:         config,
 		ciphertext:     make([]byte, 65535),
 		plaintext:      make([]byte, PlaintextLen(65535)),
-		recv: common.NewDeadlineChan(config.maxBufferedPackets()),
+		recv:           common.NewDeadlineChan(config.maxBufferedPackets()),
 	}
 	return c
 }

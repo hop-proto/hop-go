@@ -35,12 +35,12 @@ type Server struct {
 	closed common.AtomicBool
 
 	// +checklocks:m
-	handshakes map[string]*HandshakeState 
+	handshakes map[string]*HandshakeState
 	// TODO(hosono) what should the keys of this map be?
 	// Currently it's the string representation of the remote address
 
 	// +checklocks:m
-	handles    map[SessionID]*Handle
+	handles map[SessionID]*Handle
 
 	pendingConnections chan *Handle
 
@@ -83,14 +83,14 @@ func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) 
 			s.handles[hs.sessionID] = s.createHandleLocked(hs)
 			handshakeSet = true
 			break
-		} 
+		}
 	}
 	if !handshakeSet {
 		return false
 	}
 
 	// Delete handshake if the connection times out
-	time.AfterFunc(s.config.HandshakeTimeout, func (){
+	time.AfterFunc(s.config.HandshakeTimeout, func() {
 		s.m.Lock()
 		defer s.m.Unlock()
 		hs := s.fetchHandshakeStateLocked(remoteAddr)
@@ -131,7 +131,7 @@ func (s *Server) clearHandshakeStateLocked(remoteAddr *net.UDPAddr) {
 	delete(s.handshakes, key)
 }
 
-func (s *Server) fetchHandle(sessionID SessionID) *Handle{
+func (s *Server) fetchHandle(sessionID SessionID) *Handle {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	return s.fetchHandleLocked(sessionID)
@@ -556,7 +556,7 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	h, exists := s.handles[hs.sessionID]
 	if !exists {
 		return ErrUnknownSession
-	} 
+	}
 
 	logrus.Debugf("server: finishing handshake for session %x", h.ss.sessionID)
 
@@ -582,12 +582,12 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 // +checklocks:s.m
 func (s *Server) createHandleLocked(hs *HandshakeState) *Handle {
 	handle := &Handle{
-		recv:      common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
-		send:      common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
-		ctrl:      common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
-		ctrlOut:   common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
-		ss:		   &SessionState{},
-		server:    s,
+		recv:    common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
+		send:    common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
+		ctrl:    common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
+		ctrlOut: common.NewDeadlineChan(s.config.maxBufferedPacketsPerConnection()),
+		ss:      &SessionState{},
+		server:  s,
 	}
 
 	s.handles[hs.sessionID] = handle
@@ -735,7 +735,7 @@ func (s *Server) Close() (err error) {
 	// TODO(hosono) fix the weirdness around locking stuff
 	s.m.Lock()
 
-	for _, h := range s.handles{
+	for _, h := range s.handles {
 		if h != nil {
 			s.closeSessionLocked(h.ss.sessionID)
 		}
