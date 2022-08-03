@@ -78,7 +78,7 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 		size, _ = pty.GetsizeFull(os.Stdin) // ignoring the error is okay here becaus then size is set to nil
 		oldState, e = term.MakeRaw(int(os.Stdin.Fd()))
 		if e != nil {
-			logrus.Errorf("C: error with terminal state: %v", e)
+			logrus.Infof("C: error with terminal state: %v", e)
 		}
 	} else {
 		oldState = nil
