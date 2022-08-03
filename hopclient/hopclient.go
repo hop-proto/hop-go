@@ -165,7 +165,6 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 			logrus.Fatal(err)
 		}
 	}()
-	go c.TubeMuxer.Start()
 	err = c.userAuthorization()
 	if err != nil {
 		return err
