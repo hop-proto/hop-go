@@ -1,10 +1,7 @@
 package tubes
 
 import (
-	"errors"
-	"fmt"
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -104,11 +101,8 @@ func (m *Muxer) Start() error {
 	for !m.stopped {
 		frame, err := m.readMsg()
 		if err != nil {
-			// TODO(hosono) Are there any recoverable errors?
-			if errors.Is(err, os.ErrDeadlineExceeded) { // if error is a timeout
-				return fmt.Errorf("connection timed out: %s", err)
-			}
-			return fmt.Errorf("error in Muxer: %s", err)
+			// TODO(hosono) Are there any recoverable errors? (os.ErrDeadlineExceeded isn't)
+			return err
 		}
 		tube, ok := m.getTube(frame.tubeID)
 		if !ok {
