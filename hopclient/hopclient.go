@@ -156,6 +156,12 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	// c.address = address
 	c.authenticator = authenticator
 	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.TransportConn, c.config.DataTimeout)
+	go func() {
+		if err := c.TubeMuxer.Start(); err != nil {
+			c.ExecTube.Restore()
+			logrus.Fatal(err)
+		}
+	}()
 	go c.TubeMuxer.Start()
 	err = c.userAuthorization()
 	if err != nil {
