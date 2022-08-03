@@ -39,6 +39,7 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	// +checklocks:readLock
 	buf bytes.Buffer
 
+	ss 	   *SessionState
 	server *Server
 }
 

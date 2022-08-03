@@ -37,7 +37,7 @@ type Server struct {
 	// +checklocks:m
 	handshakes map[string]*HandshakeState
 	// +checklocks:m
-	sessions map[SessionID]*SessionState
+	handles    map[SessionID]*Handle
 
 	pendingConnections chan *Handle
 
@@ -50,8 +50,7 @@ type Server struct {
 func (s *Server) FetchClientLeaf(h *Handle) certs.Certificate {
 	s.m.RLock()
 	defer s.m.RUnlock()
-	ss := s.sessions[h.sessionID]
-	return ss.clientLeaf
+	return h.ss.clientLeaf
 }
 
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
@@ -112,13 +111,13 @@ func (s *Server) newSessionState() (*SessionState, error) {
 		if n != 4 || err != nil {
 			panic("could not read random data")
 		}
-		if s.setSessionState(ss) {
-			break
-		}
+		unimplemented()
 	}
 	return ss, nil
 }
 
+// TODO(hosono)
+/*
 func (s *Server) setSessionState(ss *SessionState) bool {
 	s.m.Lock()
 	defer s.m.Unlock()
@@ -129,6 +128,7 @@ func (s *Server) setSessionState(ss *SessionState) bool {
 	s.sessions[ss.sessionID] = ss
 	return true
 }
+*/
 
 func (s *Server) fetchSessionState(sessionID SessionID) *SessionState {
 	s.m.RLock()
@@ -200,18 +200,19 @@ func (s *Server) readPacket() error {
 			logrus.Debugf("server: already have handshake in progress with %s", addr.String())
 			return ErrUnexpectedMessage
 		}
-		ss, err := s.newSessionState()
-		copy(hs.sessionID[:], ss.sessionID[:])
+		id, err := s.newSessionID()
+		hs.sessionID = id
+		hs.remoteAddr = addr
 		ss.remoteAddr = addr
 		if err != nil {
 			logrus.Debug("could not make new session state")
 			return err
 		}
-		n, err = s.writeServerAuth(s.handshakeBuf, hs, ss)
+		n, err = s.writeServerAuth(s.handshakeBuf, hs)
 		if err != nil {
 			return err
 		}
-		err = s.writePacket(s.handshakeBuf[0:n], addr)
+		err = s.writePacket(s.handshakeBuf[:n], addr)
 		if err != nil {
 			return err
 		}
@@ -295,7 +296,7 @@ func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 	return length, hs, err
 }
 
-func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState) (int, error) {
+func (s *Server) writeServerAuth(b []byte, hs *HandshakeState) (int, error) {
 	c, err := s.config.GetCertificate(ClientHandshakeInfo{
 		ServerName: hs.sni,
 	})
@@ -315,8 +316,8 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState, ss *SessionState)
 	hs.duplex.Absorb(x[:HeaderLen])
 	x = x[HeaderLen:]
 	pos += HeaderLen
-	copy(x, ss.sessionID[:])
-	logrus.Debugf("server: session ID %x", ss.sessionID[:])
+	copy(x, hs.sessionID[:])
+	logrus.Debugf("server: session ID %x", hs.sessionID[:])
 	hs.duplex.Absorb(x[:SessionIDLen])
 	x = x[SessionIDLen:]
 	pos += SessionIDLen
