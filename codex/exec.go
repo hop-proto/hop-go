@@ -79,7 +79,6 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 		oldState, e = term.MakeRaw(int(os.Stdin.Fd()))
 		if e != nil {
 			logrus.Errorf("C: error with terminal state: %v", e)
-			return nil, e
 		}
 	} else {
 		oldState = nil
