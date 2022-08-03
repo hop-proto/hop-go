@@ -266,12 +266,10 @@ func (c *Handle) closeLocked() error {
 	c.send.Close()
 	c.ctrl.Close()
 
-	c.closed.SetTrue()
-
-	// Wait for the sending goroutine to exit
+	// Wait for the sending goroutines to exit
 	c.sendWg.Wait()
 
-	c.ctrlOut.Send([]byte{0})
+	c.writeControl(ControlMessageClose)
 	c.ctrlOut.Close()
 
 	c.ctrlWg.Wait()
