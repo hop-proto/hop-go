@@ -2,13 +2,13 @@ package transport
 
 import (
 	"bytes"
-	"io"
 	"errors"
+	"io"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
-	"os"
 
 	"github.com/sirupsen/logrus"
 
