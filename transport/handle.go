@@ -5,11 +5,11 @@ import (
 	"errors"
 	"io"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"sync"
 	"time"
-	"os"
 
 	"github.com/sirupsen/logrus"
 
