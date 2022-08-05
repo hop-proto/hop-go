@@ -2,10 +2,10 @@ package transport
 
 import (
 	"bytes"
-	"sync/atomic"
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 

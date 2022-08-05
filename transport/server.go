@@ -5,8 +5,8 @@ import (
 	"crypto/rand"
 	"errors"
 	"net"
-	"sync/atomic"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sirupsen/logrus"

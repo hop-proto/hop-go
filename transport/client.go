@@ -3,11 +3,11 @@ package transport
 import (
 	"bytes"
 	"errors"
-	"sync/atomic"
 	"fmt"
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sirupsen/logrus"
