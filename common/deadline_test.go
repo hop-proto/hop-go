@@ -256,7 +256,7 @@ func TestDeadlineSendCancel(t *testing.T) {
 }
 
 func TestDeadlineRecv(t *testing.T) {
-	ch := NewDeadlineChan(numLoops)
+	ch := NewDeadlineChan[[]byte](numLoops)
 
 	wg := sync.WaitGroup{}
 	wg.Add(numLoops)
@@ -274,7 +274,7 @@ func TestDeadlineRecv(t *testing.T) {
 }
 
 func TestDeadlineRecvCancel(t *testing.T) {
-	ch := NewDeadlineChan(numLoops)
+	ch := NewDeadlineChan[[]byte](numLoops)
 
 	ch.Cancel(ErrTest)
 
@@ -291,7 +291,7 @@ func TestDeadlineRecvCancel(t *testing.T) {
 	wg.Wait()
 }
 func TestDeadlineSend(t *testing.T) {
-	ch := NewDeadlineChan(numLoops)
+	ch := NewDeadlineChan[[]byte](numLoops)
 
 	wg := sync.WaitGroup{}
 	wg.Add(numLoops)
@@ -316,7 +316,7 @@ func TestDeadlineSend(t *testing.T) {
 }
 
 func TestDeadlineSendCancel(t *testing.T) {
-	ch := NewDeadlineChan(numLoops)
+	ch := NewDeadlineChan[[]byte](numLoops)
 
 	ch.Cancel(ErrTest)
 

@@ -326,16 +326,16 @@ func NewDeadline(t time.Time) *Deadline {
 // DeadlineChan is a channel of byte slices attached to a deadline.
 // It allows a caller to read and write from the channel,
 // But pending reads and writes can time out or be canceled
-type DeadlineChan struct {
+type DeadlineChan [T any] struct {
 	deadline *Deadline
 	closed   AtomicBool
-	C        chan []byte
+	C        chan T
 }
 
 // Recv reads one byte slice from the underlying channel
 // If the deadline is exceeded, Cancel is called, or Close is called,
 // err will be set to a relevant error. Always check that err is nil before using b
-func (d *DeadlineChan) Recv() (b []byte, err error) {
+func (d *DeadlineChan[T]) Recv() (b T, err error) {
 	// Return buffered data even if the channel is canceled
 	select {
 	case b = <-d.C:
@@ -345,7 +345,8 @@ func (d *DeadlineChan) Recv() (b []byte, err error) {
 	}
 
 	if d.closed.IsSet() {
-		return nil, io.EOF
+		err = io.EOF
+		return
 	}
 
 	errChan := d.deadline.Done()
@@ -365,7 +366,7 @@ func (d *DeadlineChan) Recv() (b []byte, err error) {
 // Send send one byte slice on the underlying channel
 // If the deadline is exceeded, Cancel is called, or Close is called,
 // err will not be nil.
-func (d *DeadlineChan) Send(b []byte) (err error) {
+func (d *DeadlineChan[T]) Send(b T) (err error) {
 	if d.closed.IsSet() {
 		return io.EOF
 	}
@@ -385,7 +386,7 @@ func (d *DeadlineChan) Send(b []byte) (err error) {
 }
 
 // SetDeadline sets a time at which calls to Send and Recv will timeout
-func (d *DeadlineChan) SetDeadline(t time.Time) error {
+func (d *DeadlineChan[T]) SetDeadline(t time.Time) error {
 	if d.closed.IsSet() {
 		return io.EOF
 	}
@@ -394,13 +395,13 @@ func (d *DeadlineChan) SetDeadline(t time.Time) error {
 
 // Cancel cancels pending calls to Send and Recv and causes them to return err
 // TODO(hosono) when should Recv return buffered data
-func (d *DeadlineChan) Cancel(err error) {
+func (d *DeadlineChan[T]) Cancel(err error) {
 	d.deadline.Cancel(err)
 }
 
 // Close cancels pending calls to Send and Recv. Those calls will return
 // io.EOF rather than os.ErrDeadlineExceeded even after the deadline has expired
-func (d *DeadlineChan) Close() error {
+func (d *DeadlineChan[T]) Close() error {
 	if d.closed.IsSet() {
 		return io.EOF
 	}
@@ -410,9 +411,9 @@ func (d *DeadlineChan) Close() error {
 }
 
 // NewDeadlineChan returns a pointer to a DeadlineChan with capacity of size
-func NewDeadlineChan(size int) *DeadlineChan {
-	return &DeadlineChan{
+func NewDeadlineChan[T any](size int) *DeadlineChan[T] {
+	return &DeadlineChan[T] {
 		deadline: NewDeadline(time.Time{}),
-		C:        make(chan []byte, size),
+		C:        make(chan T, size),
 	}
 }
