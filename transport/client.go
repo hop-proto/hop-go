@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"errors"
+	"sync/atomic"
 	"fmt"
 	"io"
 	"net"
@@ -31,8 +32,8 @@ type Client struct {
 	writeLock sync.Mutex
 	readLock  sync.Mutex
 
-	handshakeComplete atomicBool
-	closed            atomicBool
+	handshakeComplete atomic.Bool
+	closed            atomic.Bool
 
 	underlyingConn UDPLike
 
@@ -85,7 +86,7 @@ func (c *Client) unlockUser() {
 func (c *Client) Handshake() error {
 	// logrus.SetLevel(logrus.DebugLevel)
 	logrus.Info("Initiating Handshake")
-	if c.handshakeComplete.isSet() {
+	if c.handshakeComplete.Load() {
 		return nil
 	}
 	logrus.Debug("Handshake not complete. Locking user...")
@@ -94,7 +95,7 @@ func (c *Client) Handshake() error {
 
 	// TODO(dadrian): Cache any handshake errors
 
-	if c.handshakeComplete.isSet() {
+	if c.handshakeComplete.Load() {
 		return nil
 	}
 	logrus.Debug("got lock and checked again. Completeting handshake...")
@@ -225,8 +226,8 @@ func (c *Client) clientHandshakeLocked() error {
 	c.ss.sessionID = c.hs.sessionID
 	c.ss.remoteAddr = c.hs.remoteAddr
 	c.hs.deriveFinalKeys(&c.ss.clientToServerKey, &c.ss.serverToClientKey)
-	c.handshakeComplete.setTrue()
-	c.closed.setFalse()
+	c.handshakeComplete.Store(true)
+	c.closed.Store(false)
 	c.hs = nil
 	c.dialAddr = nil
 
@@ -258,7 +259,7 @@ func (c *Client) Write(b []byte) (int, error) {
 
 // WriteMsg implements MsgConn. It send a single packet.
 func (c *Client) WriteMsg(b []byte) error {
-	if !c.handshakeComplete.isSet() {
+	if !c.handshakeComplete.Load() {
 		err := c.Handshake()
 		if err != nil {
 			return err
@@ -266,7 +267,7 @@ func (c *Client) WriteMsg(b []byte) error {
 	}
 	c.writeLock.Lock()
 	defer c.writeLock.Unlock()
-	if c.closed.isSet() {
+	if c.closed.Load() {
 		return io.EOF
 	}
 	err := c.writeTransport(b)
@@ -282,12 +283,12 @@ func (c *Client) Close() error {
 	c.lockUser()
 	defer c.unlockUser()
 
-	if c.closed.isSet() {
+	if c.closed.Load() {
 		return io.EOF
 	}
 
-	c.closed.setTrue()
-	c.handshakeComplete.setFalse()
+	c.closed.Store(true)
+	c.handshakeComplete.Store(false)
 
 	// TODO(dadrian): We should cache this error to return on repeated calls if
 	// it fails.
@@ -337,7 +338,7 @@ func (c *Client) ReadMsg(b []byte) (n int, err error) {
 	}()
 
 	// TODO(dadrian): Close the connection on bad reads / certain unrecoverable
-	if !c.handshakeComplete.isSet() {
+	if !c.handshakeComplete.Load() {
 		err := c.Handshake()
 		if err != nil {
 			return 0, err
@@ -356,7 +357,7 @@ func (c *Client) ReadMsg(b []byte) (n int, err error) {
 		return n, err
 	}
 
-	if c.closed.isSet() {
+	if c.closed.Load() {
 		return 0, io.EOF
 	}
 
@@ -390,7 +391,7 @@ func (c *Client) Read(b []byte) (n int, err error) {
 	}()
 
 	// TODO(dadrian): Close the connection on bad reads?
-	if !c.handshakeComplete.isSet() {
+	if !c.handshakeComplete.Load() {
 		err := c.Handshake()
 		// TODO(dadrian): Cache handshake error?
 		if err != nil {
@@ -409,7 +410,7 @@ func (c *Client) Read(b []byte) (n int, err error) {
 		}
 		return n, err
 	}
-	if c.closed.isSet() {
+	if c.closed.Load() {
 		return 0, io.EOF
 	}
 

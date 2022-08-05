@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"net"
+	"sync/atomic"
 	"sync"
 	"time"
 
@@ -33,7 +34,7 @@ type Server struct {
 	udpConn *net.UDPConn
 	config  ServerConfig
 
-	closed atomicBool
+	closed atomic.Bool
 
 	// +checklocks:m
 	handshakes map[string]*HandshakeState
@@ -501,7 +502,7 @@ func (s *Server) Serve() error {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for !s.closed.isSet() {
+		for !s.closed.Load() {
 			err := s.readPacket()
 			logrus.Debug("read a packet")
 			if err != nil {
@@ -625,7 +626,7 @@ func (s *Server) ListenAddress() net.Addr {
 // TODO(dadrian): What does it do to writes?
 func (s *Server) Close() error {
 	// TODO(dadrian): #concurrency
-	s.closed.setTrue()
+	s.closed.Store(true)
 	return nil
 }
 
