@@ -48,12 +48,8 @@ type Server struct {
 	wg sync.WaitGroup
 }
 
-<<<<<<< HEAD
 // FetchClientLeaf returns the client leaf certificate used in handshake with associated handle's sessionID
-=======
 // TODO(hosono) delete this. I don't think we need this
-//FetchClientLeaf returns the client leaf certificate used in handshake with associated handle's sessionID
->>>>>>> 53cc52e (refactored handle and session state)
 func (s *Server) FetchClientLeaf(h *Handle) certs.Certificate {
 	s.m.RLock()
 	defer s.m.RUnlock()
@@ -576,10 +572,10 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 // +checklocks:s.m
 func (s *Server) createHandleLocked(hs *HandshakeState) *Handle {
 	handle := &Handle{
-		recv:    common.NewDeadlineChan[[]byte](s.config.maxBufferedPacketsPerConnection()),
-		send:    common.NewDeadlineChan[message](s.config.maxBufferedPacketsPerConnection()),
-		ss:      &SessionState{},
-		server:  s,
+		recv:   common.NewDeadlineChan[[]byte](s.config.maxBufferedPacketsPerConnection()),
+		send:   common.NewDeadlineChan[message](s.config.maxBufferedPacketsPerConnection()),
+		ss:     &SessionState{},
+		server: s,
 	}
 
 	s.handles[hs.sessionID] = handle

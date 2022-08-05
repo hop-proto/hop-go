@@ -17,7 +17,7 @@ import (
 
 type message struct {
 	msgType MessageType
-	data 	[]byte
+	data    []byte
 }
 
 // Handle implements net.Conn and MsgConn for connections accepted by a Server.
@@ -34,8 +34,8 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	// currently wait on it, but we Add/Done in the actual send write function.
 	sendWg sync.WaitGroup
 
-	recv    *common.DeadlineChan[[]byte] // incoming transport messages
-	send    *common.DeadlineChan[message] // outgoing messages
+	recv *common.DeadlineChan[[]byte]  // incoming transport messages
+	send *common.DeadlineChan[message] // outgoing messages
 
 	closed common.AtomicBool
 
@@ -142,7 +142,7 @@ func (c *Handle) WriteMsg(b []byte) error {
 	}
 
 	msg := message{
-		data: append([]byte{}, b...),
+		data:    append([]byte{}, b...),
 		msgType: MessageTypeTransport,
 	}
 	return c.send.Send(msg)
@@ -183,8 +183,8 @@ func (c *Handle) WriteControl(msg ControlMessage) error {
 	if c.closed.IsSet() {
 		return io.EOF
 	}
-	toSend := message {
-		data: []byte{byte(msg)},
+	toSend := message{
+		data:    []byte{byte(msg)},
 		msgType: MessageTypeControl,
 	}
 	return c.send.Send(toSend)
