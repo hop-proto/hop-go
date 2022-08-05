@@ -31,10 +31,10 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	// TODO(hosono) should these be condition variables?
 	ctrlWg sync.WaitGroup
 
-	recv    *common.DeadlineChan // incoming transport messages
-	send    *common.DeadlineChan // outgoing transport messages
-	ctrl    *common.DeadlineChan // incoming control messages
-	ctrlOut *common.DeadlineChan // outgoing control messages
+	recv    *common.DeadlineChan[[]byte] // incoming transport messages
+	send    *common.DeadlineChan[[]byte] // outgoing transport messages
+	ctrl    *common.DeadlineChan[[]byte] // incoming control messages
+	ctrlOut *common.DeadlineChan[[]byte] // outgoing control messages
 
 	closed common.AtomicBool
 

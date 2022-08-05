@@ -60,7 +60,7 @@ type Client struct {
 	ciphertext []byte
 	plaintext  []byte
 
-	recv *common.DeadlineChan
+	recv *common.DeadlineChan[[]byte]
 
 	config ClientConfig
 }
@@ -522,7 +522,7 @@ func NewClient(conn UDPLike, server *net.UDPAddr, config ClientConfig) *Client {
 		config:         config,
 		ciphertext:     make([]byte, 65535),
 		plaintext:      make([]byte, PlaintextLen(65535)),
-		recv:           common.NewDeadlineChan(config.maxBufferedPackets()),
+		recv:           common.NewDeadlineChan[[]byte](config.maxBufferedPackets()),
 	}
 	return c
 }
