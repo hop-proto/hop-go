@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"errors"
 	"net"
 	"os"
 	"sync"
 	"time"
+	"os"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/sirupsen/logrus"
 
@@ -269,7 +273,7 @@ func (c *Handle) closeLocked() error {
 	// Wait for the sending goroutines to exit
 	c.sendWg.Wait()
 
-	c.writeControl(ControlMessageClose)
+	c.WriteControl(ControlMessageClose)
 	c.ctrlOut.Close()
 
 	c.ctrlWg.Wait()
