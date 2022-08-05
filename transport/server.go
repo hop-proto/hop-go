@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -613,74 +612,7 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 			// Should never happen
 			return nil, ErrUnknownSession
 		}
-		h.sendWg.Add(1)
-		go func(h *Handle) {
-			defer h.sendWg.Done()
-			for {
-				plaintext, err := h.send.Recv()
-				if err != nil {
-					if errors.Is(err, io.EOF) {
-						break
-					} else if errors.Is(err, os.ErrDeadlineExceeded) {
-						continue
-					} else {
-						logrus.Errorf("server: error receiving from send channel: %s", err)
-					}
-				}
-
-				err = s.lockHandleAndWriteToSession(h.ss, MessageTypeTransport, plaintext)
-				if err != nil {
-					logrus.Errorf("server: unable to write packet: %s", err)
-					// TODO(dadrian): Should this affect connection state?
-				}
-			}
-		}(h)
-
-		h.ctrlWg.Add(1)
-		go func(h *Handle) {
-			defer h.ctrlWg.Done()
-			for {
-				plaintext, err := h.ctrlOut.Recv()
-				if err != nil {
-					if errors.Is(err, io.EOF) {
-						break
-					} else if errors.Is(err, os.ErrDeadlineExceeded) {
-						continue
-					} else {
-						logrus.Errorf("server: error receiving from send channel: %s", err)
-					}
-				}
-
-				err = s.lockHandleAndWriteToSession(h.ss, MessageTypeControl, plaintext)
-				if err != nil {
-					logrus.Errorf("server: unable to write packet: %s", err)
-					// TODO(dadrian): Should this affect connection state?
-				}
-			}
-		}(h)
-		go func(h *Handle) {
-			// TODO(hosono) technically this goroutine is leaked,
-			// but it should go away since Close also closes ctrl
-			// this isn't really the best way to do this, but it does work
-			for {
-				// TODO(hosono) handle other control messages
-				msg, err := h.ctrl.Recv()
-				if err != nil {
-					break
-				}
-				if len(msg) != 1 {
-					logrus.Fatal("server: control message with unexpected length ", msg)
-				}
-				ctrlMsg := ControlMessage(msg[0])
-				switch ctrlMsg {
-				case ControlMessageClose:
-					h.recv.Cancel(io.EOF)
-					break
-				default:
-					logrus.Fatal("server: unexpected control message ", msg)
-				}
-			}
-		}(h)
+		h.Start()
 		return handle, nil
 	case <-timer.C:
 		return nil, ErrTimeout

@@ -3,10 +3,14 @@ package transport
 import (
 	"bytes"
 	"io"
+	"errors"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
+	"os"
+
+	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/common"
 )
@@ -170,12 +174,89 @@ func (c *Handle) Write(buf []byte) (int, error) {
 	return total, nil
 }
 
-func (c *Handle) writeControl(msg ControlMessage) error {
+// WriteControl writes a control message to the remote host
+func (c *Handle) WriteControl(msg ControlMessage) error {
 	if c.closed.IsSet() {
 		return io.EOF
 	}
 	plaintext := []byte{byte(msg)}
 	return c.ctrlOut.Send(plaintext)
+}
+
+func (c *Handle) sender() {
+	c.sendWg.Add(1)
+	defer c.sendWg.Done()
+	for {
+		plaintext, err := c.send.Recv()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			} else if errors.Is(err, os.ErrDeadlineExceeded) {
+				continue
+			} else {
+				logrus.Errorf("handle: error receiving from send channel: %s", err)
+			}
+		}
+
+		err = c.ss.writePacket(c.server.udpConn, MessageTypeTransport, plaintext, &c.ss.serverToClientKey)
+		if err != nil {
+			logrus.Errorf("handle: unable to write packet: %s", err)
+			// TODO(dadrian): Should this affect connection state?
+		}
+	}
+}
+
+func (c *Handle) ctrlSender() {
+	c.ctrlWg.Add(1)
+	defer c.ctrlWg.Done()
+	for {
+		plaintext, err := c.ctrlOut.Recv()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			} else if errors.Is(err, os.ErrDeadlineExceeded) {
+				continue
+			} else {
+				logrus.Errorf("handle: error receiving from send channel: %s", err)
+			}
+		}
+
+		err = c.ss.writePacket(c.server.udpConn, MessageTypeControl, plaintext, &c.ss.serverToClientKey)
+		if err != nil {
+			logrus.Errorf("handle: unable to write packet: %s", err)
+			// TODO(dadrian): Should this affect connection state?
+		}
+	}
+}
+
+func (c *Handle) ctrlHandler() {
+	c.ctrlWg.Add(1)
+	defer c.ctrlWg.Done()
+	for {
+		// TODO(hosono) handle other control messages
+		msg, err := c.ctrl.Recv()
+		if err != nil {
+			break
+		}
+		if len(msg) != 1 {
+			logrus.Fatal("handle: control message with unexpected length ", msg)
+		}
+		ctrlMsg := ControlMessage(msg[0])
+		switch ctrlMsg {
+		case ControlMessageClose:
+			c.recv.Cancel(io.EOF)
+			break
+		default:
+			logrus.Fatal("server: unexpected control message ", msg)
+		}
+	}
+}
+
+// Start starts the goroutines that handle messages
+func (c *Handle) Start() {
+	go c.sender()
+	go c.ctrlSender()
+	go c.ctrlHandler()
 }
 
 // Close closes the connection. Future operations on non-buffered data will
@@ -200,7 +281,7 @@ func (c *Handle) closeLocked() error {
 	// Wait for the sending goroutines to exit
 	c.sendWg.Wait()
 
-	c.writeControl(ControlMessageClose)
+	c.WriteControl(ControlMessageClose)
 	c.ctrlOut.Close()
 
 	c.ctrlWg.Wait()
