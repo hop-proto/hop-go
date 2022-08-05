@@ -41,7 +41,7 @@ type HopServer struct {
 	fsystem fs.FS
 
 	server   *transport.Server
-	authsock net.Listener
+	authsock net.Listener //nolint TODO(hosono) add linting back
 }
 
 // NewHopServerExt returns a Hop Server using the provided transport server.
@@ -171,7 +171,7 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 }
 
 // handles connections to the hop server UDS to allow hop client processes to get authorization grants from their principal
-func (s *HopServer) authGrantServer() {
+func (s *HopServer) authGrantServer() { // nolint TODO(hosono) add linting back
 	defer s.authsock.Close()
 	logrus.Info("S: STARTED LISTENING AT UDS: ", s.authsock.Addr().String())
 
@@ -204,7 +204,7 @@ func (s *HopServer) SetFSystem(fsystem fstest.MapFS) {
 
 // proxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
 // Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
-func (s *HopServer) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn) {
+func (s *HopServer) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn) { // nolint TODO(hosono) add linting back
 	logrus.Info("S: ACCEPTED NEW UDS CONNECTION")
 	defer c.Close()
 
@@ -247,7 +247,7 @@ func (s *HopServer) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn)
 }
 
 // verifies that client is a descendent of a process started by the principal and returns its ancestor process PID if found
-func (s *HopServer) checkCredentials(c net.Conn) (int32, error) {
+func (s *HopServer) checkCredentials(c net.Conn) (int32, error) { // nolint TODO(hosono) add linting back
 	pid, err := readCreds(c)
 	if err != nil {
 		return 0, err
@@ -278,7 +278,7 @@ func (s *HopServer) checkCredentials(c net.Conn) (int32, error) {
 }
 
 // checks tree (starting at proc) to see if cPID is a descendent
-func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
+func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool { // nolint TODO(hosono) add linting back
 	for _, child := range proc.Children {
 		if child == cPID || checkDescendents(tree, tree.Procs[child], cPID) {
 			return true

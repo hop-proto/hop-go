@@ -20,7 +20,7 @@ import (
 
 // Src: https://blog.jbowen.dev/2019/09/using-so_peercred-in-go/src/peercred/cred.go
 // Parses the credentials sent by the client when it connects to the socket
-func readCreds(c net.Conn) (int32, error) {
+func readCreds(c net.Conn) (int32, error) { //nolint TODO(hosono) add linting back
 	var cred *unix.Ucred
 
 	//should only have *net.UnixConn types
