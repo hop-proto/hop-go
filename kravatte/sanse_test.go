@@ -3,7 +3,6 @@ package kravatte
 import (
 	"crypto/cipher"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"testing"
 
@@ -114,7 +113,7 @@ type aeadTranscriptEntry struct {
 }
 
 func mustReadFileToString(path string) string {
-	content, err := ioutil.ReadFile(path)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		logrus.Panicf("unable to read file %q: %s", path, err)
 	}

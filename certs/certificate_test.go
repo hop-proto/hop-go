@@ -3,7 +3,7 @@ package certs
 import (
 	"bytes"
 	"crypto/rand"
-	"io/ioutil"
+	"io"
 	"os"
 	"testing"
 	"time"
@@ -144,7 +144,7 @@ func open(t *testing.T, f string) *os.File {
 
 func readFile(t *testing.T, f string) []byte {
 	fd := open(t, f)
-	b, err := ioutil.ReadAll(fd)
+	b, err := io.ReadAll(fd)
 	assert.NilError(t, err)
 	return b
 }
