@@ -487,12 +487,7 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte, plaintext [
 			logrus.Warnf("session %x: recv queue full, dropping packet", sessionID)
 		}
 	case MessageTypeControl:
-		select {
-		case h.ctrl.C <- plaintext[:n]:
-			break
-		default:
-			logrus.Warnf("session %x: ctrl queue full, dropping packet", sessionID)
-		}
+		h.handleControl(plaintext[:n])
 	default:
 		return 0, ErrInvalidMessage
 	}
@@ -583,7 +578,6 @@ func (s *Server) createHandleLocked(hs *HandshakeState) *Handle {
 	handle := &Handle{
 		recv:    common.NewDeadlineChan[[]byte](s.config.maxBufferedPacketsPerConnection()),
 		send:    common.NewDeadlineChan[message](s.config.maxBufferedPacketsPerConnection()),
-		ctrl:    common.NewDeadlineChan[[]byte](s.config.maxBufferedPacketsPerConnection()),
 		ss:      &SessionState{},
 		server:  s,
 	}

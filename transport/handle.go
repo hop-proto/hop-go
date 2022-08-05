@@ -33,12 +33,9 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	// TODO(dadrian): This might need to be a real condition variable. We don't
 	// currently wait on it, but we Add/Done in the actual send write function.
 	sendWg sync.WaitGroup
-	// TODO(hosono) should these be condition variables?
-	ctrlWg sync.WaitGroup
 
 	recv    *common.DeadlineChan[[]byte] // incoming transport messages
-	send    *common.DeadlineChan[message] // outgoing transport messages
-	ctrl    *common.DeadlineChan[[]byte] // incoming control messages
+	send    *common.DeadlineChan[message] // outgoing messages
 
 	closed common.AtomicBool
 
@@ -221,34 +218,27 @@ func (c *Handle) sender() {
 	}
 }
 
-func (c *Handle) ctrlHandler() {
-	c.ctrlWg.Add(1)
-	defer c.ctrlWg.Done()
-	for {
-		// TODO(hosono) handle other control messages
-		msg, err := c.ctrl.Recv()
-		if err != nil {
-			break
-		}
-		if len(msg) != 1 {
-			logrus.Fatal("handle: control message with unexpected length ", msg)
-		}
-		ctrlMsg := ControlMessage(msg[0])
-		switch ctrlMsg {
-		case ControlMessageClose:
-			c.recv.Cancel(io.EOF)
-			break
-		default:
-			logrus.Fatal("server: unexpected control message ", msg)
-		}
+func (c *Handle) handleControl(msg []byte) error {
+	if len(msg) != 1 {
+		logrus.Error("handle: invalid control message: ", msg)
+		return ErrInvalidMessage
+	}
+
+	// TODO(hosono) handle other control messages
+	ctrlMsg := ControlMessage(msg[0])
+	switch ctrlMsg {
+	case ControlMessageClose:
+		c.recv.Close()
+		return nil
+	default:
+		logrus.Error("server: unexpected control message ", msg)
+		return ErrInvalidMessage
 	}
 }
 
 // Start starts the goroutines that handle messages
 func (c *Handle) Start() {
 	go c.sender()
-	//go c.ctrlSender()
-	go c.ctrlHandler()
 }
 
 // Close closes the connection. Future operations on non-buffered data will
@@ -270,14 +260,10 @@ func (c *Handle) closeLocked() error {
 	c.closed.SetTrue()
 
 	c.recv.Close()
-	c.ctrl.Close()
 	c.send.Close()
 
 	// Wait for the sending goroutines to exit
 	c.sendWg.Wait()
-	//c.ctrlOut.Close()
-
-	c.ctrlWg.Wait()
 
 	c.server.clearHandleLocked(c.ss.sessionID)
 
