@@ -326,7 +326,7 @@ func NewDeadline(t time.Time) *Deadline {
 // DeadlineChan is a channel of byte slices attached to a deadline.
 // It allows a caller to read and write from the channel,
 // But pending reads and writes can time out or be canceled
-type DeadlineChan [T any] struct {
+type DeadlineChan[T any] struct {
 	deadline *Deadline
 	closed   AtomicBool
 	C        chan T
@@ -416,7 +416,7 @@ func (d *DeadlineChan[T]) Close() error {
 
 // NewDeadlineChan returns a pointer to a DeadlineChan with capacity of size
 func NewDeadlineChan[T any](size int) *DeadlineChan[T] {
-	return &DeadlineChan[T] {
+	return &DeadlineChan[T]{
 		deadline: NewDeadline(time.Time{}),
 		C:        make(chan T, size),
 	}
