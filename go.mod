@@ -1,6 +1,6 @@
 module hop.computer/hop
 
-go 1.18
+go 1.19
 
 require (
 	github.com/AstromechZA/etcpwdparse v0.0.0-20170319193008-f0e5f0779716
