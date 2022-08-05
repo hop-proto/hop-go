@@ -42,7 +42,7 @@ var _ MsgConn = &Handle{}
 
 var _ net.Conn = &Handle{}
 
-//IsClosed returns closed member variable value
+// IsClosed returns closed member variable value
 func (c *Handle) IsClosed() bool {
 	return c.closed.isSet()
 }

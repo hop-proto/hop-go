@@ -26,7 +26,7 @@ import (
 // DefaultHopAuthSocket is the default UDS used for Authorization grants
 // const DefaultHopAuthSocket = "@hopauth"
 
-//HopServer represents state/conns needed for a hop server
+// HopServer represents state/conns needed for a hop server
 type HopServer struct {
 	m sync.Mutex
 	// +checklocks:m
@@ -41,7 +41,7 @@ type HopServer struct {
 	fsystem fs.FS
 
 	server   *transport.Server
-	authsock net.Listener
+	authsock net.Listener //nolint TODO(hosono) add linting back
 }
 
 // NewHopServerExt returns a Hop Server using the provided transport server.
@@ -129,7 +129,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 // 	s.authsock.Close()
 // }
 
-//Serve listens for incoming hop connection requests and start corresponding authGrantServer on a Unix Domain socket
+// Serve listens for incoming hop connection requests and start corresponding authGrantServer on a Unix Domain socket
 func (s *HopServer) Serve() {
 	// logrus.SetLevel(logrus.InfoLevel)
 
@@ -170,8 +170,8 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 	sess.start()
 }
 
-//handles connections to the hop server UDS to allow hop client processes to get authorization grants from their principal
-func (s *HopServer) authGrantServer() {
+// handles connections to the hop server UDS to allow hop client processes to get authorization grants from their principal
+func (s *HopServer) authGrantServer() { // nolint TODO(hosono) add linting back
 	defer s.authsock.Close()
 	logrus.Info("S: STARTED LISTENING AT UDS: ", s.authsock.Addr().String())
 
@@ -202,9 +202,9 @@ func (s *HopServer) SetFSystem(fsystem fstest.MapFS) {
 	s.fsystem = fsystem
 }
 
-//proxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
-//Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
-func (s *HopServer) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn) {
+// proxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
+// Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
+func (s *HopServer) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn) { // nolint TODO(hosono) add linting back
 	logrus.Info("S: ACCEPTED NEW UDS CONNECTION")
 	defer c.Close()
 
@@ -246,8 +246,8 @@ func (s *HopServer) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn)
 	}
 }
 
-//verifies that client is a descendent of a process started by the principal and returns its ancestor process PID if found
-func (s *HopServer) checkCredentials(c net.Conn) (int32, error) {
+// verifies that client is a descendent of a process started by the principal and returns its ancestor process PID if found
+func (s *HopServer) checkCredentials(c net.Conn) (int32, error) { // nolint TODO(hosono) add linting back
 	pid, err := readCreds(c)
 	if err != nil {
 		return 0, err
@@ -278,7 +278,7 @@ func (s *HopServer) checkCredentials(c net.Conn) (int32, error) {
 }
 
 // checks tree (starting at proc) to see if cPID is a descendent
-func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
+func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool { // nolint TODO(hosono) add linting back
 	for _, child := range proc.Children {
 		if child == cPID || checkDescendents(tree, tree.Procs[child], cPID) {
 			return true

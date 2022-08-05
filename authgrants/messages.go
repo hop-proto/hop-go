@@ -13,10 +13,10 @@ import (
 	"time"
 )
 
-//TODO(baumanl): Some of this may be overly complex. Figure out best way to standardize/simplify.
+// TODO(baumanl): Some of this may be overly complex. Figure out best way to standardize/simplify.
 const authGrantValidTime = 5 * time.Second
 
-//General Constants
+// General Constants
 const (
 	IntentRequest       = byte(1)
 	IntentCommunication = byte(2)
@@ -24,13 +24,13 @@ const (
 	IntentDenied        = byte(4)
 )
 
-//ErrUnknownMessage used when msgtype does not match any of the authorization grant protocol defined messages.
+// ErrUnknownMessage used when msgtype does not match any of the authorization grant protocol defined messages.
 var ErrUnknownMessage = errors.New("received message with unknown message type")
 
-//ErrIntentDenied indicates an intent request was denied
+// ErrIntentDenied indicates an intent request was denied
 var ErrIntentDenied = errors.New("received intent denied message")
 
-//Action Type Constants
+// Action Type Constants
 const (
 	ShellAction    = byte(1)
 	CommandAction  = byte(2)
@@ -38,7 +38,7 @@ const (
 	RemotePFAction = byte(4)
 )
 
-//Intent Request and Communication constants
+// Intent Request and Communication constants
 const (
 	sha3Len              = 32
 	usernameLen          = 32
@@ -60,13 +60,13 @@ const (
 	associatedDataOffset    = actionTypeOffset + actionTypeLen + reservedLen + associatedDataLenLen //2 bytes for length of associated data
 )
 
-//Intent Confirmation constants
+// Intent Confirmation constants
 const (
 	deadlineOffset = 0
 	deadlineLen    = 8
 )
 
-//Intent Denied constants
+// Intent Denied constants
 const (
 	reasonOffset = 1
 )
@@ -84,7 +84,7 @@ type data interface {
 	toBytes() []byte
 }
 
-//Intent contains all data fields of an Intent request or Intent communication
+// Intent contains all data fields of an Intent request or Intent communication
 type Intent struct {
 	sha3           [sha3Len]byte
 	clientUsername string
@@ -96,17 +96,17 @@ type Intent struct {
 	associatedData string
 }
 
-//intentConfirmationMsg contains deadline for an approved auth grant
+// intentConfirmationMsg contains deadline for an approved auth grant
 type intentConfirmationMsg struct {
 	deadline int64 //Unix time
 }
 
-//intentDeniedMsg contains reason for a denied auth grant
+// intentDeniedMsg contains reason for a denied auth grant
 type intentDeniedMsg struct {
 	reason string
 }
 
-//Constructors
+// Constructors
 func newIntent(digest [sha3Len]byte, sUser string, hostname string, port string, grantType byte, associatedData string) *Intent {
 	user, _ := user.Current()
 	cSNI, _ := os.Hostname()
@@ -132,7 +132,7 @@ func newIntentRequest(digest [sha3Len]byte, sUser string, hostname string, port 
 	}
 }
 
-//Makes an Intent Communication from an Intent Request (just change msg type)
+// Makes an Intent Communication from an Intent Request (just change msg type)
 func commFromReq(b []byte) []byte {
 	return append([]byte{IntentCommunication}, b[:]...)
 }
@@ -157,7 +157,7 @@ func newIntentDenied(r string) *agMessage {
 	}
 }
 
-//toBytes()
+// toBytes()
 func (r *Intent) toBytes() []byte {
 	s := [irHeaderLen]byte{}
 	copy(s[sha3Offset:cUserOffset], r.sha3[:])
@@ -186,7 +186,7 @@ func (a *agMessage) toBytes() []byte {
 	return append([]byte{a.msgType}, a.d.toBytes()...)
 }
 
-//Given a byte slice return the string representation of the bytes before the first null byte.
+// Given a byte slice return the string representation of the bytes before the first null byte.
 func trimNullBytes(b []byte) string {
 	i := bytes.Index(b, []byte{0})
 	if i != -1 {
@@ -195,7 +195,7 @@ func trimNullBytes(b []byte) string {
 	return string(b)
 }
 
-//fromBytes()
+// fromBytes()
 func fromIntentBytes(b []byte) *Intent {
 	r := Intent{}
 	copy(r.sha3[:], b[sha3Offset:cUserOffset])
@@ -229,17 +229,17 @@ func fromIntentDeniedBytes(b []byte) *intentDeniedMsg {
 	return &d
 }
 
-//Address returns the serverSNI and port from the intent
+// Address returns the serverSNI and port from the intent
 func (r *Intent) Address() (string, string) {
 	return r.serverSNI, strconv.Itoa(int(r.port))
 }
 
-//Username returns the serverUsername from the intent
+// Username returns the serverUsername from the intent
 func (r *Intent) Username() string {
 	return r.serverUsername
 }
 
-//Prompt prints the authgrant approval prompt to terminal and continues prompting until user enters "y" or "n"
+// Prompt prints the authgrant approval prompt to terminal and continues prompting until user enters "y" or "n"
 func (r *Intent) Prompt(reader *io.PipeReader) bool {
 	var ans string
 	for ans != "y" && ans != "n" {

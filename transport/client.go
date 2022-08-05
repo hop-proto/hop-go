@@ -12,8 +12,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-//UDPLike interface standardizes Reliable channels and UDPConn.
-//Reliable channels implement this interface so they can be used as the underlying conn for Clients
+// UDPLike interface standardizes Reliable channels and UDPConn.
+// Reliable channels implement this interface so they can be used as the underlying conn for Clients
 type UDPLike interface {
 	net.Conn
 	WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error)

@@ -7,7 +7,7 @@ import (
 	"hop.computer/hop/tubes"
 )
 
-//start session between principal and target proxied through the delegate
+// start session between principal and target proxied through the delegate
 func (c *HopClient) setupRemoteSession(req *authgrants.Intent) (*HopClient, error) {
 	panic("update me!")
 	//logrus.Info("C: USER CONFIRMED FIRST INTENT_REQUEST. CONTACTING S2...")
@@ -61,7 +61,7 @@ func (c *HopClient) setupRemoteSession(req *authgrants.Intent) (*HopClient, erro
 	// return subsess, nil
 }
 
-//start an authorization grant connection with the remote server and send intent request. return response.
+// start an authorization grant connection with the remote server and send intent request. return response.
 func (c *HopClient) confirmWithRemote(req *authgrants.Intent, npAgc *authgrants.AuthGrantConn, agt *authgrants.AuthGrantConn) ([]byte, error) {
 	//send INTENT_COMMUNICATION
 	e := npAgc.SendIntentCommunication(req)

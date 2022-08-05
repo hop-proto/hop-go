@@ -46,7 +46,7 @@ type Server struct {
 	cookieKey [KeyLen]byte
 }
 
-//FetchClientLeaf returns the client leaf certificate used in handshake with associated handle's sessionID
+// FetchClientLeaf returns the client leaf certificate used in handshake with associated handle's sessionID
 func (s *Server) FetchClientLeaf(h *Handle) certs.Certificate {
 	s.m.RLock()
 	defer s.m.RUnlock()

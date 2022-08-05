@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math"
 	"os"
 	"strings"
@@ -486,7 +485,7 @@ func ReadCertificatePEMFile(path string) (*Certificate, error) {
 		return nil, err
 	}
 	defer fd.Close()
-	b, err := ioutil.ReadAll(fd)
+	b, err := io.ReadAll(fd)
 	if err != nil {
 		return nil, err
 	}
@@ -502,7 +501,7 @@ func ReadCertificateBytesFromPEMFile(path string) (*Certificate, []byte, error) 
 		return nil, nil, err
 	}
 	defer fd.Close()
-	b, err := ioutil.ReadAll(fd)
+	b, err := io.ReadAll(fd)
 	if err != nil {
 		return nil, nil, err
 	}

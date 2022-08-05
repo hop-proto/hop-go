@@ -28,7 +28,7 @@ import (
 	"hop.computer/hop/userauth"
 )
 
-//AuthGrant contains deadline, user, data
+// AuthGrant contains deadline, user, data
 type data struct {
 	actionType     byte
 	associatedData string
@@ -120,9 +120,9 @@ func (sess *hopSession) checkAuthorization() bool {
 	*/
 }
 
-//start() sets up a session's muxer and handles incoming tube requests.
-//calls close when it receives a signal from the code execution tube that it is finished
-//TODO(baumanl): change closing behavior for sessions without cmd/shell --> integrate port forwarding duration
+// start() sets up a session's muxer and handles incoming tube requests.
+// calls close when it receives a signal from the code execution tube that it is finished
+// TODO(baumanl): change closing behavior for sessions without cmd/shell --> integrate port forwarding duration
 func (sess *hopSession) start() {
 	go func() {
 		err := sess.tubeMuxer.Start()
@@ -193,7 +193,7 @@ func (sess *hopSession) close() error {
 	return err2
 }
 
-//handleAgc handles Intent Communications from principals and updates the outstanding authgrants maps appropriately
+// handleAgc handles Intent Communications from principals and updates the outstanding authgrants maps appropriately
 func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 	agc := authgrants.NewAuthGrantConn(tube)
 	defer agc.Close()
@@ -234,7 +234,7 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 	}
 }
 
-//server enforces that delegates only execute approved actions
+// server enforces that delegates only execute approved actions
 func (sess *hopSession) checkAction(action string, actionType byte) error {
 	logrus.Info("CHECKING ACTION IS AUTHORIZED")
 	for elem := range sess.authgrant.actions {
@@ -392,7 +392,7 @@ func (sess *hopSession) startSizeTube(ch *tubes.Reliable) {
 	codex.HandleSize(ch, <-sess.pty)
 }
 
-//RemoteServer starts listening on given port and pipes the traffic back over the tube
+// RemoteServer starts listening on given port and pipes the traffic back over the tube
 func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
 	//parts := strings.Split(arg, ":") //assuming port:host:hostport
 	fwdStruct := portforwarding.Fwd{
@@ -516,7 +516,7 @@ func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
 
 }
 
-//LocalServer starts a TCP Conn with remote addr and proxies traffic from ch -> tcp and tcp -> ch
+// LocalServer starts a TCP Conn with remote addr and proxies traffic from ch -> tcp and tcp -> ch
 func (sess *hopSession) LocalServer(tube *tubes.Reliable, arg string) {
 	defer tube.Close()
 

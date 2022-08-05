@@ -38,8 +38,10 @@ func (r *receiver) getAck() uint32 {
 	return uint32(r.ackNo)
 }
 
-/* Processes window into buffer stream if the ordered fragments are ready (in order).
-Precondition: r.m mutex is held. */
+/*
+Processes window into buffer stream if the ordered fragments are ready (in order).
+Precondition: r.m mutex is held.
+*/
 func (r *receiver) processIntoBuffer() {
 	for r.fragments.Len() > 0 {
 		frag := heap.Pop(&(r.fragments)).(*pqItem)
@@ -101,8 +103,10 @@ func frameInBounds(wS uint64, wE uint64, f uint64) bool {
 	return true
 }
 
-/* Utility function to add offsets so that we eliminate wraparounds.
-   Precondition: must be holding frame number */
+/*
+Utility function to add offsets so that we eliminate wraparounds.
+Precondition: must be holding frame number
+*/
 func (r *receiver) unwrapFrameNo(frameNo uint32) uint64 {
 	// The previous, offsets are represented by the 32 least significant bytes of the window start.
 	windowStart := r.windowStart
