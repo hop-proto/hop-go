@@ -268,14 +268,10 @@ func (c *Handle) closeLocked() error {
 	c.closed.SetTrue()
 
 	c.recv.Close()
-	c.ctrl.Close()
 	c.send.Close()
 
 	// Wait for the sending goroutines to exit
 	c.sendWg.Wait()
-	//c.ctrlOut.Close()
-
-	c.ctrlWg.Wait()
 
 	c.server.clearHandleLocked(c.ss.sessionID)
 
