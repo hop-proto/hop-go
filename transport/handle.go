@@ -15,6 +15,11 @@ import (
 	"hop.computer/hop/common"
 )
 
+type message struct {
+	msgType MessageType
+	data 	[]byte
+}
+
 // Handle implements net.Conn and MsgConn for connections accepted by a Server.
 type Handle struct { // nolint:maligned // unclear if 120-byte struct is better than 128
 
@@ -32,9 +37,8 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	ctrlWg sync.WaitGroup
 
 	recv    *common.DeadlineChan[[]byte] // incoming transport messages
-	send    *common.DeadlineChan[[]byte] // outgoing transport messages
+	send    *common.DeadlineChan[message] // outgoing transport messages
 	ctrl    *common.DeadlineChan[[]byte] // incoming control messages
-	ctrlOut *common.DeadlineChan[[]byte] // outgoing control messages
 
 	closed common.AtomicBool
 
@@ -140,8 +144,11 @@ func (c *Handle) WriteMsg(b []byte) error {
 		return ErrBufOverflow
 	}
 
-	buf := append([]byte{}, b...)
-	return c.send.Send(buf)
+	msg := message{
+		data: append([]byte{}, b...),
+		msgType: MessageTypeTransport,
+	}
+	return c.send.Send(msg)
 }
 
 // Write implements io.Writer. It will split b into segments of length
@@ -179,15 +186,18 @@ func (c *Handle) WriteControl(msg ControlMessage) error {
 	if c.closed.IsSet() {
 		return io.EOF
 	}
-	plaintext := []byte{byte(msg)}
-	return c.ctrlOut.Send(plaintext)
+	toSend := message {
+		data: []byte{byte(msg)},
+		msgType: MessageTypeControl,
+	}
+	return c.send.Send(toSend)
 }
 
 func (c *Handle) sender() {
 	c.sendWg.Add(1)
 	defer c.sendWg.Done()
 	for {
-		plaintext, err := c.send.Recv()
+		msg, err := c.send.Recv()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
@@ -198,33 +208,15 @@ func (c *Handle) sender() {
 			}
 		}
 
-		err = c.ss.writePacket(c.server.udpConn, MessageTypeTransport, plaintext, &c.ss.serverToClientKey)
+		err = c.ss.writePacket(c.server.udpConn, msg.msgType, msg.data, &c.ss.serverToClientKey)
 		if err != nil {
 			logrus.Errorf("handle: unable to write packet: %s", err)
 			// TODO(dadrian): Should this affect connection state?
 		}
-	}
-}
 
-func (c *Handle) ctrlSender() {
-	c.ctrlWg.Add(1)
-	defer c.ctrlWg.Done()
-	for {
-		plaintext, err := c.ctrlOut.Recv()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			} else if errors.Is(err, os.ErrDeadlineExceeded) {
-				continue
-			} else {
-				logrus.Errorf("handle: error receiving from send channel: %s", err)
-			}
-		}
-
-		err = c.ss.writePacket(c.server.udpConn, MessageTypeControl, plaintext, &c.ss.serverToClientKey)
-		if err != nil {
-			logrus.Errorf("handle: unable to write packet: %s", err)
-			// TODO(dadrian): Should this affect connection state?
+		// end loop after sending control message
+		if msg.msgType == MessageTypeControl && ControlMessage(msg.data[0]) == ControlMessageClose {
+			break
 		}
 	}
 }
@@ -255,7 +247,7 @@ func (c *Handle) ctrlHandler() {
 // Start starts the goroutines that handle messages
 func (c *Handle) Start() {
 	go c.sender()
-	go c.ctrlSender()
+	//go c.ctrlSender()
 	go c.ctrlHandler()
 }
 
@@ -274,21 +266,20 @@ func (c *Handle) closeLocked() error {
 		return io.EOF
 	}
 
+	c.WriteControl(ControlMessageClose)
+	c.closed.SetTrue()
+
 	c.recv.Close()
-	c.send.Close()
 	c.ctrl.Close()
+	c.send.Close()
 
 	// Wait for the sending goroutines to exit
 	c.sendWg.Wait()
-
-	c.WriteControl(ControlMessageClose)
-	c.ctrlOut.Close()
+	//c.ctrlOut.Close()
 
 	c.ctrlWg.Wait()
 
 	c.server.clearHandleLocked(c.ss.sessionID)
-
-	c.closed.SetTrue()
 
 	return nil
 }

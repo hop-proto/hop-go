@@ -582,9 +582,8 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 func (s *Server) createHandleLocked(hs *HandshakeState) *Handle {
 	handle := &Handle{
 		recv:    common.NewDeadlineChan[[]byte](s.config.maxBufferedPacketsPerConnection()),
-		send:    common.NewDeadlineChan[[]byte](s.config.maxBufferedPacketsPerConnection()),
+		send:    common.NewDeadlineChan[message](s.config.maxBufferedPacketsPerConnection()),
 		ctrl:    common.NewDeadlineChan[[]byte](s.config.maxBufferedPacketsPerConnection()),
-		ctrlOut: common.NewDeadlineChan[[]byte](s.config.maxBufferedPacketsPerConnection()),
 		ss:      &SessionState{},
 		server:  s,
 	}

@@ -192,8 +192,12 @@ func (d *DeadlineChan[T]) SetDeadline(t time.Time) error {
 
 // Cancel cancels pending calls to Send and Recv and causes them to return err
 // TODO(hosono) when should Recv return buffered data
-func (d *DeadlineChan[T]) Cancel(err error) {
+func (d *DeadlineChan[T]) Cancel(err error) error {
+	if d.closed.IsSet() {
+		return io.EOF
+	}
 	d.deadline.Cancel(err)
+	return nil
 }
 
 // Close cancels pending calls to Send and Recv. Those calls will return
