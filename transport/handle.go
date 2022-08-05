@@ -214,8 +214,6 @@ func (c *Handle) sender() {
 			logrus.Errorf("handle: resetting connection. unable to write packet: %s", err)
 			go c.Close()
 		}
-	}
-}
 
 func (c *Handle) handleControl(msg []byte) (err error) {
 	if len(msg) != 1 {
@@ -266,15 +264,16 @@ func (c *Handle) closeLocked() error {
 		return io.EOF
 	}
 
+	c.WriteControl(ControlMessageClose)
+	c.closed.SetTrue()
+
 	c.recv.Close()
-	c.send.Close()
 	c.ctrl.Close()
+	c.send.Close()
 
 	// Wait for the sending goroutines to exit
 	c.sendWg.Wait()
-
-	c.WriteControl(ControlMessageClose)
-	c.ctrlOut.Close()
+	//c.ctrlOut.Close()
 
 	c.ctrlWg.Wait()
 
