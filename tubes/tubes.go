@@ -1,4 +1,4 @@
-//Package tubes implements the multiplexing of raw data into logical channels of a hop session
+// Package tubes implements the multiplexing of raw data into logical channels of a hop session
 package tubes
 
 import (
@@ -204,7 +204,7 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 	return r.sender.write(b)
 }
 
-//WriteMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
+// WriteMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
 	length := len(b)
 	h := make([]byte, 2)
@@ -213,7 +213,7 @@ func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, e
 	return length, 0, e
 }
 
-//ReadMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
+// ReadMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
 	h := make([]byte, 2)
 	_, e := io.ReadFull(r, h)
@@ -227,7 +227,7 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 	return n, 0, 0, nil, e
 }
 
-//Close handles closing reliable tubes
+// Close handles closing reliable tubes
 func (r *Reliable) Close() error {
 	r.m.Lock()
 	name := r.id
@@ -274,34 +274,34 @@ func (r *Reliable) Close() error {
 	return nil
 }
 
-//Type returns tube type
+// Type returns tube type
 func (r *Reliable) Type() TubeType {
 	return r.tType
 }
 
-//LocalAddr returns tube local address
+// LocalAddr returns tube local address
 func (r *Reliable) LocalAddr() net.Addr {
 	return r.localAddr
 }
 
-//RemoteAddr returns r.remoteAddr
+// RemoteAddr returns r.remoteAddr
 func (r *Reliable) RemoteAddr() net.Addr {
 	return r.remoteAddr
 }
 
-//SetDeadline (not implemented)
+// SetDeadline (not implemented)
 func (r *Reliable) SetDeadline(t time.Time) error {
 	// TODO
 	panic("implement me")
 }
 
-//SetReadDeadline (not implemented)
+// SetReadDeadline (not implemented)
 func (r *Reliable) SetReadDeadline(t time.Time) error {
 	// TODO
 	panic("implement me")
 }
 
-//SetWriteDeadline (not implemented)
+// SetWriteDeadline (not implemented)
 func (r *Reliable) SetWriteDeadline(t time.Time) error {
 	// TODO
 	panic("implement me")

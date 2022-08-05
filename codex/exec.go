@@ -17,7 +17,7 @@ import (
 	"hop.computer/hop/tubes"
 )
 
-//ExecTube wraps a code execution tube with additional terminal state
+// ExecTube wraps a code execution tube with additional terminal state
 type ExecTube struct {
 	tube  *tubes.Reliable
 	state *term.State
@@ -36,7 +36,7 @@ const (
 	execFail = byte(2)
 )
 
-//SendFailure lets the client know that executing the command failed and the error
+// SendFailure lets the client know that executing the command failed and the error
 func SendFailure(t *tubes.Reliable, err error) {
 	msg := make([]byte, 5+len(err.Error()))
 	msg[0] = execFail
@@ -45,12 +45,12 @@ func SendFailure(t *tubes.Reliable, err error) {
 	t.Write(msg)
 }
 
-//SendSuccess lets the client know that the server successful started the command
+// SendSuccess lets the client know that the server successful started the command
 func SendSuccess(t *tubes.Reliable) {
 	t.Write([]byte{execConf})
 }
 
-//GetStatus lets client waits for confirmation that cmd started or error if it failed
+// GetStatus lets client waits for confirmation that cmd started or error if it failed
 func getStatus(t *tubes.Reliable) error {
 	// TODO(drebelsky): consider how to handle erros in io.ReadFull
 	resp := make([]byte, 1)
@@ -65,8 +65,8 @@ func getStatus(t *tubes.Reliable) error {
 	return errors.New(string(buf))
 }
 
-//NewExecTube sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
-//Stores state in an ExecChan struct so stdin can be manipulated during authgrant process
+// NewExecTube sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
+// Stores state in an ExecChan struct so stdin can be manipulated during authgrant process
 func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTube, error) {
 	// TODO(baumanl): if no actual attached terminal then this causes issues.
 	var oldState *term.State
@@ -193,7 +193,7 @@ func (m *execInitMsg) ToBytes() []byte {
 	return r
 }
 
-//GetCmd reads execInitMsg from an EXEC_CHANNEL and returns the cmd to run
+// GetCmd reads execInitMsg from an EXEC_CHANNEL and returns the cmd to run
 func GetCmd(c net.Conn) (string, string, bool, *pty.Winsize, error) {
 	//TODO (drebelsky): consider handling io errors
 	t := make([]byte, 1)
@@ -237,7 +237,7 @@ func serializeSize(b []byte, size *pty.Winsize) {
 	binary.BigEndian.PutUint16(b[6:], size.Y)
 }
 
-//HandleSize deals with resizing the pty according to messages from a WinSize tube
+// HandleSize deals with resizing the pty according to messages from a WinSize tube
 func HandleSize(tube *tubes.Reliable, ptyFile *os.File) {
 	for {
 		if size, err := readSize(tube); err == nil {
@@ -246,7 +246,7 @@ func HandleSize(tube *tubes.Reliable, ptyFile *os.File) {
 	}
 }
 
-//Server deals with serverside code exec channel details like pty size, copies ch -> pty and pty -> ch
+// Server deals with serverside code exec channel details like pty size, copies ch -> pty and pty -> ch
 func Server(tube *tubes.Reliable, f *os.File) {
 	defer tube.Close()
 	defer func() { _ = f.Close() }() // Best effort.
@@ -262,25 +262,25 @@ func Server(tube *tubes.Reliable, f *os.File) {
 	wg.Wait()
 }
 
-//Resume makes sure the input is piped to the exec tube
+// Resume makes sure the input is piped to the exec tube
 func (e *ExecTube) Resume() {
 	e.redir = false
 }
 
-//Redirect redirects os.Stdin to a pipe and returns the read end
+// Redirect redirects os.Stdin to a pipe and returns the read end
 func (e *ExecTube) Redirect() *io.PipeReader {
 	e.redir = true
 	return e.r
 }
 
-//Restore returns the terminal to regular state
+// Restore returns the terminal to regular state
 func (e *ExecTube) Restore() {
 	if e.state != nil {
 		term.Restore(int(os.Stdin.Fd()), e.state)
 	}
 }
 
-//Raw switches the terminal to raw mode
+// Raw switches the terminal to raw mode
 func (e *ExecTube) Raw() {
 	if e.state != nil {
 		term.MakeRaw(int(os.Stdin.Fd()))

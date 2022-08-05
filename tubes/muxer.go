@@ -10,7 +10,7 @@ import (
 	"hop.computer/hop/transport"
 )
 
-//Muxer handles delivering and sending tube messages
+// Muxer handles delivering and sending tube messages
 type Muxer struct {
 	// +checklocks:m
 	tubes map[byte]*Reliable
@@ -25,7 +25,7 @@ type Muxer struct {
 	timeout    time.Duration
 }
 
-//NewMuxer starts a new tube muxer
+// NewMuxer starts a new tube muxer
 func NewMuxer(msgConn transport.MsgConn, netConn net.Conn, timeout time.Duration) *Muxer {
 	return &Muxer{
 		tubes:      make(map[byte]*Reliable),
@@ -52,7 +52,7 @@ func (m *Muxer) getTube(tubeID byte) (*Reliable, bool) {
 	return c, ok
 }
 
-//CreateTube starts a new reliable tube
+// CreateTube starts a new reliable tube
 func (m *Muxer) CreateTube(tType TubeType) (*Reliable, error) {
 	r, err := newReliableTube(m.underlying, m.netConn, m.sendQueue, tType)
 	m.addTube(r)
@@ -60,7 +60,7 @@ func (m *Muxer) CreateTube(tType TubeType) (*Reliable, error) {
 	return r, err
 }
 
-//Accept blocks for and accepts a new reliable tube
+// Accept blocks for and accepts a new reliable tube
 func (m *Muxer) Accept() (*Reliable, error) {
 	s := <-m.tubeQueue
 	logrus.Infof("Accepted Tube: %v", s.id)
@@ -89,7 +89,7 @@ func (m *Muxer) sender() {
 	}
 }
 
-//Start allows a muxer to start listening and handling incoming tube requests and messages
+// Start allows a muxer to start listening and handling incoming tube requests and messages
 func (m *Muxer) Start() error {
 	go m.sender()
 	m.stopped = false
@@ -139,7 +139,7 @@ func (m *Muxer) Start() error {
 	return nil
 }
 
-//Stop ensures all the muxer tubes are closed
+// Stop ensures all the muxer tubes are closed
 func (m *Muxer) Stop() {
 	m.m.Lock()
 	wg := sync.WaitGroup{}

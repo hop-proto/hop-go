@@ -287,7 +287,7 @@ func loadLeaf(leafFile string, autoSelfSign bool, public *keys.PublicKey, addres
 	return leaf
 }
 
-//Start starts any port forwarding/cmds/shells from the client
+// Start starts any port forwarding/cmds/shells from the client
 func (c *HopClient) Start() error {
 	//TODO(baumanl): fix how session duration tied to cmd duration or port
 	//forwarding duration depending on options
@@ -340,12 +340,12 @@ func (c *HopClient) Start() error {
 	return nil
 }
 
-//Wait blocks until the client has finished (usually used when waiting for a session tied to cmd/shell to finish)
+// Wait blocks until the client has finished (usually used when waiting for a session tied to cmd/shell to finish)
 func (c *HopClient) Wait() {
 	c.wg.Wait()
 }
 
-//Close explicitly closes down hop session (usually used after PF is down and can be terminated)
+// Close explicitly closes down hop session (usually used after PF is down and can be terminated)
 func (c *HopClient) Close() error {
 	panic("not implemented")
 	//close all remote and local port forwarding relationships
@@ -483,7 +483,7 @@ func (c *HopClient) startExecTube() error {
 	return err
 }
 
-//HandleTubes handles incoming tube requests to the client
+// HandleTubes handles incoming tube requests to the client
 func (c *HopClient) HandleTubes() {
 	//TODO(baumanl): figure out responses to different tube types/what all should be allowed
 	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****

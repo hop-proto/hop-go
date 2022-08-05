@@ -24,6 +24,7 @@ func PlaintextLen(transportLen int) int {
 
 // Convert key of the form [num num num num] to the corresponding binary string
 // Returns nil on invalid parse
+//
 //export parseKey
 func parseKey(keyString unsafe.Pointer, keyLen C.size_t) (unsafe.Pointer, int) {
 	key := string(unsafe.Slice((*byte)(keyString), keyLen))
@@ -52,6 +53,7 @@ const ErrPlaintextSize = 8
 // This is a lightly modified version of (*SessionState).ReadPacket to provide a better FFI
 
 // Returns number of bytes read, error
+//
 //export readPacket
 func readPacket(
 	plaintext_buf unsafe.Pointer, plaintext_len C.int,

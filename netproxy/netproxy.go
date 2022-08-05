@@ -18,7 +18,7 @@ var hostToIPAddr = map[string]string{ //TODO(baumanl): this should be dealt with
 	"localhost":  "127.0.0.1",
 }
 
-//Constants related to netproxy channels
+// Constants related to netproxy channels
 const (
 	NpcConf = byte(1)
 	NpcDen  = byte(2)
@@ -56,7 +56,7 @@ func fromBytes(b []byte) *npcInitMsg {
 	}
 }
 
-//Start sends an NPCInitMsg and waits for confirmation that the proxy connection is ready
+// Start sends an NPCInitMsg and waits for confirmation that the proxy connection is ready
 func Start(npTube *tubes.Reliable, arg string, t byte) error {
 	npTube.Write(newNPCInitMsg(arg, t).toBytes()) //tell server to prepare to proxy to addr (start a UDP conn)
 	//TODO(baumanl): Make better conf/denial messages for NPC
@@ -78,7 +78,7 @@ func Start(npTube *tubes.Reliable, arg string, t byte) error {
 	return nil
 }
 
-//Server starts a UDP Conn with remote addr and proxies traffic from ch -> udp and upd -> ch
+// Server starts a UDP Conn with remote addr and proxies traffic from ch -> udp and upd -> ch
 func Server(npTube *tubes.Reliable) {
 	b := make([]byte, 4)
 	io.ReadFull(npTube, b)

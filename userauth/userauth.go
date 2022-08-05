@@ -18,7 +18,7 @@ type userAuthInitMsg struct {
 	username string
 }
 
-//Server tells client whether user authorization confirmed or denied
+// Server tells client whether user authorization confirmed or denied
 const (
 	UserAuthConf = byte(1)
 	UserAuthDen  = byte(2)
@@ -38,7 +38,7 @@ func (msg *userAuthInitMsg) toBytes() []byte {
 	return s
 }
 
-//RequestAuthorization used by client to send username and get server confirmation or denial
+// RequestAuthorization used by client to send username and get server confirmation or denial
 func RequestAuthorization(ch *tubes.Reliable, username string) bool {
 	ch.Write(newUserAuthInitMsg(username).toBytes())
 	//add timeout
@@ -47,7 +47,7 @@ func RequestAuthorization(ch *tubes.Reliable, username string) bool {
 	return b[0] == UserAuthConf
 }
 
-//GetInitMsg lets the hop server read a user auth request
+// GetInitMsg lets the hop server read a user auth request
 func GetInitMsg(ch *tubes.Reliable) string {
 	lbuf := make([]byte, 4)
 	io.ReadFull(ch, lbuf)
