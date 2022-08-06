@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,7 +31,7 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	recv chan []byte
 	send chan []byte
 
-	closed atomicBool
+	closed atomic.Bool
 
 	// +checklocks:readLock
 	buf bytes.Buffer
@@ -44,7 +45,7 @@ var _ net.Conn = &Handle{}
 
 // IsClosed returns closed member variable value
 func (c *Handle) IsClosed() bool {
-	return c.closed.isSet()
+	return c.closed.Load()
 }
 
 // ReadMsg implements the MsgReader interface. If b is too short to hold the
@@ -72,7 +73,7 @@ func (c *Handle) ReadMsg(b []byte) (int, error) {
 	case msg = <-c.recv:
 		break
 	default:
-		if c.closed.isSet() {
+		if c.closed.Load() {
 			return 0, io.EOF
 		}
 	}
@@ -128,7 +129,7 @@ func (c *Handle) Read(b []byte) (int, error) {
 	case msg = <-c.recv:
 		break
 	default:
-		if c.closed.isSet() {
+		if c.closed.Load() {
 			return 0, io.EOF
 		}
 	}
@@ -163,14 +164,14 @@ func (c *Handle) WriteMsg(b []byte) error {
 	if len(b) > MaxPlaintextSize {
 		return ErrBufOverflow
 	}
-	if c.closed.isSet() {
+	if c.closed.Load() {
 		return io.EOF
 	}
 	select {
 	case c.send <- b:
 		return nil
 	default:
-		if c.closed.isSet() {
+		if c.closed.Load() {
 			return io.EOF
 		}
 	}
@@ -183,7 +184,7 @@ func (c *Handle) WriteMsg(b []byte) error {
 		}
 		return nil
 	case <-timer.C:
-		if c.closed.isSet() {
+		if c.closed.Load() {
 			return io.EOF
 		}
 		return ErrTimeout
@@ -194,7 +195,7 @@ func (c *Handle) WriteMsg(b []byte) error {
 // MaxPlaintextLength and send them using WriteMsg. Each call to WriteMsg is
 // subject to the timeout.
 func (c *Handle) Write(b []byte) (int, error) {
-	if c.closed.isSet() {
+	if c.closed.Load() {
 		return 0, io.EOF
 	}
 	if len(b) <= MaxPlaintextSize {
@@ -253,7 +254,7 @@ func (c *Handle) RemoteAddr() net.Addr {
 //
 // TODO(dadrian): Implement as a deadline.
 func (c *Handle) SetDeadline(t time.Time) error {
-	if c.closed.isSet() {
+	if c.closed.Load() {
 		return io.EOF
 	}
 	now := time.Now()
@@ -272,7 +273,7 @@ func (c *Handle) SetDeadline(t time.Time) error {
 //
 // TODO(dadrian): Implement as a deadline.
 func (c *Handle) SetReadDeadline(t time.Time) error {
-	if c.closed.isSet() {
+	if c.closed.Load() {
 		return io.EOF
 	}
 
@@ -297,7 +298,7 @@ func (c *Handle) SetReadDeadline(t time.Time) error {
 //
 // TODO(dadrian): Implement as a deadline.
 func (c *Handle) SetWriteDeadline(t time.Time) error {
-	if c.closed.isSet() {
+	if c.closed.Load() {
 		return io.EOF
 	}
 
