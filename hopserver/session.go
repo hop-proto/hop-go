@@ -182,7 +182,7 @@ func (sess *hopSession) close() error {
 	}
 
 	sess.tubeMuxer.Stop()
-	//err2 = sess.transportConn.Close() //(not implemented yet)
+	//err2 = sess.transportConn.Close() //TODO(hosono) uncomment
 	if err != nil {
 		return err
 	}
