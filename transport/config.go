@@ -78,8 +78,9 @@ type ServerConfig struct {
 	MaxBufferedPacketsPerConnection int
 
 	HandshakeTimeout     time.Duration
-	StartingReadTimeout  time.Duration
-	StartingWriteTimeout time.Duration
+	StartingReadTimeout  time.Duration // TODO(hosono) currently unused
+	StartingWriteTimeout time.Duration // TODO(hosono) currently unused
+
 
 	KeyPair      *keys.X25519KeyPair
 	Certificate  *certs.Certificate
