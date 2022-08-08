@@ -1,5 +1,7 @@
 package tubes
 
+// TODO(hosono) add these tests back
+
 // import (
 // 	"math/rand"
 // 	"net"
