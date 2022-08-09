@@ -34,7 +34,6 @@ type Muxer struct {
 	sendQueue  chan []byte
 	stopped    atomic.Bool
 	underlying transport.MsgConn
-	netConn    net.Conn
 	timeout    time.Duration
 	log        *logrus.Entry
 }
@@ -47,7 +46,6 @@ func NewMuxer(msgConn transport.MsgConn, netConn net.Conn, timeout time.Duration
 		m:          sync.Mutex{},
 		sendQueue:  make(chan []byte),
 		underlying: msgConn,
-		netConn:    netConn,
 		timeout:    timeout,
 		log:        log,
 	}

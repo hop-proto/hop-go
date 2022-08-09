@@ -88,8 +88,8 @@ func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue 
 		id:        tubeID,
 		tubeState: created,
 		// TODO (dadrian): uncomment this when transport.Handle and transport.Client implement Local,RemoteAddr()
-		// localAddr:  netConn.LocalAddr(),
-		// remoteAddr: netConn.RemoteAddr(),
+		// localAddr:  underlying.LocalAddr(),
+		// remoteAddr: underlying.RemoteAddr(),
 		m: sync.Mutex{},
 		closedCond: sync.Cond{
 			L: &sync.Mutex{},
@@ -123,7 +123,7 @@ func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue 
 	return r
 }
 
-func newReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType TubeType) (*Reliable, error) {
+func newReliableTube(underlying transport.MsgConn, sendQueue chan []byte, tType TubeType) (*Reliable, error) {
 	cid := []byte{0}
 	n, err := rand.Read(cid)
 	if err != nil || n != 1 {
@@ -162,7 +162,7 @@ func (r *Reliable) initiate(req bool) {
 		timer := time.NewTimer(retransmitOffset)
 		<-timer.C
 	}
-	go r.sender.retransmit()
+	//go r.sender.retransmit()
 	go r.send()
 }
 
