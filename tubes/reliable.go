@@ -50,7 +50,7 @@ type Reliable struct {
 	sender     sender
 	sendQueue  chan []byte
 	// +checklocks:m
-	tubeState state
+	tubeState state // TODO(hosono) this could just be atomic
 	initRecv  chan bool
 }
 
@@ -114,7 +114,7 @@ func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue 
 			RTO:              retransmitOffset,
 			sendQueue:        make(chan *frame),
 			windowSize:       windowSize,
-			ret:              make(chan int),
+			ret:              make(chan int, 1),
 		},
 		sendQueue: sendQueue,
 		tType:     tType,
@@ -177,6 +177,7 @@ func (r *Reliable) initiate(req bool) {
 	}
 	go r.sender.retransmit()
 	go r.send()
+	go r.closer()
 }
 
 func (r *Reliable) receive(pkt *frame) error {
@@ -255,7 +256,7 @@ func (r *Reliable) Close() error {
 	name := r.id
 	if r.tubeState == closed {
 		r.m.Unlock()
-		return errors.New("tube already closed")
+		return io.EOF
 	}
 	r.m.Unlock()
 	err := r.sender.sendFin()
@@ -264,7 +265,6 @@ func (r *Reliable) Close() error {
 	}
 	logrus.Debug("Starting close of ", r.id)
 
-	time.Sleep(time.Second)
 	// Wait until the other end of the connection has received the FIN packet from the other side.
 	start := time.Now()
 	go func() {

@@ -99,6 +99,10 @@ func CheckUnreliable(t *testing.T) {
 
 	assert.DeepEqual(t, buf, []byte("hello"))
 
+	n, err = server.Read(b)
+	assert.DeepEqual(t, n, 0)
+	assert.ErrorType(t, err, io.EOF)
+
 	stop()
 }
 
