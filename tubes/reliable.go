@@ -51,6 +51,7 @@ type Reliable struct {
 	sendQueue  chan []byte
 	// +checklocks:m
 	tubeState state
+	initRecv  chan bool
 }
 
 // Reliable implements net.Conn
@@ -87,10 +88,10 @@ func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue 
 	r := &Reliable{
 		id:        tubeID,
 		tubeState: created,
-		// TODO (dadrian): uncomment this when transport.Handle and transport.Client implement Local,RemoteAddr()
-		// localAddr:  underlying.LocalAddr(),
-		// remoteAddr: underlying.RemoteAddr(),
+		localAddr:  underlying.LocalAddr(),
+		remoteAddr: underlying.RemoteAddr(),
 		m: sync.Mutex{},
+		initRecv:   make(chan bool, 1),
 		closedCond: sync.Cond{
 			L: &sync.Mutex{},
 		},
@@ -125,7 +126,7 @@ func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue 
 
 func newReliableTube(underlying transport.MsgConn, sendQueue chan []byte, tType TubeType) (*Reliable, error) {
 	cid := []byte{0}
-	n, err := rand.Read(cid)
+	n, err := rand.Read(cid) // TODO(hosono) make sure there are no tube conflicts
 	if err != nil || n != 1 {
 		return nil, err
 	}
@@ -162,7 +163,19 @@ func (r *Reliable) initiate(req bool) {
 		timer := time.NewTimer(retransmitOffset)
 		<-timer.C
 	}
-	//go r.sender.retransmit()
+	for notInit {
+		r.sendQueue <- p.toBytes()
+		timer := time.NewTimer(retransmitOffset)
+		select {
+		case <-timer.C:
+			continue
+		case <- r.initRecv:
+			r.m.Lock()
+			notInit = r.tubeState == created
+			r.m.Unlock()
+		}
+	}
+	go r.sender.retransmit()
 	go r.send()
 }
 
@@ -195,6 +208,7 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		//logrus.Debug("INITIATED! ", pkt.flags.REQ, " ", pkt.flags.RESP)
 		r.tubeState = initiated
 		r.sender.recvAck(1)
+		r.initRecv<- true
 	}
 
 	return nil
