@@ -81,7 +81,6 @@ type ServerConfig struct {
 	StartingReadTimeout  time.Duration // TODO(hosono) currently unused
 	StartingWriteTimeout time.Duration // TODO(hosono) currently unused
 
-
 	KeyPair      *keys.X25519KeyPair
 	Certificate  *certs.Certificate
 	Intermediate *certs.Certificate

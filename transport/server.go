@@ -584,11 +584,6 @@ func (s *Server) createHandleLocked(hs *HandshakeState) *Handle {
 	return handle
 }
 
-func (s *Server) lockHandleAndWriteToSession(ss *SessionState, mt MessageType, plaintext []byte) error {
-	err := ss.writePacket(s.udpConn, mt, plaintext, &ss.serverToClientKey)
-	return err
-}
-
 // AcceptTimeout blocks for up to duration until a new connection is available.
 func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 	logrus.Debug("accept timeout started")
