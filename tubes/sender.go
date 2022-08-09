@@ -63,7 +63,6 @@ func (s *sender) unsentFramesRemaining() bool {
 
 func (s *sender) write(b []byte) (n int, err error) {
 	s.l.Lock()
-	defer func() { s.ret <- 1 }()
 	defer s.l.Unlock()
 	if s.closed {
 		return 0, errors.New("trying to write to closed tube")
@@ -88,6 +87,7 @@ func (s *sender) write(b []byte) (n int, err error) {
 
 	}
 
+	s.ret <- 1
 	return len(b), nil
 }
 
@@ -116,10 +116,10 @@ func (s *sender) recvAck(ackNo uint32) error {
 }
 
 func (s *sender) retransmit() {
+	ticker := time.NewTicker(s.RTO)
 	for !s.isClosed() { // TODO - decide how to shutdown this endless loop with an enum state
-		timer := time.NewTimer(s.RTO)
 		select {
-		case <-timer.C:
+		case <-ticker.C:
 			s.l.Lock()
 			if len(s.frames) == 0 { // Keep Alive messages
 				pkt := frame{
@@ -139,6 +139,7 @@ func (s *sender) retransmit() {
 			s.l.Unlock()
 		case <-s.ret: //case received new data
 			s.l.Lock()
+			ticker.Reset(s.RTO)
 			i := 0
 			for i < len(s.frames) && i < int(s.windowSize) && i < maxFragTransPerRTO {
 				s.sendQueue <- s.frames[i]
@@ -186,6 +187,7 @@ func (s *sender) sendFin() error {
 	s.frameDataLengths[pkt.frameNo] = 0
 	s.frameNo++
 	s.frames = append(s.frames, &pkt)
+	s.ret <- 1
 	//logrus.Info("ADDED FIN PACKET TO SEND QUEUE")
 	return nil
 }

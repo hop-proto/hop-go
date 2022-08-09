@@ -113,8 +113,13 @@ func TestClose(t *testing.T) {
 	assert.NilError(t, err)
 
 	server.Close()
+
 	b := make([]byte, 1024)
 	n, err := client.Read(b)
+	assert.DeepEqual(t, n, 0)
+	assert.ErrorType(t, err, io.EOF)
+
+	n, err = server.Read(b)
 	assert.DeepEqual(t, n, 0)
 	assert.ErrorType(t, err, io.EOF)
 

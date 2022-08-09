@@ -59,7 +59,7 @@ func (r *receiver) processIntoBuffer() {
 			r.closedCond.L.Lock()
 			logrus.Debug("RECEIVING FIN PACKET")
 			r.closed = true
-			r.closedCond.Signal()
+			r.closedCond.Broadcast()
 			r.closedCond.L.Unlock()
 			break
 		} else {
