@@ -82,11 +82,11 @@ func newReliableTubeWithTubeID(underlying transport.MsgConn, sendQueue chan []by
 
 func makeTube(underlying transport.MsgConn, sendQueue chan []byte, tType TubeType, tubeID byte) *Reliable {
 	r := &Reliable{
-		id:        tubeID,
-		tubeState: created,
+		id:         tubeID,
+		tubeState:  created,
 		localAddr:  underlying.LocalAddr(),
 		remoteAddr: underlying.RemoteAddr(),
-		m: sync.Mutex{},
+		m:          sync.Mutex{},
 		initRecv:   make(chan bool, 1),
 		closedCond: sync.Cond{
 			L: &sync.Mutex{},
@@ -156,7 +156,7 @@ func (r *Reliable) initiate(req bool) {
 		select {
 		case <-timer.C:
 			continue
-		case <- r.initRecv:
+		case <-r.initRecv:
 			r.m.Lock()
 			notInit = r.tubeState == created
 			r.m.Unlock()
@@ -195,7 +195,7 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		//logrus.Debug("INITIATED! ", pkt.flags.REQ, " ", pkt.flags.RESP)
 		r.tubeState = initiated
 		r.sender.recvAck(1)
-		r.initRecv<- true
+		r.initRecv <- true
 	}
 
 	return nil
