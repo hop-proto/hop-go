@@ -398,8 +398,12 @@ func (c *Client) listen() {
 		n, mt, err := c.readMsg()
 
 		if err != nil {
-			logrus.Errorf("client: %s", err)
-			continue
+			if !errors.Is(err, net.ErrClosed) {
+				logrus.Errorf("client: %s", err)
+			}
+			c.recv.Close()
+			c.underlyingConn.SetDeadline(time.Now())
+			break
 		}
 
 		switch mt {

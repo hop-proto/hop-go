@@ -51,6 +51,7 @@ type Reliable struct {
 	sendQueue  chan []byte
 	// +checklocks:m
 	tubeState state
+	initRecv  chan bool
 }
 
 // Reliable implements net.Conn
@@ -83,10 +84,10 @@ func makeTube(underlying transport.MsgConn, sendQueue chan []byte, tType TubeTyp
 	r := &Reliable{
 		id:        tubeID,
 		tubeState: created,
-		// TODO (dadrian): uncomment this when transport.Handle and transport.Client implement Local,RemoteAddr()
-		// localAddr:  underlying.LocalAddr(),
-		// remoteAddr: underlying.RemoteAddr(),
+		localAddr:  underlying.LocalAddr(),
+		remoteAddr: underlying.RemoteAddr(),
 		m: sync.Mutex{},
+		initRecv:   make(chan bool, 1),
 		closedCond: sync.Cond{
 			L: &sync.Mutex{},
 		},
@@ -121,7 +122,7 @@ func makeTube(underlying transport.MsgConn, sendQueue chan []byte, tType TubeTyp
 
 func newReliableTube(underlying transport.MsgConn, sendQueue chan []byte, tType TubeType) (*Reliable, error) {
 	cid := []byte{0}
-	n, err := rand.Read(cid)
+	n, err := rand.Read(cid) // TODO(hosono) make sure there are no tube conflicts
 	if err != nil || n != 1 {
 		return nil, err
 	}
@@ -135,29 +136,33 @@ func (r *Reliable) initiate(req bool) {
 	tubeType := r.tType
 	notInit := true
 
-	for notInit {
-		p := initiateFrame{
-			tubeID:     r.id,
-			tubeType:   tubeType,
-			data:       []byte{},
-			dataLength: 0,
-			frameNo:    0,
-			windowSize: r.recvWindow.windowSize,
-			flags: frameFlags{
-				ACK:  true,
-				FIN:  false,
-				REQ:  req,
-				RESP: !req,
-			},
-		}
-		r.sendQueue <- p.toBytes()
-		r.m.Lock()
-		notInit = r.tubeState == created
-		r.m.Unlock()
-		timer := time.NewTimer(retransmitOffset)
-		<-timer.C
+	p := initiateFrame{
+		tubeID:     r.id,
+		tubeType:   tubeType,
+		data:       []byte{},
+		dataLength: 0,
+		frameNo:    0,
+		windowSize: r.recvWindow.windowSize,
+		flags: frameFlags{
+			ACK:  true,
+			FIN:  false,
+			REQ:  req,
+			RESP: !req,
+		},
 	}
-	//go r.sender.retransmit()
+	for notInit {
+		r.sendQueue <- p.toBytes()
+		timer := time.NewTimer(retransmitOffset)
+		select {
+		case <-timer.C:
+			continue
+		case <- r.initRecv:
+			r.m.Lock()
+			notInit = r.tubeState == created
+			r.m.Unlock()
+		}
+	}
+	go r.sender.retransmit()
 	go r.send()
 }
 
@@ -190,6 +195,7 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		//logrus.Debug("INITIATED! ", pkt.flags.REQ, " ", pkt.flags.RESP)
 		r.tubeState = initiated
 		r.sender.recvAck(1)
+		r.initRecv<- true
 	}
 
 	return nil
