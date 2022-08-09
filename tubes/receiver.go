@@ -128,7 +128,6 @@ func (r *receiver) receive(p *frame) error {
 
 	frameNo := r.unwrapFrameNo(p.frameNo)
 	logrus.Debugf("receive frame frameNo: %d, ackNo: %d, fin: %t, recv ack no: %d, data: %x", frameNo, p.ackNo, p.flags.FIN, r.ackNo, p.data)
-	//logrus.Debug("receive frame frameNo: ", frameNo, " ackNo: ", p.ackNo, " data: ", string(p.data), " FIN? ", p.flags.FIN, " recv ack no? ", r.ackNo)
 	if !frameInBounds(windowStart, windowEnd, frameNo) {
 		logrus.Debug("received dataframe out of receive window bounds")
 		return errors.New("received dataframe out of receive window bounds")

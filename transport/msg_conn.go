@@ -1,6 +1,8 @@
 package transport
 
-import "time"
+import (
+	"net"
+)
 
 // MsgReader captures the read method for a message-oriented connection.
 type MsgReader interface {
@@ -16,8 +18,11 @@ type MsgWriter interface {
 type MsgConn interface {
 	MsgReader
 	MsgWriter
-	SetReadDeadline(time.Time) error
+	net.Conn
 }
 
 // Client implements MsgConn
 var _ MsgConn = &Client{}
+
+// Handle implements MsgConn
+var _ MsgConn = &Handle{}
