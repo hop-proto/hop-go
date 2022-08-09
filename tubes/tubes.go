@@ -50,7 +50,7 @@ type Reliable struct {
 	sender     sender
 	sendQueue  chan []byte
 	// +checklocks:m
-	tubeState state
+	tubeState state // TODO(hosono) this could just be atomic
 	initRecv  chan bool
 }
 
@@ -72,6 +72,19 @@ func (r *Reliable) send() {
 		logrus.Debugf("sending pkt. frameno: %d, ackno: %d, fin: %t, ack: %t", pkt.frameNo, pkt.ackNo, pkt.flags.FIN, pkt.flags.ACK)
 		r.sendQueue <- pkt.toBytes()
 	}
+}
+
+func (r *Reliable) closer() {
+	for {
+		if r.recvWindow.closed {
+			break
+		}
+		r.closedCond.L.Lock()
+		r.closedCond.Wait()
+		r.closedCond.L.Unlock()
+		logrus.Error("CLOSER WOKE UP")
+	}
+	r.Close()
 }
 
 func newReliableTubeWithTubeID(underlying transport.MsgConn, sendQueue chan []byte, tubeType TubeType, tubeID byte) *Reliable {
@@ -110,7 +123,7 @@ func makeTube(underlying transport.MsgConn, sendQueue chan []byte, tType TubeTyp
 			RTO:              retransmitOffset,
 			sendQueue:        make(chan *frame),
 			windowSize:       windowSize,
-			ret:              make(chan int),
+			ret:              make(chan int, 1),
 		},
 		sendQueue: sendQueue,
 		tType:     tType,
@@ -164,6 +177,7 @@ func (r *Reliable) initiate(req bool) {
 	}
 	go r.sender.retransmit()
 	go r.send()
+	go r.closer()
 }
 
 func (r *Reliable) receive(pkt *frame) error {
@@ -242,7 +256,7 @@ func (r *Reliable) Close() error {
 	name := r.id
 	if r.tubeState == closed {
 		r.m.Unlock()
-		return errors.New("tube already closed")
+		return io.EOF
 	}
 	r.m.Unlock()
 	err := r.sender.sendFin()
@@ -251,7 +265,6 @@ func (r *Reliable) Close() error {
 	}
 	logrus.Debug("Starting close of ", r.id)
 
-	time.Sleep(time.Second)
 	// Wait until the other end of the connection has received the FIN packet from the other side.
 	start := time.Now()
 	go func() {
