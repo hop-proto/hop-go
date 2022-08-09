@@ -129,7 +129,7 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	// authgrant procedure.
 	// c.address = address
 	c.authenticator = authenticator
-	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.TransportConn, c.hostconfig.DataTimeout)
+	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.config.DataTimeout)
 	go func() {
 		err := c.TubeMuxer.Start()
 		if c.ExecTube != nil {

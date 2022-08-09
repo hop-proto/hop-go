@@ -1,7 +1,6 @@
 package tubes
 
 import (
-	"net"
 	"sync"
 	"time"
 
@@ -22,12 +21,11 @@ type Muxer struct {
 	sendQueue  chan []byte
 	stopped    common.AtomicBool // TODO(hosono) should this be defined elsewhere?
 	underlying transport.MsgConn
-	netConn    net.Conn
 	timeout    time.Duration
 }
 
 // NewMuxer starts a new tube muxer
-func NewMuxer(msgConn transport.MsgConn, netConn net.Conn, timeout time.Duration) *Muxer {
+func NewMuxer(msgConn transport.MsgConn, timeout time.Duration) *Muxer {
 	return &Muxer{
 		tubes:      make(map[byte]*Reliable),
 		tubeQueue:  make(chan *Reliable, 128),
@@ -35,7 +33,6 @@ func NewMuxer(msgConn transport.MsgConn, netConn net.Conn, timeout time.Duration
 		sendQueue:  make(chan []byte),
 		stopped:    0, // false
 		underlying: msgConn,
-		netConn:    netConn,
 		timeout:    timeout,
 	}
 }
@@ -55,7 +52,7 @@ func (m *Muxer) getTube(tubeID byte) (*Reliable, bool) {
 
 // CreateTube starts a new reliable tube
 func (m *Muxer) CreateTube(tType TubeType) (*Reliable, error) {
-	r, err := newReliableTube(m.underlying, m.netConn, m.sendQueue, tType)
+	r, err := newReliableTube(m.underlying, m.sendQueue, tType)
 	m.addTube(r)
 	logrus.Infof("Created Tube: %v", r.id)
 	return r, err
@@ -115,7 +112,7 @@ func (m *Muxer) Start() error {
 				if err != nil {
 					return err
 				}
-				tube = newReliableTubeWithTubeID(m.underlying, m.netConn, m.sendQueue, initFrame.tubeType, initFrame.tubeID)
+				tube = newReliableTubeWithTubeID(m.underlying, m.sendQueue, initFrame.tubeType, initFrame.tubeID)
 				m.addTube(tube)
 				m.tubeQueue <- tube
 			}
