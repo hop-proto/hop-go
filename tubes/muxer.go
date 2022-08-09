@@ -69,7 +69,7 @@ func (m *Muxer) Accept() (*Reliable, error) {
 }
 
 func (m *Muxer) readMsg() (*frame, error) {
-	pkt := make([]byte, 65535)
+	pkt := make([]byte, 65535) // TODO(hosono) avoid allocation
 	_, err := m.underlying.ReadMsg(pkt)
 	if err != nil {
 		return nil, err
