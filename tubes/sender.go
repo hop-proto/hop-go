@@ -130,11 +130,9 @@ func (s *sender) retransmit() {
 				//logrus.Info("SENDING EMPTY PACKET ON SEND QUEUE FOR ACK - FIN? ", pkt.flags.FIN)
 				s.sendQueue <- &pkt
 			}
-			i := 0
-			for i < len(s.frames) && i < int(s.windowSize) && i < maxFragTransPerRTO {
+			for i := 0; i < len(s.frames) && i < int(s.windowSize) && i < maxFragTransPerRTO; i++ {
 				s.sendQueue <- s.frames[i]
 				//logrus.Info("PUTTING PKT ON SEND QUEUE - FIN? ", s.frames[i].flags.FIN)
-				i++
 			}
 			s.l.Unlock()
 		case <-s.ret: //case received new data
