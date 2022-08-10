@@ -82,7 +82,6 @@ func (r *Reliable) closer() {
 		r.closedCond.L.Lock()
 		r.closedCond.Wait()
 		r.closedCond.L.Unlock()
-		logrus.Error("CLOSER WOKE UP")
 	}
 	r.Close()
 }
