@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -248,6 +249,22 @@ func (sess *hopSession) checkAction(action string, actionType byte) error {
 
 }
 
+func getGroups(uid int) (groups []uint32) {
+	groups = append(groups, uint32(uid))
+	u, err := user.LookupId(strconv.Itoa(uid))
+	if err != nil {
+		return
+	}
+	groupIds, _ := u.GroupIds()
+	for _, gid := range groupIds {
+		parsed, err := strconv.ParseUint(gid, 10, 32)
+		if err == nil {
+			groups = append(groups, uint32(parsed))
+		}
+	}
+	return
+}
+
 func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 	cmd, termEnv, shell, size, _ := codex.GetCmd(tube)
 	logrus.Info("CMD: ", cmd)
@@ -290,7 +307,7 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 			c.SysProcAttr.Credential = &syscall.Credential{
 				Uid:    uint32(user.Uid()),
 				Gid:    uint32(user.Gid()),
-				Groups: []uint32{uint32(user.Gid())},
+				Groups: getGroups(user.Uid()),
 			}
 		}
 		c.Env = env
