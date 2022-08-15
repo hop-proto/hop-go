@@ -22,10 +22,6 @@ type initiateFrame struct {
 }
 
 type frameFlags struct {
-	// Flag to update the acknowledgement number from the sender of the packet for the receiver of the packet.
-	ACK bool
-	// Flag to teardown tube.
-	FIN bool
 	// Flag to initiate a tube.
 	REQ bool
 	// Flag to accept tube initiation.
@@ -46,12 +42,6 @@ const (
 
 func flagsToMetaByte(p *frameFlags) byte {
 	meta := byte(0)
-	if p.ACK {
-		meta = meta | (1 << ACKIdx)
-	}
-	if p.FIN {
-		meta = meta | (1 << FINIdx)
-	}
 	if p.REQ {
 		meta = meta | (1 << REQIdx)
 	}
@@ -66,9 +56,7 @@ func flagsToMetaByte(p *frameFlags) byte {
 
 func metaToFlags(b byte) frameFlags {
 	flags := frameFlags{
-		ACK:  b&(1<<ACKIdx) != 0,
-		FIN:  b&(1<<FINIdx) != 0,
-		REQ:  b&(1<<REQIdx) != 0,
+		REQ:  b&(1<<REQIdx)  != 0,
 		RESP: b&(1<<RESPIdx) != 0,
 		REL:  b&(1<<RELIdx) != 0,
 	}
