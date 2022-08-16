@@ -63,18 +63,6 @@ func (r *Reliable) getState() state {
 	return r.tubeState
 }
 
-func (r *Reliable) send() {
-	for r.getState() == initiated || r.getState() == closeStart {
-		pkt := <-r.sender.sendQueue
-		pkt.tubeID = r.id
-		pkt.ackNo = r.recvWindow.getAck()
-		pkt.flags.ACK = true
-		pkt.flags.REL = true
-		logrus.Debugf("sending pkt. frameno: %d, ackno: %d, fin: %t, ack: %t", pkt.frameNo, pkt.ackNo, pkt.flags.FIN, pkt.flags.ACK)
-		r.sendQueue <- pkt.toBytes()
-	}
-}
-
 func (r *Reliable) closer() {
 	for {
 		if r.recvWindow.closed {
@@ -122,12 +110,12 @@ func makeTube(underlying transport.MsgConn, sendQueue chan []byte, tType TubeTyp
 			frameNo:          1,
 			RTOTicker:        time.NewTicker(retransmitOffset),
 			RTO:              retransmitOffset,
-			sendQueue:        make(chan *frame),
 			windowSize:       windowSize,
 		},
 		sendQueue: sendQueue,
 		tType:     tType,
 	}
+	r.sender.tube = r
 	r.recvWindow.closedCond = &r.closedCond
 	r.recvWindow.init()
 	return r
@@ -178,7 +166,6 @@ func (r *Reliable) initiate(req bool) {
 		}
 	}
 	go r.sender.retransmit()
-	go r.send()
 	go r.closer()
 }
 
