@@ -107,14 +107,14 @@ func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue 
 		sender: sender{
 			ackNo:            1,
 			buffer:           make([]byte, 0),
-			closed:           false,
+			// closed defaults to false
 			finSent:          false,
 			frameDataLengths: make(map[uint32]uint16),
 			frameNo:          1,
+			RTOTicker:        time.NewTicker(retransmitOffset),
 			RTO:              retransmitOffset,
 			sendQueue:        make(chan *frame),
 			windowSize:       windowSize,
-			ret:              make(chan int, 1),
 		},
 		sendQueue: sendQueue,
 		tType:     tType,
@@ -137,6 +137,7 @@ func newReliableTube(underlying transport.MsgConn, sendQueue chan []byte, tType 
 
 /* req: whether the tube is requesting to initiate a tube (true), or whether is respondding to an initiation request (false).*/
 func (r *Reliable) initiate(req bool) {
+	//logrus.Errorf("Tube %d initiated", r.id)
 	tubeType := r.tType
 	notInit := true
 
@@ -260,7 +261,7 @@ func (r *Reliable) Close() error {
 	}
 	r.m.Unlock()
 	err := r.sender.sendFin()
-	if err != nil {
+	if err != nil && !errors.Is(err, io.EOF){
 		return err
 	}
 	logrus.Debug("Starting close of ", r.id)
@@ -287,7 +288,7 @@ func (r *Reliable) Close() error {
 		r.closedCond.Wait()
 	}
 	r.closedCond.L.Unlock()
-	r.sender.close()
+	r.sender.Close()
 	logrus.Debugf("closed tube: %v", name)
 	r.m.Lock()
 	r.tubeState = closed
