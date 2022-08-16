@@ -3,7 +3,6 @@ package codex
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"io"
 	"math"
 	"sync"
@@ -81,10 +80,6 @@ func (w *prefixWriter) Write(b []byte) (n int, err error) {
 	}
 	return
 }
-
-// SplitReader implements io.Reader--it should be matched with writers using
-// NewStdoutWriter and NewStderrWriter on the sending side;
-var ErrInvalidSplitHeader = errors.New("invalid Split header")
 
 // TODO(drebelsky): consider timeouts
 
