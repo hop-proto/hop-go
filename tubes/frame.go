@@ -56,7 +56,7 @@ func flagsToMetaByte(p *frameFlags) byte {
 
 func metaToFlags(b byte) frameFlags {
 	flags := frameFlags{
-		REQ:  b&(1<<REQIdx)  != 0,
+		REQ:  b&(1<<REQIdx) != 0,
 		RESP: b&(1<<RESPIdx) != 0,
 		REL:  b&(1<<RELIdx) != 0,
 	}

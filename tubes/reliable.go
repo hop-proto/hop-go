@@ -105,8 +105,8 @@ func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue 
 			windowStart: 1,
 		},
 		sender: sender{
-			ackNo:            1,
-			buffer:           make([]byte, 0),
+			ackNo:  1,
+			buffer: make([]byte, 0),
 			// closed defaults to false
 			finSent:          false,
 			frameDataLengths: make(map[uint32]uint16),
@@ -261,7 +261,7 @@ func (r *Reliable) Close() error {
 	}
 	r.m.Unlock()
 	err := r.sender.sendFin()
-	if err != nil && !errors.Is(err, io.EOF){
+	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	logrus.Debug("Starting close of ", r.id)
