@@ -32,8 +32,9 @@ const (
 )
 
 const (
-	execConf = byte(1)
-	execFail = byte(2)
+	execConf      = byte(0)
+	execConfSplit = byte(1)
+	execFail      = byte(2)
 )
 
 // SendFailure lets the client know that executing the command failed and the error
@@ -50,19 +51,26 @@ func SendSuccess(t *tubes.Reliable) {
 	t.Write([]byte{execConf})
 }
 
-// GetStatus lets client waits for confirmation that cmd started or error if it failed
-func getStatus(t *tubes.Reliable) error {
-	// TODO(drebelsky): consider how to handle erros in io.ReadFull
+// SendSuccessSplit lets the client know that the server successful started the
+// command and will be using stdout/stderr multiplexing
+func SendSuccessSplit(t *tubes.Reliable) {
+	t.Write([]byte{execConfSplit})
+}
+
+// getStatus lets client waits for confirmation that cmd started or error if it failed
+// returns whether the server is splitting the streams
+func getStatus(t *tubes.Reliable) (split bool, err error) {
+	// TODO(drebelsky): consider how to handle errors in io.ReadFull
 	resp := make([]byte, 1)
 	io.ReadFull(t, resp)
-	if resp[0] == execConf {
-		return nil
+	if resp[0] != execFail {
+		return resp[0] == execConfSplit, nil
 	}
 	elen := make([]byte, 4)
 	io.ReadFull(t, elen)
 	buf := make([]byte, binary.BigEndian.Uint16(elen))
 	io.ReadFull(t, buf)
-	return errors.New(string(buf))
+	return false, errors.New(string(buf))
 }
 
 // NewExecTube sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
@@ -90,7 +98,7 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 	}
 
 	//get confirmation that cmd started successfully before piping IO
-	err := getStatus(tube)
+	split, err := getStatus(tube)
 	if err != nil {
 		if oldState != nil {
 			term.Restore(int(os.Stdin.Fd()), oldState)
@@ -125,9 +133,21 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 		w:     w,
 	}
 
+	var stdout io.Reader
+	if split {
+		var stderr io.Reader
+		stdout, stderr = newSplitReader(ex.tube)
+		// TODO(drebelsky): debate how to handle closing here
+		go func() {
+			io.Copy(os.Stderr, stderr)
+		}()
+	} else {
+		stdout = ex.tube
+	}
+
 	go func(ex *ExecTube) {
 		defer wg.Done()
-		io.Copy(os.Stdout, ex.tube) // read bytes from tube to os.Stdout
+		io.Copy(os.Stdout, stdout) //read bytes from tube to os.Stdout
 		if oldState != nil {
 			term.Restore(int(os.Stdin.Fd()), oldState)
 		}

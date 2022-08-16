@@ -281,18 +281,20 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 				codex.SendFailure(tube, err)
 				return
 			}
+			codex.SendSuccess(tube)
 		} else {
 			// Signal nil to sess.pty so that window sizes don't indefinitely buffer
 			sess.pty <- nil
 			c.Stdin = tube
-			c.Stdout = tube
-			c.Stderr = tube
+			c.Stdout = codex.NewStdoutWriter(tube)
+			c.Stderr = codex.NewStderrWriter(tube)
 			err = c.Start()
 			if err != nil {
 				logrus.Errorf("S: error running command %v", err)
 				codex.SendFailure(tube, err)
 				return
 			}
+			codex.SendSuccessSplit(tube)
 		}
 
 		// update principals map.
