@@ -255,7 +255,10 @@ func getGroups(uid int) (groups []uint32) {
 	if err != nil {
 		return
 	}
-	groupIds, _ := u.GroupIds()
+	groupIds, err := u.GroupIds()
+	if err != nil {
+		logrus.Infof("Failed to fully get group ids for user with uid %v", err)
+	}
 	for _, gid := range groupIds {
 		parsed, err := strconv.ParseUint(gid, 10, 32)
 		if err == nil {
