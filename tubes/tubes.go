@@ -205,9 +205,6 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 }
 
 func (r *Reliable) Read(b []byte) (n int, err error) {
-	// This part gets hard if you want this call to block until data is available.
-	//
-	// David recommends not making that work until everything else works.
 	return r.recvWindow.read(b)
 }
 
@@ -290,12 +287,12 @@ func (r *Reliable) Type() TubeType {
 	return r.tType
 }
 
-// LocalAddr returns tube local address
+// LocalAddr returns the local address for the tube
 func (r *Reliable) LocalAddr() net.Addr {
 	return r.localAddr
 }
 
-// RemoteAddr returns r.remoteAddr
+// RemoteAddr returns the remote address for the tube
 func (r *Reliable) RemoteAddr() net.Addr {
 	return r.remoteAddr
 }
