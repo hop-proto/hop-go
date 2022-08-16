@@ -108,7 +108,6 @@ func makeTubeConn(t *testing.T) (c1, c2 net.Conn, stop func(), err error) {
 		server.Close()
 	}
 
-	time.Sleep(1) // TODO(hosono) remove this
 	return c1, c2, stop, err
 }
 

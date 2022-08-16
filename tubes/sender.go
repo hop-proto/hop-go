@@ -2,8 +2,8 @@ package tubes
 
 import (
 	"errors"
-	"io"
 	"fmt"
+	"io"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,10 +26,10 @@ type sender struct {
 	frameNo uint32
 	// +checklocks:l
 	windowSize uint16
-	
+
 	// +checklocks:l
 	finSent bool
-	closed atomic.Bool
+	closed  atomic.Bool
 	// The buffer of unacknowledged tube frames that will be retransmitted if necessary.
 	// +checklocks:l
 	frames []*frame
@@ -69,7 +69,7 @@ func (s *sender) write(b []byte) (n int, err error) {
 	s.buffer = append(s.buffer, b...)
 
 	for len(s.buffer) > 0 {
-		dataLength := uint16(maxFrameDataLength)
+		dataLength := maxFrameDataLength
 		if uint16(len(s.buffer)) < dataLength {
 			dataLength = uint16(len(s.buffer))
 		}
@@ -85,7 +85,7 @@ func (s *sender) write(b []byte) (n int, err error) {
 		s.frames = append(s.frames, &pkt)
 	}
 
-	for i := 0; i < len(s.frames) && i < int(s.windowSize); i++{
+	for i := 0; i < len(s.frames) && i < int(s.windowSize); i++ {
 		s.sendQueue <- s.frames[i]
 	}
 	s.RTOTicker.Reset(s.RTO)
@@ -117,28 +117,23 @@ func (s *sender) recvAck(ackNo uint32) error {
 
 func (s *sender) retransmit() {
 	for !s.closed.Load() { // TODO - decide how to shutdown this endless loop with an enum state
-		select {
-		case <-s.RTOTicker.C:
-			s.l.Lock()
-			if len(s.frames) == 0 { // Keep Alive messages
-				pkt := frame{
-					dataLength: 0,
-					frameNo:    s.frameNo,
-					data:       []byte{},
-				}
-				// logrus.Info("SENDING EMPTY PACKET ON SEND QUEUE FOR ACK - FIN? ", pkt.flags.FIN)
-				s.sendQueue <- &pkt
+		<-s.RTOTicker.C
+		s.l.Lock()
+		if len(s.frames) == 0 { // Keep Alive messages
+			pkt := frame{
+				dataLength: 0,
+				frameNo:    s.frameNo,
+				data:       []byte{},
 			}
-			for i := 0; i < len(s.frames) && i < int(s.windowSize) && i < maxFragTransPerRTO; i++ {
-				s.sendQueue <- s.frames[i]
-				 //logrus.Info("PUTTING PKT ON SEND QUEUE - FIN? ", s.frames[i].flags.FIN)
-			}
-			s.l.Unlock()
+			// logrus.Info("SENDING EMPTY PACKET ON SEND QUEUE FOR ACK - FIN? ", pkt.flags.FIN)
+			s.sendQueue <- &pkt
 		}
+		for i := 0; i < len(s.frames) && i < int(s.windowSize) && i < maxFragTransPerRTO; i++ {
+			s.sendQueue <- s.frames[i]
+			//logrus.Info("PUTTING PKT ON SEND QUEUE - FIN? ", s.frames[i].flags.FIN)
+		}
+		s.l.Unlock()
 	}
-}
-func (s *sender) isClosed() bool {
-	return s.closed.Load()
 }
 
 func (s *sender) Close() {
