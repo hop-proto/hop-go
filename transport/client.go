@@ -314,7 +314,7 @@ func (c *Client) readMsg() (int, error) {
 		return 0, ErrInvalidMessage
 	}
 
-	if !EqualUDPAddress(c.ss.remoteAddr, addr) {
+	if c.ss.remoteAddr != nil && !EqualUDPAddress(c.ss.remoteAddr, addr) {
 		c.ss.remoteAddr = addr
 	}
 
