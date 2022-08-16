@@ -14,3 +14,4 @@ var errInvalidPacket = errors.New("invalid packer")
 
 var errNoDataLength = fmt.Errorf("data length missing for frame [%w]", errInvalidPacket)
 
+var errTubeNotInitiated = errors.New("receiving non-initiate tube frames when not initiated")
