@@ -113,12 +113,12 @@ func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue 
 			frameNo:          1,
 			RTOTicker:        time.NewTicker(retransmitOffset),
 			RTO:              retransmitOffset,
-			sendQueue:        make(chan *frame),
 			windowSize:       windowSize,
 		},
 		sendQueue: sendQueue,
 		tType:     tType,
 	}
+	r.sender.tube = r
 	r.recvWindow.closedCond = &r.closedCond
 	r.recvWindow.init()
 	return r
@@ -177,7 +177,6 @@ func (r *Reliable) initiate(req bool) {
 		}
 	}
 	go r.sender.retransmit()
-	go r.send()
 	go r.closer()
 }
 
