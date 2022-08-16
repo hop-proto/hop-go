@@ -1,7 +1,6 @@
 package tubes
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -74,7 +73,7 @@ func (s *sender) write(b []byte) (int, error) {
 	s.l.Lock()
 	defer s.l.Unlock()
 	if s.closed.Load() {
-		return 0, errors.New("trying to write to closed tube")
+		return 0, errClosedWrite
 	}
 	s.buffer = append(s.buffer, b...)
 
@@ -115,7 +114,7 @@ func (s *sender) recvAck(ackNo uint32) error {
 		_, ok := s.frameDataLengths[uint32(s.ackNo)]
 		if !ok {
 			logrus.Debugf("data length missing for frame %d", s.ackNo)
-			return fmt.Errorf("data length missing for frame %d", s.ackNo)
+			return errNoDataLength
 		}
 		delete(s.frameDataLengths, uint32(s.ackNo))
 		s.ackNo++
@@ -154,7 +153,7 @@ func (s *sender) sendFin() error {
 	s.l.Lock()
 	defer s.l.Unlock()
 	if s.closed.Load() || s.finSent {
-		return fmt.Errorf("tube already closed [%w]", io.EOF)
+		return errClosedWrite
 	}
 	s.finSent = true
 
