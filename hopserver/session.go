@@ -263,6 +263,8 @@ func getGroups(uid int) (groups []uint32) {
 		parsed, err := strconv.ParseUint(gid, 10, 32)
 		if err == nil {
 			groups = append(groups, uint32(parsed))
+		} else {
+			logrus.Infof("Failed to parse gid %v (error: %v)", gid, err)
 		}
 	}
 	return
