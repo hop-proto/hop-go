@@ -51,7 +51,9 @@ type sender struct {
 	// Retransmission TimeOut.
 	RTOTicker *time.Ticker
 	RTO       time.Duration
-	sendQueue chan *frame
+
+	// the tube that owns this sender
+	tube 	*Reliable
 }
 
 func (s *sender) unsentFramesRemaining() bool {
@@ -60,7 +62,15 @@ func (s *sender) unsentFramesRemaining() bool {
 	return len(s.frames) > 0
 }
 
-func (s *sender) write(b []byte) (n int, err error) {
+func (s *sender) sendFrame(pkt *frame) {
+	pkt.tubeID = s.tube.id
+	pkt.ackNo = s.tube.recvWindow.getAck()
+	pkt.flags.ACK = true
+	pkt.flags.REL = true
+	s.tube.sendQueue <- pkt.toBytes()
+}
+
+func (s *sender) write(b []byte) (int, error) {
 	s.l.Lock()
 	defer s.l.Unlock()
 	if s.closed.Load() {
@@ -86,7 +96,7 @@ func (s *sender) write(b []byte) (n int, err error) {
 	}
 
 	for i := 0; i < len(s.frames) && i < int(s.windowSize); i++ {
-		s.sendQueue <- s.frames[i]
+		s.sendFrame(s.frames[i])
 	}
 	s.RTOTicker.Reset(s.RTO)
 	return len(b), nil
@@ -126,10 +136,10 @@ func (s *sender) retransmit() {
 				data:       []byte{},
 			}
 			// logrus.Info("SENDING EMPTY PACKET ON SEND QUEUE FOR ACK - FIN? ", pkt.flags.FIN)
-			s.sendQueue <- &pkt
+			s.sendFrame(&pkt)
 		}
 		for i := 0; i < len(s.frames) && i < int(s.windowSize) && i < maxFragTransPerRTO; i++ {
-			s.sendQueue <- s.frames[i]
+			s.sendFrame(s.frames[i])
 			//logrus.Info("PUTTING PKT ON SEND QUEUE - FIN? ", s.frames[i].flags.FIN)
 		}
 		s.l.Unlock()
@@ -163,7 +173,7 @@ func (s *sender) sendFin() error {
 	s.frameDataLengths[pkt.frameNo] = 0
 	s.frameNo++
 	s.frames = append(s.frames, &pkt)
-	s.sendQueue <- &pkt
+	s.sendFrame(&pkt)
 	//logrus.Info("ADDED FIN PACKET TO SEND QUEUE")
 	return nil
 }
