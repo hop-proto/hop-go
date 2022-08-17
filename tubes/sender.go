@@ -1,8 +1,7 @@
 package tubes
 
 import (
-	"fmt"
-	"io"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -51,6 +50,9 @@ type sender struct {
 	RTOTicker *time.Ticker
 	RTO       time.Duration
 
+	// the time after which writes will expire
+	deadline time.Time
+
 	// the tube that owns this sender
 	tube 	*Reliable
 }
@@ -70,6 +72,9 @@ func (s *sender) sendFrame(pkt *frame) {
 }
 
 func (s *sender) write(b []byte) (int, error) {
+	if !s.deadline.IsZero() && time.Now().After(s.deadline) {
+		return 0, os.ErrDeadlineExceeded
+	}
 	s.l.Lock()
 	defer s.l.Unlock()
 	if s.closed.Load() {
