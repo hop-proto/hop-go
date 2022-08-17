@@ -80,6 +80,11 @@ var clientMapper = ConfigMapper{
 			Converter: converters.Identity,
 		},
 		{
+			Setting:   "User",
+			Field:     "User",
+			Converter: converters.Identity,
+		},
+		{
 			Setting:   "Port",
 			Field:     "Port",
 			Converter: converters.Int,

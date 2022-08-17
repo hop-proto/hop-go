@@ -88,6 +88,12 @@ func loadClientConfig_Gen(c *ClientConfig, root *ast.Node) (*ClientConfig, error
 						return err
 					}
 					bc.Hostname = result
+				case ast.Setting.User.Value:
+					result, err := identity(n.SettingValue)
+					if err != nil {
+						return err
+					}
+					bc.User = result
 				case ast.Setting.Port.Value:
 					result, err := strconv.Atoi(n.SettingValue)
 					if err != nil {

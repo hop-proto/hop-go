@@ -105,6 +105,7 @@ func main() {
 		{Name: "Intermediate"},
 		{Name: "AutoSelfSign"},
 		{Name: "Address"},
+		{Name: "User"},
 		{Name: "Port"},
 		{Name: "Number"},
 		{Name: "Word"},

@@ -42,6 +42,7 @@ var Setting = struct {
 	ListenAddress Token
 	Number        Token
 	Port          Token
+	User          Token
 	Word          Token
 }{
 	Address: Token{
@@ -84,6 +85,10 @@ var Setting = struct {
 		Type:  TokenTypeSetting,
 		Value: "Port",
 	},
+	User: Token{
+		Type:  TokenTypeSetting,
+		Value: "User",
+	},
 	Word: Token{
 		Type:  TokenTypeSetting,
 		Value: "Word",
@@ -102,5 +107,6 @@ var Settings = []Token{
 	Setting.ListenAddress,
 	Setting.Number,
 	Setting.Port,
+	Setting.User,
 	Setting.Word,
 }

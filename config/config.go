@@ -58,7 +58,7 @@ type ServerConfig struct {
 type HostConfig struct {
 	Pattern      string
 	Hostname     string
-	User         string // TODO(dadrian): Implement this setting in the grammar
+	User         string
 	Port         int
 	AutoSelfSign BoolSetting
 	Key          string
