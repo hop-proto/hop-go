@@ -179,10 +179,6 @@ func UserDirectoryFor(username string) (string, error) {
 var serverDirectory string
 var serverDirectoryOnce sync.Once
 
-func locateServerConfigDirectory() {
-	serverDirectory = "/etc/hopd" // TODO(dadrian): Windows? Compile-time override?
-}
-
 // ServerDirectory returns the directory used for server configuration.
 func ServerDirectory() string {
 	serverDirectoryOnce.Do(locateServerConfigDirectory)
