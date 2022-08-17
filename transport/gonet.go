@@ -19,12 +19,17 @@ func Dial(network, address string, config ClientConfig) (*Client, error) {
 		return nil, ErrUDPOnly
 	}
 
-	inner, err := net.Dial(udp, address)
+	inner, err := net.ListenPacket(udp, ":0")
 	if err != nil {
 		return nil, err
 	}
 
-	return NewClient(inner.(*net.UDPConn), nil, config), nil
+	raddr, err := net.ResolveUDPAddr(udp, address)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewClient(inner.(*net.UDPConn), raddr, config), nil
 }
 
 // DialNP is similar to Dial, but using a reliable tube as an underlying conn for the Client
