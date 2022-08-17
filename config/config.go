@@ -176,15 +176,6 @@ func UserDirectoryFor(username string) (string, error) {
 	return filepath.Join(u.HomeDir, common.UserConfigDirtory), nil
 }
 
-var serverDirectory string
-var serverDirectoryOnce sync.Once
-
-// ServerDirectory returns the directory used for server configuration.
-func ServerDirectory() string {
-	serverDirectoryOnce.Do(locateServerConfigDirectory)
-	return serverDirectory
-}
-
 // DefaultKeyPath returns UserDirectory()/id_hop.pem.
 func DefaultKeyPath() string {
 	d := UserDirectory()
