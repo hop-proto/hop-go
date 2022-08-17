@@ -2,6 +2,7 @@
 
 package config
 
-func locateServerConfigDirectory() {
-	serverDirectory = "/etc/hopd"
+// ServerDirectory returns the directory used for server configuration.
+func ServerDirectory() string {
+	return "/etc/hopd"
 }

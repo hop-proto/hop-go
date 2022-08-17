@@ -2,6 +2,6 @@
 
 package config
 
-func locateServerConfigDirectory() {
+func ServerDirectory() string {
 	panic("Not yet implemented")
 }
