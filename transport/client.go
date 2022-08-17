@@ -304,7 +304,7 @@ func (c *Client) Close() error {
 // It uses both c.ciphertext and c.plaintext as scratch space
 // +checklocks:c.readLock
 func (c *Client) readMsg() (int, error) {
-	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(c.ciphertext, nil)
+	msgLen, _, _, addr, err := c.underlyingConn.ReadMsgUDP(c.ciphertext, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -312,6 +312,10 @@ func (c *Client) readMsg() (int, error) {
 	plaintextLen := PlaintextLen(msgLen)
 	if plaintextLen < 0 {
 		return 0, ErrInvalidMessage
+	}
+
+	if c.ss.remoteAddr != nil && !EqualUDPAddress(c.ss.remoteAddr, addr) {
+		c.ss.remoteAddr = addr
 	}
 
 	n, err := c.ss.readPacket(c.plaintext, c.ciphertext[:msgLen], &c.ss.serverToClientKey)

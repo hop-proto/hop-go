@@ -19,12 +19,17 @@ func Dial(network, address string, config ClientConfig) (*Client, error) {
 		return nil, ErrUDPOnly
 	}
 
-	inner, err := net.Dial(udp, address)
+	inner, err := net.ListenPacket(udp, ":0")
 	if err != nil {
 		return nil, err
 	}
 
-	return NewClient(inner.(*net.UDPConn), nil, config), nil
+	raddr, err := net.ResolveUDPAddr(udp, address)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewClient(inner.(*net.UDPConn), raddr, config), nil
 }
 
 // DialNP is similar to Dial, but using a reliable tube as an underlying conn for the Client
@@ -49,6 +54,13 @@ func DialWithDialer(dialer *net.Dialer, network, address string, config ClientCo
 		return nil, err
 	}
 
+	raddr := inner.RemoteAddr()
+	if udpListener, err := net.ListenPacket("udp", ":0"); err == nil {
+		inner = udpListener.(*net.UDPConn)
+	} else {
+		return nil, err
+	}
+
 	// If dialer has set a timeout, deadline, or keep alive, use those
 	// Options set in dialer will override those in config
 	if dialer.Timeout != 0 {
@@ -63,5 +75,5 @@ func DialWithDialer(dialer *net.Dialer, network, address string, config ClientCo
 		config.KeepAlive = dialer.KeepAlive
 	}
 
-	return NewClient(inner.(*net.UDPConn), nil, config), nil
+	return NewClient(inner.(*net.UDPConn), raddr.(*net.UDPAddr), config), nil
 }
