@@ -3,11 +3,13 @@ package tubes
 import (
 	"bytes"
 	"container/heap"
-	"errors"
 	"io"
 	"sync"
+	"sync/atomic"
 
 	"github.com/sirupsen/logrus"
+
+	"hop.computer/hop/common"
 )
 
 type receiver struct {
@@ -19,12 +21,12 @@ type receiver struct {
 	ackNo       uint64
 	windowStart uint64
 	windowSize  uint16
-	closed      bool
-	closedCond  *sync.Cond
-	bufferCond  sync.Cond
+	closed      atomic.Bool
+	finReceived chan struct{}
 	m           sync.Mutex
 	fragments   PriorityQueue
 
+	dataReady   *common.DeadlineChan[struct{}]
 	buffer *bytes.Buffer
 }
 
@@ -54,13 +56,19 @@ func (r *receiver) processIntoBuffer() {
 				break
 			}
 		} else if frag.FIN {
+			if r.fragments.Len() != 0 {
+				logrus.Fatalf("Got fin but %d fragments remain", r.fragments.Len())
+			}
 			r.windowStart++
 			r.ackNo++
-			r.closedCond.L.Lock()
-			logrus.Debug("RECEIVING FIN PACKET")
-			r.closed = true
-			r.closedCond.Broadcast()
-			r.closedCond.L.Unlock()
+			logrus.Errorf("processing fin packet. data: %x", frag.value)
+			r.closed.Store(true)
+			select {
+			case r.finReceived <- struct{}{}:
+				break
+			default:
+				break
+			}
 			break
 		} else {
 			r.buffer.Write(frag.value)
@@ -68,22 +76,28 @@ func (r *receiver) processIntoBuffer() {
 			r.ackNo++
 		}
 	}
-	r.bufferCond.Signal()
+	select {
+	case r.dataReady.C <- struct{}{}:
+		break
+	default:
+		break
+	}
 }
 
 func (r *receiver) read(buf []byte) (int, error) {
-	r.bufferCond.L.Lock()
 	r.m.Lock()
-	if r.buffer.Len() == 0 && !r.closed {
+	if r.buffer.Len() == 0 && !r.closed.Load() {
 		r.m.Unlock()
-		r.bufferCond.Wait()
+		_, err := r.dataReady.Recv()
+		if err != nil {
+			return 0, err
+		}
 		r.m.Lock()
 	}
 	defer r.m.Unlock()
-	defer r.bufferCond.L.Unlock()
 
 	nbytes, _ := r.buffer.Read(buf)
-	if r.closed {
+	if r.closed.Load() {
 		return nbytes, io.EOF
 	}
 	return nbytes, nil

@@ -13,6 +13,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/common"
 	"hop.computer/hop/transport"
 )
 
@@ -40,7 +41,8 @@ const (
 
 // Reliable implements a reliable and receiveWindow tube on top
 type Reliable struct {
-	closedCond sync.Cond
+	closing    chan struct{}
+	finReceived chan struct{}
 	tType      TubeType
 	id         byte
 	localAddr  net.Addr
@@ -65,12 +67,10 @@ func (r *Reliable) getState() state {
 
 func (r *Reliable) closer() {
 	for {
-		if r.recvWindow.closed {
+		if r.recvWindow.closed.Load() {
 			break
 		}
-		r.closedCond.L.Lock()
-		r.closedCond.Wait()
-		r.closedCond.L.Unlock()
+		<-r.finReceived
 	}
 	r.Close()
 }
@@ -89,14 +89,11 @@ func makeTube(underlying transport.MsgConn, sendQueue chan []byte, tType TubeTyp
 		remoteAddr: underlying.RemoteAddr(),
 		m:          sync.Mutex{},
 		initRecv:   make(chan bool, 1),
-		closedCond: sync.Cond{
-			L: &sync.Mutex{},
-		},
+		closing:    make(chan struct{}, 1),
+		finReceived: make(chan struct{}, 1),
 		recvWindow: receiver{
+			dataReady: common.NewDeadlineChan[struct{}](1),
 			buffer: new(bytes.Buffer),
-			bufferCond: sync.Cond{
-				L: &sync.Mutex{},
-			},
 			fragments:   make(PriorityQueue, 0),
 			windowSize:  windowSize,
 			windowStart: 1,
@@ -116,7 +113,7 @@ func makeTube(underlying transport.MsgConn, sendQueue chan []byte, tType TubeTyp
 		tType:     tType,
 	}
 	r.sender.tube = r
-	r.recvWindow.closedCond = &r.closedCond
+	r.recvWindow.finReceived = r.finReceived
 	r.recvWindow.init()
 	return r
 }
@@ -176,12 +173,15 @@ func (r *Reliable) receive(pkt *frame) error {
 	if tubeState != initiated {
 		return errTubeNotInitiated
 	}
-	r.closedCond.L.Lock()
 	if pkt.flags.ACK {
 		r.sender.recvAck(pkt.ackNo)
 	}
-	r.closedCond.Signal()
-	r.closedCond.L.Unlock()
+	select {
+	case r.closing <- struct{}{}:
+		break
+	default:
+		break
+	}
 	err := r.recvWindow.receive(pkt)
 
 	return err
@@ -239,7 +239,6 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 // Close handles closing reliable tubes
 func (r *Reliable) Close() error {
 	r.m.Lock()
-	name := r.id
 	if r.tubeState == closed {
 		r.m.Unlock()
 		return io.EOF
@@ -252,29 +251,22 @@ func (r *Reliable) Close() error {
 	logrus.Debug("Starting close of ", r.id)
 
 	// Wait until the other end of the connection has received the FIN packet from the other side.
-	start := time.Now()
-	go func() {
-		timer := time.NewTimer(time.Second * 5)
-		<-timer.C
-		r.closedCond.L.Lock()
-		r.closedCond.Signal()
-		r.closedCond.L.Unlock()
-	}()
-	r.closedCond.L.Lock()
+	timer := time.NewTimer(5 * time.Second)
+	closeLoop:
 	for {
-		t := time.Now()
-		elapsed := t.Sub(start)
-		logrus.Debug("waiting: ", r.sender.unsentFramesRemaining(), r.recvWindow.closed, elapsed.Seconds())
-
-		if elapsed.Seconds() > 5 || (!r.sender.unsentFramesRemaining() && r.recvWindow.closed) {
-			logrus.Debug("Breaking out! ", r.id)
-			break
+		logrus.Error("waiting: ", r.sender.unsentFramesRemaining(), r.recvWindow.closed.Load())
+		select {
+		case <-r.closing:
+			if !r.sender.unsentFramesRemaining() && r.recvWindow.closed.Load() {
+				logrus.Error("sent all frame and got fin", r.id)
+				break closeLoop
+			}
+		case <-timer.C:
+			break closeLoop
 		}
-		r.closedCond.Wait()
 	}
-	r.closedCond.L.Unlock()
 	r.sender.Close()
-	logrus.Debugf("closed tube: %v", name)
+	logrus.Debugf("closed tube: %v", r.id)
 	r.m.Lock()
 	r.tubeState = closed
 	r.m.Unlock()
@@ -299,18 +291,20 @@ func (r *Reliable) RemoteAddr() net.Addr {
 
 // SetDeadline (not implemented)
 func (r *Reliable) SetDeadline(t time.Time) error {
-	// TODO
-	panic("implement me")
+	r.SetReadDeadline(t)
+	r.SetWriteDeadline(t)
+	return nil
 }
 
 // SetReadDeadline (not implemented)
 func (r *Reliable) SetReadDeadline(t time.Time) error {
-	// TODO
-	panic("implement me")
+	return r.recvWindow.dataReady.SetDeadline(t)
 }
 
 // SetWriteDeadline (not implemented)
 func (r *Reliable) SetWriteDeadline(t time.Time) error {
-	// TODO
-	panic("implement me")
+	r.sender.l.Lock()
+	defer r.sender.l.Unlock()
+	r.sender.deadline = t
+	return nil
 }

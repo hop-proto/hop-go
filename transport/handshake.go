@@ -463,8 +463,8 @@ func (hs *HandshakeState) deriveFinalKeys(clientToServerKey, serverToClientKey *
 	hs.duplex.Ratchet()
 	hs.duplex.Absorb([]byte("server_to_client_key"))
 	hs.duplex.Squeeze(serverToClientKey[:])
-	logrus.Debugf("client_to_server_key: %x", *clientToServerKey)
-	logrus.Debugf("server_to_client_key: %x", *serverToClientKey)
+	logrus.Infof("client_to_server_key: %x", *clientToServerKey)
+	logrus.Infof("server_to_client_key: %x", *serverToClientKey)
 	return nil
 }
 
