@@ -2,8 +2,8 @@ package tubes
 
 import (
 	"errors"
-	"io"
 	"fmt"
+	"io"
 )
 
 var errRecvOutOfBounds = errors.New("received dataframe out of receive window bounds")

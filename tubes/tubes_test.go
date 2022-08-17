@@ -131,7 +131,7 @@ func TestClose(t *testing.T) {
 }
 
 func TestTubes(t *testing.T) {
-	logrus.SetLevel(logrus.DebugLevel)
+	//logrus.SetLevel(logrus.DebugLevel)
 	mk := nettest.MakePipe(
 		func() (c1, c2 net.Conn, stop func(), err error) {
 			return makeTubeConn(t)
