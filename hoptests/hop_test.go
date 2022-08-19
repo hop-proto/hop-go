@@ -186,11 +186,10 @@ func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
 
 	// TODO(baumanl): what should actual default values be here.
 	c.Config = &config.HostConfig{
-		Patterns:     []string{h},
 		Hostname:     h,
 		Port:         port,
 		User:         username,
-		AutoSelfSign: config.True,
+		AutoSelfSign: true,
 		Key:          "home/" + username + "/.hop/id_hop.pem",
 	}
 

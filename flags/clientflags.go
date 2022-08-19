@@ -35,7 +35,7 @@ type ClientFlags struct {
 	Verbose    bool     // show verbose error messages
 }
 
-func mergeAddresses(f *ClientFlags, hc *config.HostConfig) error {
+func mergeAddresses(f *ClientFlags, hc *config.HostConfigOptional) error {
 	address := core.MergeURLs(hc.HostURL(), *f.Address)
 
 	if address.User == "" {
@@ -47,15 +47,15 @@ func mergeAddresses(f *ClientFlags, hc *config.HostConfig) error {
 	}
 
 	// Update host config address
-	hc.Hostname = address.Host
+	hc.Hostname = &address.Host
 	hc.Port, _ = strconv.Atoi(address.Port)
-	hc.User = address.User
+	hc.User = &address.User
 	return nil
 }
 
 func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig, dc *config.ClientConfig) (*config.HostConfig, error) {
 	// TODO(baumanl): any need to preserve the original inputURL?
-	var hc *config.HostConfig
+	var hc *config.HostConfigOptional
 	if dc == nil {
 		hc = cc.MatchHost(f.Address.Host)
 	} else {
@@ -68,17 +68,13 @@ func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig, dc *conf
 	}
 
 	if f.Cmd != "" {
-		hc.Cmd = f.Cmd
+		hc.Cmd = &f.Cmd
 	}
 
-	if f.UsePty {
-		hc.UsePty = config.True
-	} else {
-		hc.UsePty = config.False
-	}
+	hc.UsePty = &f.UsePty
 
 	// TODO(baumanl): add merge support for all other flags/config options
-	return hc, nil
+	return hc.Unwrap(), nil
 }
 
 // LoadClientConfigFromFlags follows the configpath provided in flags (or default)

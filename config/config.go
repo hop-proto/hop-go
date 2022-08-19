@@ -2,7 +2,6 @@
 package config
 
 import (
-	"fmt"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -17,47 +16,10 @@ import (
 	"hop.computer/hop/pkg/thunks"
 )
 
-// BoolSetting is True, False, or Unset. The zero value is unset.
-type BoolSetting int
-
-// Valid values for BoolSetting
-const (
-	Unset BoolSetting = 0
-	True  BoolSetting = 1
-	False BoolSetting = -1
-)
-
-// Bool converts the BoolSetting into true if it is true, false if it is false,
-// and defaultVal if it is Unset
-func (bs BoolSetting) Bool(defaultVal bool) bool {
-	switch bs {
-	case True:
-		return true
-	case False:
-		return false
-	default:
-		return defaultVal
-	}
-}
-
-// UnmarshalText converts a byte slice (where []byte("true") = True and
-// []byte("false") = False) to a BoolSetting
-func (bs *BoolSetting) UnmarshalText(text []byte) error {
-	switch string(text) {
-	case "true":
-		*bs = True
-	case "false":
-		*bs = False
-	default:
-		return fmt.Errorf("expected value but found \"%v\" instead", string(text))
-	}
-	return nil
-}
-
 // ClientConfig represents a parsed client configuration.
 type ClientConfig struct {
-	Global HostConfig
-	Hosts  []HostConfig
+	Global HostConfigOptional
+	Hosts  []HostConfigOptional
 }
 
 // ServerConfig represents a parsed server configuration.
@@ -66,7 +28,7 @@ type ServerConfig struct {
 	Certificate  string
 	Intermediate string
 
-	AutoSelfSign  BoolSetting
+	AutoSelfSign  *bool
 	ListenAddress string
 
 	Names []NameConfig
@@ -75,26 +37,52 @@ type ServerConfig struct {
 	DataTimeout      time.Duration
 }
 
-// HostConfig contains a definition of a host pattern in a client configuration.
+// HostConfigOptional contains a definition of a host pattern in a client
+// configuration; strings and bools are represented as pointers so that a
+// default value can be distinguished from a set zero-value; users should
+// convert to a `HostConfig` (via .Unwrap) before reading the values
+type HostConfigOptional struct {
+	AgentURL     *string
+	AutoSelfSign *bool
+	CAFiles      []string
+	Certificate  *string
+	Cmd          *string // what command to run on connect
+	DisableAgent *bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
+	Headless     *bool   // run without command
+	Hostname     *string
+	Intermediate *string
+	Key          *string
+	Patterns     []string
+	Port         int
+	User         *string
+	// something for principal vs. delegate
+	// something for remote port forward
+	// something for local port forward
+
+	UsePty           *bool
+	HandshakeTimeout time.Duration
+	DataTimeout      time.Duration
+}
+
+// HostConfig contains a definition of a host pattern in a client configuration
 type HostConfig struct {
 	AgentURL     string
-	AutoSelfSign BoolSetting
+	AutoSelfSign bool
 	CAFiles      []string
 	Certificate  string
-	Cmd          string      // what command to run on connect
-	DisableAgent BoolSetting // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
-	Headless     BoolSetting // run without command
+	Cmd          string // what command to run on connect
+	DisableAgent bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
+	Headless     bool   // run without command
 	Hostname     string
 	Intermediate string
 	Key          string
-	Patterns     []string
 	Port         int
 	User         string
 	// something for principal vs. delegate
 	// something for remote port forward
 	// something for local port forward
 
-	UsePty           BoolSetting
+	UsePty           bool
 	HandshakeTimeout time.Duration
 	DataTimeout      time.Duration
 }
@@ -106,51 +94,51 @@ type NameConfig struct {
 	Key          string
 	Certificate  string
 	Intermediate string
-	AutoSelfSign BoolSetting
+	AutoSelfSign *bool
 
 	// TODO(dadrian): User mapping
 }
 
-// MergeWith takes non-default values in another HostConfig and overwrites them
+// MergeWith takes non-default values in another HostConfigOptional and overwrites them
 // on/merges them with the values in the receiver
-func (hc *HostConfig) MergeWith(other *HostConfig) {
-	//TODO(drebelsky): consider whether these default values could be valid values
-	if other.AgentURL != "" {
+func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
+	//TODO(drebelsky): consider using reflection
+	if other.AgentURL != nil {
 		hc.AgentURL = other.AgentURL
 	}
-	if other.AutoSelfSign != Unset {
+	if other.AutoSelfSign != nil {
 		hc.AutoSelfSign = other.AutoSelfSign
 	}
 	hc.CAFiles = append(hc.CAFiles, other.CAFiles...)
-	if other.Certificate != "" {
+	if other.Certificate != nil {
 		hc.Certificate = other.Certificate
 	}
-	if other.Cmd != "" {
+	if other.Cmd != nil {
 		hc.Cmd = other.Cmd
 	}
-	if other.DisableAgent != Unset {
+	if other.DisableAgent != nil {
 		hc.DisableAgent = other.DisableAgent
 	}
-	if other.Headless != Unset {
+	if other.Headless != nil {
 		hc.Headless = other.Headless
 	}
-	if other.Hostname != "" {
+	if other.Hostname != nil {
 		hc.Hostname = other.Hostname
 	}
-	if other.Intermediate != "" {
+	if other.Intermediate != nil {
 		hc.Intermediate = other.Intermediate
 	}
-	if other.Key != "" {
+	if other.Key != nil {
 		hc.Key = other.Key
 	}
-	// don't need to merge hc.Patterns
+	// don't need to merge Patterns
 	if other.Port != 0 {
 		hc.Port = other.Port
 	}
-	if other.User != "" {
+	if other.User != nil {
 		hc.User = other.User
 	}
-	if other.UsePty != Unset {
+	if other.UsePty != nil {
 		hc.UsePty = other.UsePty
 	}
 	if other.HandshakeTimeout != 0 {
@@ -159,6 +147,59 @@ func (hc *HostConfig) MergeWith(other *HostConfig) {
 	if other.DataTimeout != 0 {
 		hc.DataTimeout = other.DataTimeout
 	}
+}
+
+func (hc *HostConfigOptional) Unwrap() *HostConfig {
+	//TODO(drebelsky): consider using reflection
+	newHC := HostConfig{
+		HandshakeTimeout: 15 * time.Second,
+		DataTimeout:      15 * time.Second,
+	}
+	if hc.AgentURL != nil {
+		newHC.AgentURL = *hc.AgentURL
+	}
+	if hc.AutoSelfSign != nil {
+		newHC.AutoSelfSign = *hc.AutoSelfSign
+	}
+	newHC.CAFiles = hc.CAFiles
+	if hc.Certificate != nil {
+		newHC.Certificate = *hc.Certificate
+	}
+	if hc.Cmd != nil {
+		newHC.Cmd = *hc.Cmd
+	}
+	if hc.DisableAgent != nil {
+		newHC.DisableAgent = *hc.DisableAgent
+	}
+	if hc.Headless != nil {
+		newHC.Headless = *hc.Headless
+	}
+	if hc.Hostname != nil {
+		newHC.Hostname = *hc.Hostname
+	}
+	if hc.Intermediate != nil {
+		newHC.Intermediate = *hc.Intermediate
+	}
+	if hc.Key != nil {
+		newHC.Key = *hc.Key
+	}
+	// don't need to include patterns
+	if hc.Port != 0 {
+		newHC.Port = hc.Port
+	}
+	if hc.User != nil {
+		newHC.User = *hc.User
+	}
+	if hc.UsePty != nil {
+		newHC.UsePty = *hc.UsePty
+	}
+	if hc.HandshakeTimeout != 0 {
+		newHC.HandshakeTimeout = hc.HandshakeTimeout
+	}
+	if hc.DataTimeout != 0 {
+		newHC.DataTimeout = hc.DataTimeout
+	}
+	return &newHC
 }
 
 // LoadClientConfigFromFile tokenizes and parses the file at path, then loads it into
@@ -267,7 +308,7 @@ func MatchHostPattern(pattern string, input string) bool {
 }
 
 // MatchHost returns the host block that matches the input host.
-func (c *ClientConfig) MatchHost(inputHost string) *HostConfig {
+func (c *ClientConfig) MatchHost(inputHost string) *HostConfigOptional {
 	host := c.Global
 	for i := range c.Hosts {
 		for _, pattern := range c.Hosts[i].Patterns {
@@ -298,10 +339,25 @@ func (hc *HostConfig) ApplyConfigToInputAddress(address core.URL) core.URL {
 
 // HostURL extracts the Hostname, Port, and User from the HostConfig into an
 // core.URL.
-func (hc HostConfig) HostURL() core.URL {
+func (hc *HostConfig) HostURL() core.URL {
 	u := core.URL{
 		Host: hc.Hostname,
 		User: hc.User,
+	}
+	if hc.Port != 0 {
+		u.Port = strconv.Itoa(hc.Port)
+	} else {
+		u.Port = common.DefaultListenPortString
+	}
+	return u
+}
+
+// HostURL extracts the Hostname, Port, and User from the HostConfig into an
+// core.URL.
+func (hc *HostConfigOptional) HostURL() core.URL {
+	u := core.URL{
+		Host: *hc.Hostname,
+		User: *hc.User,
 	}
 	if hc.Port != 0 {
 		u.Port = strconv.Itoa(hc.Port)

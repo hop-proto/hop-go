@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/sirupsen/logrus"
@@ -33,8 +32,6 @@ func main() {
 		}
 		return
 	}
-	hc.HandshakeTimeout = 15 * time.Second
-	hc.DataTimeout = 15 * time.Second
 
 	client, err := hopclient.NewHopClient(hc)
 	if err != nil {

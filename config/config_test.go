@@ -9,16 +9,20 @@ import (
 func TestLoadClientConfig(t *testing.T) {
 	c, err := LoadClientConfigFromFile("testdata/client")
 	assert.NilError(t, err)
+	key := "/path/to/key.pem"
+	cert := "/path/to/cert.pem"
+	hostname := "example.localhost"
+	autoSelfSign := false
 	expected := &ClientConfig{
-		Global: HostConfig{
+		Global: HostConfigOptional{
 			CAFiles: []string{"/path/to/ca.pem", "/path/to/other.pem"},
 		},
-		Hosts: []HostConfig{{
+		Hosts: []HostConfigOptional{{
 			Patterns:     []string{"example.localhost"},
-			Key:          "/path/to/key.pem",
-			Certificate:  "/path/to/cert.pem",
-			AutoSelfSign: False,
-			Hostname:     "example.localhost",
+			Key:          &key,
+			Certificate:  &cert,
+			AutoSelfSign: &autoSelfSign,
+			Hostname:     &hostname,
 			Port:         1234,
 		}},
 	}

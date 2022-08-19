@@ -170,7 +170,7 @@ func (c *HopClient) authenticatorSetupLocked(authgrantConn net.Conn) error {
 	var autoSelfSign bool
 	if hc.Certificate != "" {
 		leafFile = hc.Certificate
-	} else if hc.AutoSelfSign == config.True {
+	} else if hc.AutoSelfSign {
 		autoSelfSign = true
 	} else {
 		return fmt.Errorf("no certificate provided and AutoSelfSign is not enabled for %q", hc.HostURL().Address())
@@ -189,7 +189,7 @@ func (c *HopClient) authenticatorSetupLocked(authgrantConn net.Conn) error {
 	// Connect to the agent
 	aconn, _ := net.Dial("tcp", agentURL)
 
-	if hc.DisableAgent != config.True && aconn != nil && ac.Available(context.Background()) {
+	if !hc.DisableAgent && aconn != nil && ac.Available(context.Background()) {
 		bc, err := ac.ExchangerFor(context.Background(), keyPath)
 		if err != nil {
 			return fmt.Errorf("unable to create exchanger for agent with keyID: %s", err)
@@ -448,7 +448,7 @@ func (c *HopClient) startExecTube() error {
 		return err
 	}
 	c.wg.Add(1)
-	c.ExecTube, err = codex.NewExecTube(c.hostconfig.Cmd, c.hostconfig.UsePty.Bool(false), ch, winSizeTube, &c.wg)
+	c.ExecTube, err = codex.NewExecTube(c.hostconfig.Cmd, c.hostconfig.UsePty, ch, winSizeTube, &c.wg)
 	return err
 }
 
@@ -463,7 +463,7 @@ func (c *HopClient) HandleTubes() {
 			continue
 		}
 		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v", t.Type())
-		if t.Type() == common.AuthGrantTube && c.hostconfig.Headless.Bool(false) {
+		if t.Type() == common.AuthGrantTube && c.hostconfig.Headless {
 			go c.principal(t)
 		} else if t.Type() == common.RemotePFTube {
 			go c.handleRemote(t)
