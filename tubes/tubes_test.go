@@ -1,7 +1,6 @@
 package tubes
 
 import (
-	"errors"
 	"io"
 	"net"
 	"testing"
