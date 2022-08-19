@@ -40,6 +40,7 @@ var errTubeNotInitiated = errors.New("tube not initiated")
 
 // Reliable implements a reliable and receiveWindow tube on top
 type Reliable struct {
+	reset       chan struct{}
 	closing     chan struct{}
 	finReceived chan struct{}
 	tType       TubeType
@@ -57,16 +58,6 @@ type Reliable struct {
 // Reliable implements net.Conn
 var _ net.Conn = &Reliable{}
 
-func (r *Reliable) closer() {
-	for {
-		if r.recvWindow.closed.Load() {
-			break
-		}
-		<-r.finReceived
-	}
-	r.Close()
-}
-
 func newReliableTubeWithTubeID(muxer *Muxer, tubeType TubeType, tubeID byte) *Reliable {
 	r := makeTube(muxer, tubeType, tubeID)
 	go r.initiate(false)
@@ -81,6 +72,7 @@ func makeTube(muxer *Muxer, tType TubeType, tubeID byte) *Reliable {
 		remoteAddr:  muxer.underlying.RemoteAddr(),
 		initRecv:    make(chan struct{}),
 		closing:     make(chan struct{}, 1),
+		reset:       make(chan struct{}, 1),
 		finReceived: make(chan struct{}, 1),
 		recvWindow: receiver{
 			dataReady:   common.NewDeadlineChan[struct{}](1),
@@ -99,6 +91,7 @@ func makeTube(muxer *Muxer, tType TubeType, tubeID byte) *Reliable {
 			RTOTicker:        time.NewTicker(retransmitOffset),
 			RTO:              retransmitOffset,
 			windowSize:       windowSize,
+			retransmitEnded:  make(chan struct{}),
 		},
 		sendQueue: muxer.sendQueue,
 		tType:     tType,
@@ -152,8 +145,7 @@ func (r *Reliable) initiate(req bool) {
 			notInit = r.tubeState.Load() == created
 		}
 	}
-	go r.sender.retransmit()
-	//go r.closer()
+	go r.sender.Start()
 }
 
 func (r *Reliable) receive(pkt *frame) error {
@@ -243,14 +235,34 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 	return n, 0, 0, nil, e
 }
 
+func (r *Reliable) Reset() (err error) {
+	// TODO(hosono) add a reset flag
+
+	if r.tubeState.CompareAndSwap(initiated, closed) {
+		logrus.Warnf("Resetting tube %d", r.id)
+		err = nil
+	} else {
+		logrus.Warnf("Resetting of closed tube %d", r.id)
+		err = io.EOF
+	}
+	r.sender.Close()
+	r.recvWindow.Close()
+
+	select {
+	case r.reset <- struct{}{}:
+		break
+	default:
+		break
+	}
+
+	return
+}
+
 // Close handles closing reliable tubes
 func (r *Reliable) Close() (err error) {
-	if r.tubeState.Load() == closed {
+	if !r.tubeState.CompareAndSwap(initiated, closed) {
 		return io.EOF
 	}
-	//r.m.Lock()
-	//r.tubeState = closeStart
-	//r.m.Unlock()
 	err = r.sender.sendFin()
 	if err != nil && !errors.Is(err, io.EOF) {
 		return err
@@ -268,6 +280,9 @@ closeLoop:
 			} else {
 				logrus.Debugf("closing. packets left to ack: %d", len(r.sender.frames))
 			}
+		case <- r.reset:
+			logrus.Debugf("got reset in close loop for tube %d", r.id)
+			break closeLoop
 		}
 	}
 	r.sender.Close()
