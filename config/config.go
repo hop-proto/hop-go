@@ -60,8 +60,8 @@ type HostConfigOptional struct {
 	// something for local port forward
 
 	UsePty           *bool
-	HandshakeTimeout time.Duration
-	DataTimeout      time.Duration
+	HandshakeTimeout int
+	DataTimeout      int
 }
 
 // HostConfig contains a definition of a host pattern in a client configuration
@@ -194,10 +194,10 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 		newHC.UsePty = *hc.UsePty
 	}
 	if hc.HandshakeTimeout != 0 {
-		newHC.HandshakeTimeout = hc.HandshakeTimeout
+		newHC.HandshakeTimeout = time.Duration(hc.HandshakeTimeout) * time.Second
 	}
 	if hc.DataTimeout != 0 {
-		newHC.DataTimeout = hc.DataTimeout
+		newHC.DataTimeout = time.Duration(hc.DataTimeout) * time.Second
 	}
 	return &newHC
 }
