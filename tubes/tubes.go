@@ -8,7 +8,7 @@ import (
 	"errors"
 	"io"
 	"net"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -26,17 +26,17 @@ const retransmitOffset = time.Millisecond * 500
 
 const windowSize = 128
 
-type state int
-
 // TubeType represents identifier bytes of Tubes.
 type TubeType byte
 
 const (
-	created    state = iota
-	initiated  state = iota
-	closeStart state = iota
-	closed     state = iota
+	created    int32 = iota
+	initiated  int32 = iota
+	closeStart int32 = iota
+	closed     int32 = iota
 )
+
+var errTubeNotInitiated = errors.New("tube not initiated")
 
 // Reliable implements a reliable and receiveWindow tube on top
 type Reliable struct {
@@ -45,13 +45,11 @@ type Reliable struct {
 	tType       TubeType
 	id          byte
 	localAddr   net.Addr
-	m           sync.Mutex
 	recvWindow  receiver
 	remoteAddr  net.Addr
 	sender      sender
 	sendQueue   chan []byte
-	// +checklocks:m
-	tubeState state // TODO(hosono) this could just be atomic
+	tubeState atomic.Int32 // TODO(hosono) this could just be atomic
 	initRecv  chan struct{}
 	muxer     *Muxer
 }
@@ -79,10 +77,8 @@ func makeTube(muxer *Muxer, tType TubeType, tubeID byte) *Reliable {
 	r := &Reliable{
 		muxer:       muxer,
 		id:          tubeID,
-		tubeState:   created,
 		localAddr:   muxer.underlying.LocalAddr(),
 		remoteAddr:  muxer.underlying.RemoteAddr(),
-		m:           sync.Mutex{},
 		initRecv:    make(chan struct{}),
 		closing:     make(chan struct{}, 1),
 		finReceived: make(chan struct{}, 1),
@@ -107,6 +103,7 @@ func makeTube(muxer *Muxer, tType TubeType, tubeID byte) *Reliable {
 		sendQueue: muxer.sendQueue,
 		tType:     tType,
 	}
+	r.tubeState.Store(created)
 	r.sender.tube = r
 	r.recvWindow.finReceived = r.finReceived
 	r.recvWindow.init()
@@ -152,9 +149,7 @@ func (r *Reliable) initiate(req bool) {
 		case <-ticker.C:
 			continue
 		case <-r.initRecv:
-			r.m.Lock()
-			notInit = r.tubeState == created
-			r.m.Unlock()
+			notInit = r.tubeState.Load() == created
 		}
 	}
 	go r.sender.retransmit()
@@ -162,9 +157,7 @@ func (r *Reliable) initiate(req bool) {
 }
 
 func (r *Reliable) receive(pkt *frame) error {
-	r.m.Lock()
-	tubeState := r.tubeState
-	r.m.Unlock()
+	tubeState := r.tubeState.Load()
 	if tubeState != initiated && tubeState != closeStart{
 		logrus.Errorf("receive for uninitiated tube %d. fin? %t", r.id, pkt.flags.FIN)
 		return errors.New("tube not initiated")
@@ -185,28 +178,16 @@ func (r *Reliable) receive(pkt *frame) error {
 }
 
 func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
-	r.m.Lock()
-	defer r.m.Unlock()
-
-	if r.tubeState == created {
+	if r.tubeState.Load() == created {
 		r.recvWindow.m.Lock()
 		r.recvWindow.ackNo = 1
 		r.recvWindow.m.Unlock()
 		//logrus.Debug("INITIATED! ", pkt.flags.REQ, " ", pkt.flags.RESP)
-		r.tubeState = initiated
+		r.tubeState.Store(initiated)
 		r.sender.recvAck(1)
 		close(r.initRecv)
 	}
 
-	return nil
-}
-
-func (r *Reliable) checkInitiated() (error) {
-	r.m.Lock()
-	defer r.m.Unlock()
-	if r.tubeState != initiated {
-		return errors.New("tube not initiated")
-	}
 	return nil
 }
 
@@ -215,25 +196,25 @@ func (r *Reliable) WaitForInitiated() {
 }
 
 func (r *Reliable) Read(b []byte) (n int, err error) {
-	err = r.checkInitiated()
-	if err != nil {
-		return 0, err
+	if r.tubeState.Load() != initiated {
+		err = errTubeNotInitiated
+		return
 	}
 	return r.recvWindow.read(b)
 }
 
 func (r *Reliable) Write(b []byte) (n int, err error) {
-	err = r.checkInitiated()
-	if err != nil {
-		return 0, err
+	if r.tubeState.Load() != initiated {
+		err = errTubeNotInitiated
+		return
 	}
 	return r.sender.write(b)
 }
 
 // WriteMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
-	err = r.checkInitiated()
-	if err != nil {
+	if r.tubeState.Load() != initiated {
+		err = errTubeNotInitiated
 		return
 	}
 	length := len(b)
@@ -245,8 +226,8 @@ func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, e
 
 // ReadMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
-	err = r.checkInitiated()
-	if err != nil {
+	if r.tubeState.Load() != initiated {
+		err = errTubeNotInitiated
 		return
 	}
 	h := make([]byte, 2)
@@ -263,15 +244,8 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 
 // Close handles closing reliable tubes
 func (r *Reliable) Close() (err error) {
-	r.m.Lock()
-	if r.tubeState == closed {
-		r.m.Unlock()
+	if r.tubeState.Load() == closed {
 		return io.EOF
-	}
-	r.m.Unlock()
-	err = r.checkInitiated()
-	if err != nil {
-		return err
 	}
 	//r.m.Lock()
 	//r.tubeState = closeStart
@@ -298,9 +272,7 @@ closeLoop:
 	r.sender.Close()
 	r.recvWindow.Close()
 	logrus.Debugf("closed tube: %v", r.id)
-	r.m.Lock()
-	r.tubeState = closed
-	r.m.Unlock()
+	r.tubeState.Store(closed)
 
 	return nil
 }
