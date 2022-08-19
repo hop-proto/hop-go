@@ -4,6 +4,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/flags"
@@ -25,7 +26,11 @@ func main() {
 	// hc will be result of merging config file settings and flags
 	hc, err := flags.LoadClientConfigFromFlags(f)
 	if err != nil {
-		logrus.Error(err)
+		if perr, ok := err.(toml.ParseError); ok {
+			logrus.Error(perr.ErrorWithUsage())
+		} else {
+			logrus.Error(err)
+		}
 		return
 	}
 	hc.HandshakeTimeout = 15 * time.Second

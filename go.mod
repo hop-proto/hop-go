@@ -2,8 +2,11 @@ module hop.computer/hop
 
 go 1.19
 
+replace github.com/BurntSushi/toml => github.com/drebelsky/toml v0.0.2
+
 require (
 	github.com/AstromechZA/etcpwdparse v0.0.0-20170319193008-f0e5f0779716
+	github.com/BurntSushi/toml v1.2.0
 	github.com/creack/pty v1.1.18
 	github.com/docker/docker v20.10.14+incompatible
 	github.com/docker/go-connections v0.4.0
@@ -19,7 +22,6 @@ require (
 )
 
 require (
-	github.com/BurntSushi/toml v1.2.0 // indirect
 	github.com/Microsoft/go-winio v0.5.2 // indirect
 	github.com/Microsoft/hcsshim v0.9.2 // indirect
 	github.com/containerd/cgroups v1.0.3 // indirect

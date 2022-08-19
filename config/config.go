@@ -8,12 +8,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/BurntSushi/toml"
+	"github.com/sirupsen/logrus"
+
 	"hop.computer/hop/common"
 	"hop.computer/hop/core"
 	"hop.computer/hop/pkg/glob"
 	"hop.computer/hop/pkg/thunks"
-
-	"github.com/BurntSushi/toml"
 )
 
 // BoolSetting is True, False, or Unset. The zero value is unset.
@@ -168,7 +169,11 @@ func LoadClientConfigFromFile(path string) (*ClientConfig, error) {
 }
 
 func loadClientConfigFromFile(c *ClientConfig, path string) (*ClientConfig, error) {
-	_, err := toml.DecodeFile(path, c)
+	meta, err := toml.DecodeFile(path, c)
+	keys, lines := meta.UndecodedWithLines()
+	for i, key := range keys {
+		logrus.Warnf("While parsing config, encountered unknown key `%v` at %v:%v", key, path, lines[i])
+	}
 	return c, err
 }
 
@@ -180,7 +185,11 @@ func LoadServerConfigFromFile(path string) (*ServerConfig, error) {
 }
 
 func loadServerConfigFromFile(c *ServerConfig, path string) (*ServerConfig, error) {
-	_, err := toml.DecodeFile(path, c)
+	meta, err := toml.DecodeFile(path, c)
+	keys, lines := meta.UndecodedWithLines()
+	for i, key := range keys {
+		logrus.Warnf("While parsing config, encountered unknown key `%v` at %v:%v", key, path, lines[i])
+	}
 	return c, err
 }
 

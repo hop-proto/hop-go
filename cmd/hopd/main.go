@@ -6,6 +6,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/flags"
@@ -26,7 +27,11 @@ func main() {
 
 	sc, err := flags.LoadServerConfigFromFlags(f)
 	if err != nil {
-		logrus.Fatalf("error loading config: %s", err)
+		if perr, ok := err.(toml.ParseError); ok {
+			logrus.Fatal(perr.ErrorWithUsage())
+		} else {
+			logrus.Fatalf("error loading config: %s", err)
+		}
 	}
 	sc.HandshakeTimeout = 15 * time.Second
 
