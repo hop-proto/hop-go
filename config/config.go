@@ -2,17 +2,18 @@
 package config
 
 import (
-	"os"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
 
 	"hop.computer/hop/common"
-	"hop.computer/hop/config/ast"
 	"hop.computer/hop/core"
 	"hop.computer/hop/pkg/glob"
 	"hop.computer/hop/pkg/thunks"
+
+	"github.com/BurntSushi/toml"
 )
 
 // BoolSetting is True, False, or Unset. The zero value is unset.
@@ -25,18 +26,33 @@ const (
 	False BoolSetting = -1
 )
 
+func (bs BoolSetting) Bool(defaultVal bool) bool {
+	switch bs {
+	case True:
+		return true
+	case False:
+		return false
+	default:
+		return defaultVal
+	}
+}
+
+func (bs *BoolSetting) UnmarshalText(text []byte) error {
+	switch string(text) {
+	case "true":
+		*bs = True
+	case "false":
+		*bs = False
+	default:
+		return fmt.Errorf("expected value but found \"%v\" instead", string(text))
+	}
+	return nil
+}
+
 // ClientConfig represents a parsed client configuration.
 type ClientConfig struct {
-	CAFiles          []string
-	Key              string
-	Certificate      string
-	AutoSelfSign     BoolSetting
-	AgentURL         string
-	Hosts            []HostConfig
-	Cmd              string // TODO(hosono) seems redundant with Cmd in hostconfig
-	UsePty           bool
-	HandshakeTimeout time.Duration
-	DataTimeout      time.Duration
+	Global HostConfig
+	Hosts  []HostConfig
 }
 
 // ServerConfig represents a parsed server configuration.
@@ -56,23 +72,26 @@ type ServerConfig struct {
 
 // HostConfig contains a definition of a host pattern in a client configuration.
 type HostConfig struct {
-	Pattern      string
-	Hostname     string
-	User         string
-	Port         int
+	AgentUrl     string
 	AutoSelfSign BoolSetting
-	Key          string
+	CAFiles      []string
 	Certificate  string
-	Intermediate string
-
+	Cmd          string      // what command to run on connect
 	DisableAgent BoolSetting // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
-
-	// TODO(baumanl): Add application layer hop config options to grammar
-	Cmd      string // what command to run on connect
-	Headless bool   // run without command
+	Headless     BoolSetting // run without command
+	Hostname     string
+	Intermediate string
+	Key          string
+	Patterns     []string
+	Port         int
+	User         string
 	// something for principal vs. delegate
 	// something for remote port forward
 	// something for local port forward
+
+	UsePty           BoolSetting
+	HandshakeTimeout time.Duration
+	DataTimeout      time.Duration
 }
 
 // NameConfig defines the keys and certificates presented by the server for a
@@ -87,28 +106,52 @@ type NameConfig struct {
 	// TODO(dadrian): User mapping
 }
 
-//go:generate go run ./gen config_gen.go
-
-// LoadClientConfig converts an AST into an actual configuration object.
-func LoadClientConfig(root *ast.Node) (*ClientConfig, error) {
-	var c ClientConfig
-	return loadClientConfig_Gen(&c, root)
-}
-
-func tokenizeAndParseFile(path string) (*ast.Node, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
+func (host *HostConfig) mergeWith(other *HostConfig) {
+	//TODO(drebelsky): consider whether these default values could be valid values
+	if other.AgentUrl != "" {
+		host.AgentUrl = other.AgentUrl
 	}
-	tokens, err := ast.Tokenize(b)
-	if err != nil {
-		return nil, err
+	if other.AutoSelfSign != Unset {
+		host.AutoSelfSign = other.AutoSelfSign
 	}
-	p := ast.NewParser(b, tokens)
-	if err := p.Parse(); err != nil {
-		return nil, err
+	host.CAFiles = append(host.CAFiles, other.CAFiles...)
+	if other.Certificate != "" {
+		host.Certificate = other.Certificate
 	}
-	return p.AST, nil
+	if other.Cmd != "" {
+		host.Cmd = other.Cmd
+	}
+	if other.DisableAgent != Unset {
+		host.DisableAgent = other.DisableAgent
+	}
+	if other.Headless != Unset {
+		host.Headless = other.Headless
+	}
+	if other.Hostname != "" {
+		host.Hostname = other.Hostname
+	}
+	if other.Intermediate != "" {
+		host.Intermediate = other.Intermediate
+	}
+	if other.Key != "" {
+		host.Key = other.Key
+	}
+	// don't need to merge host.Patterns
+	if other.Port != 0 {
+		host.Port = other.Port
+	}
+	if other.User != "" {
+		host.User = other.User
+	}
+	if other.UsePty != Unset {
+		host.UsePty = other.UsePty
+	}
+	if other.HandshakeTimeout != 0 {
+		host.HandshakeTimeout = other.HandshakeTimeout
+	}
+	if other.DataTimeout != 0 {
+		host.DataTimeout = other.DataTimeout
+	}
 }
 
 // LoadClientConfigFromFile tokenizes and parses the file at path, then loads it into
@@ -119,17 +162,8 @@ func LoadClientConfigFromFile(path string) (*ClientConfig, error) {
 }
 
 func loadClientConfigFromFile(c *ClientConfig, path string) (*ClientConfig, error) {
-	root, err := tokenizeAndParseFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return loadClientConfig_Gen(c, root)
-}
-
-// LoadServerConfig parses an AST into a ServerConfig.
-func LoadServerConfig(root *ast.Node) (*ServerConfig, error) {
-	var c ServerConfig
-	return loadServerConfig_Gen(&c, root)
+	_, err := toml.DecodeFile(path, c)
+	return c, err
 }
 
 // LoadServerConfigFromFile tokenizes and parse the file at path, and then loads
@@ -140,11 +174,8 @@ func LoadServerConfigFromFile(path string) (*ServerConfig, error) {
 }
 
 func loadServerConfigFromFile(c *ServerConfig, path string) (*ServerConfig, error) {
-	root, err := tokenizeAndParseFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return loadServerConfig_Gen(c, root)
+	_, err := toml.DecodeFile(path, c)
+	return c, err
 }
 
 var clientDirectory string
@@ -222,13 +253,16 @@ func MatchHostPattern(pattern string, input string) bool {
 
 // MatchHost returns the host block that matches the input host.
 func (c *ClientConfig) MatchHost(inputHost string) *HostConfig {
+	host := c.Global
 	for i := range c.Hosts {
-		if MatchHostPattern(c.Hosts[i].Pattern, inputHost) {
-			return &c.Hosts[i]
+		for _, pattern := range c.Hosts[i].Patterns {
+			if MatchHostPattern(pattern, inputHost) {
+				host.mergeWith(&c.Hosts[i])
+				break
+			}
 		}
 	}
-	// TODO(dadrian): Should this return a default host config? Yes.
-	return &HostConfig{}
+	return &host
 }
 
 // ApplyConfigToInputAddress updates the input address with the Host, Port, and

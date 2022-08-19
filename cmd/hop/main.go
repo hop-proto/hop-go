@@ -28,8 +28,8 @@ func main() {
 		logrus.Error(err)
 		return
 	}
-	cc.HandshakeTimeout = 15 * time.Second
-	cc.DataTimeout = 15 * time.Second
+	cc.Global.HandshakeTimeout = 15 * time.Second
+	cc.Global.DataTimeout = 15 * time.Second
 
 	client, err := hopclient.NewHopClientWithURL(cc, f.Address)
 	if err != nil {

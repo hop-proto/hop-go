@@ -62,10 +62,14 @@ func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig) error {
 	}
 
 	if f.Cmd != "" {
-		cc.Cmd = f.Cmd
+		hc.Cmd = f.Cmd
 	}
 
-	cc.UsePty = f.UsePty
+	if f.UsePty {
+		hc.UsePty = config.True
+	} else {
+		hc.UsePty = config.False
+	}
 
 	// TODO(baumanl): add merge support for all other flags/config options
 	return nil

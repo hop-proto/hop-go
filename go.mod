@@ -19,6 +19,7 @@ require (
 )
 
 require (
+	github.com/BurntSushi/toml v1.2.0 // indirect
 	github.com/Microsoft/go-winio v0.5.2 // indirect
 	github.com/Microsoft/hcsshim v0.9.2 // indirect
 	github.com/containerd/cgroups v1.0.3 // indirect
