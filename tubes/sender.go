@@ -59,6 +59,8 @@ type sender struct {
 
 	// the tube that owns this sender
 	tube *Reliable
+
+	retransmitEnded chan struct{}
 }
 
 func (s *sender) unsentFramesRemaining() bool {
@@ -163,10 +165,16 @@ func (s *sender) retransmit() {
 		}
 		s.l.Unlock()
 	}
+	close(s.retransmitEnded)
+}
+
+func (s *sender) Start() {
+	go s.retransmit()
 }
 
 func (s *sender) Close() {
 	s.closed.Store(true)
+	<-s.retransmitEnded
 }
 
 func (s *sender) sendFin() error {
