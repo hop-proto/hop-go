@@ -1,6 +1,7 @@
 package tubes
 
 import (
+	"io"
 	"sync"
 	"time"
 
@@ -81,16 +82,21 @@ func (m *Muxer) readMsg() (*frame, error) {
 }
 
 func (m *Muxer) sender() {
-	for !m.stopped.IsSet() {
-		rawBytes := <-m.sendQueue
+	for rawBytes := range(m.sendQueue) {
 		m.underlying.WriteMsg(rawBytes)
 	}
 }
 
 // Start allows a muxer to start listening and handling incoming tube requests and messages
-func (m *Muxer) Start() error {
+func (m *Muxer) Start() (err error) {
 	go m.sender()
 	m.stopped.SetFalse()
+
+	defer func() {
+		if err != nil {
+			m.Stop()
+		}
+	}()
 
 	// Set initial timeout
 	if m.timeout != 0 {
@@ -137,9 +143,13 @@ func (m *Muxer) Start() error {
 	return nil
 }
 
-// Stop ensures all the muxer tubes are closed
-func (m *Muxer) Stop() {
+// Close ensures all the muxer tubes are closed
+func (m *Muxer) Close() (err error) {
+	if m.stopped.IsSet() {
+		return io.EOF
+	}
 	m.m.Lock()
+	defer m.m.Unlock()
 	wg := sync.WaitGroup{}
 	for _, v := range m.tubes {
 		wg.Add(1)
@@ -149,8 +159,23 @@ func (m *Muxer) Stop() {
 			v.Close() //TODO(baumanl): If a tube was already closed this returns an error that is ignored atm. Remove tube from map after closing?
 		}(v)
 	}
-	m.m.Unlock()
 	wg.Wait()
+	close(m.sendQueue)
 	m.stopped.SetTrue() //This has to come after all the tubes are closed otherwise the tubes can't finish sending all their frames and deadlock
-	logrus.Info("Muxer.Stop() finished")
+	logrus.Info("Muxer.Close() finished")
+	return nil
+}
+
+func (m *Muxer) Stop() (err error) {
+	if m.stopped.IsSet() {
+		return io.EOF
+	}
+	m.m.Lock()
+	defer m.m.Unlock()
+	for _, tube := range(m.tubes) {
+		tube.Reset()
+	}
+	close(m.sendQueue)
+	m.stopped.SetTrue()
+	return nil
 }

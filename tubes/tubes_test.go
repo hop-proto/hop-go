@@ -74,16 +74,15 @@ func makeTubeConn(t *testing.T) (c1, c2 net.Conn, stop func(), err error) {
 	handle, err := server.AcceptTimeout(time.Second)
 	assert.NilError(t, err)
 
-	// TODO(hosono) change to reasonable timeouts
 	clientMuxer := NewMuxer(client, 2 * time.Second)
 	serverMuxer := NewMuxer(handle, 2 * time.Second)
 	go func() {
-		clientMuxer.Start()
-		logrus.Infof("client muxer stopped")
+		err := clientMuxer.Start()
+		logrus.Infof("client muxer stopped with error %s", err)
 	}()
 	go func() {
-		serverMuxer.Start()
-		logrus.Infof("server muxer stopped")
+		err := serverMuxer.Start()
+		logrus.Infof("server muxer stopped with error %s", err)
 	}()
 
 	t1, err := clientMuxer.CreateTube(common.ExecTube)
@@ -97,12 +96,25 @@ func makeTubeConn(t *testing.T) (c1, c2 net.Conn, stop func(), err error) {
 	c2 = net.Conn(t2)
 
 	stop = func() {
+		logrus.Infof("Calling stop")
+
 		c1.Close()
+		logrus.Infof("c1 closed")
+
 		c2.Close()
+		logrus.Infof("c2 closed")
+
 		clientMuxer.Stop()
+		logrus.Infof("client muxer closed")
+
 		serverMuxer.Stop()
+		logrus.Infof("server muxer closed")
+
 		client.Close()
+		logrus.Infof("client closed")
+
 		server.Close()
+		logrus.Infof("server closed")
 	}
 
 	return c1, c2, stop, err
