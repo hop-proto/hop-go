@@ -2,6 +2,5 @@
 set -e
 
 mkdir -p /etc/hopd
-sleep infinity
-# go run ./cmd/hopd -V -C /etc/hopd/config
+go run ./cmd/hopd -V -C /etc/hopd/config
 
