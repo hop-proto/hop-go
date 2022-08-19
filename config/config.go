@@ -231,6 +231,8 @@ func loadServerConfigFromFile(c *ServerConfig, path string) (*ServerConfig, erro
 	for i, key := range keys {
 		logrus.Warnf("While parsing config, encountered unknown key `%v` at %v:%v", key, path, lines[i])
 	}
+	c.HandshakeTimeout *= time.Second
+	c.DataTimeout *= time.Second
 	return c, err
 }
 
