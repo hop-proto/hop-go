@@ -110,7 +110,9 @@ type NameConfig struct {
 	// TODO(dadrian): User mapping
 }
 
-func (hc *HostConfig) mergeWith(other *HostConfig) {
+// MergeWith takes non-default values in another HostConfig and overwrites them
+// on/merges them with the values in the receiver
+func (hc *HostConfig) MergeWith(other *HostConfig) {
 	//TODO(drebelsky): consider whether these default values could be valid values
 	if other.AgentURL != "" {
 		hc.AgentURL = other.AgentURL
@@ -261,7 +263,7 @@ func (c *ClientConfig) MatchHost(inputHost string) *HostConfig {
 	for i := range c.Hosts {
 		for _, pattern := range c.Hosts[i].Patterns {
 			if MatchHostPattern(pattern, inputHost) {
-				host.mergeWith(&c.Hosts[i])
+				host.MergeWith(&c.Hosts[i])
 				break
 			}
 		}

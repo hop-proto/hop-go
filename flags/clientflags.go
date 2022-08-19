@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	istty "github.com/mattn/go-isatty"
+	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/config"
 	"hop.computer/hop/core"
@@ -52,10 +53,15 @@ func mergeAddresses(f *ClientFlags, hc *config.HostConfig) error {
 	return nil
 }
 
-func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig) (*config.HostConfig, error) {
-	//
+func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig, dc *config.ClientConfig) (*config.HostConfig, error) {
 	// TODO(baumanl): any need to preserve the original inputURL?
-	hc := cc.MatchHost(f.Address.Host)
+	var hc *config.HostConfig
+	if dc == nil {
+		hc = cc.MatchHost(f.Address.Host)
+	} else {
+		hc = dc.MatchHost(f.Address.Host)
+		hc.MergeWith(cc.MatchHost(f.Address.Host))
+	}
 	err := mergeAddresses(f, hc)
 	if err != nil {
 		return nil, err
@@ -78,7 +84,16 @@ func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig) (*config
 // LoadClientConfigFromFlags follows the configpath provided in flags (or default)
 // also updates the flags.Address to be the correct override (currently)
 func LoadClientConfigFromFlags(f *ClientFlags) (*config.HostConfig, error) {
-	// Make client config
+	// Get default client config if it exists
+	var dc *config.ClientConfig
+	if f.ConfigPath != "" {
+		var err error
+		dc, err = config.GetClient("")
+		if err != nil {
+			logrus.Warnf("Problem with loading config in default location: %v", err)
+			dc = nil
+		}
+	}
 	// Load the config file
 	cc, err := config.GetClient(f.ConfigPath)
 	if err != nil {
@@ -87,7 +102,7 @@ func LoadClientConfigFromFlags(f *ClientFlags) (*config.HostConfig, error) {
 		// host config and CLI flags?
 		return nil, fmt.Errorf("no config file found: %s", err)
 	}
-	return mergeClientFlagsAndConfig(f, cc)
+	return mergeClientFlagsAndConfig(f, cc, dc)
 }
 
 // defineClientFlags calls fs.StringVar for Client
