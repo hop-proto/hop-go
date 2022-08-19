@@ -3,6 +3,7 @@ package tubes
 import (
 	"bytes"
 	"container/heap"
+	"errors"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -26,8 +27,8 @@ type receiver struct {
 	m           sync.Mutex
 	fragments   PriorityQueue
 
-	dataReady   *common.DeadlineChan[struct{}]
-	buffer *bytes.Buffer
+	dataReady *common.DeadlineChan[struct{}]
+	buffer    *bytes.Buffer
 }
 
 func (r *receiver) init() {
@@ -56,12 +57,8 @@ func (r *receiver) processIntoBuffer() {
 				break
 			}
 		} else if frag.FIN {
-			if r.fragments.Len() != 0 {
-				logrus.Fatalf("Got fin but %d fragments remain", r.fragments.Len())
-			}
 			r.windowStart++
 			r.ackNo++
-			logrus.Errorf("processing fin packet. data: %x", frag.value)
 			r.closed.Store(true)
 			select {
 			case r.finReceived <- struct{}{}:
@@ -122,15 +119,19 @@ Utility function to add offsets so that we eliminate wraparounds.
 Precondition: must be holding frame number
 */
 func (r *receiver) unwrapFrameNo(frameNo uint32) uint64 {
-	// The previous, offsets are represented by the 32 least significant bytes of the window start.
-	windowStart := r.windowStart
-	newNo := uint64(frameNo) + windowStart - uint64(uint32(windowStart))
-
-	// Add an additional offset for the case in which seqNo has wrapped around again.
-	if frameNo < uint32(windowStart) {
-		newNo += 1 << 32
-	}
-	return newNo
+	// TODO(hosono) there's a bug in the implementation below. For now, don't unwrap
+	return uint64(frameNo)
+/*
+ *    // The previous, offsets are represented by the 32 least significant bytes of the window start.
+ *    windowStart := r.windowStart
+ *    newNo := uint64(frameNo) + windowStart - uint64(uint32(windowStart))
+ *
+ *    // Add an additional offset for the case in which seqNo has wrapped around again.
+ *    if frameNo < uint32(windowStart) {
+ *        newNo += 1 << 32
+ *    }
+ *    return newNo
+ */
 }
 
 /* Precondition: receive window lock is held. */
@@ -141,10 +142,12 @@ func (r *receiver) receive(p *frame) error {
 	windowEnd := r.windowStart + uint64(uint32(r.windowSize))
 
 	frameNo := r.unwrapFrameNo(p.frameNo)
-	logrus.Debugf("receive frame frameNo: %d, ackNo: %d, fin: %t, recv ack no: %d, data: %x", frameNo, p.ackNo, p.flags.FIN, r.ackNo, p.data)
+	//logrus.Debugf("receive frame frameNo: %d, ackNo: %d, fin: %t, recv ack no: %d, data: %x", frameNo, p.ackNo, p.flags.FIN, r.ackNo, p.data)
 	if !frameInBounds(windowStart, windowEnd, frameNo) {
-		logrus.Debug("received dataframe out of receive window bounds")
-		return errRecvOutOfBounds
+		logrus.Debugf("out of bounds frame. frameNo: %d, windowStart: %d, windowEnd: %d", frameNo, windowStart, windowEnd)
+		return errors.New("received dataframe out of receive window bounds")
+	} else {
+		logrus.Debugf("got in bounds frame. frameNo: %d, windowStart: %d, windowEnd: %d", frameNo, windowStart, windowEnd)
 	}
 
 	if (p.dataLength > 0 || p.flags.FIN) && (frameNo >= r.windowStart) {
@@ -158,4 +161,9 @@ func (r *receiver) receive(p *frame) error {
 	r.processIntoBuffer()
 
 	return nil
+}
+
+func (r *receiver) Close() {
+	r.closed.Store(true)
+	r.dataReady.Cancel(io.EOF)
 }

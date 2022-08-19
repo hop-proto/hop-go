@@ -52,7 +52,7 @@ func (m *Muxer) getTube(tubeID byte) (*Reliable, bool) {
 
 // CreateTube starts a new reliable tube
 func (m *Muxer) CreateTube(tType TubeType) (*Reliable, error) {
-	r, err := newReliableTube(m.underlying, m.sendQueue, tType)
+	r, err := newReliableTube(m, tType)
 	m.addTube(r)
 	logrus.Infof("Created Tube: %v", r.id)
 	return r, err
@@ -112,7 +112,7 @@ func (m *Muxer) Start() error {
 				if err != nil {
 					return err
 				}
-				tube = newReliableTubeWithTubeID(m.underlying, m.sendQueue, initFrame.tubeType, initFrame.tubeID)
+				tube = newReliableTubeWithTubeID(m, initFrame.tubeType, initFrame.tubeID)
 				m.addTube(tube)
 				m.tubeQueue <- tube
 			}
@@ -122,13 +122,13 @@ func (m *Muxer) Start() error {
 		if tube != nil {
 			if frame.flags.REQ || frame.flags.RESP {
 				initFrame, err := fromInitiateBytes(frame.toBytes())
-				//logrus.Info("RECEIVING INITIATE FRAME ", initFrame.tubeID, " ", initFrame.frameNo, " ", frame.flags.REQ, " ", frame.flags.RESP)
+				logrus.Debugf("receiving initiate frame. id: %d, frameNo: %d, req? %t, resp? %t", initFrame.tubeID, initFrame.frameNo, frame.flags.REQ, frame.flags.RESP)
 				if err != nil {
 					return err
 				}
 				go tube.receiveInitiatePkt(initFrame)
 			} else {
-				//logrus.Info("RECEIVING NORMAL FRAME")
+				logrus.Tracef("got frame. id: %d, ackno: %d. ack? %t", tube.id, frame.ackNo, frame.flags.ACK)
 				go tube.receive(frame)
 			}
 		}
