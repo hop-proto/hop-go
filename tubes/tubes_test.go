@@ -1,7 +1,6 @@
 package tubes
 
 import (
-	"errors"
 	"io"
 	"net"
 	"testing"
@@ -76,34 +75,32 @@ func makeTubeConn(t *testing.T) (c1, c2 net.Conn, stop func(), err error) {
 	assert.NilError(t, err)
 
 	// TODO(hosono) change to reasonable timeouts
-	clientMuxer := NewMuxer(client, 10*time.Hour)
-	serverMuxer := NewMuxer(handle, 10*time.Hour)
+	clientMuxer := NewMuxer(client, 2 * time.Second)
+	serverMuxer := NewMuxer(handle, 2 * time.Second)
 	go func() {
-		err := clientMuxer.Start()
-		if !errors.Is(err, io.EOF) {
-			logrus.Errorf("client muxer error: %s", err)
-			// assert.NilError doesn't work
-			//logrus.Panic(err)
-		}
+		clientMuxer.Start()
+		logrus.Infof("client muxer stopped")
 	}()
 	go func() {
-		err := serverMuxer.Start()
-		if !errors.Is(err, io.EOF) {
-			logrus.Errorf("server muxer error: %s", err)
-			// assert.NilError doesn't work
-			//logrus.Fatal(err)
-		}
+		serverMuxer.Start()
+		logrus.Infof("server muxer stopped")
 	}()
 
-	c1, err = clientMuxer.CreateTube(common.ExecTube)
+	t1, err := clientMuxer.CreateTube(common.ExecTube)
 	assert.NilError(t, err)
+	t1.WaitForInitiated()
+	c1 = net.Conn(t1)
 
-	c2, err = serverMuxer.Accept()
+	t2, err := serverMuxer.Accept()
 	assert.NilError(t, err)
+	t2.WaitForInitiated()
+	c2 = net.Conn(t2)
 
 	stop = func() {
 		c1.Close()
 		c2.Close()
+		clientMuxer.Stop()
+		serverMuxer.Stop()
 		client.Close()
 		server.Close()
 	}
@@ -131,7 +128,7 @@ func TestClose(t *testing.T) {
 }
 
 func TestTubes(t *testing.T) {
-	//logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetLevel(logrus.DebugLevel)
 	mk := nettest.MakePipe(
 		func() (c1, c2 net.Conn, stop func(), err error) {
 			return makeTubeConn(t)

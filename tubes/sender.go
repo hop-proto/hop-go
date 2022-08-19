@@ -1,6 +1,8 @@
 package tubes
 
 import (
+	"errors"
+	"io"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -48,13 +50,15 @@ type sender struct {
 	l sync.Mutex
 	// Retransmission TimeOut.
 	RTOTicker *time.Ticker
-	RTO       time.Duration
+	// +checklocks:l
+	RTO time.Duration
 
 	// the time after which writes will expire
+	// +checklocks:l
 	deadline time.Time
 
 	// the tube that owns this sender
-	tube 	*Reliable
+	tube *Reliable
 }
 
 func (s *sender) unsentFramesRemaining() bool {
@@ -72,15 +76,17 @@ func (s *sender) sendFrame(pkt *frame) {
 }
 
 func (s *sender) write(b []byte) (int, error) {
+	s.l.Lock()
+	defer s.l.Unlock()
 	if !s.deadline.IsZero() && time.Now().After(s.deadline) {
 		return 0, os.ErrDeadlineExceeded
 	}
-	s.l.Lock()
-	defer s.l.Unlock()
 	if s.closed.Load() {
-		return 0, errClosedWrite
+		return 0, io.EOF
 	}
 	s.buffer = append(s.buffer, b...)
+
+	startFrame := len(s.frames)
 
 	for len(s.buffer) > 0 {
 		dataLength := maxFrameDataLength
@@ -99,7 +105,7 @@ func (s *sender) write(b []byte) (int, error) {
 		s.frames = append(s.frames, &pkt)
 	}
 
-	for i := 0; i < len(s.frames) && i < int(s.windowSize); i++ {
+	for i := startFrame; i < len(s.frames) && i < int(s.windowSize); i++ {
 		s.sendFrame(s.frames[i])
 	}
 	s.RTOTicker.Reset(s.RTO)
@@ -119,7 +125,7 @@ func (s *sender) recvAck(ackNo uint32) error {
 		_, ok := s.frameDataLengths[uint32(s.ackNo)]
 		if !ok {
 			logrus.Debugf("data length missing for frame %d", s.ackNo)
-			return errNoDataLength
+			return errors.New("no data length")
 		}
 		delete(s.frameDataLengths, uint32(s.ackNo))
 		s.ackNo++
@@ -127,6 +133,15 @@ func (s *sender) recvAck(ackNo uint32) error {
 	}
 
 	return nil
+}
+
+func (s *sender) sendEmptyPacket() {
+	pkt := &frame{
+		dataLength: 0,
+		frameNo: s.frameNo,
+		data: []byte{},
+	}
+	s.sendFrame(pkt)
 }
 
 func (s *sender) retransmit() {
@@ -139,12 +154,12 @@ func (s *sender) retransmit() {
 				frameNo:    s.frameNo,
 				data:       []byte{},
 			}
-			// logrus.Info("SENDING EMPTY PACKET ON SEND QUEUE FOR ACK - FIN? ", pkt.flags.FIN)
+			logrus.Tracef("Keep alive. ackNo: %d", s.tube.recvWindow.getAck())
 			s.sendFrame(&pkt)
 		}
 		for i := 0; i < len(s.frames) && i < int(s.windowSize) && i < maxFragTransPerRTO; i++ {
 			s.sendFrame(s.frames[i])
-			//logrus.Info("PUTTING PKT ON SEND QUEUE - FIN? ", s.frames[i].flags.FIN)
+			logrus.Tracef("Putting packet on queue. fin? %t", s.frames[i].flags.FIN)
 		}
 		s.l.Unlock()
 	}
@@ -158,7 +173,7 @@ func (s *sender) sendFin() error {
 	s.l.Lock()
 	defer s.l.Unlock()
 	if s.closed.Load() || s.finSent {
-		return errClosedWrite
+		return io.EOF
 	}
 	s.finSent = true
 
