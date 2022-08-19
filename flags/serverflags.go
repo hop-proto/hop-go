@@ -3,7 +3,6 @@ package flags
 import (
 	"errors"
 	"flag"
-	"fmt"
 
 	"hop.computer/hop/config"
 )
