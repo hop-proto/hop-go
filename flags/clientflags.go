@@ -52,13 +52,13 @@ func mergeAddresses(f *ClientFlags, hc *config.HostConfig) error {
 	return nil
 }
 
-func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig) error {
+func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig) (*config.HostConfig, error) {
 	//
 	// TODO(baumanl): any need to preserve the original inputURL?
 	hc := cc.MatchHost(f.Address.Host)
 	err := mergeAddresses(f, hc)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if f.Cmd != "" {
@@ -72,12 +72,12 @@ func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig) error {
 	}
 
 	// TODO(baumanl): add merge support for all other flags/config options
-	return nil
+	return hc, nil
 }
 
 // LoadClientConfigFromFlags follows the configpath provided in flags (or default)
 // also updates the flags.Address to be the correct override (currently)
-func LoadClientConfigFromFlags(f *ClientFlags) (*config.ClientConfig, error) {
+func LoadClientConfigFromFlags(f *ClientFlags) (*config.HostConfig, error) {
 	// Make client config
 	// Load the config file
 	cc, err := config.GetClient(f.ConfigPath)
@@ -87,8 +87,7 @@ func LoadClientConfigFromFlags(f *ClientFlags) (*config.ClientConfig, error) {
 		// host config and CLI flags?
 		return nil, fmt.Errorf("no config file found: %s", err)
 	}
-	err = mergeClientFlagsAndConfig(f, cc)
-	return cc, err
+	return mergeClientFlagsAndConfig(f, cc)
 }
 
 // defineClientFlags calls fs.StringVar for Client

@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strconv"
 	"sync"
 	"testing/fstest"
 
@@ -55,30 +54,12 @@ type HopClient struct { // nolint:maligned
 }
 
 // NewHopClient creates a new client object
-func NewHopClient(config *config.ClientConfig, hostname string) (*HopClient, error) {
-	return NewHopClientWithURL(config, &core.URL{Host: hostname})
-}
-
-// NewHopClientWithURL creates a new client object, like NewHopClient, but
-// takes in a core.URL to allow overriding the port/user for the hostconfig
-// matching host.Host
-func NewHopClientWithURL(config *config.ClientConfig, host *core.URL) (*HopClient, error) {
+func NewHopClient(config *config.HostConfig) (*HopClient, error) {
 	client := &HopClient{
-		hostconfig: config.MatchHost(host.Host),
+		hostconfig: config,
 		wg:         sync.WaitGroup{},
 		Fsystem:    nil,
 		// Proxied:    false,
-	}
-	if host.Port != "" {
-		if port, err := strconv.Atoi(host.Port); err == nil {
-			client.hostconfig.Port = port
-		}
-	}
-	if host.User != "" {
-		client.hostconfig.User = host.User
-	}
-	if client.hostconfig.Hostname == "" {
-		client.hostconfig.Hostname = host.Host
 	}
 	logrus.Info("C: created client: ", client.hostconfig.Hostname)
 	// if !config.NonPricipal {
