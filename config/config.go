@@ -26,6 +26,8 @@ const (
 	False BoolSetting = -1
 )
 
+// Bool converts the BoolSetting into true if it is true, false if it is false,
+// and defaultVal if it is Unset
 func (bs BoolSetting) Bool(defaultVal bool) bool {
 	switch bs {
 	case True:
@@ -37,6 +39,8 @@ func (bs BoolSetting) Bool(defaultVal bool) bool {
 	}
 }
 
+// UnmarshalText converts a byte slice (where []byte("true") = True and
+// []byte("false") = False) to a BoolSetting
 func (bs *BoolSetting) UnmarshalText(text []byte) error {
 	switch string(text) {
 	case "true":
@@ -72,7 +76,7 @@ type ServerConfig struct {
 
 // HostConfig contains a definition of a host pattern in a client configuration.
 type HostConfig struct {
-	AgentUrl     string
+	AgentURL     string
 	AutoSelfSign BoolSetting
 	CAFiles      []string
 	Certificate  string
@@ -106,51 +110,51 @@ type NameConfig struct {
 	// TODO(dadrian): User mapping
 }
 
-func (host *HostConfig) mergeWith(other *HostConfig) {
+func (hc *HostConfig) mergeWith(other *HostConfig) {
 	//TODO(drebelsky): consider whether these default values could be valid values
-	if other.AgentUrl != "" {
-		host.AgentUrl = other.AgentUrl
+	if other.AgentURL != "" {
+		hc.AgentURL = other.AgentURL
 	}
 	if other.AutoSelfSign != Unset {
-		host.AutoSelfSign = other.AutoSelfSign
+		hc.AutoSelfSign = other.AutoSelfSign
 	}
-	host.CAFiles = append(host.CAFiles, other.CAFiles...)
+	hc.CAFiles = append(hc.CAFiles, other.CAFiles...)
 	if other.Certificate != "" {
-		host.Certificate = other.Certificate
+		hc.Certificate = other.Certificate
 	}
 	if other.Cmd != "" {
-		host.Cmd = other.Cmd
+		hc.Cmd = other.Cmd
 	}
 	if other.DisableAgent != Unset {
-		host.DisableAgent = other.DisableAgent
+		hc.DisableAgent = other.DisableAgent
 	}
 	if other.Headless != Unset {
-		host.Headless = other.Headless
+		hc.Headless = other.Headless
 	}
 	if other.Hostname != "" {
-		host.Hostname = other.Hostname
+		hc.Hostname = other.Hostname
 	}
 	if other.Intermediate != "" {
-		host.Intermediate = other.Intermediate
+		hc.Intermediate = other.Intermediate
 	}
 	if other.Key != "" {
-		host.Key = other.Key
+		hc.Key = other.Key
 	}
-	// don't need to merge host.Patterns
+	// don't need to merge hc.Patterns
 	if other.Port != 0 {
-		host.Port = other.Port
+		hc.Port = other.Port
 	}
 	if other.User != "" {
-		host.User = other.User
+		hc.User = other.User
 	}
 	if other.UsePty != Unset {
-		host.UsePty = other.UsePty
+		hc.UsePty = other.UsePty
 	}
 	if other.HandshakeTimeout != 0 {
-		host.HandshakeTimeout = other.HandshakeTimeout
+		hc.HandshakeTimeout = other.HandshakeTimeout
 	}
 	if other.DataTimeout != 0 {
-		host.DataTimeout = other.DataTimeout
+		hc.DataTimeout = other.DataTimeout
 	}
 }
 

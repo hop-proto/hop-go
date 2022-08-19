@@ -172,8 +172,6 @@ func (c *HopClient) authenticatorSetupLocked(authgrantConn net.Conn) error {
 		leafFile = hc.Certificate
 	} else if hc.AutoSelfSign == config.True {
 		autoSelfSign = true
-	} else if hc.Certificate != "" {
-		leafFile = hc.Certificate
 	} else {
 		return fmt.Errorf("no certificate provided and AutoSelfSign is not enabled for %q", hc.HostURL().Address())
 	}
@@ -181,7 +179,7 @@ func (c *HopClient) authenticatorSetupLocked(authgrantConn net.Conn) error {
 	var authenticator core.Authenticator
 
 	var leaf *certs.Certificate
-	agentURL := combinators.StringOr(hc.AgentUrl, common.DefaultAgentURL)
+	agentURL := combinators.StringOr(hc.AgentURL, common.DefaultAgentURL)
 
 	ac := agent.Client{
 		BaseURL:    agentURL,

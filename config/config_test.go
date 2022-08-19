@@ -13,7 +13,7 @@ func TestLoadClientConfig(t *testing.T) {
 		Global: HostConfig{
 			CAFiles: []string{"/path/to/ca.pem", "/path/to/other.pem"},
 		},
-		Hosts: []HostConfig{HostConfig{
+		Hosts: []HostConfig{{
 			Patterns:     []string{"example.localhost"},
 			Key:          "/path/to/key.pem",
 			Certificate:  "/path/to/cert.pem",
@@ -28,10 +28,10 @@ func TestLoadClientConfig(t *testing.T) {
 func TestLoadServerConfig(t *testing.T) {
 	c, err := LoadServerConfigFromFile("testdata/server")
 	assert.NilError(t, err)
-  expected := &ServerConfig {
-    ListenAddress: ":77",
-    Key: "/etc/hopd/id_hop.pem",
-    Certificate: "/etc/hopd/id_hop.cert",
-  }
-  assert.DeepEqual(t, c, expected)
+	expected := &ServerConfig{
+		ListenAddress: ":77",
+		Key:           "/etc/hopd/id_hop.pem",
+		Certificate:   "/etc/hopd/id_hop.cert",
+	}
+	assert.DeepEqual(t, c, expected)
 }
