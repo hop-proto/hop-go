@@ -26,6 +26,8 @@ type Muxer struct {
 	underlying transport.MsgConn
 	timeout    time.Duration
 	muxerStopped chan struct{}
+	// +checklocks:m
+	nextTubeID   byte
 }
 
 // NewMuxer starts a new tube muxer
@@ -55,12 +57,41 @@ func (m *Muxer) getTube(tubeID byte) (*Reliable, bool) {
 	return c, ok
 }
 
+// if tubeID is nil, this creates a requesting tube and selects an id
+func (m *Muxer) newReliableTube(tubeType TubeType, tubeID *byte) *Reliable {
+	m.m.Lock()
+	defer m.m.Unlock()
+
+	laddr := m.underlying.LocalAddr()
+	raddr := m.underlying.RemoteAddr()
+
+	// whether the tube is requesting to initiate (true) or responding (false)
+	req := tubeID == nil
+
+	if tubeID == nil {
+		tubeID = new(byte)
+		tubeID = &m.nextTubeID
+		
+		for i := 0; i < 256; i += 2 {
+			*tubeID += byte(i)
+			_, ok := m.tubes[*tubeID]
+			if !ok {
+				break
+			}
+		}
+	}
+
+	r := makeTube(tubeType, *tubeID, laddr, raddr, m.sendQueue)
+	m.tubes[r.id] = r
+	go r.initiate(req)
+	return r
+}
+
 // CreateTube starts a new reliable tube
-func (m *Muxer) CreateTube(tType TubeType) (*Reliable, error) {
-	r, err := newReliableTube(m, tType)
-	m.addTube(r)
+func (m *Muxer) CreateTube(tubeType TubeType) *Reliable {
+	r := m.newReliableTube(tubeType, nil)
 	logrus.Infof("Created Tube: %v", r.id)
-	return r, err
+	return r
 }
 
 // Accept blocks for and accepts a new reliable tube
@@ -106,6 +137,8 @@ func (m *Muxer) Start() (err error) {
 		}
 	}()
 
+	defer func() { m.muxerStopped <- struct{}{} }()
+
 	// Set initial timeout
 	if m.timeout != 0 {
 		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
@@ -126,7 +159,7 @@ func (m *Muxer) Start() (err error) {
 				if err != nil {
 					return err
 				}
-				tube = newReliableTubeWithTubeID(m, initFrame.tubeType, initFrame.tubeID)
+				tube = m.newReliableTube(initFrame.tubeType, &initFrame.tubeID)
 				m.addTube(tube)
 				m.tubeQueue <- tube
 			}
@@ -149,7 +182,6 @@ func (m *Muxer) Start() (err error) {
 
 	}
 
-	m.muxerStopped <- struct{}{}
 	return nil
 }
 
@@ -190,7 +222,9 @@ func (m *Muxer) Stop() (err error) {
 	for _, tube := range(m.tubes) {
 		tube.Reset()
 	}
-	close(m.sendQueue)
 	m.stopped.SetTrue()
+	m.underlying.SetReadDeadline(time.Now())
+	<-m.muxerStopped
+	close(m.sendQueue)
 	return nil
 }
