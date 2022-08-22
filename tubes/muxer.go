@@ -25,6 +25,7 @@ type Muxer struct {
 	stopped    common.AtomicBool // TODO(hosono) should this be defined elsewhere?
 	underlying transport.MsgConn
 	timeout    time.Duration
+	muxerStopped chan struct{}
 }
 
 // NewMuxer starts a new tube muxer
@@ -37,6 +38,7 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration) *Muxer {
 		stopped:    0, // false
 		underlying: msgConn,
 		timeout:    timeout,
+		muxerStopped: make(chan struct{}, 1),
 	}
 }
 
@@ -138,14 +140,16 @@ func (m *Muxer) Start() (err error) {
 				if err != nil {
 					return err
 				}
-				go tube.receiveInitiatePkt(initFrame)
+				tube.receiveInitiatePkt(initFrame)
 			} else {
 				logrus.Tracef("got frame. id: %d, ackno: %d. ack? %t", tube.id, frame.ackNo, frame.flags.ACK)
-				go tube.receive(frame)
+				tube.receive(frame)
 			}
 		}
 
 	}
+
+	m.muxerStopped <- struct{}{}
 	return nil
 }
 
@@ -166,9 +170,13 @@ func (m *Muxer) Close() (err error) {
 		}(v)
 	}
 	wg.Wait()
-	close(m.sendQueue)
+
 	m.stopped.SetTrue() //This has to come after all the tubes are closed otherwise the tubes can't finish sending all their frames and deadlock
 	m.underlying.SetReadDeadline(time.Now())
+	<-m.muxerStopped
+
+	close(m.sendQueue)
+
 	logrus.Info("Muxer.Close() finished")
 	return nil
 }
