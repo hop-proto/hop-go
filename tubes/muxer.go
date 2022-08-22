@@ -140,7 +140,11 @@ func (m *Muxer) Start() (err error) {
 	m.stopped.Store(false)
 
 	defer func() {
-		if err != nil {
+		// This case indicates that the muxer was stopped by m.Close()
+		if errors.Is(err, os.ErrDeadlineExceeded) && m.stopped.IsSet() {
+			err = nil
+		} else if err != nil {
+			logrus.Errorf("Muxer ended with error: %s", err)
 			m.Stop()
 		}
 	}()
@@ -199,11 +203,11 @@ func (m *Muxer) Start() (err error) {
 
 // Close ensures all the muxer tubes are closed
 func (m *Muxer) Close() (err error) {
+	m.m.Lock()
+	defer m.m.Unlock()
 	if m.stopped.IsSet() {
 		return io.EOF
 	}
-	m.m.Lock()
-	defer m.m.Unlock()
 	wg := sync.WaitGroup{}
 	for _, v := range m.tubes {
 		wg.Add(1)

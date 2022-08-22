@@ -167,7 +167,7 @@ func (sess *hopSession) start() {
 func (sess *hopSession) close() error {
 	var err, err2 error
 
-	sess.tubeMuxer.Stop()
+	sess.tubeMuxer.Close()
 
 	// remove from server session map
 	sess.server.sessionLock.Lock()
