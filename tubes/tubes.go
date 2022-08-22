@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -52,6 +53,7 @@ type Reliable struct {
 	tubeState atomic.Int32 // TODO(hosono) this could just be atomic
 	initRecv  chan struct{}
 	muxer     *Muxer
+	l         sync.Mutex
 }
 
 // Reliable implements net.Conn
@@ -90,6 +92,7 @@ func makeTube(muxer *Muxer, tType TubeType, tubeID byte) *Reliable {
 			RTO:              retransmitOffset,
 			windowSize:       windowSize,
 			endRetransmit:    make(chan struct{}),
+			windowOpen:       make(chan struct{}, 1),
 		},
 		sendQueue: muxer.sendQueue,
 		tType:     tType,
@@ -158,7 +161,8 @@ func (r *Reliable) receive(pkt *frame) error {
 	if pkt.flags.ACK {
 		r.sender.recvAck(pkt.ackNo)
 	}
-	if pkt.flags.FIN {
+	// TODO(hosono) fix this check to be better
+	if pkt.flags.FIN || (r.recvWindow.getAck() - r.sender.lastAckSent.Load()) >= windowSize / 2{
 		r.sender.sendEmptyPacket()
 	}
 
@@ -269,26 +273,29 @@ func (r *Reliable) Close() (err error) {
 
 	// Prevent future writes from succeeding
 	r.sender.Close()
+	r.recvWindow.Close()
 
 	// Wait until the other end of the connection has received the FIN packet from the other side.
 closeLoop:
 	for {
 		select {
 		case <-r.closing:
-			if !r.sender.unsentFramesRemaining() && r.recvWindow.closed.Load() {
+			if r.sender.unsentFramesRemaining() == 0 && r.recvWindow.closed.Load() {
 				logrus.Debugf("sent all frames and got fin for tube %d", r.id)
 				break closeLoop
 			} else {
-				logrus.Debugf("closing. packets left to ack: %d", len(r.sender.frames))
+				logrus.Debugf("closing. packets left to ack: %d", r.sender.unsentFramesRemaining())
 			}
 		case <- r.reset:
 			logrus.Debugf("got reset in close loop for tube %d", r.id)
 			break closeLoop
 		}
 	}
+	// TODO(hosono) correctly linger
+	time.Sleep(5 * time.Second)
 	r.sender.stopRetransmit()
-	r.recvWindow.Close()
 	logrus.Debugf("closed tube: %v", r.id)
+
 	r.tubeState.Store(closed)
 
 	return nil

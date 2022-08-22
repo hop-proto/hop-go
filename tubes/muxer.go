@@ -26,6 +26,7 @@ type Muxer struct {
 	stopped    atomic.Bool
 	underlying transport.MsgConn
 	timeout    time.Duration
+	muxerStopped chan struct{}
 }
 
 // NewMuxer starts a new tube muxer
@@ -37,6 +38,7 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration) *Muxer {
 		sendQueue:  make(chan []byte),
 		underlying: msgConn,
 		timeout:    timeout,
+		muxerStopped: make(chan struct{}, 1),
 	}
 }
 
@@ -139,14 +141,16 @@ func (m *Muxer) Start() (err error) {
 				if err != nil {
 					return err
 				}
-				go tube.receiveInitiatePkt(initFrame)
+				tube.receiveInitiatePkt(initFrame)
 			} else {
 				logrus.Tracef("got frame. id: %d, ackno: %d. ack? %t", tube.id, frame.ackNo, frame.flags.ACK)
-				go tube.receive(frame)
+				tube.receive(frame)
 			}
 		}
 
 	}
+
+	m.muxerStopped <- struct{}{}
 	return nil
 }
 
