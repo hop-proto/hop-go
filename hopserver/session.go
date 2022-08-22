@@ -181,7 +181,7 @@ func (sess *hopSession) close() error {
 		err = sess.authgrant.principalSession.close() //TODO: move where principalSession stored?
 	}
 
-	sess.tubeMuxer.Stop()
+	sess.tubeMuxer.Close()
 	//err2 = sess.transportConn.Close() //TODO(hosono) uncomment
 	if err != nil {
 		return err

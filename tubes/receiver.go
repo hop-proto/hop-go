@@ -23,7 +23,6 @@ type receiver struct {
 	windowStart uint64
 	windowSize  uint16
 	closed      atomic.Bool
-	finReceived chan struct{}
 	m           sync.Mutex
 	fragments   PriorityQueue
 
@@ -51,7 +50,7 @@ func (r *receiver) processIntoBuffer() {
 
 		if r.windowStart != frag.priority {
 			// This packet cannot be added to the buffer yet.
-			logrus.Debug("WINDOW START: ", r.windowStart, " FRAG PRIORITY: ", frag.priority)
+			logrus.Tracef("window start: %d, frag priority: %d", r.windowStart, frag.priority)
 			if frag.priority > r.windowStart {
 				heap.Push(&r.fragments, frag)
 				break
@@ -60,13 +59,6 @@ func (r *receiver) processIntoBuffer() {
 			r.windowStart++
 			r.ackNo++
 			r.closed.Store(true)
-			select {
-			case r.finReceived <- struct{}{}:
-				break
-			default:
-				break
-			}
-			break
 		} else {
 			r.buffer.Write(frag.value)
 			r.windowStart++
@@ -147,7 +139,7 @@ func (r *receiver) receive(p *frame) error {
 		logrus.Debugf("out of bounds frame. frameNo: %d, windowStart: %d, windowEnd: %d", frameNo, windowStart, windowEnd)
 		return errors.New("received dataframe out of receive window bounds")
 	} else {
-		logrus.Debugf("got in bounds frame. frameNo: %d, windowStart: %d, windowEnd: %d", frameNo, windowStart, windowEnd)
+		logrus.Tracef("got in bounds frame. frameNo: %d, windowStart: %d, windowEnd: %d", frameNo, windowStart, windowEnd)
 	}
 
 	if (p.dataLength > 0 || p.flags.FIN) && (frameNo >= r.windowStart) {
