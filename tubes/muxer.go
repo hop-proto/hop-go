@@ -1,7 +1,9 @@
 package tubes
 
 import (
+	"errors"
 	"io"
+	"os"
 	"sync"
 	"time"
 
@@ -93,7 +95,11 @@ func (m *Muxer) Start() (err error) {
 	m.stopped.SetFalse()
 
 	defer func() {
-		if err != nil {
+		// This case indicates that the muxer was stopped by m.Close()
+		if errors.Is(err, os.ErrDeadlineExceeded) && m.stopped.IsSet() {
+			err = nil
+		} else if err != nil {
+			logrus.Errorf("Muxer ended with error: %s", err)
 			m.Stop()
 		}
 	}()
@@ -145,11 +151,11 @@ func (m *Muxer) Start() (err error) {
 
 // Close ensures all the muxer tubes are closed
 func (m *Muxer) Close() (err error) {
+	m.m.Lock()
+	defer m.m.Unlock()
 	if m.stopped.IsSet() {
 		return io.EOF
 	}
-	m.m.Lock()
-	defer m.m.Unlock()
 	wg := sync.WaitGroup{}
 	for _, v := range m.tubes {
 		wg.Add(1)
@@ -162,16 +168,17 @@ func (m *Muxer) Close() (err error) {
 	wg.Wait()
 	close(m.sendQueue)
 	m.stopped.SetTrue() //This has to come after all the tubes are closed otherwise the tubes can't finish sending all their frames and deadlock
+	m.underlying.SetReadDeadline(time.Now())
 	logrus.Info("Muxer.Close() finished")
 	return nil
 }
 
 func (m *Muxer) Stop() (err error) {
+	m.m.Lock()
+	defer m.m.Unlock()
 	if m.stopped.IsSet() {
 		return io.EOF
 	}
-	m.m.Lock()
-	defer m.m.Unlock()
 	for _, tube := range(m.tubes) {
 		tube.Reset()
 	}

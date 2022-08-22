@@ -3,6 +3,7 @@ package tubes
 import (
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -98,23 +99,35 @@ func makeTubeConn(t *testing.T) (c1, c2 net.Conn, stop func(), err error) {
 	stop = func() {
 		logrus.Infof("Calling stop")
 
-		c1.Close()
-		logrus.Infof("c1 closed")
+		wg := sync.WaitGroup{}
 
-		c2.Close()
-		logrus.Infof("c2 closed")
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := c1.Close()
+			logrus.Infof("c1 closed. err: %s", err)
+		}()
 
-		clientMuxer.Stop()
-		logrus.Infof("client muxer closed")
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := c2.Close()
+			logrus.Infof("c2 closed. err: %s", err)
+		}()
 
-		serverMuxer.Stop()
-		logrus.Infof("server muxer closed")
+		wg.Wait()
 
-		client.Close()
-		logrus.Infof("client closed")
+		err := clientMuxer.Close()
+		logrus.Infof("client muxer closed. err: %s", err)
 
-		server.Close()
-		logrus.Infof("server closed")
+		err = serverMuxer.Close()
+		logrus.Infof("server muxer closed. err: %s", err)
+
+		err = client.Close()
+		logrus.Infof("client closed. err: %s", err)
+
+		err = server.Close()
+		logrus.Infof("server closed. err: %s", err)
 	}
 
 	return c1, c2, stop, err

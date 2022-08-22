@@ -28,7 +28,7 @@ type sender struct {
 	windowSize uint16
 
 	// +checklocks:l
-	finSent bool
+	finSent atomic.Bool
 	closed  atomic.Bool
 	// The buffer of unacknowledged tube frames that will be retransmitted if necessary.
 	// +checklocks:l
@@ -60,7 +60,7 @@ type sender struct {
 	// the tube that owns this sender
 	tube *Reliable
 
-	retransmitEnded chan struct{}
+	endRetransmit chan struct{}
 }
 
 func (s *sender) unsentFramesRemaining() bool {
@@ -118,7 +118,7 @@ func (s *sender) recvAck(ackNo uint32) error {
 	s.l.Lock()
 	defer s.l.Unlock()
 	newAckNo := uint64(ackNo)
-	logrus.Debug("RECV ACK origAckNo ", s.ackNo, " new ackno ", newAckNo)
+	logrus.Debugf("received ack. orig ackno: %d, new ackno: %d", s.ackNo, newAckNo)
 	if newAckNo < s.ackNo && (newAckNo+(1<<32)-s.ackNo <= uint64(s.windowSize)) { // wrap around
 		newAckNo = newAckNo + (1 << 32)
 	}
@@ -147,43 +147,66 @@ func (s *sender) sendEmptyPacket() {
 }
 
 func (s *sender) retransmit() {
-	for !s.closed.Load() { // TODO - decide how to shutdown this endless loop with an enum state
-		<-s.RTOTicker.C
-		s.l.Lock()
-		if len(s.frames) == 0 { // Keep Alive messages
-			pkt := frame{
-				dataLength: 0,
-				frameNo:    s.frameNo,
-				data:       []byte{},
+	stop := false
+	for !stop {
+		select {
+		case <-s.RTOTicker.C:
+			s.l.Lock()
+			if len(s.frames) == 0 { // Keep Alive messages
+				pkt := frame{
+					dataLength: 0,
+					frameNo:    s.frameNo,
+					data:       []byte{},
+					flags: frameFlags{
+						FIN:  s.finSent.Load(),
+					},
+				}
+				logrus.Tracef("Keep alive. ackNo: %d", s.tube.recvWindow.getAck())
+				s.sendFrame(&pkt)
 			}
-			logrus.Tracef("Keep alive. ackNo: %d", s.tube.recvWindow.getAck())
-			s.sendFrame(&pkt)
+			for i := 0; i < len(s.frames) && i < int(s.windowSize) && i < maxFragTransPerRTO; i++ {
+				s.sendFrame(s.frames[i])
+				logrus.Tracef("Putting packet on queue. fin? %t", s.frames[i].flags.FIN)
+			}
+			s.l.Unlock()
+		case <-s.endRetransmit:
+			stop = true
 		}
-		for i := 0; i < len(s.frames) && i < int(s.windowSize) && i < maxFragTransPerRTO; i++ {
-			s.sendFrame(s.frames[i])
-			logrus.Tracef("Putting packet on queue. fin? %t", s.frames[i].flags.FIN)
-		}
-		s.l.Unlock()
 	}
-	close(s.retransmitEnded)
+}
+
+func (s *sender) stopRetransmit() {
+	select {
+	case s.endRetransmit <- struct{}{}:
+		break
+	default:
+		break
+	}
 }
 
 func (s *sender) Start() {
 	go s.retransmit()
 }
 
-func (s *sender) Close() {
-	s.closed.Store(true)
-	<-s.retransmitEnded
+func (s *sender) Reset() {
+	s.stopRetransmit()
+}
+
+func (s *sender) Close() error {
+	if s.closed.CompareAndSwap(false, true) {
+		s.sendFin()
+		return nil
+	}
+	return io.EOF
 }
 
 func (s *sender) sendFin() error {
 	s.l.Lock()
 	defer s.l.Unlock()
-	if s.closed.Load() || s.finSent {
+	if s.finSent.Load() {
 		return io.EOF
 	}
-	s.finSent = true
+	s.finSent.Store(true)
 
 	pkt := frame{
 		dataLength: 0,

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -507,7 +508,11 @@ func (s *Server) Serve() error {
 			err := s.readPacket()
 			logrus.Tracef("read a packet")
 			if err != nil {
-				logrus.Errorf("server: %s", err)
+				// This checks for timeouts caused by closing the connection
+				// and does not log the error in that case
+				if !(errors.Is(err, os.ErrDeadlineExceeded) && s.closed.IsSet()) {
+					logrus.Errorf("server: %s", err)
+				}
 			}
 		}
 	}()
