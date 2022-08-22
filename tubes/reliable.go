@@ -3,7 +3,6 @@ package tubes
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -88,10 +87,9 @@ func newReliableTubeWithTubeID(underlying transport.MsgConn, netConn net.Conn, s
 
 func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType TubeType, tubeID byte) *Reliable {
 	r := &Reliable{
-		muxer:       muxer,
 		id:          tubeID,
-		localAddr:   muxer.underlying.LocalAddr(),
-		remoteAddr:  muxer.underlying.RemoteAddr(),
+		localAddr:   laddr,
+		remoteAddr:  raddr,
 		initRecv:    make(chan struct{}),
 		closing:     make(chan struct{}, 1),
 		reset:       make(chan struct{}, 1),
@@ -115,7 +113,7 @@ func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue 
 			endRetransmit:    make(chan struct{}),
 			windowOpen:       make(chan struct{}, 1),
 		},
-		sendQueue: muxer.sendQueue,
+		sendQueue: sendQueue,
 		tType:     tType,
 	}
 	r.tubeState.Store(created)

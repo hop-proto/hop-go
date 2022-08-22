@@ -149,6 +149,8 @@ func (m *Muxer) Start() (err error) {
 		}
 	}()
 
+	defer func() { m.muxerStopped <- struct{}{} }()
+
 	// Set initial timeout
 	if m.timeout != 0 {
 		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
@@ -199,7 +201,6 @@ func (m *Muxer) Start() (err error) {
 
 	}
 
-	m.muxerStopped <- struct{}{}
 	return nil
 }
 
