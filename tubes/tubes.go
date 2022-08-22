@@ -3,7 +3,6 @@ package tubes
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -59,18 +58,11 @@ type Reliable struct {
 // Reliable implements net.Conn
 var _ net.Conn = &Reliable{}
 
-func newReliableTubeWithTubeID(muxer *Muxer, tubeType TubeType, tubeID byte) *Reliable {
-	r := makeTube(muxer, tubeType, tubeID)
-	go r.initiate(false)
-	return r
-}
-
-func makeTube(muxer *Muxer, tType TubeType, tubeID byte) *Reliable {
+func makeTube(tType TubeType, tubeID byte, laddr, raddr net.Addr, sendQueue chan []byte) *Reliable {
 	r := &Reliable{
-		muxer:       muxer,
 		id:          tubeID,
-		localAddr:   muxer.underlying.LocalAddr(),
-		remoteAddr:  muxer.underlying.RemoteAddr(),
+		localAddr:   laddr,
+		remoteAddr:  raddr,
 		initRecv:    make(chan struct{}),
 		closing:     make(chan struct{}, 1),
 		reset:       make(chan struct{}, 1),
@@ -94,24 +86,13 @@ func makeTube(muxer *Muxer, tType TubeType, tubeID byte) *Reliable {
 			endRetransmit:    make(chan struct{}),
 			windowOpen:       make(chan struct{}, 1),
 		},
-		sendQueue: muxer.sendQueue,
+		sendQueue: sendQueue,
 		tType:     tType,
 	}
 	r.tubeState.Store(created)
 	r.sender.tube = r
 	r.recvWindow.init()
 	return r
-}
-
-func newReliableTube(muxer *Muxer, tType TubeType) (*Reliable, error) {
-	cid := []byte{0}
-	n, err := rand.Read(cid) // TODO(hosono) make sure there are no tube conflicts
-	if err != nil || n != 1 {
-		return nil, err
-	}
-	r := makeTube(muxer, tType, cid[0])
-	go r.initiate(true)
-	return r, nil
 }
 
 /* req: whether the tube is requesting to initiate a tube (true), or whether is respondding to an initiation request (false).*/

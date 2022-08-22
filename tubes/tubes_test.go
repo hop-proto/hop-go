@@ -86,8 +86,7 @@ func makeTubeConn(t *testing.T) (c1, c2 net.Conn, stop func(), err error) {
 		logrus.Infof("server muxer stopped with error %s", err)
 	}()
 
-	t1, err := clientMuxer.CreateTube(common.ExecTube)
-	assert.NilError(t, err)
+	t1 := clientMuxer.CreateTube(common.ExecTube)
 	t1.WaitForInitiated()
 	c1 = net.Conn(t1)
 
