@@ -22,6 +22,9 @@ type sender struct {
 	// The acknowledgement number sent from the other end of the connection.
 	// +checklocks:l
 	ackNo uint64
+
+	lastAckSent atomic.Uint32
+	
 	// +checklocks:l
 	frameNo uint32
 	// +checklocks:l
@@ -61,19 +64,23 @@ type sender struct {
 	tube *Reliable
 
 	endRetransmit chan struct{}
+
+	windowOpen chan struct{}
 }
 
-func (s *sender) unsentFramesRemaining() bool {
+func (s *sender) unsentFramesRemaining() int {
 	s.l.Lock()
 	defer s.l.Unlock()
-	return len(s.frames) > 0
+	return len(s.frames)
 }
 
+// +checklocks:s.l
 func (s *sender) sendFrame(pkt *frame) {
 	pkt.tubeID = s.tube.id
 	pkt.ackNo = s.tube.recvWindow.getAck()
 	pkt.flags.ACK = true
 	pkt.flags.REL = true
+	s.lastAckSent.Store(pkt.ackNo)
 	s.tube.sendQueue <- pkt.toBytes()
 }
 
@@ -118,7 +125,7 @@ func (s *sender) recvAck(ackNo uint32) error {
 	s.l.Lock()
 	defer s.l.Unlock()
 	newAckNo := uint64(ackNo)
-	logrus.Debugf("received ack. orig ackno: %d, new ackno: %d", s.ackNo, newAckNo)
+	logrus.Tracef("received ack. orig ackno: %d, new ackno: %d", s.ackNo, newAckNo)
 	if newAckNo < s.ackNo && (newAckNo+(1<<32)-s.ackNo <= uint64(s.windowSize)) { // wrap around
 		newAckNo = newAckNo + (1 << 32)
 	}
@@ -134,16 +141,34 @@ func (s *sender) recvAck(ackNo uint32) error {
 		s.frames = s.frames[1:]
 	}
 
+	select {
+	case s.windowOpen <- struct{}{}:
+		break
+	default:
+		break
+	}
+
 	return nil
 }
 
 func (s *sender) sendEmptyPacket() {
+	s.l.Lock()
+	defer s.l.Unlock()
 	pkt := &frame{
 		dataLength: 0,
 		frameNo: s.frameNo,
 		data: []byte{},
 	}
 	s.sendFrame(pkt)
+}
+
+// rto is true if the window is filled due to a retransmission timeout and false otherwise
+// +checklocks:s.l
+func (s *sender) fillWindow(rto bool) {
+	for i := 0; i < len(s.frames) && i < int(s.windowSize) && (i < maxFragTransPerRTO || !rto); i++ {
+		s.sendFrame(s.frames[i])
+		logrus.Tracef("Putting packet on queue. fin? %t", s.frames[i].flags.FIN)
+	}
 }
 
 func (s *sender) retransmit() {
@@ -163,11 +188,13 @@ func (s *sender) retransmit() {
 				}
 				logrus.Tracef("Keep alive. ackNo: %d", s.tube.recvWindow.getAck())
 				s.sendFrame(&pkt)
+			} else {
+				s.fillWindow(true)
 			}
-			for i := 0; i < len(s.frames) && i < int(s.windowSize) && i < maxFragTransPerRTO; i++ {
-				s.sendFrame(s.frames[i])
-				logrus.Tracef("Putting packet on queue. fin? %t", s.frames[i].flags.FIN)
-			}
+			s.l.Unlock()
+		case <-s.windowOpen:
+			s.l.Lock()
+			s.fillWindow(false)
 			s.l.Unlock()
 		case <-s.endRetransmit:
 			stop = true

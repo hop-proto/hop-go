@@ -188,7 +188,7 @@ func (m *Muxer) Start() (err error) {
 				if err != nil {
 					return err
 				}
-				go tube.receiveInitiatePkt(initFrame)
+				tube.receiveInitiatePkt(initFrame)
 			} else {
 				// m.log.Info("RECEIVING NORMAL FRAME")
 				// TODO(hosono) doing this in a gorouting messes up the nettests
@@ -198,6 +198,8 @@ func (m *Muxer) Start() (err error) {
 		}
 
 	}
+
+	m.muxerStopped <- struct{}{}
 	return nil
 }
 
