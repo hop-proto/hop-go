@@ -52,8 +52,8 @@ type Reliable struct {
 	tubeState atomic.Int32 // TODO(hosono) this could just be atomic
 	initRecv  chan struct{}
 	sendStopped chan struct{}
-	muxer     *Muxer
 	l         sync.Mutex
+	finAcked  atomic.Bool
 }
 
 // Reliable implements net.Conn
@@ -203,10 +203,16 @@ func (r *Reliable) receive(pkt *frame) error {
 	if pkt.flags.ACK {
 		r.sender.recvAck(pkt.ackNo)
 	}
-	// TODO(hosono) fix this check to be better
-	if pkt.flags.FIN {/*|| (r.recvWindow.getAck() - r.sender.lastAckSent.Load()) >= windowSize / 2{*/
+
+	if pkt.flags.FIN && !r.finAcked.CompareAndSwap(false, true) {
 		r.sender.sendEmptyPacket()
 	}
+	// TODO(hosono) fix this check to be better
+	/*
+	 *if (r.recvWindow.getAck() - r.sender.lastAckSent.Load()) >= windowSize / 2{
+	 *    r.sender.sendEmptyPacket()
+	 *}
+	 */
 
 	select {
 	case r.closing <- struct{}{}:
