@@ -32,7 +32,7 @@ type Server struct {
 	udpConn UDPLike
 	config  ServerConfig
 
-	closed common.AtomicBool
+	closed atomic.Bool
 
 	// +checklocks:m
 	handshakes map[string]*HandshakeState
@@ -504,13 +504,13 @@ func (s *Server) Serve() error {
 	s.wg.Add(2)
 	go func() {
 		defer s.wg.Done()
-		for !s.closed.IsSet() {
+		for !s.closed.Load() {
 			err := s.readPacket()
 			logrus.Tracef("read a packet")
 			if err != nil {
 				// This checks for timeouts caused by closing the connection
 				// and does not log the error in that case
-				if !(errors.Is(err, os.ErrDeadlineExceeded) && s.closed.IsSet()) {
+				if !(errors.Is(err, os.ErrDeadlineExceeded) && s.closed.Load()) {
 					logrus.Errorf("server: %s", err)
 				}
 			}
@@ -542,7 +542,7 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	s.m.Lock()
 	defer s.m.Unlock()
 
-	if s.closed.IsSet() {
+	if s.closed.Load() {
 		return io.EOF
 	}
 
@@ -643,10 +643,10 @@ func (s *Server) closeHandleWrapper(c *Handle) error {
 // TODO(dadrian): What does it do to writes?
 func (s *Server) Close() (err error) {
 	// This will end the reading goroutine and wait for it to exit
-	if s.closed.IsSet() {
+	if s.closed.Load() {
 		return io.EOF
 	}
-	s.closed.SetTrue()
+	s.closed.Store(true)
 
 	// This will ensure there are no pending reads
 	s.udpConn.SetReadDeadline(time.Now())

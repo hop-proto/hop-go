@@ -37,7 +37,7 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	recv *common.DeadlineChan[[]byte]  // incoming transport messages
 	send *common.DeadlineChan[message] // outgoing messages
 
-	closed common.AtomicBool
+	closed atomic.Bool
 
 	// +checklocks:readLock
 	buf bytes.Buffer
@@ -54,7 +54,7 @@ var _ net.Conn = &Handle{}
 
 // IsClosed returns closed member variable value
 func (c *Handle) IsClosed() bool {
-	return c.closed.IsSet()
+	return c.closed.Load()
 }
 
 // ReadMsg implements the MsgReader interface. If b is too short to hold the
@@ -133,7 +133,7 @@ func (c *Handle) WriteMsg(b []byte) error {
 	c.writeLock.Lock()
 	defer c.writeLock.Unlock()
 
-	if c.closed.IsSet() {
+	if c.closed.Load() {
 		return io.EOF
 	}
 
@@ -152,7 +152,7 @@ func (c *Handle) WriteMsg(b []byte) error {
 // MaxPlaintextLength and send them using WriteMsg. Each call to WriteMsg is
 // subject to the timeout.
 func (c *Handle) Write(buf []byte) (int, error) {
-	if c.closed.IsSet() {
+	if c.closed.Load() {
 		return 0, io.EOF
 	}
 	b := append([]byte{}, buf...)
@@ -180,7 +180,7 @@ func (c *Handle) Write(buf []byte) (int, error) {
 
 // WriteControl writes a control message to the remote host
 func (c *Handle) WriteControl(msg ControlMessage) error {
-	if c.closed.IsSet() {
+	if c.closed.Load() {
 		return io.EOF
 	}
 	toSend := message{
@@ -191,7 +191,6 @@ func (c *Handle) WriteControl(msg ControlMessage) error {
 }
 
 func (c *Handle) sender() {
-	c.sendWg.Add(1)
 	defer c.sendWg.Done()
 	for {
 		msg, err := c.send.Recv()
@@ -238,6 +237,7 @@ func (c *Handle) handleControl(msg []byte) error {
 
 // Start starts the goroutines that handle messages
 func (c *Handle) Start() {
+	c.sendWg.Add(1)
 	go c.sender()
 }
 
@@ -252,12 +252,12 @@ func (c *Handle) Close() error {
 // Note that the lock here refers to the server's lock
 // +checklocks:c.server.m
 func (c *Handle) closeLocked() error {
-	if c.closed.IsSet() {
+	if c.closed.Load() {
 		return io.EOF
 	}
 
 	c.WriteControl(ControlMessageClose)
-	c.closed.SetTrue()
+	c.closed.Store(true)
 
 	c.recv.Close()
 	c.send.Close()

@@ -4,6 +4,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"hop.computer/hop/common"
@@ -23,7 +24,7 @@ type ReliableUDP struct {
 	readDeadline  *common.Deadline
 	writeDeadline *common.Deadline
 
-	closed common.AtomicBool
+	closed atomic.Bool
 }
 
 var _ UDPLike = &ReliableUDP{}
@@ -53,7 +54,7 @@ func (r *ReliableUDP) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.U
 		break
 	}
 
-	if r.closed.IsSet() {
+	if r.closed.Load() {
 		return 0, 0, 0, addr, io.EOF
 	}
 
@@ -90,7 +91,7 @@ func (r *ReliableUDP) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int
 	r.writeLock.Lock()
 	defer r.writeLock.Unlock()
 
-	if r.closed.IsSet() {
+	if r.closed.Load() {
 		err = io.EOF
 		return
 	}
@@ -114,11 +115,11 @@ func (r *ReliableUDP) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int
 // Reads from the remote host will not return io.EOF since there is no
 // closing behavior defined in UDP
 func (r *ReliableUDP) Close() error {
-	if r.closed.IsSet() {
+	if r.closed.Load() {
 		return io.EOF
 	}
 
-	r.closed.SetTrue()
+	r.closed.Store(true)
 	r.writeDeadline.Cancel(io.EOF)
 	r.readDeadline.Cancel(io.EOF)
 

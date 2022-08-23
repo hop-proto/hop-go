@@ -34,8 +34,8 @@ type Client struct {
 	writeLock sync.Mutex
 	readLock  sync.Mutex
 
-	handshakeComplete common.AtomicBool
-	closed            common.AtomicBool
+	handshakeComplete atomic.Bool
+	closed            atomic.Bool
 
 	wg sync.WaitGroup
 
@@ -89,7 +89,7 @@ func (c *Client) unlockUser() {
 func (c *Client) Handshake() error {
 	// logrus.SetLevel(logrus.DebugLevel)
 	logrus.Info("Initiating Handshake")
-	if c.handshakeComplete.IsSet() {
+	if c.handshakeComplete.Load() {
 		return nil
 	}
 	logrus.Debug("Handshake not complete. Locking user...")
@@ -98,7 +98,7 @@ func (c *Client) Handshake() error {
 
 	// TODO(dadrian): Cache any handshake errors
 
-	if c.handshakeComplete.IsSet() {
+	if c.handshakeComplete.Load() {
 		return nil
 	}
 	logrus.Debug("got lock and checked again. Completeting handshake...")
@@ -230,8 +230,8 @@ func (c *Client) clientHandshakeLocked() error {
 	c.ss.sessionID = c.hs.sessionID
 	c.ss.remoteAddr = c.hs.remoteAddr
 	c.hs.deriveFinalKeys(&c.ss.clientToServerKey, &c.ss.serverToClientKey)
-	c.handshakeComplete.SetTrue()
-	c.closed.SetFalse()
+	c.handshakeComplete.Store(true)
+	c.closed.Store(false)
 	c.hs = nil
 	c.dialAddr = nil
 
@@ -239,6 +239,7 @@ func (c *Client) clientHandshakeLocked() error {
 	// Data timeouts are handled by the Tube Muxer
 	c.underlyingConn.SetReadDeadline(time.Time{})
 
+	c.wg.Add(1)
 	go c.listen()
 
 	logrus.Info("Handshake Complete")
@@ -258,7 +259,7 @@ func (c *Client) writeControl(msg ControlMessage) error {
 
 // Write implements net.Conn.
 func (c *Client) Write(b []byte) (int, error) {
-	if c.closed.IsSet() {
+	if c.closed.Load() {
 		return 0, io.EOF
 	}
 
@@ -271,11 +272,11 @@ func (c *Client) Write(b []byte) (int, error) {
 
 // WriteMsg implements MsgConn. It send a single packet.
 func (c *Client) WriteMsg(b []byte) error {
-	if c.closed.IsSet() {
+	if c.closed.Load() {
 		return io.EOF
 	}
 
-	if !c.handshakeComplete.IsSet() {
+	if !c.handshakeComplete.Load() {
 		err := c.Handshake()
 		if err != nil {
 			return err
@@ -293,7 +294,7 @@ func (c *Client) WriteMsg(b []byte) error {
 
 // Close gracefully shuts down the connection. Repeated calls to close will error.
 func (c *Client) Close() error {
-	if c.closed.IsSet() {
+	if c.closed.Load() {
 		return io.EOF
 	}
 
@@ -304,8 +305,8 @@ func (c *Client) Close() error {
 
 	c.writeControl(ControlMessageClose)
 
-	c.closed.SetTrue()
-	c.handshakeComplete.SetFalse()
+	c.closed.Store(true)
+	c.handshakeComplete.Store(false)
 
 	err := c.underlyingConn.Close()
 
@@ -316,9 +317,8 @@ func (c *Client) Close() error {
 }
 
 func (c *Client) listen() {
-	c.wg.Add(1)
 	defer c.wg.Done()
-	for !c.closed.IsSet() {
+	for !c.closed.Load() {
 		n, mt, err := c.readMsg()
 
 		if err != nil {
@@ -404,7 +404,7 @@ func (c *Client) ReadMsg(b []byte) (n int, err error) {
 	}()
 
 	// TODO(dadrian): Close the connection on bad reads / certain unrecoverable
-	if !c.handshakeComplete.IsSet() {
+	if !c.handshakeComplete.Load() {
 		err := c.Handshake()
 		if err != nil {
 			return 0, err
@@ -450,7 +450,7 @@ func (c *Client) Read(b []byte) (n int, err error) {
 	}()
 
 	// TODO(dadrian): Close the connection on bad reads?
-	if !c.handshakeComplete.IsSet() {
+	if !c.handshakeComplete.Load() {
 		err := c.Handshake()
 		// TODO(dadrian): Cache handshake error?
 		if err != nil {

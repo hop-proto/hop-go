@@ -76,7 +76,7 @@ func clientClose(t *testing.T) {
 	assert.NilError(t, err)
 
 	client.Close()
-	assert.Equal(t, client.closed.IsSet(), true)
+	assert.Equal(t, client.closed.Load(), true)
 
 	time.Sleep(time.Second)
 
@@ -138,7 +138,7 @@ func serverClose(t *testing.T) {
 	assert.NilError(t, err)
 
 	server.Close()
-	assert.Equal(t, server.closed.IsSet(), true)
+	assert.Equal(t, server.closed.Load(), true)
 
 	b := make([]byte, 1024)
 

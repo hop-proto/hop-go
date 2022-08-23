@@ -8,18 +8,6 @@ import (
 	"time"
 )
 
-// AtomicBool is a boolean value with atomic operations
-type AtomicBool int32
-
-// IsSet is true if the AtomicBool is true and false otherwise
-func (b *AtomicBool) IsSet() bool { return atomic.LoadInt32((*int32)(b)) != 0 }
-
-// SetTrue sets the value of the AtomicBool to true
-func (b *AtomicBool) SetTrue() { atomic.StoreInt32((*int32)(b), 1) }
-
-// SetFalse sets the value of the AtomicBool to false
-func (b *AtomicBool) SetFalse() { atomic.StoreInt32((*int32)(b), 0) }
-
 // Deadline implements a deadline following the requirements of the net.Conn
 // SetDeadline method. It allows the deadline to be extended and allows
 // an expired deadline to become unexpired.
@@ -32,7 +20,7 @@ type Deadline struct {
 	// +checklocks:timerLock
 	timer *time.Timer
 
-	active AtomicBool
+	active atomic.Bool
 
 	// +checklocks:chanLock
 	err error
@@ -45,7 +33,7 @@ func (d *Deadline) Done() chan error {
 	d.chanLock.Lock()
 	defer d.chanLock.Unlock()
 	ch := make(chan error, 1)
-	if !d.active.IsSet() {
+	if !d.active.Load() {
 		ch <- d.err
 		close(ch)
 	} else {
@@ -60,7 +48,7 @@ func (d *Deadline) Cancel(err error) {
 	d.chanLock.Lock()
 	defer d.chanLock.Unlock()
 
-	d.active.SetFalse()
+	d.active.Store(false)
 	d.err = err
 
 	for _, ch := range d.chans {
@@ -93,7 +81,7 @@ func (d *Deadline) SetDeadline(t time.Time) error {
 	}
 
 	if t.IsZero() {
-		d.active.SetTrue()
+		d.active.Store(true)
 		return nil
 	}
 
@@ -101,7 +89,7 @@ func (d *Deadline) SetDeadline(t time.Time) error {
 	if t.Before(start) {
 		d.timeout()
 	} else {
-		d.active.SetTrue()
+		d.active.Store(true)
 		d.timer.Reset(t.Sub(start))
 	}
 
@@ -115,7 +103,7 @@ func NewDeadline(t time.Time) *Deadline {
 	if !d.timer.Stop() {
 		<-d.timer.C
 	}
-	d.active.SetTrue()
+	d.active.Store(true)
 	d.SetDeadline(t)
 	return d
 }
@@ -125,7 +113,7 @@ func NewDeadline(t time.Time) *Deadline {
 // But pending reads and writes can time out or be canceled
 type DeadlineChan[T any] struct {
 	deadline *Deadline
-	closed   AtomicBool
+	closed   atomic.Bool
 	C        chan T
 }
 
@@ -141,7 +129,7 @@ func (d *DeadlineChan[T]) Recv() (b T, err error) {
 		break
 	}
 
-	if d.closed.IsSet() {
+	if d.closed.Load() {
 		err = io.EOF
 		return
 	}
@@ -164,7 +152,7 @@ func (d *DeadlineChan[T]) Recv() (b T, err error) {
 // If the deadline is exceeded, Cancel is called, or Close is called,
 // err will not be nil.
 func (d *DeadlineChan[T]) Send(b T) (err error) {
-	if d.closed.IsSet() {
+	if d.closed.Load() {
 		return io.EOF
 	}
 
@@ -184,7 +172,7 @@ func (d *DeadlineChan[T]) Send(b T) (err error) {
 
 // SetDeadline sets a time at which calls to Send and Recv will timeout
 func (d *DeadlineChan[T]) SetDeadline(t time.Time) error {
-	if d.closed.IsSet() {
+	if d.closed.Load() {
 		return io.EOF
 	}
 	return d.deadline.SetDeadline(t)
@@ -193,7 +181,7 @@ func (d *DeadlineChan[T]) SetDeadline(t time.Time) error {
 // Cancel cancels pending calls to Send and Recv and causes them to return err
 // TODO(hosono) when should Recv return buffered data
 func (d *DeadlineChan[T]) Cancel(err error) error {
-	if d.closed.IsSet() {
+	if d.closed.Load() {
 		return io.EOF
 	}
 	d.deadline.Cancel(err)
@@ -203,10 +191,10 @@ func (d *DeadlineChan[T]) Cancel(err error) error {
 // Close cancels pending calls to Send and Recv. Those calls will return
 // io.EOF rather than os.ErrDeadlineExceeded even after the deadline has expired
 func (d *DeadlineChan[T]) Close() error {
-	if d.closed.IsSet() {
+	if d.closed.Load() {
 		return io.EOF
 	}
-	d.closed.SetTrue()
+	d.closed.Store(true)
 	d.deadline.Cancel(io.EOF)
 	return nil
 }
