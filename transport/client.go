@@ -428,12 +428,15 @@ func (c *Client) listen() {
 	}
 }
 
+// handleControlMsg must only be called on authenticated packets after the handshake is complete.
+// Due to the spoofable nature of UDP, control messages can be injected by third parties.
+// both on the connection patch an off the connection path
 func (c *Client) handleControlMsg(msg ControlMessage) error {
 	switch msg {
 	case ControlMessageClose:
 		return c.recv.Close()
 	default:
-		return nil
+		return ErrInvalidMessage
 	}
 }
 
