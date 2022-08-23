@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"golang.org/x/net/nettest"
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
@@ -22,8 +23,22 @@ func TestTransportAEAD(t *testing.T) {
 	assert.Check(t, cmp.Equal(sanse.Overhead(), TagLen))
 }
 
-func makeConn(t *testing.T) (*Client, *Handle, *Server, func(), error) {
-	serverUDP, clientUDP := MakeRelaibleUDPConn()
+// fakeUDP is true to use the in memory ReliableUDP connection and false to use
+// UDP on the loopback interface
+func makeConn(t *testing.T, fakeUDP bool) (*Client, *Handle, *Server, func(), error) {
+	logrus.SetLevel(logrus.DebugLevel)
+
+	var serverUDP UDPLike
+	var clientUDP UDPLike
+	if fakeUDP {
+		serverUDP, clientUDP = MakeRelaibleUDPConn()
+	} else {
+		serverPkt, err := net.ListenPacket("udp", "localhost:7777")
+		assert.NilError(t, err)
+		serverUDP = serverPkt.(*net.UDPConn)
+		clientUDP, err = net.DialUDP("udp", nil, serverUDP.LocalAddr().(*net.UDPAddr))
+		assert.NilError(t, err)
+	}
 
 	// Create new server
 	serverConfig, verifyConfig := newTestServerConfig(t)
@@ -67,17 +82,9 @@ func TestClose(t *testing.T) {
 	t.Run("ClientClose", clientClose)
 	t.Run("HandleClose", handleClose)
 	t.Run("ServerClose", serverClose)
-
 }
 
-// Tests that closing the client connection causes server reads to error
-func clientClose(t *testing.T) {
-	client, handle, _, stop, err := makeConn(t)
-	assert.NilError(t, err)
-
-	client.Close()
-	assert.Equal(t, client.closed.Load(), true)
-
+func checkEOFReads(t *testing.T, client *Client, handle *Handle) {
 	time.Sleep(time.Second)
 
 	b := make([]byte, 1024)
@@ -97,44 +104,37 @@ func clientClose(t *testing.T) {
 	n, err = handle.ReadMsg(b)
 	assert.ErrorType(t, err, io.EOF)
 	assert.Equal(t, n, 0)
+}
+
+// Tests that closing the client connection causes server reads to error
+func clientClose(t *testing.T) {
+	client, handle, _, stop, err := makeConn(t, false)
+	assert.NilError(t, err)
+
+	client.Close()
+	assert.Equal(t, client.closed.Load(), true)
+
+	checkEOFReads(t, client, handle)
 
 	stop()
 }
 
 // Tests that closing the handle causes client reads to error
 func handleClose(t *testing.T) {
-	client, handle, _, stop, err := makeConn(t)
+	client, handle, _, stop, err := makeConn(t, false)
 	assert.NilError(t, err)
 
 	handle.Close()
 	assert.Equal(t, handle.IsClosed(), true)
 
-	time.Sleep(time.Second)
-
-	b := make([]byte, 1024)
-
-	n, err := handle.Read(b)
-	assert.ErrorType(t, err, io.EOF)
-	assert.Equal(t, n, 0)
-
-	n, err = handle.ReadMsg(b)
-	assert.ErrorType(t, err, io.EOF)
-	assert.Equal(t, n, 0)
-
-	n, err = client.Read(b)
-	assert.ErrorType(t, err, io.EOF)
-	assert.Equal(t, n, 0)
-
-	n, err = client.ReadMsg(b)
-	assert.ErrorType(t, err, io.EOF)
-	assert.Equal(t, n, 0)
+	checkEOFReads(t, client, handle)
 
 	stop()
 }
 
 // Tests that closing the server causes the handle and clients to close
 func serverClose(t *testing.T) {
-	client, handle, server, stop, err := makeConn(t)
+	client, handle, server, stop, err := makeConn(t, false)
 	assert.NilError(t, err)
 
 	server.Close()
@@ -161,6 +161,40 @@ func serverClose(t *testing.T) {
 	stop()
 }
 
+func TestReset(t *testing.T) {
+	t.Run("ClientReset", clientReset)
+	t.Run("HandleReset", handleReset)
+
+	// TODO(hosono) can you reset the server?
+	//t.Run("ServerReset", serverReset)
+}
+
+// Tests that resetting the client connection causes server reads to error
+func clientReset(t *testing.T) {
+	client, handle, _, stop, err := makeConn(t, false)
+	assert.NilError(t, err)
+
+	client.Reset()
+	assert.Equal(t, client.closed.Load(), true)
+
+	checkEOFReads(t, client, handle)
+
+	stop()
+}
+
+// Tests that resetting the handle causes client reads to error
+func handleReset(t *testing.T) {
+	client, handle, _, stop, err := makeConn(t, false)
+	assert.NilError(t, err)
+
+	handle.Reset()
+	assert.Equal(t, handle.IsClosed(), true)
+
+	checkEOFReads(t, client, handle)
+
+	stop()
+}
+
 func makeReliableUDPPipe() (net.Conn, net.Conn, func(), error) {
 	c1, c2 := MakeRelaibleUDPConn()
 	stop := func() {
@@ -182,12 +216,12 @@ func DontTestReliableUDP(t *testing.T) {
 func TestTransportConn(t *testing.T) {
 
 	makePipe1 := func() (net.Conn, net.Conn, func(), error) {
-		c1, c2, _, stop, err := makeConn(t)
+		c1, c2, _, stop, err := makeConn(t, true)
 		return c1, c2, stop, err
 	}
 
 	makePipe2 := func() (net.Conn, net.Conn, func(), error) {
-		c1, c2, _, stop, err := makeConn(t)
+		c1, c2, _, stop, err := makeConn(t, true)
 		return c2, c1, stop, err
 	}
 

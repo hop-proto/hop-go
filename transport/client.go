@@ -292,21 +292,21 @@ func (c *Client) WriteMsg(b []byte) error {
 
 }
 
-// Close gracefully shuts down the connection. Repeated calls to close will error.
-func (c *Client) Close() error {
-	if c.closed.Load() {
+// shutdown is a helper method to factor out code common to Close and Reset
+// If msg is not nil, shutdown will send the relevant control message
+func (c *Client) shutdown(msg *ControlMessage) error {
+	if !c.closed.CompareAndSwap(false, true) {
 		return io.EOF
 	}
 
-	c.recv.Cancel(io.EOF)
+	c.recv.Close()
 
 	c.lockUser()
 	defer c.unlockUser()
 
-	c.writeControl(ControlMessageClose)
-
-	c.closed.Store(true)
-	c.handshakeComplete.Store(false)
+	if msg != nil {
+		c.writeControl(*msg)
+	}
 
 	err := c.underlyingConn.Close()
 
@@ -314,6 +314,18 @@ func (c *Client) Close() error {
 	c.wg.Wait()
 
 	return err
+}
+
+// Reset immediately destroys the connection without waiting for graceful shutdown
+func (c *Client) Reset() error {
+	msg := ControlMessageReset
+	return c.shutdown(&msg)
+}
+
+// Close gracefully shuts down the connection. Repeated calls to close will error.
+func (c *Client) Close() error {
+	msg := ControlMessageClose
+	return c.shutdown(&msg)
 }
 
 func (c *Client) listen() {
@@ -325,8 +337,7 @@ func (c *Client) listen() {
 			if !errors.Is(err, net.ErrClosed) {
 				logrus.Errorf("client: %s", err)
 			}
-			c.recv.Close()
-			c.underlyingConn.SetDeadline(time.Now())
+			go c.Reset()
 			break
 		}
 
@@ -340,14 +351,17 @@ func (c *Client) listen() {
 			}
 		case MessageTypeControl:
 			if n != 1 {
-				logrus.Fatalf("client: malformed control message: %s", c.plaintext[:n])
+				logrus.Errorf("client: malformed control message: %s", c.plaintext[:n])
+				go c.Reset()
 			}
 			msg := ControlMessage(c.plaintext[0])
-			c.handleControlMsg(msg)
+			err := c.handleControlMsg(msg)
+			if err != nil {
+				go c.Reset()
+			}
 		default:
-			// TODO(hosono) Maybe silently discard instead of panic?
-			// Messages must be authenticated to reach this point
-			logrus.Panicf("client: unexpected message %x", mt)
+			logrus.Errorf("client: unexpected message type %x", mt)
+			go c.Reset()
 		}
 	}
 }
@@ -358,7 +372,12 @@ func (c *Client) listen() {
 func (c *Client) handleControlMsg(msg ControlMessage) error {
 	switch msg {
 	case ControlMessageClose:
-		return c.recv.Close()
+		c.recv.Close()
+		return nil
+	case ControlMessageReset:
+		logrus.Errorf("client: connection reset by remote peer")
+		go c.shutdown(nil)
+		return nil
 	default:
 		return ErrInvalidMessage
 	}
@@ -403,7 +422,6 @@ func (c *Client) ReadMsg(b []byte) (n int, err error) {
 		}
 	}()
 
-	// TODO(dadrian): Close the connection on bad reads / certain unrecoverable
 	if !c.handshakeComplete.Load() {
 		err := c.Handshake()
 		if err != nil {
@@ -449,7 +467,6 @@ func (c *Client) Read(b []byte) (n int, err error) {
 		}
 	}()
 
-	// TODO(dadrian): Close the connection on bad reads?
 	if !c.handshakeComplete.Load() {
 		err := c.Handshake()
 		// TODO(dadrian): Cache handshake error?

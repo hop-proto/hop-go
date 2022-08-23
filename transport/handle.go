@@ -22,16 +22,9 @@ type message struct {
 
 // Handle implements net.Conn and MsgConn for connections accepted by a Server.
 type Handle struct { // nolint:maligned // unclear if 120-byte struct is better than 128
-
-	// TODO(dadrian): Not all of these are used, but also not all of the
-	// functions are implemented yet. Remove unused variables when the
-	// implementation settles down.
-	m         sync.Mutex
 	readLock  sync.Mutex
 	writeLock sync.Mutex
 
-	// TODO(dadrian): This might need to be a real condition variable. We don't
-	// currently wait on it, but we Add/Done in the actual send write function.
 	sendWg sync.WaitGroup
 
 	recv *common.DeadlineChan[[]byte]  // incoming transport messages
@@ -60,7 +53,6 @@ func (c *Handle) IsClosed() bool {
 // ReadMsg implements the MsgReader interface. If b is too short to hold the
 // message, it returns ErrBufOverflow.
 func (c *Handle) ReadMsg(b []byte) (int, error) {
-	// TODO(dadrian): Should we close the connection on read errors?
 	// TODO(dadrian): This duplicates a lot of code from Read().
 	c.readLock.Lock()
 	defer c.readLock.Unlock()
@@ -206,8 +198,8 @@ func (c *Handle) sender() {
 
 		err = c.ss.writePacket(c.server.udpConn, msg.msgType, msg.data, &c.ss.serverToClientKey)
 		if err != nil {
-			logrus.Errorf("handle: unable to write packet: %s", err)
-			// TODO(dadrian): Should this affect connection state?
+			logrus.Errorf("handle: resetting connection. unable to write packet: %s", err)
+			go c.Reset()
 		}
 
 		// end loop after sending control message
@@ -220,16 +212,23 @@ func (c *Handle) sender() {
 func (c *Handle) handleControl(msg []byte) error {
 	if len(msg) != 1 {
 		logrus.Error("handle: invalid control message: ", msg)
+		c.Reset()
 		return ErrInvalidMessage
 	}
 
-	// TODO(hosono) handle other control messages
 	ctrlMsg := ControlMessage(msg[0])
 	switch ctrlMsg {
 	case ControlMessageClose:
 		c.recv.Close()
 		return nil
+	case ControlMessageReset:
+		logrus.Errorf("server: connection reset by remote peer")
+		c.server.m.Lock()
+		defer c.server.m.Unlock()
+		c.shutdown(nil)
+		return nil
 	default:
+		c.Reset()
 		logrus.Error("server: unexpected control message ", msg)
 		return ErrInvalidMessage
 	}
@@ -241,22 +240,33 @@ func (c *Handle) Start() {
 	go c.sender()
 }
 
+// Reset closes the connection without waiting for graceful shutdown
+func (c *Handle) Reset() error {
+	c.server.m.Lock()
+	defer c.server.m.Unlock()
+	msg := ControlMessageReset
+	return c.shutdown(&msg)
+}
+
 // Close closes the connection. Future operations on non-buffered data will
 // return io.EOF.
 func (c *Handle) Close() error {
 	c.server.m.Lock()
 	defer c.server.m.Unlock()
-	return c.closeLocked()
+	msg := ControlMessageClose
+	return c.shutdown(&msg)
 }
 
 // Note that the lock here refers to the server's lock
 // +checklocks:c.server.m
-func (c *Handle) closeLocked() error {
+func (c *Handle) shutdown(msg *ControlMessage) error {
 	if c.closed.Load() {
 		return io.EOF
 	}
 
-	c.WriteControl(ControlMessageClose)
+	if msg != nil {
+		c.WriteControl(*msg)
+	}
 	c.closed.Store(true)
 
 	c.recv.Close()
