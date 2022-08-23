@@ -15,6 +15,12 @@ import (
 	"hop.computer/hop/common"
 )
 
+const (
+	initiated uint32 = iota
+	closeStart
+	closed
+)
+
 type message struct {
 	msgType MessageType
 	data    []byte
@@ -30,7 +36,8 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	recv *common.DeadlineChan[[]byte]  // incoming transport messages
 	send *common.DeadlineChan[message] // outgoing messages
 
-	closed atomic.Bool
+	state atomic.Uint32
+	//closed atomic.Bool
 
 	// +checklocks:readLock
 	buf bytes.Buffer
@@ -47,7 +54,7 @@ var _ net.Conn = &Handle{}
 
 // IsClosed returns closed member variable value
 func (c *Handle) IsClosed() bool {
-	return c.closed.Load()
+	return c.state.Load() == closed
 }
 
 // ReadMsg implements the MsgReader interface. If b is too short to hold the
@@ -125,7 +132,7 @@ func (c *Handle) WriteMsg(b []byte) error {
 	c.writeLock.Lock()
 	defer c.writeLock.Unlock()
 
-	if c.closed.Load() {
+	if c.state.Load() != initiated {
 		return io.EOF
 	}
 
@@ -144,7 +151,7 @@ func (c *Handle) WriteMsg(b []byte) error {
 // MaxPlaintextLength and send them using WriteMsg. Each call to WriteMsg is
 // subject to the timeout.
 func (c *Handle) Write(buf []byte) (int, error) {
-	if c.closed.Load() {
+	if c.state.Load() != initiated {
 		return 0, io.EOF
 	}
 	b := append([]byte{}, buf...)
@@ -172,7 +179,7 @@ func (c *Handle) Write(buf []byte) (int, error) {
 
 // WriteControl writes a control message to the remote host
 func (c *Handle) WriteControl(msg ControlMessage) error {
-	if c.closed.Load() {
+	if c.state.Load() == closed {
 		return io.EOF
 	}
 	toSend := message{
@@ -260,14 +267,15 @@ func (c *Handle) Close() error {
 // Note that the lock here refers to the server's lock
 // +checklocks:c.server.m
 func (c *Handle) shutdown(msg *ControlMessage) error {
-	if c.closed.Load() {
+	if c.state.Load() == closed {
 		return io.EOF
 	}
 
 	if msg != nil {
 		c.WriteControl(*msg)
 	}
-	c.closed.Store(true)
+
+	c.state.Store(closed)
 
 	c.recv.Close()
 	c.send.Close()

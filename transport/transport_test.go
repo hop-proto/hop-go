@@ -85,7 +85,7 @@ func TestClose(t *testing.T) {
 }
 
 func checkEOFReads(t *testing.T, client *Client, handle *Handle) {
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 
 	b := make([]byte, 1024)
 

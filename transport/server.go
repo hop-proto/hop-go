@@ -461,8 +461,6 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte, plaintext [
 		return 0, ErrUnknownSession
 	}
 
-	h.m.Lock()
-	defer h.m.Unlock()
 	if h.IsClosed() {
 		return 0, io.EOF
 	}
