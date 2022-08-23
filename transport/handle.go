@@ -260,12 +260,12 @@ func (c *Handle) Close() error {
 // Note that the lock here refers to the server's lock
 // +checklocks:c.server.m
 func (c *Handle) closeLocked() error {
-	if c.closed.IsSet() {
+	if c.closed.Load() {
 		return io.EOF
 	}
 
 	c.WriteControl(ControlMessageClose)
-	c.closed.SetTrue()
+	c.closed.Store(true)
 
 	c.recv.Close()
 	c.send.Close()

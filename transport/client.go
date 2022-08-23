@@ -394,7 +394,7 @@ func (c *Client) handleControlMsg(msg ControlMessage) (err error) {
 func (c *Client) listen() {
 	c.wg.Add(1)
 	defer c.wg.Done()
-	for !c.closed.IsSet() {
+	for !c.closed.Load() {
 		n, mt, err := c.readMsg()
 
 		if err != nil {

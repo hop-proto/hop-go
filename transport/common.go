@@ -124,6 +124,7 @@ type ControlMessage byte
 const (
 	ControlMessageClose    ControlMessage = 0x01
 	ControlMessageAckClose ControlMessage = 0x02
+	ControlMessageReset    ControlMessage = 0x03
 )
 
 // IsHandshakeType returns true if the message type is part of the handshake, not the transport.

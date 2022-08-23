@@ -32,7 +32,7 @@ type Server struct {
 	udpConn UDPLike
 	config  ServerConfig
 
-	closed common.AtomicBool
+	closed atomic.Bool
 
 	// +checklocks:m
 	handshakes map[string]*HandshakeState
