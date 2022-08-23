@@ -149,7 +149,10 @@ func (m *Muxer) Start() (err error) {
 		}
 	}()
 
-	defer func() { m.muxerStopped <- struct{}{} }()
+	defer func() {
+		// TODO(hosono) prevent panic by making sure this happens only once prevent panic by making sure this happens only once
+		close(m.muxerStopped)
+	}()
 
 	// Set initial timeout
 	if m.timeout != 0 {
@@ -206,12 +209,13 @@ func (m *Muxer) Start() (err error) {
 
 // Close ensures all the muxer tubes are closed
 func (m *Muxer) Close() (err error) {
-	m.m.Lock()
-	defer m.m.Unlock()
+	m.closeLock.Lock()
+	defer m.closeLock.Unlock()
 	if m.stopped.IsSet() {
 		return io.EOF
 	}
 	wg := sync.WaitGroup{}
+	m.tubeLock.Lock()
 	for _, v := range m.tubes {
 		wg.Add(1)
 		go func(v Tube) { //parallelized closing tubes because other side may close them in a different order

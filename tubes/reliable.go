@@ -51,6 +51,7 @@ type Reliable struct {
 	sendQueue   chan []byte
 	tubeState atomic.Int32 // TODO(hosono) this could just be atomic
 	initRecv  chan struct{}
+	sendStopped chan struct{}
 	muxer     *Muxer
 	l         sync.Mutex
 }
@@ -90,6 +91,7 @@ func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue 
 		id:          tubeID,
 		localAddr:   laddr,
 		remoteAddr:  raddr,
+		sendStopped: make(chan struct{}, 1),
 		initRecv:    make(chan struct{}),
 		closing:     make(chan struct{}, 1),
 		reset:       make(chan struct{}, 1),
@@ -106,18 +108,19 @@ func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue 
 			// closed defaults to false
 			// finSent defaults to false
 			frameDataLengths: make(map[uint32]uint16),
-			frameNo:          1,
 			RTOTicker:        time.NewTicker(retransmitOffset),
 			RTO:              retransmitOffset,
 			windowSize:       windowSize,
 			endRetransmit:    make(chan struct{}),
 			windowOpen:       make(chan struct{}, 1),
+			sendQueue:        make(chan *frame),
+			retransmitEnded:  make(chan struct{}, 1),
 		},
 		sendQueue: sendQueue,
 		tType:     tType,
 	}
+	r.sender.frameNo.Store(1)
 	r.tubeState.Store(created)
-	r.sender.tube = r
 	r.recvWindow.init()
 	return r
 }
@@ -172,7 +175,19 @@ func (r *Reliable) initiate(req bool) {
 			notInit = r.tubeState.Load() == created
 		}
 	}
+	go r.send()
 	r.sender.Start()
+}
+
+func (r *Reliable) send() {
+	for pkt := range(r.sender.sendQueue) {
+		pkt.tubeID = r.id
+		pkt.ackNo = r.recvWindow.getAck()
+		pkt.flags.ACK = true
+		pkt.flags.REL = true
+		r.sendQueue <- pkt.toBytes()
+	}
+	r.sendStopped <- struct{}{}
 }
 
 func (r *Reliable) receive(pkt *frame) error {
@@ -189,7 +204,7 @@ func (r *Reliable) receive(pkt *frame) error {
 		r.sender.recvAck(pkt.ackNo)
 	}
 	// TODO(hosono) fix this check to be better
-	if pkt.flags.FIN || (r.recvWindow.getAck() - r.sender.lastAckSent.Load()) >= windowSize / 2{
+	if pkt.flags.FIN {/*|| (r.recvWindow.getAck() - r.sender.lastAckSent.Load()) >= windowSize / 2{*/
 		r.sender.sendEmptyPacket()
 	}
 
@@ -271,15 +286,18 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 func (r *Reliable) Reset() (err error) {
 	// TODO(hosono) add a reset flag
 
-	if r.tubeState.CompareAndSwap(initiated, closed) {
-		logrus.Warnf("Resetting tube %d", r.id)
-		err = nil
-	} else {
+	oldState := r.tubeState.Swap(closed)
+	if oldState == closed {
 		logrus.Warnf("Resetting of closed tube %d", r.id)
-		err = io.EOF
+		return io.EOF
 	}
+
+	logrus.Warnf("Resetting tube %d", r.id)
+
 	r.sender.Reset()
 	r.recvWindow.Close()
+	close(r.sender.sendQueue)
+	<-r.sendStopped
 
 	select {
 	case r.reset <- struct{}{}:
@@ -313,16 +331,21 @@ closeLoop:
 			} else {
 				logrus.Debugf("closing. packets left to ack: %d", r.sender.unsentFramesRemaining())
 			}
-		case <- r.reset:
+		case <-r.reset:
 			logrus.Debugf("got reset in close loop for tube %d", r.id)
 			break closeLoop
 		}
 	}
 	// TODO(hosono) correctly linger
 	time.Sleep(5 * time.Second)
-	r.sender.stopRetransmit()
+
+	r.l.Lock()
+	defer r.l.Unlock()
+	r.sender.Reset()
 	logrus.Debugf("closed tube: %v", r.id)
 
+	close(r.sender.sendQueue)
+	<-r.sendStopped
 	r.tubeState.Store(closed)
 
 	return nil
