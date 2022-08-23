@@ -177,11 +177,10 @@ function hop_tube.dissector(buffer, pinfo, ptree)
   local tube_id = tube_id:uint()
   local flags = buffer(1, 1):uint()
   local flags_str = ""
-  if bit.band(flags, 1) ~= 0 then flags_str = flags_str .. " REQ" end
-  if bit.band(flags, 2) ~= 0 then flags_str = flags_str .. " RESP" end
-  if bit.band(flags, 4) ~= 0 then flags_str = flags_str .. " REL" end
-  if bit.band(flags, 8) ~= 0 then flags_str = flags_str .. " ACK" end
-  if bit.band(flags, 16) ~= 0 then flags_str = flags_str .. " FIN" end
+  if bit.band(flags, 1) ~= 0 then flags_str = flags_str .. " ACK" end
+  if bit.band(flags, 2) ~= 0 then flags_str = flags_str .. " FIN" end
+  if bit.band(flags, 4) ~= 0 then flags_str = flags_str .. " REQ" end
+  if bit.band(flags, 8) ~= 0 then flags_str = flags_str .. " RESP" end
   subtree:add(hop_tube.fields.flags, buffer(1, 1)):append_text(flags_str)
   local data_length = buffer(2, 2)
   subtree:add(hop_tube.fields.data_length, data_length)
@@ -195,7 +194,7 @@ function hop_tube.dissector(buffer, pinfo, ptree)
     data_tree = subtree:add(hop_tube.fields.data, buffer(12, data_length))
   end
   -- If this is an initiate packet (REQ/RES set)
-  if bit.band(flags, 3) ~= 0 then
+  if bit.band(flags, 12) ~= 0 then
     subtree:add(hop_tube.fields.type, buffer(6, 1))
     tube_types[tube_id] = buffer(6, 1):uint()
   else

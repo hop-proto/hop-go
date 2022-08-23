@@ -2,17 +2,15 @@ package tubes
 
 import (
 	"errors"
-	"io"
-	"os"
+	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/sirupsen/logrus"
 )
 
 // The largest tube frame data length field.
-const maxFrameDataLength uint16 = 2000
+const maxFrameDataLength = 2000
 
 // The highest number of frames we will transmit per timeout period,
 // even if the window size is large enough.
@@ -22,16 +20,21 @@ type sender struct {
 	// The acknowledgement number sent from the other end of the connection.
 	// +checklocks:l
 	ackNo uint64
-
-	frameNo atomic.Uint32
+	// +checklocks:l
+	frameNo uint32
 	// +checklocks:l
 	windowSize uint16
-
-	finSent atomic.Bool
-	closed  atomic.Bool
+	// +checklocks:l
+	finSent bool
+	// +checklocks:l
+	closed bool
 	// The buffer of unacknowledged tube frames that will be retransmitted if necessary.
 	// +checklocks:l
 	frames []*frame
+
+	//TODO(baumanl): is it safe and good style to have this tube here?
+	//First attempt at stopping laggy behavior due to retransmit previously always waiting for RTO.
+	ret chan int //signaled whenever frame added to frames so retransmit() starts
 
 	// Different frames can have different data lengths -- we need to know how
 	// to update the buffer when frames are acknowledged.
@@ -48,70 +51,52 @@ type sender struct {
 	// The lock controls all fields of the sender.
 	l sync.Mutex
 	// Retransmission TimeOut.
-	RTOTicker *time.Ticker
-	// +checklocks:l
-	RTO time.Duration
-
-	// the time after which writes will expire
-	// +checklocks:l
-	deadline time.Time
-
-	endRetransmit chan struct{}
-	retransmitEnded chan struct{}
-
-	windowOpen chan struct{}
-
+	RTO       time.Duration
 	sendQueue chan *frame
 }
 
-func (s *sender) unsentFramesRemaining() int {
+func (s *sender) unsentFramesRemaining() bool {
 	s.l.Lock()
 	defer s.l.Unlock()
-	return len(s.frames)
+	return len(s.frames) > 0
 }
 
-func (s *sender) write(b []byte) (int, error) {
+func (s *sender) write(b []byte) (n int, err error) {
 	s.l.Lock()
+	defer func() { s.ret <- 1 }()
 	defer s.l.Unlock()
-	if !s.deadline.IsZero() && time.Now().After(s.deadline) {
-		return 0, os.ErrDeadlineExceeded
-	}
-	if s.closed.Load() {
-		return 0, io.EOF
+	if s.closed {
+		return 0, errors.New("trying to write to closed tube")
 	}
 	s.buffer = append(s.buffer, b...)
 
-	startFrame := len(s.frames)
-
 	for len(s.buffer) > 0 {
-		dataLength := maxFrameDataLength
+		dataLength := uint16(maxFrameDataLength)
 		if uint16(len(s.buffer)) < dataLength {
 			dataLength = uint16(len(s.buffer))
 		}
 		pkt := frame{
 			dataLength: dataLength,
-			frameNo:    s.frameNo.Load(),
+			frameNo:    s.frameNo,
 			data:       s.buffer[:dataLength],
 		}
 
 		s.frameDataLengths[pkt.frameNo] = dataLength
-		s.frameNo.Add(1)
+		s.frameNo++
 		s.buffer = s.buffer[dataLength:]
 		s.frames = append(s.frames, &pkt)
+
 	}
 
-	for i := startFrame; i < len(s.frames) && i < int(s.windowSize); i++ {
-		s.sendQueue <- s.frames[i]
-	}
-	s.RTOTicker.Reset(s.RTO)
 	return len(b), nil
 }
 
 func (s *sender) recvAck(ackNo uint32) error {
+	logrus.Debug("GRABBING LOCK")
 	s.l.Lock()
 	defer s.l.Unlock()
 	newAckNo := uint64(ackNo)
-	logrus.Tracef("received ack. orig ackno: %d, new ackno: %d", s.ackNo, newAckNo)
+	logrus.Debug("RECV ACK origAckNo ", s.ackNo, " new ackno ", newAckNo)
 	if newAckNo < s.ackNo && (newAckNo+(1<<32)-s.ackNo <= uint64(s.windowSize)) { // wrap around
 		newAckNo = newAckNo + (1 << 32)
 	}
@@ -120,107 +105,75 @@ func (s *sender) recvAck(ackNo uint32) error {
 		_, ok := s.frameDataLengths[uint32(s.ackNo)]
 		if !ok {
 			logrus.Debugf("data length missing for frame %d", s.ackNo)
-			return errors.New("no data length")
+			return fmt.Errorf("data length missing for frame %d", s.ackNo)
 		}
 		delete(s.frameDataLengths, uint32(s.ackNo))
 		s.ackNo++
 		s.frames = s.frames[1:]
 	}
 
-	select {
-	case s.windowOpen <- struct{}{}:
-		break
-	default:
-		break
-	}
-
 	return nil
 }
 
-func (s *sender) sendEmptyPacket() *frame {
-	pkt := &frame{
-		dataLength: 0,
-		frameNo: s.frameNo.Load(),
-		data: []byte{},
-		flags: frameFlags{
-			FIN: s.finSent.Load(),
-		},
-	}
-	s.sendQueue <- pkt
-	return pkt
-}
-
-// rto is true if the window is filled due to a retransmission timeout and false otherwise
-// +checklocks:s.l
-func (s *sender) fillWindow(rto bool) {
-	for i := 0; i < len(s.frames) && i < int(s.windowSize) && (i < maxFragTransPerRTO || !rto); i++ {
-		s.sendQueue <- s.frames[i]
-		logrus.Tracef("Putting packet on queue. fin? %t", s.frames[i].flags.FIN)
-	}
-}
-
 func (s *sender) retransmit() {
-	stop := false
-	for !stop {
+	for !s.isClosed() { // TODO - decide how to shutdown this endless loop with an enum state
+		timer := time.NewTimer(s.RTO)
 		select {
-		case <-s.RTOTicker.C:
+		case <-timer.C:
 			s.l.Lock()
 			if len(s.frames) == 0 { // Keep Alive messages
-				logrus.Tracef("Keep alive sent. frameno: %d", s.frameNo.Load())
-				s.sendEmptyPacket()
-			} else {
-				s.fillWindow(true)
+				pkt := frame{
+					dataLength: 0,
+					frameNo:    s.frameNo,
+					data:       []byte{},
+				}
+				//logrus.Info("SENDING EMPTY PACKET ON SEND QUEUE FOR ACK - FIN? ", pkt.flags.FIN)
+				s.sendQueue <- &pkt
+			}
+			i := 0
+			for i < len(s.frames) && i < int(s.windowSize) && i < maxFragTransPerRTO {
+				s.sendQueue <- s.frames[i]
+				//logrus.Info("PUTTING PKT ON SEND QUEUE - FIN? ", s.frames[i].flags.FIN)
+				i++
 			}
 			s.l.Unlock()
-		case <-s.windowOpen:
+		case <-s.ret: //case received new data
 			s.l.Lock()
-			s.fillWindow(false)
+			i := 0
+			for i < len(s.frames) && i < int(s.windowSize) && i < maxFragTransPerRTO {
+				s.sendQueue <- s.frames[i]
+				//logrus.Info("PUTTING PKT ON SEND QUEUE - FIN? ", s.frames[i].flags.FIN)
+				i++
+			}
 			s.l.Unlock()
-		case <-s.endRetransmit:
-			stop = true
 		}
-	}
-	// TODO(hosono) prevent panic by making sure retransmit is only called once
-	close(s.retransmitEnded)
-}
 
-func (s *sender) stopRetransmit() {
-	select {
-	case s.endRetransmit <- struct{}{}:
-		break
-	default:
-		break
 	}
 }
-
-func (s *sender) Start() {
-	go s.retransmit()
+func (s *sender) isClosed() bool {
+	s.l.Lock()
+	defer s.l.Unlock()
+	return s.closed
 }
 
-func (s *sender) Reset() {
-	s.stopRetransmit()
-	<-s.retransmitEnded
+func (s *sender) close() {
+	s.l.Lock()
+	defer s.l.Unlock()
+	s.closed = true
 }
 
-func (s *sender) Close() error {
-	if s.closed.CompareAndSwap(false, true) {
-		s.sendFin()
-		return nil
-	}
-	return io.EOF
-}
-
+/* */
 func (s *sender) sendFin() error {
 	s.l.Lock()
 	defer s.l.Unlock()
-	if s.finSent.Load() {
-		return io.EOF
+	if s.closed || s.finSent {
+		return errors.New("tube is already closed")
 	}
-	s.finSent.Store(true)
+	s.finSent = true
 
 	pkt := frame{
 		dataLength: 0,
-		frameNo:    s.frameNo.Load(),
+		frameNo:    s.frameNo,
 		data:       []byte{},
 		flags: frameFlags{
 			ACK:  true,
@@ -231,9 +184,8 @@ func (s *sender) sendFin() error {
 	}
 
 	s.frameDataLengths[pkt.frameNo] = 0
-	s.frameNo.Add(1)
+	s.frameNo++
 	s.frames = append(s.frames, &pkt)
-	s.sendQueue <- &pkt
-	logrus.Debug("sending FIN packet")
+	//logrus.Info("ADDED FIN PACKET TO SEND QUEUE")
 	return nil
 }
