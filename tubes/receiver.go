@@ -6,11 +6,8 @@ import (
 	"errors"
 	"io"
 	"sync"
-	"sync/atomic"
 
 	"github.com/sirupsen/logrus"
-
-	"hop.computer/hop/common"
 )
 
 type receiver struct {
@@ -22,12 +19,13 @@ type receiver struct {
 	ackNo       uint64
 	windowStart uint64
 	windowSize  uint16
-	closed      atomic.Bool
+	closed      bool
+	closedCond  *sync.Cond
+	bufferCond  sync.Cond
 	m           sync.Mutex
 	fragments   PriorityQueue
 
-	dataReady *common.DeadlineChan[struct{}]
-	buffer    *bytes.Buffer
+	buffer *bytes.Buffer
 }
 
 func (r *receiver) init() {
@@ -50,7 +48,7 @@ func (r *receiver) processIntoBuffer() {
 
 		if r.windowStart != frag.priority {
 			// This packet cannot be added to the buffer yet.
-			logrus.Tracef("window start: %d, frag priority: %d", r.windowStart, frag.priority)
+			logrus.Debug("WINDOW START: ", r.windowStart, " FRAG PRIORITY: ", frag.priority)
 			if frag.priority > r.windowStart {
 				heap.Push(&r.fragments, frag)
 				break
@@ -58,35 +56,34 @@ func (r *receiver) processIntoBuffer() {
 		} else if frag.FIN {
 			r.windowStart++
 			r.ackNo++
-			r.closed.Store(true)
+			r.closedCond.L.Lock()
+			logrus.Debug("RECEIVING FIN PACKET")
+			r.closed = true
+			r.closedCond.Signal()
+			r.closedCond.L.Unlock()
+			break
 		} else {
 			r.buffer.Write(frag.value)
 			r.windowStart++
 			r.ackNo++
 		}
 	}
-	select {
-	case r.dataReady.C <- struct{}{}:
-		break
-	default:
-		break
-	}
+	r.bufferCond.Signal()
 }
 
 func (r *receiver) read(buf []byte) (int, error) {
+	r.bufferCond.L.Lock()
 	r.m.Lock()
-	if r.buffer.Len() == 0 && !r.closed.Load() {
+	if r.buffer.Len() == 0 && !r.closed {
 		r.m.Unlock()
-		_, err := r.dataReady.Recv()
-		if err != nil {
-			return 0, err
-		}
+		r.bufferCond.Wait()
 		r.m.Lock()
 	}
 	defer r.m.Unlock()
+	defer r.bufferCond.L.Unlock()
 
 	nbytes, _ := r.buffer.Read(buf)
-	if r.closed.Load() {
+	if r.closed {
 		return nbytes, io.EOF
 	}
 	return nbytes, nil
@@ -111,19 +108,15 @@ Utility function to add offsets so that we eliminate wraparounds.
 Precondition: must be holding frame number
 */
 func (r *receiver) unwrapFrameNo(frameNo uint32) uint64 {
-	// TODO(hosono) there's a bug in the implementation below. For now, don't unwrap
-	return uint64(frameNo)
-/*
- *    // The previous, offsets are represented by the 32 least significant bytes of the window start.
- *    windowStart := r.windowStart
- *    newNo := uint64(frameNo) + windowStart - uint64(uint32(windowStart))
- *
- *    // Add an additional offset for the case in which seqNo has wrapped around again.
- *    if frameNo < uint32(windowStart) {
- *        newNo += 1 << 32
- *    }
- *    return newNo
- */
+	// The previous, offsets are represented by the 32 least significant bytes of the window start.
+	windowStart := r.windowStart
+	newNo := uint64(frameNo) + windowStart - uint64(uint32(windowStart))
+
+	// Add an additional offset for the case in which seqNo has wrapped around again.
+	if frameNo < uint32(windowStart) {
+		newNo += 1 << 32
+	}
+	return newNo
 }
 
 /* Precondition: receive window lock is held. */
@@ -134,12 +127,10 @@ func (r *receiver) receive(p *frame) error {
 	windowEnd := r.windowStart + uint64(uint32(r.windowSize))
 
 	frameNo := r.unwrapFrameNo(p.frameNo)
-	//logrus.Debugf("receive frame frameNo: %d, ackNo: %d, fin: %t, recv ack no: %d, data: %x", frameNo, p.ackNo, p.flags.FIN, r.ackNo, p.data)
+	logrus.Debug("receive frame frameNo: ", frameNo, " ackNo: ", p.ackNo, " data: ", string(p.data), " FIN? ", p.flags.FIN, " recv ack no? ", r.ackNo)
 	if !frameInBounds(windowStart, windowEnd, frameNo) {
-		logrus.Debugf("out of bounds frame. frameNo: %d, windowStart: %d, windowEnd: %d", frameNo, windowStart, windowEnd)
+		logrus.Debug("received dataframe out of receive window bounds")
 		return errors.New("received dataframe out of receive window bounds")
-	} else {
-		logrus.Tracef("got in bounds frame. frameNo: %d, windowStart: %d, windowEnd: %d", frameNo, windowStart, windowEnd)
 	}
 
 	if (p.dataLength > 0 || p.flags.FIN) && (frameNo >= r.windowStart) {
@@ -153,9 +144,4 @@ func (r *receiver) receive(p *frame) error {
 	r.processIntoBuffer()
 
 	return nil
-}
-
-func (r *receiver) Close() {
-	r.closed.Store(true)
-	r.dataReady.Cancel(io.EOF)
 }
