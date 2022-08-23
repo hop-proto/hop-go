@@ -23,14 +23,10 @@ type sender struct {
 	// +checklocks:l
 	ackNo uint64
 
-	lastAckSent atomic.Uint32
-	
-	// +checklocks:l
-	frameNo uint32
+	frameNo atomic.Uint32
 	// +checklocks:l
 	windowSize uint16
 
-	// +checklocks:l
 	finSent atomic.Bool
 	closed  atomic.Bool
 	// The buffer of unacknowledged tube frames that will be retransmitted if necessary.
@@ -60,28 +56,18 @@ type sender struct {
 	// +checklocks:l
 	deadline time.Time
 
-	// the tube that owns this sender
-	tube *Reliable
-
 	endRetransmit chan struct{}
+	retransmitEnded chan struct{}
 
 	windowOpen chan struct{}
+
+	sendQueue chan *frame
 }
 
 func (s *sender) unsentFramesRemaining() int {
 	s.l.Lock()
 	defer s.l.Unlock()
 	return len(s.frames)
-}
-
-// +checklocks:s.l
-func (s *sender) sendFrame(pkt *frame) {
-	pkt.tubeID = s.tube.id
-	pkt.ackNo = s.tube.recvWindow.getAck()
-	pkt.flags.ACK = true
-	pkt.flags.REL = true
-	s.lastAckSent.Store(pkt.ackNo)
-	s.tube.sendQueue <- pkt.toBytes()
 }
 
 func (s *sender) write(b []byte) (int, error) {
@@ -104,18 +90,18 @@ func (s *sender) write(b []byte) (int, error) {
 		}
 		pkt := frame{
 			dataLength: dataLength,
-			frameNo:    s.frameNo,
+			frameNo:    s.frameNo.Load(),
 			data:       s.buffer[:dataLength],
 		}
 
 		s.frameDataLengths[pkt.frameNo] = dataLength
-		s.frameNo++
+		s.frameNo.Add(1)
 		s.buffer = s.buffer[dataLength:]
 		s.frames = append(s.frames, &pkt)
 	}
 
 	for i := startFrame; i < len(s.frames) && i < int(s.windowSize); i++ {
-		s.sendFrame(s.frames[i])
+		s.sendQueue <- s.frames[i]
 	}
 	s.RTOTicker.Reset(s.RTO)
 	return len(b), nil
@@ -151,22 +137,24 @@ func (s *sender) recvAck(ackNo uint32) error {
 	return nil
 }
 
-func (s *sender) sendEmptyPacket() {
-	s.l.Lock()
-	defer s.l.Unlock()
+func (s *sender) sendEmptyPacket() *frame {
 	pkt := &frame{
 		dataLength: 0,
-		frameNo: s.frameNo,
+		frameNo: s.frameNo.Load(),
 		data: []byte{},
+		flags: frameFlags{
+			FIN: s.finSent.Load(),
+		},
 	}
-	s.sendFrame(pkt)
+	s.sendQueue <- pkt
+	return pkt
 }
 
 // rto is true if the window is filled due to a retransmission timeout and false otherwise
 // +checklocks:s.l
 func (s *sender) fillWindow(rto bool) {
 	for i := 0; i < len(s.frames) && i < int(s.windowSize) && (i < maxFragTransPerRTO || !rto); i++ {
-		s.sendFrame(s.frames[i])
+		s.sendQueue <- s.frames[i]
 		logrus.Tracef("Putting packet on queue. fin? %t", s.frames[i].flags.FIN)
 	}
 }
@@ -178,16 +166,8 @@ func (s *sender) retransmit() {
 		case <-s.RTOTicker.C:
 			s.l.Lock()
 			if len(s.frames) == 0 { // Keep Alive messages
-				pkt := frame{
-					dataLength: 0,
-					frameNo:    s.frameNo,
-					data:       []byte{},
-					flags: frameFlags{
-						FIN:  s.finSent.Load(),
-					},
-				}
-				logrus.Tracef("Keep alive. ackNo: %d", s.tube.recvWindow.getAck())
-				s.sendFrame(&pkt)
+				logrus.Tracef("Keep alive sent. frameno: %d", s.frameNo.Load())
+				s.sendEmptyPacket()
 			} else {
 				s.fillWindow(true)
 			}
@@ -200,6 +180,8 @@ func (s *sender) retransmit() {
 			stop = true
 		}
 	}
+	// TODO(hosono) prevent panic by making sure retransmit is only called once
+	close(s.retransmitEnded)
 }
 
 func (s *sender) stopRetransmit() {
@@ -217,6 +199,7 @@ func (s *sender) Start() {
 
 func (s *sender) Reset() {
 	s.stopRetransmit()
+	<-s.retransmitEnded
 }
 
 func (s *sender) Close() error {
@@ -237,7 +220,7 @@ func (s *sender) sendFin() error {
 
 	pkt := frame{
 		dataLength: 0,
-		frameNo:    s.frameNo,
+		frameNo:    s.frameNo.Load(),
 		data:       []byte{},
 		flags: frameFlags{
 			ACK:  true,
@@ -248,9 +231,9 @@ func (s *sender) sendFin() error {
 	}
 
 	s.frameDataLengths[pkt.frameNo] = 0
-	s.frameNo++
+	s.frameNo.Add(1)
 	s.frames = append(s.frames, &pkt)
-	s.sendFrame(&pkt)
-	//logrus.Info("ADDED FIN PACKET TO SEND QUEUE")
+	s.sendQueue <- &pkt
+	logrus.Debug("sending FIN packet")
 	return nil
 }

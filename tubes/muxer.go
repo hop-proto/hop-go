@@ -16,19 +16,20 @@ import (
 
 // Muxer handles delivering and sending tube messages
 type Muxer struct {
-	// +checklocks:m
+	// +checklocks:tubeLock
 	tubes map[byte]*Reliable
+	tubeLock         sync.Mutex
 	// Channels waiting for an Accept() call.
 	tubeQueue chan *Reliable
-	m         sync.Mutex
 	// All hop tubes write raw bytes for a tube packet to this golang chan.
 	sendQueue  chan []byte
 	stopped    atomic.Bool
 	underlying transport.MsgConn
 	timeout    time.Duration
 	muxerStopped chan struct{}
-	// +checklocks:m
+	// +checklocks:tubeLock
 	nextTubeID   byte
+	closeLock    sync.Mutex
 }
 
 // NewMuxer starts a new tube muxer
@@ -36,7 +37,6 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration) *Muxer {
 	return &Muxer{
 		tubes:      make(map[byte]*Reliable),
 		tubeQueue:  make(chan *Reliable, 128),
-		m:          sync.Mutex{},
 		sendQueue:  make(chan []byte),
 		underlying: msgConn,
 		timeout:    timeout,
@@ -45,22 +45,22 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration) *Muxer {
 }
 
 func (m *Muxer) addTube(c *Reliable) {
-	m.m.Lock()
+	m.tubeLock.Lock()
 	m.tubes[c.id] = c
-	m.m.Unlock()
+	m.tubeLock.Unlock()
 }
 
 func (m *Muxer) getTube(tubeID byte) (*Reliable, bool) {
-	m.m.Lock()
-	defer m.m.Unlock()
+	m.tubeLock.Lock()
+	defer m.tubeLock.Unlock()
 	c, ok := m.tubes[tubeID]
 	return c, ok
 }
 
 // if tubeID is nil, this creates a requesting tube and selects an id
 func (m *Muxer) newReliableTube(tubeType TubeType, tubeID *byte) *Reliable {
-	m.m.Lock()
-	defer m.m.Unlock()
+	m.tubeLock.Lock()
+	defer m.tubeLock.Unlock()
 
 	laddr := m.underlying.LocalAddr()
 	raddr := m.underlying.RemoteAddr()
@@ -138,7 +138,10 @@ func (m *Muxer) Start() (err error) {
 		}
 	}()
 
-	defer func() { m.muxerStopped <- struct{}{} }()
+	defer func() {
+		// TODO(hosono) prevent panic by making sure this happens only once prevent panic by making sure this happens only once
+		close(m.muxerStopped)
+	}()
 
 	// Set initial timeout
 	if m.timeout != 0 {
@@ -188,12 +191,13 @@ func (m *Muxer) Start() (err error) {
 
 // Close ensures all the muxer tubes are closed
 func (m *Muxer) Close() (err error) {
-	m.m.Lock()
-	defer m.m.Unlock()
+	m.closeLock.Lock()
+	defer m.closeLock.Unlock()
 	if m.stopped.IsSet() {
 		return io.EOF
 	}
 	wg := sync.WaitGroup{}
+	m.tubeLock.Lock()
 	for _, v := range m.tubes {
 		wg.Add(1)
 		go func(v *Reliable) { //parallelized closing tubes because other side may close them in a different order
