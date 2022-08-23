@@ -685,7 +685,8 @@ func (s *Server) CloseSession(sessionID SessionID) error {
 // +checklocks:s.m
 // +checklocksalias:c.server.m=s.m
 func (s *Server) closeHandleWrapper(c *Handle) error {
-	return c.closeLocked()
+	msg := ControlMessageClose
+	return c.shutdown(&msg)
 }
 
 // Close stops the server, causing Serve() to return.

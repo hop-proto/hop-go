@@ -336,6 +336,18 @@ func (c *Client) Close() error {
 	return err
 }
 
+// Reset immediately destroys the connection without waiting for graceful shutdown
+func (c *Client) Reset() error {
+	msg := ControlMessageReset
+	return c.shutdown(&msg)
+}
+
+// Close gracefully shuts down the connection. Repeated calls to close will error.
+func (c *Client) Close() error {
+	msg := ControlMessageClose
+	return c.shutdown(&msg)
+}
+
 func (c *Client) listen() {
 	defer c.wg.Done()
 	for {
@@ -401,8 +413,7 @@ func (c *Client) listen() {
 			if !errors.Is(err, net.ErrClosed) {
 				logrus.Errorf("client: %s", err)
 			}
-			c.recv.Close()
-			c.underlyingConn.SetDeadline(time.Now())
+			go c.Reset()
 			break
 		}
 
@@ -416,14 +427,17 @@ func (c *Client) listen() {
 			}
 		case MessageTypeControl:
 			if n != 1 {
-				logrus.Fatalf("client: malformed control message: %s", c.plaintext[:n])
+				logrus.Errorf("client: malformed control message: %s", c.plaintext[:n])
+				go c.Reset()
 			}
 			msg := ControlMessage(c.plaintext[0])
-			c.handleControlMsg(msg)
+			err := c.handleControlMsg(msg)
+			if err != nil {
+				go c.Reset()
+			}
 		default:
-			// TODO(hosono) Maybe silently discard instead of panic?
-			// Messages must be authenticated to reach this point
-			logrus.Panicf("client: unexpected message %x", mt)
+			logrus.Errorf("client: unexpected message type %x", mt)
+			go c.Reset()
 		}
 	}
 }
@@ -434,7 +448,12 @@ func (c *Client) listen() {
 func (c *Client) handleControlMsg(msg ControlMessage) error {
 	switch msg {
 	case ControlMessageClose:
-		return c.recv.Close()
+		c.recv.Close()
+		return nil
+	case ControlMessageReset:
+		logrus.Errorf("client: connection reset by remote peer")
+		go c.shutdown(nil)
+		return nil
 	default:
 		return ErrInvalidMessage
 	}

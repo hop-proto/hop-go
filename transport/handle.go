@@ -254,17 +254,20 @@ func (c *Handle) Start() {
 func (c *Handle) Close() error {
 	c.server.m.Lock()
 	defer c.server.m.Unlock()
-	return c.closeLocked()
+	msg := ControlMessageClose
+	return c.shutdown(&msg)
 }
 
 // Note that the lock here refers to the server's lock
 // +checklocks:c.server.m
-func (c *Handle) closeLocked() error {
+func (c *Handle) shutdown(msg *ControlMessage) error {
 	if c.closed.Load() {
 		return io.EOF
 	}
 
-	c.WriteControl(ControlMessageClose)
+	if msg != nil {
+		c.WriteControl(*msg)
+	}
 	c.closed.Store(true)
 
 	c.recv.Close()

@@ -262,6 +262,40 @@ func serverClose(t *testing.T) {
 	stop()
 }
 
+func TestReset(t *testing.T) {
+	t.Run("ClientReset", clientReset)
+	t.Run("HandleReset", handleReset)
+
+	// TODO(hosono) can you reset the server?
+	//t.Run("ServerReset", serverReset)
+}
+
+// Tests that resetting the client connection causes server reads to error
+func clientReset(t *testing.T) {
+	client, handle, _, stop, err := makeConn(t, false)
+	assert.NilError(t, err)
+
+	client.Reset()
+	assert.Equal(t, client.closed.Load(), true)
+
+	checkEOFReads(t, client, handle)
+
+	stop()
+}
+
+// Tests that resetting the handle causes client reads to error
+func handleReset(t *testing.T) {
+	client, handle, _, stop, err := makeConn(t, false)
+	assert.NilError(t, err)
+
+	handle.Reset()
+	assert.Equal(t, handle.IsClosed(), true)
+
+	checkEOFReads(t, client, handle)
+
+	stop()
+}
+
 func makeReliableUDPPipe() (net.Conn, net.Conn, func(), error) {
 	c1, c2 := MakeReliableUDPConn(true)
 	stop := func() {
