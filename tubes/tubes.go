@@ -49,6 +49,7 @@ type Reliable struct {
 	remoteAddr net.Addr
 	sender     sender
 	sendQueue  chan []byte
+	// +checklocks:m
 	tubeState  state
 }
 
