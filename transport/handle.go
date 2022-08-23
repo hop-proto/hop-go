@@ -19,6 +19,12 @@ import (
 	"hop.computer/hop/common"
 )
 
+const (
+	initiated uint32 = iota
+	closeStart
+	closed
+)
+
 type message struct {
 	msgType MessageType
 	data    []byte
@@ -261,14 +267,15 @@ func (c *Handle) Close() error {
 // Note that the lock here refers to the server's lock
 // +checklocks:c.server.m
 func (c *Handle) shutdown(msg *ControlMessage) error {
-	if c.closed.Load() {
+	if c.state.Load() == closed {
 		return io.EOF
 	}
 
 	if msg != nil {
 		c.WriteControl(*msg)
 	}
-	c.closed.Store(true)
+
+	c.state.Store(closed)
 
 	c.recv.Close()
 	c.send.Close()
