@@ -50,7 +50,7 @@ type Reliable struct {
 	sender     sender
 	sendQueue  chan []byte
 	// +checklocks:m
-	tubeState  state
+	tubeState state
 }
 
 // Reliable implements net.Conn
