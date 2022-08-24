@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	istty "github.com/mattn/go-isatty"
+	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/config"
 	"hop.computer/hop/core"
@@ -34,7 +35,7 @@ type ClientFlags struct {
 	Verbose    bool     // show verbose error messages
 }
 
-func mergeAddresses(f *ClientFlags, hc *config.HostConfig) error {
+func mergeAddresses(f *ClientFlags, hc *config.HostConfigOptional) error {
 	address := core.MergeURLs(hc.HostURL(), *f.Address)
 
 	if address.User == "" {
@@ -46,45 +47,58 @@ func mergeAddresses(f *ClientFlags, hc *config.HostConfig) error {
 	}
 
 	// Update host config address
-	hc.Hostname = address.Host
+	hc.Hostname = &address.Host
 	hc.Port, _ = strconv.Atoi(address.Port)
-	hc.User = address.User
+	hc.User = &address.User
 	return nil
 }
 
-func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig) error {
-	//
+func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig, dc *config.ClientConfig) (*config.HostConfig, error) {
 	// TODO(baumanl): any need to preserve the original inputURL?
-	hc := cc.MatchHost(f.Address.Host)
+	var hc *config.HostConfigOptional
+	if dc == nil {
+		hc = cc.MatchHost(f.Address.Host)
+	} else {
+		hc = dc.MatchHost(f.Address.Host)
+		hc.MergeWith(cc.MatchHost(f.Address.Host))
+	}
 	err := mergeAddresses(f, hc)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if f.Cmd != "" {
-		cc.Cmd = f.Cmd
+		hc.Cmd = &f.Cmd
 	}
 
-	cc.UsePty = f.UsePty
+	hc.UsePty = &f.UsePty
 
 	// TODO(baumanl): add merge support for all other flags/config options
-	return nil
+	return hc.Unwrap(), nil
 }
 
 // LoadClientConfigFromFlags follows the configpath provided in flags (or default)
 // also updates the flags.Address to be the correct override (currently)
-func LoadClientConfigFromFlags(f *ClientFlags) (*config.ClientConfig, error) {
-	// Make client config
+func LoadClientConfigFromFlags(f *ClientFlags) (*config.HostConfig, error) {
+	// Get default client config if it exists
+	var dc *config.ClientConfig
+	if f.ConfigPath != "" {
+		var err error
+		dc, err = config.GetClient("")
+		if err != nil {
+			logrus.Warnf("Problem with loading config in default location: %v", err)
+			dc = nil
+		}
+	}
 	// Load the config file
 	cc, err := config.GetClient(f.ConfigPath)
 	if err != nil {
 		// TODO(baumanl): currently fails if no config file found at provided path or default path
 		// Do we want to support case where file literally doesn't exist? Just use default
 		// host config and CLI flags?
-		return nil, fmt.Errorf("no config file found: %s", err)
+		return nil, err
 	}
-	err = mergeClientFlagsAndConfig(f, cc)
-	return cc, err
+	return mergeClientFlagsAndConfig(f, cc, dc)
 }
 
 // defineClientFlags calls fs.StringVar for Client

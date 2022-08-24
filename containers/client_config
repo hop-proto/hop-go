@@ -1,5 +1,6 @@
-AutoSelfSign true
+[Global]
+AutoSelfSign = true
 
-Host 127.0.0.1 {
-  Key containers/id_client.pem
-}
+[[Hosts]]
+Patterns = ["127.0.0.1"]
+Key = "containers/id_client.pem"

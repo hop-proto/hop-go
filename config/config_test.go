@@ -7,15 +7,35 @@ import (
 )
 
 func TestLoadClientConfig(t *testing.T) {
-	c, err := LoadClientConfigFromFile("ast/testdata/client")
+	c, err := LoadClientConfigFromFile("testdata/client")
 	assert.NilError(t, err)
-	t.Log(*c)
-	// TODO(dadrian): Actually check the output
+	key := "/path/to/key.pem"
+	cert := "/path/to/cert.pem"
+	hostname := "example.localhost"
+	autoSelfSign := false
+	expected := &ClientConfig{
+		Global: HostConfigOptional{
+			CAFiles: []string{"/path/to/ca.pem", "/path/to/other.pem"},
+		},
+		Hosts: []HostConfigOptional{{
+			Patterns:     []string{"example.localhost"},
+			Key:          &key,
+			Certificate:  &cert,
+			AutoSelfSign: &autoSelfSign,
+			Hostname:     &hostname,
+			Port:         1234,
+		}},
+	}
+	assert.DeepEqual(t, c, expected)
 }
 
 func TestLoadServerConfig(t *testing.T) {
-	c, err := LoadServerConfigFromFile("ast/testdata/server")
+	c, err := LoadServerConfigFromFile("testdata/server")
 	assert.NilError(t, err)
-	t.Log(*c)
-	// TODO(dadrian): Actually check the output
+	expected := &ServerConfig{
+		ListenAddress: ":77",
+		Key:           "/etc/hopd/id_hop.pem",
+		Certificate:   "/etc/hopd/id_hop.cert",
+	}
+	assert.DeepEqual(t, c, expected)
 }

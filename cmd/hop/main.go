@@ -2,8 +2,8 @@ package main
 
 import (
 	"os"
-	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/flags"
@@ -22,16 +22,18 @@ func main() {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
 
-	// cc will be result of merging config file settings and flags
-	cc, err := flags.LoadClientConfigFromFlags(f)
+	// hc will be result of merging config file settings and flags
+	hc, err := flags.LoadClientConfigFromFlags(f)
 	if err != nil {
-		logrus.Error(err)
+		if perr, ok := err.(toml.ParseError); ok {
+			logrus.Error(perr.ErrorWithUsage())
+		} else {
+			logrus.Error(err)
+		}
 		return
 	}
-	cc.HandshakeTimeout = 15 * time.Second
-	cc.DataTimeout = 15 * time.Second
 
-	client, err := hopclient.NewHopClientWithURL(cc, f.Address)
+	client, err := hopclient.NewHopClient(hc)
 	if err != nil {
 		logrus.Error(err)
 		return

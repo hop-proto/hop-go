@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strconv"
 	"sync"
 	"testing/fstest"
 
@@ -50,44 +49,19 @@ type HopClient struct { // nolint:maligned
 	// TODO(baumanl): does the hop client actually need all of the Hosts slice if
 	// it is just connecting to one? In general I think they won't be used, but
 	// could be useful for creating a config during authorization grant protocol
-	config     *config.ClientConfig
+	// config     *config.ClientConfig
 	hostconfig *config.HostConfig
 }
 
 // NewHopClient creates a new client object
-func NewHopClient(config *config.ClientConfig, hostname string) (*HopClient, error) {
-	return NewHopClientWithURL(config, &core.URL{Host: hostname})
-}
-
-// NewHopClientWithURL creates a new client object, like NewHopClient, but
-// takes in a core.URL to allow overriding the port/user for the hostconfig
-// matching host.Host
-func NewHopClientWithURL(config *config.ClientConfig, host *core.URL) (*HopClient, error) {
+func NewHopClient(config *config.HostConfig) (*HopClient, error) {
 	client := &HopClient{
-		config:     config,
-		hostconfig: config.MatchHost(host.Host),
+		hostconfig: config,
 		wg:         sync.WaitGroup{},
 		Fsystem:    nil,
 		// Proxied:    false,
 	}
 	logrus.Info("C: created client: ", client.hostconfig.Hostname)
-	if host.Port != "" || host.User != "" || host.Host != "" {
-		// We create a copy of the hostconfig because we don't want to modify the
-		// host config with the host everywhere
-		hostconfig := *client.hostconfig
-		if host.Port != "" {
-			if port, err := strconv.Atoi(host.Port); err == nil {
-				hostconfig.Port = port
-			}
-		}
-		if host.User != "" {
-			hostconfig.User = host.User
-		}
-		if host.Host != "" {
-			hostconfig.Hostname = host.Host
-		}
-		client.hostconfig = &hostconfig
-	}
 	// if !config.NonPricipal {
 	// 	// Do nothing, keys are passed at Dial time
 	// } else {
@@ -155,7 +129,7 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	// authgrant procedure.
 	// c.address = address
 	c.authenticator = authenticator
-	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.TransportConn, c.config.DataTimeout)
+	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.TransportConn, c.hostconfig.DataTimeout)
 	go func() {
 		err := c.TubeMuxer.Start()
 		if c.ExecTube != nil {
@@ -182,7 +156,6 @@ func (c *HopClient) authenticatorSetup(authgrantConn net.Conn) error {
 // Client creates an authenticator object from AG, agent, or in mem keys.
 func (c *HopClient) authenticatorSetupLocked(authgrantConn net.Conn) error {
 	defer logrus.Info("C: authenticator setup complete")
-	cc := c.config
 	hc := c.hostconfig
 
 	if authgrantConn != nil { //nolint TODO(hosono) add linting back
@@ -197,20 +170,16 @@ func (c *HopClient) authenticatorSetupLocked(authgrantConn net.Conn) error {
 	var autoSelfSign bool
 	if hc.Certificate != "" {
 		leafFile = hc.Certificate
-	} else if hc.AutoSelfSign == config.True {
-		autoSelfSign = true
-	} else if hc.AutoSelfSign != config.True && cc.Certificate != "" {
-		leafFile = cc.Certificate
-	} else if hc.AutoSelfSign == config.Unset && cc.AutoSelfSign == config.True {
+	} else if hc.AutoSelfSign {
 		autoSelfSign = true
 	} else {
 		return fmt.Errorf("no certificate provided and AutoSelfSign is not enabled for %q", hc.HostURL().Address())
 	}
-	keyPath := combinators.StringOr(hc.Key, combinators.StringOr(cc.Key, config.DefaultKeyPath()))
+	keyPath := combinators.StringOr(hc.Key, config.DefaultKeyPath())
 	var authenticator core.Authenticator
 
 	var leaf *certs.Certificate
-	agentURL := combinators.StringOr(cc.AgentURL, common.DefaultAgentURL)
+	agentURL := combinators.StringOr(hc.AgentURL, common.DefaultAgentURL)
 
 	ac := agent.Client{
 		BaseURL:    agentURL,
@@ -220,7 +189,7 @@ func (c *HopClient) authenticatorSetupLocked(authgrantConn net.Conn) error {
 	// Connect to the agent
 	aconn, _ := net.Dial("tcp", agentURL)
 
-	if hc.DisableAgent != config.True && aconn != nil && ac.Available(context.Background()) {
+	if !hc.DisableAgent && aconn != nil && ac.Available(context.Background()) {
 		bc, err := ac.ExchangerFor(context.Background(), keyPath)
 		if err != nil {
 			return fmt.Errorf("unable to create exchanger for agent with keyID: %s", err)
@@ -430,7 +399,7 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 	var err error
 	// if !c.Proxied {
 	var dialer net.Dialer
-	dialer.Timeout = c.config.HandshakeTimeout
+	dialer.Timeout = c.hostconfig.HandshakeTimeout
 	c.TransportConn, err = transport.DialWithDialer(&dialer, "udp", address, transportConfig)
 	// } else {
 	// 	c.TransportConn, err = transport.DialNP("netproxy", address, c.ProxyConn, transportConfig)
@@ -467,7 +436,7 @@ func (c *HopClient) startExecTube() error {
 	//Hop Session is tied to the life of this code execution tube.
 	// TODO(baumanl): provide support for Cmd in ClientConfig
 
-	logrus.Infof("Performing action: %v", c.config.Cmd)
+	logrus.Infof("Performing action: %v", c.hostconfig.Cmd)
 	ch, err := c.TubeMuxer.CreateTube(common.ExecTube)
 	if err != nil {
 		logrus.Error(err)
@@ -479,7 +448,7 @@ func (c *HopClient) startExecTube() error {
 		return err
 	}
 	c.wg.Add(1)
-	c.ExecTube, err = codex.NewExecTube(c.config.Cmd, c.config.UsePty, ch, winSizeTube, &c.wg)
+	c.ExecTube, err = codex.NewExecTube(c.hostconfig.Cmd, c.hostconfig.UsePty, ch, winSizeTube, &c.wg)
 	return err
 }
 

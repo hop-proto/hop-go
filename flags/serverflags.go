@@ -3,7 +3,6 @@ package flags
 import (
 	"errors"
 	"flag"
-	"fmt"
 
 	"hop.computer/hop/config"
 )
@@ -55,7 +54,7 @@ func LoadServerConfigFromFlags(f *ServerFlags) (*config.ServerConfig, error) {
 	if err != nil {
 		// TODO(baumanl): currently fails if no config file found at provided path or default path
 		// Do we want to support case where file literally doesn't exist?
-		return nil, fmt.Errorf("no config file found: %s", err)
+		return nil, err
 	}
 	err = mergeServerFlagsAndConfig(f, sc)
 	return sc, err

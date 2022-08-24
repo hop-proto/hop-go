@@ -2,41 +2,24 @@
 package config
 
 import (
-	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/BurntSushi/toml"
+	"github.com/sirupsen/logrus"
+
 	"hop.computer/hop/common"
-	"hop.computer/hop/config/ast"
 	"hop.computer/hop/core"
 	"hop.computer/hop/pkg/glob"
 	"hop.computer/hop/pkg/thunks"
 )
 
-// BoolSetting is True, False, or Unset. The zero value is unset.
-type BoolSetting int
-
-// Valid values for BoolSetting
-const (
-	Unset BoolSetting = 0
-	True  BoolSetting = 1
-	False BoolSetting = -1
-)
-
 // ClientConfig represents a parsed client configuration.
 type ClientConfig struct {
-	CAFiles          []string
-	Key              string
-	Certificate      string
-	AutoSelfSign     BoolSetting
-	AgentURL         string
-	Hosts            []HostConfig
-	Cmd              string // TODO(hosono) seems redundant with Cmd in hostconfig
-	UsePty           bool
-	HandshakeTimeout time.Duration
-	DataTimeout      time.Duration
+	Global HostConfigOptional
+	Hosts  []HostConfigOptional
 }
 
 // ServerConfig represents a parsed server configuration.
@@ -45,7 +28,7 @@ type ServerConfig struct {
 	Certificate  string
 	Intermediate string
 
-	AutoSelfSign  BoolSetting
+	AutoSelfSign  *bool
 	ListenAddress string
 
 	Names []NameConfig
@@ -54,25 +37,54 @@ type ServerConfig struct {
 	DataTimeout      time.Duration
 }
 
-// HostConfig contains a definition of a host pattern in a client configuration.
-type HostConfig struct {
-	Pattern      string
-	Hostname     string
-	User         string // TODO(dadrian): Implement this setting in the grammar
+// HostConfigOptional contains a definition of a host pattern in a client
+// configuration; strings and bools are represented as pointers so that a
+// default value can be distinguished from a set zero-value; users should
+// convert to a `HostConfig` (via .Unwrap) before reading the values
+type HostConfigOptional struct {
+	AgentURL     *string
+	AutoSelfSign *bool
+	CAFiles      []string
+	Certificate  *string
+	Cmd          *string // what command to run on connect
+	DisableAgent *bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
+	Headless     *bool   // run without command
+	Hostname     *string
+	Intermediate *string
+	Key          *string
+	Patterns     []string
 	Port         int
-	AutoSelfSign BoolSetting
-	Key          string
-	Certificate  string
-	Intermediate string
-
-	DisableAgent BoolSetting // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
-
-	// TODO(baumanl): Add application layer hop config options to grammar
-	Cmd      string // what command to run on connect
-	Headless bool   // run without command
+	User         *string
 	// something for principal vs. delegate
 	// something for remote port forward
 	// something for local port forward
+
+	UsePty           *bool
+	HandshakeTimeout int
+	DataTimeout      int
+}
+
+// HostConfig contains a definition of a host pattern in a client configuration
+type HostConfig struct {
+	AgentURL     string
+	AutoSelfSign bool
+	CAFiles      []string
+	Certificate  string
+	Cmd          string // what command to run on connect
+	DisableAgent bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
+	Headless     bool   // run without command
+	Hostname     string
+	Intermediate string
+	Key          string
+	Port         int
+	User         string
+	// something for principal vs. delegate
+	// something for remote port forward
+	// something for local port forward
+
+	UsePty           bool
+	HandshakeTimeout time.Duration
+	DataTimeout      time.Duration
 }
 
 // NameConfig defines the keys and certificates presented by the server for a
@@ -82,33 +94,112 @@ type NameConfig struct {
 	Key          string
 	Certificate  string
 	Intermediate string
-	AutoSelfSign BoolSetting
+	AutoSelfSign *bool
 
 	// TODO(dadrian): User mapping
 }
 
-//go:generate go run ./gen config_gen.go
-
-// LoadClientConfig converts an AST into an actual configuration object.
-func LoadClientConfig(root *ast.Node) (*ClientConfig, error) {
-	var c ClientConfig
-	return loadClientConfig_Gen(&c, root)
+// MergeWith takes non-default values in another HostConfigOptional and overwrites them
+// on/merges them with the values in the receiver
+func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
+	//TODO(drebelsky): consider using reflection
+	if other.AgentURL != nil {
+		hc.AgentURL = other.AgentURL
+	}
+	if other.AutoSelfSign != nil {
+		hc.AutoSelfSign = other.AutoSelfSign
+	}
+	hc.CAFiles = append(hc.CAFiles, other.CAFiles...)
+	if other.Certificate != nil {
+		hc.Certificate = other.Certificate
+	}
+	if other.Cmd != nil {
+		hc.Cmd = other.Cmd
+	}
+	if other.DisableAgent != nil {
+		hc.DisableAgent = other.DisableAgent
+	}
+	if other.Headless != nil {
+		hc.Headless = other.Headless
+	}
+	if other.Hostname != nil {
+		hc.Hostname = other.Hostname
+	}
+	if other.Intermediate != nil {
+		hc.Intermediate = other.Intermediate
+	}
+	if other.Key != nil {
+		hc.Key = other.Key
+	}
+	// don't need to merge Patterns
+	if other.Port != 0 {
+		hc.Port = other.Port
+	}
+	if other.User != nil {
+		hc.User = other.User
+	}
+	if other.UsePty != nil {
+		hc.UsePty = other.UsePty
+	}
+	if other.HandshakeTimeout != 0 {
+		hc.HandshakeTimeout = other.HandshakeTimeout
+	}
+	if other.DataTimeout != 0 {
+		hc.DataTimeout = other.DataTimeout
+	}
 }
 
-func tokenizeAndParseFile(path string) (*ast.Node, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
+func (hc *HostConfigOptional) Unwrap() *HostConfig {
+	//TODO(drebelsky): consider using reflection
+	newHC := HostConfig{
+		HandshakeTimeout: 15 * time.Second,
+		DataTimeout:      15 * time.Second,
 	}
-	tokens, err := ast.Tokenize(b)
-	if err != nil {
-		return nil, err
+	if hc.AgentURL != nil {
+		newHC.AgentURL = *hc.AgentURL
 	}
-	p := ast.NewParser(b, tokens)
-	if err := p.Parse(); err != nil {
-		return nil, err
+	if hc.AutoSelfSign != nil {
+		newHC.AutoSelfSign = *hc.AutoSelfSign
 	}
-	return p.AST, nil
+	newHC.CAFiles = hc.CAFiles
+	if hc.Certificate != nil {
+		newHC.Certificate = *hc.Certificate
+	}
+	if hc.Cmd != nil {
+		newHC.Cmd = *hc.Cmd
+	}
+	if hc.DisableAgent != nil {
+		newHC.DisableAgent = *hc.DisableAgent
+	}
+	if hc.Headless != nil {
+		newHC.Headless = *hc.Headless
+	}
+	if hc.Hostname != nil {
+		newHC.Hostname = *hc.Hostname
+	}
+	if hc.Intermediate != nil {
+		newHC.Intermediate = *hc.Intermediate
+	}
+	if hc.Key != nil {
+		newHC.Key = *hc.Key
+	}
+	// don't need to include patterns
+	if hc.Port != 0 {
+		newHC.Port = hc.Port
+	}
+	if hc.User != nil {
+		newHC.User = *hc.User
+	}
+	if hc.UsePty != nil {
+		newHC.UsePty = *hc.UsePty
+	}
+	if hc.HandshakeTimeout != 0 {
+		newHC.HandshakeTimeout = time.Duration(hc.HandshakeTimeout) * time.Second
+	}
+	if hc.DataTimeout != 0 {
+		newHC.DataTimeout = time.Duration(hc.DataTimeout) * time.Second
+	}
+	return &newHC
 }
 
 // LoadClientConfigFromFile tokenizes and parses the file at path, then loads it into
@@ -119,17 +210,12 @@ func LoadClientConfigFromFile(path string) (*ClientConfig, error) {
 }
 
 func loadClientConfigFromFile(c *ClientConfig, path string) (*ClientConfig, error) {
-	root, err := tokenizeAndParseFile(path)
-	if err != nil {
-		return nil, err
+	meta, err := toml.DecodeFile(path, c)
+	keys, lines := meta.UndecodedWithLines()
+	for i, key := range keys {
+		logrus.Warnf("While parsing config, encountered unknown key `%v` at %v:%v", key, path, lines[i])
 	}
-	return loadClientConfig_Gen(c, root)
-}
-
-// LoadServerConfig parses an AST into a ServerConfig.
-func LoadServerConfig(root *ast.Node) (*ServerConfig, error) {
-	var c ServerConfig
-	return loadServerConfig_Gen(&c, root)
+	return c, err
 }
 
 // LoadServerConfigFromFile tokenizes and parse the file at path, and then loads
@@ -140,11 +226,14 @@ func LoadServerConfigFromFile(path string) (*ServerConfig, error) {
 }
 
 func loadServerConfigFromFile(c *ServerConfig, path string) (*ServerConfig, error) {
-	root, err := tokenizeAndParseFile(path)
-	if err != nil {
-		return nil, err
+	meta, err := toml.DecodeFile(path, c)
+	keys, lines := meta.UndecodedWithLines()
+	for i, key := range keys {
+		logrus.Warnf("While parsing config, encountered unknown key `%v` at %v:%v", key, path, lines[i])
 	}
-	return loadServerConfig_Gen(c, root)
+	c.HandshakeTimeout *= time.Second
+	c.DataTimeout *= time.Second
+	return c, err
 }
 
 var clientDirectory string
@@ -174,19 +263,6 @@ func UserDirectoryFor(username string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(u.HomeDir, common.UserConfigDirtory), nil
-}
-
-var serverDirectory string
-var serverDirectoryOnce sync.Once
-
-func locateServerConfigDirectory() {
-	serverDirectory = "/etc/hopd" // TODO(dadrian): Windows? Compile-time override?
-}
-
-// ServerDirectory returns the directory used for server configuration.
-func ServerDirectory() string {
-	serverDirectoryOnce.Do(locateServerConfigDirectory)
-	return serverDirectory
 }
 
 // DefaultKeyPath returns UserDirectory()/id_hop.pem.
@@ -234,14 +310,17 @@ func MatchHostPattern(pattern string, input string) bool {
 }
 
 // MatchHost returns the host block that matches the input host.
-func (c *ClientConfig) MatchHost(inputHost string) *HostConfig {
+func (c *ClientConfig) MatchHost(inputHost string) *HostConfigOptional {
+	host := c.Global
 	for i := range c.Hosts {
-		if MatchHostPattern(c.Hosts[i].Pattern, inputHost) {
-			return &c.Hosts[i]
+		for _, pattern := range c.Hosts[i].Patterns {
+			if MatchHostPattern(pattern, inputHost) {
+				host.MergeWith(&c.Hosts[i])
+				break
+			}
 		}
 	}
-	// TODO(dadrian): Should this return a default host config? Yes.
-	return &HostConfig{}
+	return &host
 }
 
 // ApplyConfigToInputAddress updates the input address with the Host, Port, and
@@ -262,10 +341,25 @@ func (hc *HostConfig) ApplyConfigToInputAddress(address core.URL) core.URL {
 
 // HostURL extracts the Hostname, Port, and User from the HostConfig into an
 // core.URL.
-func (hc HostConfig) HostURL() core.URL {
+func (hc *HostConfig) HostURL() core.URL {
 	u := core.URL{
 		Host: hc.Hostname,
 		User: hc.User,
+	}
+	if hc.Port != 0 {
+		u.Port = strconv.Itoa(hc.Port)
+	} else {
+		u.Port = common.DefaultListenPortString
+	}
+	return u
+}
+
+// HostURL extracts the Hostname, Port, and User from the HostConfig into an
+// core.URL.
+func (hc *HostConfigOptional) HostURL() core.URL {
+	u := core.URL{
+		Host: *hc.Hostname,
+		User: *hc.User,
 	}
 	if hc.Port != 0 {
 		u.Port = strconv.Itoa(hc.Port)

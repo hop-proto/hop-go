@@ -55,7 +55,7 @@ type TestServer struct {
 type TestClient struct {
 	KeyPair *keys.X25519KeyPair
 
-	Config   *config.ClientConfig
+	Config   *config.HostConfig
 	Username string // user it will be authenticating as
 	Remote   string // address of server it will be connecting to
 	Hostname string
@@ -185,15 +185,12 @@ func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
 	assert.NilError(t, err)
 
 	// TODO(baumanl): what should actual default values be here.
-	c.Config = &config.ClientConfig{
-		Hosts: []config.HostConfig{{
-			Pattern:      h,
-			Hostname:     h,
-			Port:         port,
-			User:         username,
-			AutoSelfSign: config.True,
-			Key:          "home/" + username + "/.hop/id_hop.pem",
-		}},
+	c.Config = &config.HostConfig{
+		Hostname:     h,
+		Port:         port,
+		User:         username,
+		AutoSelfSign: true,
+		Key:          "home/" + username + "/.hop/id_hop.pem",
 	}
 
 	c.FileSystem = &fstest.MapFS{
@@ -216,8 +213,8 @@ func (c *TestClient) AddAgentConnToClient(t *testing.T, a *TestAgent) {
 
 func (c *TestClient) AddCmd(cmd string) {
 	logrus.Info("adding cmd to client config")
-	c.Config.MatchHost(c.Hostname).Cmd = cmd
-	logrus.Info("added: ", c.Config.MatchHost(c.Hostname).Cmd)
+	c.Config.Cmd = cmd
+	logrus.Info("added: ", c.Config.Cmd)
 	logrus.Info("config: ", c.Config)
 }
 
@@ -227,7 +224,7 @@ func (c *TestClient) AddCmd(cmd string) {
 // lastly it will just call Dial and let hopclient determine method from config
 func (c *TestClient) StartClient(t *testing.T) {
 	var err error
-	c.Client, err = hopclient.NewHopClient(c.Config, c.Hostname)
+	c.Client, err = hopclient.NewHopClient(c.Config)
 	c.Client.Fsystem = *c.FileSystem
 	assert.NilError(t, err)
 	if c.Authenticator != nil {
@@ -382,7 +379,7 @@ func TestStartCmd(t *testing.T) {
 
 		c.StartClient(t)
 
-		logrus.Info("CMD: ", c.Config.MatchHost(c.Hostname).Cmd)
+		logrus.Info("CMD: ", c.Config.Cmd)
 
 		//_ = c.Client.Start()
 		// TODO(baumanl): this currently doesn't work because code execution
