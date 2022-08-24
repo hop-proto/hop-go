@@ -37,7 +37,7 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	send *common.DeadlineChan[message] // outgoing messages
 
 	state atomic.Uint32
-	//closed atomic.Bool
+	gotAck atomic.Bool
 
 	// +checklocks:readLock
 	buf bytes.Buffer
@@ -225,15 +225,27 @@ func (c *Handle) handleControl(msg []byte) error {
 
 	ctrlMsg := ControlMessage(msg[0])
 	switch ctrlMsg {
+
 	case ControlMessageClose:
 		c.recv.Close()
 		return nil
+
+	case ControlMessageAckClose:
+		if c.state.Load() != closeStart {
+			c.Reset()
+			logrus.Error("server: unexpected close ack", msg)
+			return ErrInvalidMessage
+		}
+		c.gotAck.Store(true)
+		return nil
+
 	case ControlMessageReset:
 		logrus.Errorf("server: connection reset by remote peer")
 		c.server.m.Lock()
 		defer c.server.m.Unlock()
 		c.shutdown(nil)
 		return nil
+
 	default:
 		c.Reset()
 		logrus.Error("server: unexpected control message ", msg)
@@ -261,6 +273,31 @@ func (c *Handle) Close() error {
 	c.server.m.Lock()
 	defer c.server.m.Unlock()
 	msg := ControlMessageClose
+
+	if !c.state.CompareAndSwap(initiated, closeStart) {
+		return io.EOF
+	}
+
+	c.WriteControl(ControlMessageClose)
+
+	/*
+	 * Two cases, either we have gotten a fin before this or we have not
+	 * 
+	 * if we have, send an ACK (in handle control)
+	 * send our fin
+	 * wait for an ack
+	 * retransmit if needed
+	 * if we get an ACK, end immediately
+	 * otherwise, timeout
+	 *
+	 * if we have not gotten a fin yet,
+	 * send our fin
+	 * wait for both a fin and an ack
+	 * when we get both, linger for a bit
+	 * clean everything up
+	 * the server shouldn't care if this blocks for a while
+	 */
+
 	return c.shutdown(&msg)
 }
 
