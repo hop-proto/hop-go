@@ -19,7 +19,6 @@ import (
 	"hop.computer/hop/common"
 )
 
-
 type message struct {
 	msgType MessageType
 	data    []byte
@@ -255,7 +254,7 @@ func (c *Handle) Start() {
 func (c *Handle) Close() error {
 	c.m.Lock()
 	defer c.m.Unlock()
-	
+
 	switch c.state {
 	case established:
 		logrus.Debug("handle: established->finWait1")
@@ -281,7 +280,7 @@ func (c *Handle) Close() error {
 
 	/*
 	 * Two cases, either we have gotten a fin before this or we have not
-	 * 
+	 *
 	 * if we have, send an ACK (in handle control)
 	 * send our fin
 	 * wait for an ack

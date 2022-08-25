@@ -494,7 +494,7 @@ func (c *Client) handleControlMsg(msg ControlMessage) (err error) {
 		case finWait2:
 			logrus.Debug("client: finWait2->timeWait")
 			c.state = timeWait
-			c.waitTimer = time.AfterFunc(5 * time.Second, func() {
+			c.waitTimer = time.AfterFunc(5*time.Second, func() {
 				logrus.Debug("client: finished lingering")
 				select {
 				case c.closed <- struct{}{}:
@@ -521,7 +521,7 @@ func (c *Client) handleControlMsg(msg ControlMessage) (err error) {
 		case closing:
 			logrus.Debug("client: closing->timeWait")
 			c.state = timeWait
-			c.waitTimer = time.AfterFunc(5 * time.Second, func() {
+			c.waitTimer = time.AfterFunc(5*time.Second, func() {
 				select {
 				case c.closed <- struct{}{}:
 					break
