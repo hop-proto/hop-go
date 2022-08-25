@@ -429,7 +429,6 @@ func (c *Client) handleControlMsg(msg ControlMessage) (err error) {
 		}
 		c.recv.Close()
 		c.writeControl(ControlMessageAckClose)
-		go c.Close()
 		return
 
 	case ControlMessageAckClose:

@@ -3,6 +3,7 @@ package transport
 import (
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,8 +71,17 @@ func makeConn(t *testing.T, fakeUDP bool) (*Client, *Handle, *Server, func(), er
 	assert.NilError(t, err)
 
 	stop := func() {
-		serverConn.CloseSession(handle.ss.sessionID)
-		clientConn.Close()
+		wg := sync.WaitGroup{}
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			serverConn.CloseSession(handle.ss.sessionID)
+		}()
+		go func() {
+			defer wg.Done()
+			time.Sleep(10 * time.Millisecond)
+			clientConn.Close()
+		}()
 		serverConn.Close()
 	}
 

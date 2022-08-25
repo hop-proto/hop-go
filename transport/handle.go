@@ -48,6 +48,7 @@ var _ MsgConn = &Handle{}
 
 var _ net.Conn = &Handle{}
 
+// GetState returns the state that the handle is in
 func (c *Handle) GetState() connState {
 	c.m.Lock()
 	defer c.m.Unlock()

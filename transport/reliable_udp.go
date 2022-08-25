@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -55,7 +54,7 @@ func (r *ReliableUDP) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.U
 	}
 
 	if r.closed.Load() {
-		return 0, 0, 0, addr, io.EOF
+		return 0, 0, 0, addr, net.ErrClosed
 	}
 
 	ch := r.readDeadline.Done()
@@ -68,7 +67,7 @@ func (r *ReliableUDP) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.U
 			return
 		case msg, ok := <-r.recv:
 			if !ok {
-				err = io.EOF
+				err = net.ErrClosed
 				return
 			}
 			n = copy(b, msg)
@@ -92,7 +91,7 @@ func (r *ReliableUDP) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int
 	defer r.writeLock.Unlock()
 
 	if r.closed.Load() {
-		err = io.EOF
+		err = net.ErrClosed
 		return
 	}
 
@@ -116,12 +115,12 @@ func (r *ReliableUDP) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int
 // closing behavior defined in UDP
 func (r *ReliableUDP) Close() error {
 	if r.closed.Load() {
-		return io.EOF
+		return net.ErrClosed
 	}
 
 	r.closed.Store(true)
-	r.writeDeadline.Cancel(io.EOF)
-	r.readDeadline.Cancel(io.EOF)
+	r.writeDeadline.Cancel(net.ErrClosed)
+	r.readDeadline.Cancel(net.ErrClosed)
 
 	r.writeLock.Lock()
 	defer r.writeLock.Unlock()

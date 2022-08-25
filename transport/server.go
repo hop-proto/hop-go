@@ -505,8 +505,7 @@ func (s *Server) Serve() error {
 			err := s.readPacket()
 			logrus.Tracef("read a packet")
 			if err != nil {
-				// This checks for timeouts caused by closing the connection
-				// and does not log the error in that case
+				// this prevents logging an error upon closing the server
 				if !(errors.Is(err, net.ErrClosed) && s.closed.Load()) {
 					logrus.Errorf("server: %s", err)
 				}
@@ -615,34 +614,12 @@ func (s *Server) ListenAddress() net.Addr {
 }
 
 // CloseSession gracefully closes one hop session
-// TODO(hosono) we still need a protocol close message
 func (s *Server) CloseSession(sessionID SessionID) error {
-	s.m.Lock()
-	defer s.m.Unlock()
-	return s.closeSessionLocked(sessionID)
-}
-
-// +checklocks:s.m
-func (s *Server) closeSessionLocked(sessionID SessionID) error {
-	h := s.fetchHandleLocked(sessionID)
-	if h == nil {
-		return ErrUnknownSession
+	h := s.fetchHandle(sessionID)
+	if h != nil {
+		return h.Close()
 	}
-	err := s.closeHandleWrapper(h)
-	s.clearHandleLocked(sessionID)
-	return err
-}
-
-// This wrapper is needed to make checklocks happy
-// +checklocks:s.m
-// +checklocksalias:c.server.m=s.m
-func (s *Server) closeHandleWrapper(c *Handle) error {
-	// TODO(hosono) this is not the correct closing behavior
-	// but making it correct would require changing the locking behavior
-	c.m.Lock()
-	defer c.m.Unlock()
-	c.writeControl(ControlMessageClose)
-	return c.shutdown()
+	return nil
 }
 
 // Close stops the server, causing Serve() to return.
@@ -664,10 +641,7 @@ func (s *Server) Close() (err error) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				err := h.Close()
-				if err != nil {
-					logrus.Errorf("error closing handle: %s", err)
-				}
+				h.Close()
 			}()
 		}
 	}
@@ -678,10 +652,7 @@ func (s *Server) Close() (err error) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				err := handle.Close()
-				if err != nil {
-					logrus.Errorf("error closing handle: %s", err)
-				}
+				handle.Close()
 			}()
 		} else {
 			logrus.Error("server: nil handle in pending connections")
