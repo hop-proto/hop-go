@@ -19,11 +19,6 @@ import (
 	"hop.computer/hop/common"
 )
 
-const (
-	initiated uint32 = iota
-	closeStart
-	closed
-)
 
 type message struct {
 	msgType MessageType
@@ -258,15 +253,31 @@ func (c *Handle) Start() {
 
 // Close closes the connection. Future operations on non-buffered data will return io.EOF.
 func (c *Handle) Close() error {
-	c.server.m.Lock()
-	defer c.server.m.Unlock()
-	msg := ControlMessageClose
-
-	if !c.state.CompareAndSwap(initiated, closeStart) {
+	c.m.Lock()
+	defer c.m.Unlock()
+	
+	switch c.state {
+	case established:
+		logrus.Debug("handle: established->finWait1")
+		c.state = finWait1
+	case closeWait:
+		logrus.Debug("handle: closeWait->lastAck")
+		c.state = lastAck
+	default:
 		return io.EOF
 	}
 
-	c.WriteControl(ControlMessageClose)
+	logrus.Debug("handle: starting close")
+
+	c.writeControl(ControlMessageClose)
+
+	c.m.Unlock()
+	<-c.closed
+	c.m.Lock()
+
+	c.server.m.Lock()
+	defer c.server.m.Unlock()
+	return c.shutdown()
 
 	/*
 	 * Two cases, either we have gotten a fin before this or we have not
@@ -285,28 +296,19 @@ func (c *Handle) Close() error {
 	 * clean everything up
 	 * the server shouldn't care if this blocks for a while
 	 */
-
-	return c.shutdown(&msg)
 }
 
 // Note that the lock here refers to the server's lock
 // +checklocks:c.server.m
-func (c *Handle) shutdown(msg *ControlMessage) error {
-	if c.state.Load() == closed {
-		return io.EOF
-	}
-
-	if msg != nil {
-		c.WriteControl(*msg)
-	}
-
-	c.state.Store(closed)
-
+// +checklocks:c.m
+func (c *Handle) shutdown() error {
 	c.recv.Close()
 	c.send.Close()
 
 	// Wait for the sending goroutines to exit
 	c.sendWg.Wait()
+
+	c.state = closed
 
 	c.server.clearHandleLocked(c.ss.sessionID)
 

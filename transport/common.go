@@ -127,5 +127,20 @@ const (
 	ControlMessageReset    ControlMessage = 0x03
 )
 
+// states that a Handle or Client can be in. Most of them are needed to handle closing
+// most of these names are taken from the RFC 793 (TCP) for familiarity
+type connState uint32
+const (
+	finishingHandshake connState = iota
+	established
+	closeWait
+	lastAck
+	finWait1
+	finWait2
+	closing
+	timeWait
+	closed
+)
+
 // IsHandshakeType returns true if the message type is part of the handshake, not the transport.
 func (mt MessageType) IsHandshakeType() bool { return (byte(mt) & byte(0x0F)) != 0 }

@@ -98,6 +98,20 @@ func (c *Client) handshakeComplete() bool {
 	return c.state != finishingHandshake
 }
 
+// IsClosed returns true if Close() has been called
+func (c *Client) IsClosed() bool {
+	c.m.Lock()
+	defer c.m.Unlock()
+	return c.state != established && c.state != closeWait
+}
+
+// handshake complete returns true if the client has finished its handshake with the server
+func (c *Client) handshakeComplete() bool {
+	c.m.Lock()
+	defer c.m.Unlock()
+	return c.state != finishingHandshake
+}
+
 // Handshake performs the Portal handshake with the remote host. The connection
 // must already be open. It is an error to call Handshake on a connection that
 // has already performed the portal handshake.
@@ -338,14 +352,35 @@ func (c *Client) Close() error {
 
 // Reset immediately destroys the connection without waiting for graceful shutdown
 func (c *Client) Reset() error {
-	msg := ControlMessageReset
-	return c.shutdown(&msg)
+	c.writeControl(ControlMessageReset)
+	return c.shutdown()
 }
 
 // Close gracefully shuts down the connection. Repeated calls to close will error.
 func (c *Client) Close() error {
-	msg := ControlMessageClose
-	return c.shutdown(&msg)
+	c.m.Lock()
+	defer c.m.Unlock()
+
+	switch c.state {
+	case established:
+		logrus.Debug("client: established->finWait1")
+		c.state = finWait1
+	case closeWait:
+		logrus.Debug("client: closeWait->lastAck")
+		c.state = lastAck
+	default:
+		return io.EOF
+	}
+
+	logrus.Debug("client: starting close")
+
+	c.writeControl(ControlMessageClose)
+
+	c.m.Unlock()
+	<-c.closed
+	c.m.Lock()
+
+	return c.shutdown()
 }
 
 func (c *Client) listen() {
@@ -412,8 +447,8 @@ func (c *Client) listen() {
 		if err != nil {
 			if !errors.Is(err, net.ErrClosed) {
 				logrus.Errorf("client: %s", err)
+				go c.Reset()
 			}
-			go c.Reset()
 			break
 		}
 
@@ -445,18 +480,76 @@ func (c *Client) listen() {
 // handleControlMsg must only be called on authenticated packets after the handshake is complete.
 // Due to the spoofable nature of UDP, control messages can be injected by third parties.
 // both on the connection patch an off the connection path
-func (c *Client) handleControlMsg(msg ControlMessage) error {
+func (c *Client) handleControlMsg(msg ControlMessage) (err error) {
 	switch msg {
 	case ControlMessageClose:
+		logrus.Debug("client: got close message")
+		switch c.state {
+		case established:
+			logrus.Debug("client: established->closeWait")
+			c.state = closeWait
+		case finWait1:
+			logrus.Debug("client: finWait1->closing")
+			c.state = closing
+		case finWait2:
+			logrus.Debug("client: finWait2->timeWait")
+			c.state = timeWait
+			c.waitTimer = time.AfterFunc(5 * time.Second, func() {
+				logrus.Debug("client: finished lingering")
+				select {
+				case c.closed <- struct{}{}:
+					break
+				default:
+					break
+				}
+			})
+		default:
+			logrus.Debugf("client: got close in invalid state: %d", c.state)
+			err = ErrInvalidMessage
+		}
 		c.recv.Close()
-		return nil
+		c.writeControl(ControlMessageAckClose)
+		go c.Close()
+		return
+
+	case ControlMessageAckClose:
+		logrus.Debug("client: got ack of close")
+		switch c.state {
+		case finWait1:
+			logrus.Debug("client: finWait1->finWait2")
+			c.state = finWait2
+		case closing:
+			logrus.Debug("client: closing->timeWait")
+			c.state = timeWait
+			c.waitTimer = time.AfterFunc(5 * time.Second, func() {
+				select {
+				case c.closed <- struct{}{}:
+					break
+				default:
+					break
+				}
+			})
+		case lastAck:
+			logrus.Debug("client: lastAck->closed")
+			c.state = closed
+			c.closed <- struct{}{}
+		default:
+			logrus.Debugf("client: got ack of close in bad state: %d", c.state)
+			return ErrInvalidMessage
+		}
+
 	case ControlMessageReset:
 		logrus.Errorf("client: connection reset by remote peer")
-		go c.shutdown(nil)
+		go c.shutdown()
 		return nil
+
 	default:
+		logrus.Errorf("client: invalid control message: %x", msg)
+		go c.Reset()
 		return ErrInvalidMessage
 	}
+
+	return nil
 }
 
 // readMsg reads one packet from the underlying connection, and writes it into c.plaintext
@@ -615,6 +708,7 @@ func NewClient(conn UDPLike, server *net.UDPAddr, config ClientConfig) *Client {
 		ciphertext:     make([]byte, 65535),
 		plaintext:      make([]byte, PlaintextLen(65535)),
 		recv:           common.NewDeadlineChan[[]byte](config.maxBufferedPackets()),
+		closed:         make(chan struct{}, 1),
 	}
 	return c
 }

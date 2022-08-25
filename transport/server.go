@@ -617,7 +617,7 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	default:
 		logrus.Warnf("server: session %x: pending connections queue is full, dropping handshake", h.ss.sessionID)
 		s.clearHandle(h.ss.sessionID)
-		h.Close()
+		h.Reset()
 	}
 	return nil
 }
@@ -685,8 +685,12 @@ func (s *Server) CloseSession(sessionID SessionID) error {
 // +checklocks:s.m
 // +checklocksalias:c.server.m=s.m
 func (s *Server) closeHandleWrapper(c *Handle) error {
-	msg := ControlMessageClose
-	return c.shutdown(&msg)
+	// TODO(hosono) this is not the correct closing behavior
+	// but making it correct would require changing the locking behavior
+	c.m.Lock()
+	defer c.m.Unlock()
+	c.writeControl(ControlMessageClose)
+	return c.shutdown()
 }
 
 // Close stops the server, causing Serve() to return.
