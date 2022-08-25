@@ -112,6 +112,7 @@ const (
 // states that a Handle or Client can be in. Most of them are needed to handle closing
 // most of these names are taken from the RFC 793 (TCP) for familiarity
 type connState uint32
+
 const (
 	finishingHandshake connState = iota
 	established

@@ -14,7 +14,6 @@ import (
 	"hop.computer/hop/common"
 )
 
-
 type message struct {
 	msgType MessageType
 	data    []byte
@@ -31,8 +30,8 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	send *common.DeadlineChan[message] // outgoing messages
 
 	// +checklocks:m
-	state connState
-	m     sync.Mutex
+	state     connState
+	m         sync.Mutex
 	waitTimer *time.Timer
 	closed    chan struct{}
 
@@ -239,7 +238,7 @@ func (c *Handle) handleControl(msg []byte) (err error) {
 			logrus.Debug("handle: finWait2->timeWait")
 			c.state = timeWait
 			if c.waitTimer == nil {
-				c.waitTimer = time.AfterFunc(5 * time.Second, func() {
+				c.waitTimer = time.AfterFunc(5*time.Second, func() {
 					logrus.Debug("handle: finished lingering")
 					c.closed <- struct{}{}
 				})
@@ -262,7 +261,7 @@ func (c *Handle) handleControl(msg []byte) (err error) {
 			logrus.Debug("handle: closing->timeWait")
 			c.state = timeWait
 			if c.waitTimer == nil {
-				c.waitTimer = time.AfterFunc(5 * time.Second, func() {
+				c.waitTimer = time.AfterFunc(5*time.Second, func() {
 					logrus.Debug("handle: finished lingering")
 					c.closed <- struct{}{}
 				})
@@ -319,7 +318,7 @@ func (c *Handle) Reset() error {
 func (c *Handle) Close() error {
 	c.m.Lock()
 	defer c.m.Unlock()
-	
+
 	switch c.state {
 	case established:
 		logrus.Debug("handle: established->finWait1")
@@ -345,7 +344,7 @@ func (c *Handle) Close() error {
 
 	/*
 	 * Two cases, either we have gotten a fin before this or we have not
-	 * 
+	 *
 	 * if we have, send an ACK (in handle control)
 	 * send our fin
 	 * wait for an ack

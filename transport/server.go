@@ -557,7 +557,6 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	}
 	h.ss.clientLeaf = hs.clientLeaf
 
-
 	h.m.Lock()
 	h.state = established
 	h.m.Unlock()
@@ -655,7 +654,6 @@ func (s *Server) Close() (err error) {
 		return io.EOF
 	}
 
-
 	// TODO(hosono) fix the weirdness around locking stuff
 	s.m.Lock()
 
@@ -667,7 +665,7 @@ func (s *Server) Close() (err error) {
 			go func() {
 				defer wg.Done()
 				err := h.Close()
-				if err != nil{
+				if err != nil {
 					logrus.Errorf("error closing handle: %s", err)
 				}
 			}()
@@ -681,7 +679,7 @@ func (s *Server) Close() (err error) {
 			go func() {
 				defer wg.Done()
 				err := handle.Close()
-				if err != nil{
+				if err != nil {
 					logrus.Errorf("error closing handle: %s", err)
 				}
 			}()
