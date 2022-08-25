@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -704,6 +703,8 @@ func (s *Server) Close() (err error) {
 	s.closed.Store(true)
 
 	close(s.stopCookieRotate)
+
+	wg := sync.WaitGroup{}
 
 	wg := sync.WaitGroup{}
 
