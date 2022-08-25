@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -508,7 +507,7 @@ func (s *Server) Serve() error {
 			if err != nil {
 				// This checks for timeouts caused by closing the connection
 				// and does not log the error in that case
-				if !(errors.Is(err, os.ErrDeadlineExceeded) && s.closed.Load()) {
+				if !(errors.Is(err, net.ErrClosed) && s.closed.Load()) {
 					logrus.Errorf("server: %s", err)
 				}
 			}
@@ -655,36 +654,49 @@ func (s *Server) Close() (err error) {
 	if s.closed.Load() {
 		return io.EOF
 	}
-	s.closed.Store(true)
 
-	// This will ensure there are no pending reads
-	s.udpConn.SetReadDeadline(time.Now())
-	s.wg.Wait()
 
 	// TODO(hosono) fix the weirdness around locking stuff
 	s.m.Lock()
 
+	wg := sync.WaitGroup{}
+
 	for _, h := range s.handles {
 		if h != nil {
-			s.closeSessionLocked(h.ss.sessionID)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				err := h.Close()
+				if err != nil{
+					logrus.Errorf("error closing handle: %s", err)
+				}
+			}()
 		}
 	}
 
 	close(s.pendingConnections)
 	for handle := range s.pendingConnections {
 		if handle != nil {
-			err = s.closeHandleWrapper(handle)
-			if err != nil {
-				logrus.Errorf("error closing handle: %s", err)
-			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				err := handle.Close()
+				if err != nil{
+					logrus.Errorf("error closing handle: %s", err)
+				}
+			}()
 		} else {
 			logrus.Error("server: nil handle in pending connections")
 		}
 	}
-
 	s.m.Unlock()
 
+	// wait for all handles to close
+	wg.Wait()
+
+	s.closed.Store(true)
 	s.udpConn.Close()
+	s.wg.Wait()
 
 	return nil
 }

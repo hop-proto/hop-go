@@ -111,7 +111,8 @@ func clientClose(t *testing.T) {
 	client, handle, _, stop, err := makeConn(t, false)
 	assert.NilError(t, err)
 
-	client.Close()
+	err = client.Close()
+	assert.NilError(t, err)
 	assert.DeepEqual(t, client.state, closed)
 
 	checkEOFReads(t, client, handle)
@@ -124,7 +125,8 @@ func handleClose(t *testing.T) {
 	client, handle, _, stop, err := makeConn(t, false)
 	assert.NilError(t, err)
 
-	handle.Close()
+	err = handle.Close()
+	assert.NilError(t, err)
 	assert.Equal(t, handle.IsClosed(), true)
 
 	checkEOFReads(t, client, handle)
@@ -137,7 +139,8 @@ func serverClose(t *testing.T) {
 	client, handle, server, stop, err := makeConn(t, false)
 	assert.NilError(t, err)
 
-	server.Close()
+	err = server.Close()
+	assert.NilError(t, err)
 	assert.Equal(t, server.closed.Load(), true)
 
 	b := make([]byte, 1024)
