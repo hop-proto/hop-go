@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -15,11 +14,6 @@ import (
 	"hop.computer/hop/common"
 )
 
-const (
-	initiated uint32 = iota
-	closeStart
-	closed
-)
 
 type message struct {
 	msgType MessageType
@@ -36,8 +30,11 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	recv *common.DeadlineChan[[]byte]  // incoming transport messages
 	send *common.DeadlineChan[message] // outgoing messages
 
-	state atomic.Uint32
-	gotAck atomic.Bool
+	// +checklocks:m
+	state connState
+	m     sync.Mutex
+	waitTimer *time.Timer
+	closed    chan struct{}
 
 	// +checklocks:readLock
 	buf bytes.Buffer
@@ -52,9 +49,18 @@ var _ MsgConn = &Handle{}
 
 var _ net.Conn = &Handle{}
 
-// IsClosed returns closed member variable value
+func (c *Handle) GetState() connState {
+	c.m.Lock()
+	defer c.m.Unlock()
+	return c.state
+}
+
+// IsClosed returns true if the handle is closed or in the process of closing.
+// Writes and reads to the handle return io.EOF if and only if IsClosed returns true
 func (c *Handle) IsClosed() bool {
-	return c.state.Load() == closed
+	c.m.Lock()
+	defer c.m.Unlock()
+	return c.state != established && c.state != closeWait
 }
 
 // ReadMsg implements the MsgReader interface. If b is too short to hold the
@@ -132,7 +138,7 @@ func (c *Handle) WriteMsg(b []byte) error {
 	c.writeLock.Lock()
 	defer c.writeLock.Unlock()
 
-	if c.state.Load() != initiated {
+	if c.IsClosed() {
 		return io.EOF
 	}
 
@@ -151,7 +157,7 @@ func (c *Handle) WriteMsg(b []byte) error {
 // MaxPlaintextLength and send them using WriteMsg. Each call to WriteMsg is
 // subject to the timeout.
 func (c *Handle) Write(buf []byte) (int, error) {
-	if c.state.Load() != initiated {
+	if c.IsClosed() {
 		return 0, io.EOF
 	}
 	b := append([]byte{}, buf...)
@@ -177,11 +183,8 @@ func (c *Handle) Write(buf []byte) (int, error) {
 	return total, nil
 }
 
-// WriteControl writes a control message to the remote host
-func (c *Handle) WriteControl(msg ControlMessage) error {
-	if c.state.Load() == closed {
-		return io.EOF
-	}
+// writeControl writes a control message to the remote host
+func (c *Handle) writeControl(msg ControlMessage) error {
 	toSend := message{
 		data:    []byte{byte(msg)},
 		msgType: MessageTypeControl,
@@ -208,77 +211,137 @@ func (c *Handle) sender() {
 			logrus.Errorf("handle: resetting connection. unable to write packet: %s", err)
 			go c.Reset()
 		}
-
-		// end loop after sending control message
-		if msg.msgType == MessageTypeControl && ControlMessage(msg.data[0]) == ControlMessageClose {
-			break
-		}
 	}
 }
 
-func (c *Handle) handleControl(msg []byte) error {
+func (c *Handle) handleControl(msg []byte) (err error) {
 	if len(msg) != 1 {
 		logrus.Error("handle: invalid control message: ", msg)
 		c.Reset()
 		return ErrInvalidMessage
 	}
 
+	c.m.Lock()
+	defer c.m.Unlock()
+
 	ctrlMsg := ControlMessage(msg[0])
 	switch ctrlMsg {
 
 	case ControlMessageClose:
+		logrus.Debug("handle: got close message")
+		if c.state == established {
+			logrus.Debug("handle: established->closeWait")
+			c.state = closeWait
+		} else if c.state == finWait1 {
+			logrus.Debug("handle: finWait1->closing")
+			c.state = closing
+		} else if c.state == finWait2 {
+			logrus.Debug("handle: finWait2->timeWait")
+			c.state = timeWait
+			if c.waitTimer == nil {
+				c.waitTimer = time.AfterFunc(5 * time.Second, func() {
+					logrus.Debug("handle: finished lingering")
+					c.closed <- struct{}{}
+				})
+			}
+		} else {
+			logrus.Debugf("handle: got close in invalid state: %d", c.state)
+			err = ErrInvalidMessage
+		}
 		c.recv.Close()
-		return nil
+		c.writeControl(ControlMessageAckClose)
+		go c.Close()
+		return
 
 	case ControlMessageAckClose:
-		if c.state.Load() != closeStart {
-			c.Reset()
-			logrus.Error("server: unexpected close ack", msg)
+		logrus.Debug("handle: got ack of close")
+		if c.state == finWait1 {
+			logrus.Debug("handle: finWait1->finWait2")
+			c.state = finWait2
+		} else if c.state == closing {
+			logrus.Debug("handle: closing->timeWait")
+			c.state = timeWait
+			if c.waitTimer == nil {
+				c.waitTimer = time.AfterFunc(5 * time.Second, func() {
+					logrus.Debug("handle: finished lingering")
+					c.closed <- struct{}{}
+				})
+			}
+		} else if c.state == lastAck {
+			logrus.Debug("handle: lastAck->closed")
+			c.state = closed
+			c.closed <- struct{}{}
+		} else {
+			logrus.Debugf("handle: got ack of fin in invalid state: %d", c.state)
 			return ErrInvalidMessage
 		}
-		c.gotAck.Store(true)
 		return nil
 
 	case ControlMessageReset:
 		logrus.Errorf("server: connection reset by remote peer")
 		c.server.m.Lock()
 		defer c.server.m.Unlock()
-		c.shutdown(nil)
-		return nil
+		return c.shutdown()
 
 	default:
+		logrus.Errorf("server: unexpected control message: %x", msg)
 		c.Reset()
-		logrus.Error("server: unexpected control message ", msg)
 		return ErrInvalidMessage
 	}
 }
 
 // Start starts the goroutines that handle messages
 func (c *Handle) Start() {
+	c.m.Lock()
+	defer c.m.Unlock()
+
+	c.state = established
+	c.closed = make(chan struct{})
+
 	c.sendWg.Add(1)
 	go c.sender()
 }
 
 // Reset closes the connection without waiting for graceful shutdown
 func (c *Handle) Reset() error {
+	c.writeControl(ControlMessageReset)
+
+	c.m.Lock()
+	defer c.m.Unlock()
+
 	c.server.m.Lock()
 	defer c.server.m.Unlock()
-	msg := ControlMessageReset
-	return c.shutdown(&msg)
+	return c.shutdown()
 }
 
 // Close closes the connection. Future operations on non-buffered data will
 // return io.EOF.
 func (c *Handle) Close() error {
-	c.server.m.Lock()
-	defer c.server.m.Unlock()
-	msg := ControlMessageClose
-
-	if !c.state.CompareAndSwap(initiated, closeStart) {
+	c.m.Lock()
+	defer c.m.Unlock()
+	
+	switch c.state {
+	case established:
+		logrus.Debug("handle: established->finWait1")
+		c.state = finWait1
+	case closeWait:
+		logrus.Debug("handle: closeWait->lastAck")
+		c.state = lastAck
+	default:
 		return io.EOF
 	}
 
-	c.WriteControl(ControlMessageClose)
+	logrus.Debug("handle: starting close")
+
+	c.writeControl(ControlMessageClose)
+
+	c.m.Unlock()
+	<-c.closed
+	c.m.Lock()
+
+	c.server.m.Lock()
+	defer c.server.m.Unlock()
+	return c.shutdown()
 
 	/*
 	 * Two cases, either we have gotten a fin before this or we have not
@@ -297,28 +360,19 @@ func (c *Handle) Close() error {
 	 * clean everything up
 	 * the server shouldn't care if this blocks for a while
 	 */
-
-	return c.shutdown(&msg)
 }
 
 // Note that the lock here refers to the server's lock
 // +checklocks:c.server.m
-func (c *Handle) shutdown(msg *ControlMessage) error {
-	if c.state.Load() == closed {
-		return io.EOF
-	}
-
-	if msg != nil {
-		c.WriteControl(*msg)
-	}
-
-	c.state.Store(closed)
-
+// +checklocks:c.m
+func (c *Handle) shutdown() error {
 	c.recv.Close()
 	c.send.Close()
 
 	// Wait for the sending goroutines to exit
 	c.sendWg.Wait()
+
+	c.state = closed
 
 	c.server.clearHandleLocked(c.ss.sessionID)
 

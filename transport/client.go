@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -34,8 +33,10 @@ type Client struct {
 	writeLock sync.Mutex
 	readLock  sync.Mutex
 
-	handshakeComplete atomic.Bool
-	closed            atomic.Bool
+	//+checklocks:m
+	state connState
+	closed chan struct{}
+	waitTimer *time.Timer
 
 	wg sync.WaitGroup
 
@@ -83,25 +84,36 @@ func (c *Client) unlockUser() {
 	c.writeLock.Unlock()
 }
 
+// IsClosed returns true if Close() has been called
+func (c *Client) IsClosed() bool {
+	c.m.Lock()
+	defer c.m.Unlock()
+	return c.state != established && c.state != closeWait
+}
+
+// handshake complete returns true if the client has finished its handshake with the server
+func (c *Client) handshakeComplete() bool {
+	c.m.Lock()
+	defer c.m.Unlock()
+	return c.state != finishingHandshake
+}
+
 // Handshake performs the Portal handshake with the remote host. The connection
 // must already be open. It is an error to call Handshake on a connection that
 // has already performed the portal handshake.
 func (c *Client) Handshake() error {
-	// logrus.SetLevel(logrus.DebugLevel)
 	logrus.Info("Initiating Handshake")
-	if c.handshakeComplete.Load() {
-		return nil
-	}
-	logrus.Debug("Handshake not complete. Locking user...")
+
 	c.lockUser()
 	defer c.unlockUser()
 
-	// TODO(dadrian): Cache any handshake errors
-
-	if c.handshakeComplete.Load() {
+	if c.state != finishingHandshake {
 		return nil
 	}
-	logrus.Debug("got lock and checked again. Completeting handshake...")
+	logrus.Debug("Handshake not complete. Completing handshake...")
+
+	// TODO(dadrian): Cache any handshake errors
+
 	return c.clientHandshakeLocked()
 }
 
@@ -230,8 +242,7 @@ func (c *Client) clientHandshakeLocked() error {
 	c.ss.sessionID = c.hs.sessionID
 	c.ss.remoteAddr = c.hs.remoteAddr
 	c.hs.deriveFinalKeys(&c.ss.clientToServerKey, &c.ss.serverToClientKey)
-	c.handshakeComplete.Store(true)
-	c.closed.Store(false)
+	c.state = established
 	c.hs = nil
 	c.dialAddr = nil
 
@@ -246,20 +257,29 @@ func (c *Client) clientHandshakeLocked() error {
 	return nil
 }
 
-// +checklocks:c.writeLock
 func (c *Client) writeTransport(plaintext []byte) error {
+	c.writeLock.Lock()
+	defer c.writeLock.Unlock()
 	return c.ss.writePacket(c.underlyingConn, MessageTypeTransport, plaintext, &c.ss.clientToServerKey)
 }
 
-// +checklocks:c.writeLock
 func (c *Client) writeControl(msg ControlMessage) error {
+	c.writeLock.Lock()
+	defer c.writeLock.Unlock()
 	plaintext := []byte{byte(msg)}
 	return c.ss.writePacket(c.underlyingConn, MessageTypeControl, plaintext, &c.ss.clientToServerKey)
 }
 
 // Write implements net.Conn.
 func (c *Client) Write(b []byte) (int, error) {
-	if c.closed.Load() {
+	if !c.handshakeComplete() {
+		err := c.Handshake()
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	if c.IsClosed() {
 		return 0, io.EOF
 	}
 
@@ -272,18 +292,17 @@ func (c *Client) Write(b []byte) (int, error) {
 
 // WriteMsg implements MsgConn. It send a single packet.
 func (c *Client) WriteMsg(b []byte) error {
-	if c.closed.Load() {
-		return io.EOF
-	}
-
-	if !c.handshakeComplete.Load() {
+	if !c.handshakeComplete() {
 		err := c.Handshake()
 		if err != nil {
 			return err
 		}
 	}
-	c.writeLock.Lock()
-	defer c.writeLock.Unlock()
+
+	if c.IsClosed() {
+		return io.EOF
+	}
+
 	err := c.writeTransport(b)
 	if err != nil {
 		return err
@@ -292,52 +311,64 @@ func (c *Client) WriteMsg(b []byte) error {
 
 }
 
-// shutdown is a helper method to factor out code common to Close and Reset
-// If msg is not nil, shutdown will send the relevant control message
-func (c *Client) shutdown(msg *ControlMessage) error {
-	if !c.closed.CompareAndSwap(false, true) {
-		return io.EOF
-	}
-
+// shutdown cleans up resources associated with the client
+// it also cancels all pending reads and writes
+// +checklocks:c.m
+func (c *Client) shutdown() error {
 	c.recv.Close()
-
-	c.lockUser()
-	defer c.unlockUser()
-
-	if msg != nil {
-		c.writeControl(*msg)
-	}
-
 	err := c.underlyingConn.Close()
 
 	// Wait for c.listen() to finish
 	c.wg.Wait()
+
+	c.state = closed
 
 	return err
 }
 
 // Reset immediately destroys the connection without waiting for graceful shutdown
 func (c *Client) Reset() error {
-	msg := ControlMessageReset
-	return c.shutdown(&msg)
+	c.writeControl(ControlMessageReset)
+	return c.shutdown()
 }
 
 // Close gracefully shuts down the connection. Repeated calls to close will error.
 func (c *Client) Close() error {
-	msg := ControlMessageClose
-	return c.shutdown(&msg)
+	c.m.Lock()
+	defer c.m.Unlock()
+
+	switch c.state {
+	case established:
+		logrus.Debug("client: established->finWait1")
+		c.state = finWait1
+	case closeWait:
+		logrus.Debug("client: closeWait->lastAck")
+		c.state = lastAck
+	default:
+		return io.EOF
+	}
+
+	logrus.Debug("client: starting close")
+
+	c.writeControl(ControlMessageClose)
+
+	c.m.Unlock()
+	<-c.closed
+	c.m.Lock()
+
+	return c.shutdown()
 }
 
 func (c *Client) listen() {
 	defer c.wg.Done()
-	for !c.closed.Load() {
+	for {
 		n, mt, err := c.readMsg()
 
 		if err != nil {
 			if !errors.Is(err, net.ErrClosed) {
 				logrus.Errorf("client: %s", err)
+				go c.Reset()
 			}
-			go c.Reset()
 			break
 		}
 
@@ -369,18 +400,76 @@ func (c *Client) listen() {
 // handleControlMsg must only be called on authenticated packets after the handshake is complete.
 // Due to the spoofable nature of UDP, control messages can be injected by third parties.
 // both on the connection patch an off the connection path
-func (c *Client) handleControlMsg(msg ControlMessage) error {
+func (c *Client) handleControlMsg(msg ControlMessage) (err error) {
 	switch msg {
 	case ControlMessageClose:
+		logrus.Debug("client: got close message")
+		switch c.state {
+		case established:
+			logrus.Debug("client: established->closeWait")
+			c.state = closeWait
+		case finWait1:
+			logrus.Debug("client: finWait1->closing")
+			c.state = closing
+		case finWait2:
+			logrus.Debug("client: finWait2->timeWait")
+			c.state = timeWait
+			c.waitTimer = time.AfterFunc(5 * time.Second, func() {
+				logrus.Debug("client: finished lingering")
+				select {
+				case c.closed <- struct{}{}:
+					break
+				default:
+					break
+				}
+			})
+		default:
+			logrus.Debugf("client: got close in invalid state: %d", c.state)
+			err = ErrInvalidMessage
+		}
 		c.recv.Close()
-		return nil
+		c.writeControl(ControlMessageAckClose)
+		go c.Close()
+		return
+
+	case ControlMessageAckClose:
+		logrus.Debug("client: got ack of close")
+		switch c.state {
+		case finWait1:
+			logrus.Debug("client: finWait1->finWait2")
+			c.state = finWait2
+		case closing:
+			logrus.Debug("client: closing->timeWait")
+			c.state = timeWait
+			c.waitTimer = time.AfterFunc(5 * time.Second, func() {
+				select {
+				case c.closed <- struct{}{}:
+					break
+				default:
+					break
+				}
+			})
+		case lastAck:
+			logrus.Debug("client: lastAck->closed")
+			c.state = closed
+			c.closed <- struct{}{}
+		default:
+			logrus.Debugf("client: got ack of close in bad state: %d", c.state)
+			return ErrInvalidMessage
+		}
+
 	case ControlMessageReset:
 		logrus.Errorf("client: connection reset by remote peer")
-		go c.shutdown(nil)
+		go c.shutdown()
 		return nil
+
 	default:
+		logrus.Errorf("client: invalid control message: %x", msg)
+		go c.Reset()
 		return ErrInvalidMessage
 	}
+
+	return nil
 }
 
 // readMsg reads one packet from the underlying connection, and writes it into c.plaintext
@@ -422,7 +511,7 @@ func (c *Client) ReadMsg(b []byte) (n int, err error) {
 		}
 	}()
 
-	if !c.handshakeComplete.Load() {
+	if !c.handshakeComplete() {
 		err := c.Handshake()
 		if err != nil {
 			return 0, err
@@ -467,7 +556,7 @@ func (c *Client) Read(b []byte) (n int, err error) {
 		}
 	}()
 
-	if !c.handshakeComplete.Load() {
+	if !c.handshakeComplete() {
 		err := c.Handshake()
 		// TODO(dadrian): Cache handshake error?
 		if err != nil {
@@ -543,6 +632,7 @@ func NewClient(conn UDPLike, server *net.UDPAddr, config ClientConfig) *Client {
 		ciphertext:     make([]byte, 65535),
 		plaintext:      make([]byte, PlaintextLen(65535)),
 		recv:           common.NewDeadlineChan[[]byte](config.maxBufferedPackets()),
+		closed:         make(chan struct{}, 1),
 	}
 	return c
 }

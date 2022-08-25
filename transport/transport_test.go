@@ -112,7 +112,7 @@ func clientClose(t *testing.T) {
 	assert.NilError(t, err)
 
 	client.Close()
-	assert.Equal(t, client.closed.Load(), true)
+	assert.DeepEqual(t, client.state, closed)
 
 	checkEOFReads(t, client, handle)
 
@@ -175,7 +175,7 @@ func clientReset(t *testing.T) {
 	assert.NilError(t, err)
 
 	client.Reset()
-	assert.Equal(t, client.closed.Load(), true)
+	assert.DeepEqual(t, client.state, closed)
 
 	checkEOFReads(t, client, handle)
 
