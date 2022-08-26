@@ -20,8 +20,6 @@ import (
 // connections.
 //
 // To run, call Serve.
-//
-// TODO(dadrian): Figure out how much this should reflect the Listener API.
 type Server struct {
 	m sync.RWMutex
 
@@ -589,10 +587,20 @@ func (s *Server) createHandleLocked(hs *HandshakeState) *Handle {
 	return handle
 }
 
+// Accept wraps AcceptTimeout with no timeout set. This reflects the net.Listener API
+func (s *Server) Accep() (*Handle, error) {
+	for {
+		h, err := s.AcceptTimeout(5 * time.Second)
+		if err != ErrTimeout {
+			return h, err
+		}
+	}
+}
+
 // AcceptTimeout blocks for up to duration until a new connection is available.
 func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 	logrus.Debug("accept timeout started")
-	timer := time.NewTicker(duration)
+	timer := time.NewTimer(duration)
 	select {
 	case handle := <-s.pendingConnections:
 		logrus.Debug("got a handle")
@@ -608,8 +616,9 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 	}
 }
 
-// ListenAddress returns the net.UDPAddr used by the underlying connection.
-func (s *Server) ListenAddress() net.Addr {
+// Addr returns the net.UDPAddr used by the underlying connection.
+// It reflects the net.Listener API
+func (s *Server) Addr() net.Addr {
 	return s.udpConn.LocalAddr()
 }
 
@@ -623,8 +632,6 @@ func (s *Server) CloseSession(sessionID SessionID) error {
 }
 
 // Close stops the server, causing Serve() to return.
-//
-// TODO(dadrian): What does it do to writes?
 func (s *Server) Close() (err error) {
 	// This will end the reading goroutine and wait for it to exit
 	if s.closed.Load() {
