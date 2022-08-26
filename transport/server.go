@@ -48,11 +48,13 @@ type Server struct {
 
 // FetchClientLeaf returns the client leaf certificate used in handshake with associated handle's sessionID
 // TODO(hosono) delete this. I don't think we need this
-func (s *Server) FetchClientLeaf(h *Handle) certs.Certificate {
-	s.m.RLock()
-	defer s.m.RUnlock()
-	return h.ss.clientLeaf
-}
+/*
+ *func (s *Server) FetchClientLeaf(h *Handle) certs.Certificate {
+ *    s.m.RLock()
+ *    defer s.m.RUnlock()
+ *    return h.ss.clientLeaf
+ *}
+ */
 
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
 	s.m.Lock()
@@ -552,7 +554,10 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	if err != nil {
 		return err
 	}
-	h.ss.clientLeaf = hs.clientLeaf
+
+	h.m.Lock()
+	h.clientLeaf = hs.clientLeaf
+	h.m.Unlock()
 
 	h.m.Lock()
 	h.state = established

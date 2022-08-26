@@ -11,6 +11,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
 )
 
@@ -36,6 +37,8 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	// +checklocks:readLock
 	buf bytes.Buffer
 
+	// +checklocks:m
+	clientLeaf certs.Certificate
 	ss     *SessionState
 	server *Server
 }
@@ -272,6 +275,12 @@ func (c *Handle) Close() error {
 	c.server.clearHandleLocked(c.ss.sessionID)
 
 	return nil
+}
+
+func (c *Handle) FetchClientLeaf() certs.Certificate {
+	c.m.Lock()
+	defer c.m.Unlock()
+	return c.clientLeaf
 }
 
 // LocalAddr implements net.Conn.

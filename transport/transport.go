@@ -8,7 +8,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"hop.computer/hop/certs"
 	"hop.computer/hop/kravatte"
 )
 
@@ -25,9 +24,6 @@ type SessionState struct {
 	clientToServerKey [KeyLen]byte
 	serverToClientKey [KeyLen]byte
 	remoteAddr        *net.UDPAddr
-
-	//clientStatic keys.PublicKey //needed after handshake for user authorization step
-	clientLeaf certs.Certificate
 
 	m sync.Mutex
 	// +checklocks:m
