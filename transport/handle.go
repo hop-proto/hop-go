@@ -30,8 +30,8 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	send *common.DeadlineChan[message] // outgoing messages
 
 	// +checklocks:m
-	state     connState
-	m         sync.Mutex
+	state connState
+	m     sync.Mutex
 
 	// +checklocks:readLock
 	buf bytes.Buffer

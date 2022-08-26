@@ -104,7 +104,7 @@ type ControlMessage byte
 // ControlMessage constants for each control message
 // TODO(hosono) pick values for these
 const (
-	ControlMessageClose    ControlMessage = 0x01
+	ControlMessageClose ControlMessage = 0x01
 )
 
 // states that a Handle or Client can be in. Most of them are needed to handle closing

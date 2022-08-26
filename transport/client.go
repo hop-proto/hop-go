@@ -34,7 +34,7 @@ type Client struct {
 	readLock  sync.Mutex
 
 	//+checklocks:m
-	state     connState
+	state connState
 
 	wg sync.WaitGroup
 
