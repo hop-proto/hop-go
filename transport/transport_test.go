@@ -92,6 +92,8 @@ func TestClose(t *testing.T) {
 	t.Run("ClientClose", clientClose)
 	t.Run("HandleClose", handleClose)
 	t.Run("ServerClose", serverClose)
+	t.Run("ClientHandleBothClose", bothClose)
+	t.Run("AllClose", allClose)
 }
 
 func checkEOFReads(t *testing.T, client *Client, handle *Handle) {
@@ -135,9 +137,84 @@ func handleClose(t *testing.T) {
 	client, handle, _, stop, err := makeConn(t, false)
 	assert.NilError(t, err)
 
+	done := make(chan struct{})
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		err := client.Close()
+		assert.NilError(t, err)
+		done <- struct{}{}
+	}()
+
 	err = handle.Close()
 	assert.NilError(t, err)
 	assert.Equal(t, handle.IsClosed(), true)
+
+	<-done
+
+	checkEOFReads(t, client, handle)
+
+	stop()
+}
+
+func bothClose(t *testing.T) {
+	client, handle, _, stop, err := makeConn(t, false)
+	assert.NilError(t, err)
+
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		err := client.Close()
+		assert.NilError(t, err)
+	}()
+
+	go func() {
+		defer wg.Done()
+		err := handle.Close()
+		assert.NilError(t, err)
+	}()
+
+	wg.Wait()
+
+	assert.Equal(t, client.IsClosed(), true)
+	assert.Equal(t, handle.IsClosed(), true)
+
+	checkEOFReads(t, client, handle)
+
+	stop()
+}
+
+func allClose(t *testing.T) {
+	client, handle, server, stop, err := makeConn(t, false)
+	assert.NilError(t, err)
+
+	wg := sync.WaitGroup{}
+	wg.Add(3)
+
+	go func() {
+		defer wg.Done()
+		err := client.Close()
+		assert.NilError(t, err)
+	}()
+
+	go func() {
+		defer wg.Done()
+		handle.Close()
+	}()
+
+	go func() {
+		defer wg.Done()
+		err := server.Close()
+		assert.NilError(t, err)
+	}()
+
+	wg.Wait()
+
+	assert.Equal(t, client.IsClosed(), true)
+	assert.Equal(t, handle.IsClosed(), true)
+	assert.Equal(t, server.closed.Load(), true)
 
 	checkEOFReads(t, client, handle)
 
@@ -149,9 +226,20 @@ func serverClose(t *testing.T) {
 	client, handle, server, stop, err := makeConn(t, false)
 	assert.NilError(t, err)
 
+	done := make(chan struct{})
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		err := client.Close()
+		assert.NilError(t, err)
+		done <- struct{}{}
+	}()
+
 	err = server.Close()
 	assert.NilError(t, err)
 	assert.Equal(t, server.closed.Load(), true)
+
+	<-done
 
 	b := make([]byte, 1024)
 
@@ -170,40 +258,6 @@ func serverClose(t *testing.T) {
 	n, err = client.ReadMsg(b)
 	assert.ErrorType(t, err, io.EOF)
 	assert.Equal(t, n, 0)
-
-	stop()
-}
-
-func TestReset(t *testing.T) {
-	t.Run("ClientReset", clientReset)
-	t.Run("HandleReset", handleReset)
-
-	// TODO(hosono) can you reset the server?
-	//t.Run("ServerReset", serverReset)
-}
-
-// Tests that resetting the client connection causes server reads to error
-func clientReset(t *testing.T) {
-	client, handle, _, stop, err := makeConn(t, false)
-	assert.NilError(t, err)
-
-	client.Reset()
-	assert.DeepEqual(t, client.state, closed)
-
-	checkEOFReads(t, client, handle)
-
-	stop()
-}
-
-// Tests that resetting the handle causes client reads to error
-func handleReset(t *testing.T) {
-	client, handle, _, stop, err := makeConn(t, false)
-	assert.NilError(t, err)
-
-	handle.Reset()
-	assert.Equal(t, handle.IsClosed(), true)
-
-	checkEOFReads(t, client, handle)
 
 	stop()
 }
@@ -227,7 +281,6 @@ func DontTestReliableUDP(t *testing.T) {
 
 // Wrapper around the client nettests
 func TestTransportConn(t *testing.T) {
-
 	makePipe1 := func() (net.Conn, net.Conn, func(), error) {
 		c1, c2, _, stop, err := makeConn(t, true)
 		return c1, c2, stop, err

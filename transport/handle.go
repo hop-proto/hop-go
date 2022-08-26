@@ -32,8 +32,6 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	// +checklocks:m
 	state     connState
 	m         sync.Mutex
-	waitTimer *time.Timer
-	closed    chan struct{}
 
 	// +checklocks:readLock
 	buf bytes.Buffer
@@ -60,7 +58,7 @@ func (c *Handle) GetState() connState {
 func (c *Handle) IsClosed() bool {
 	c.m.Lock()
 	defer c.m.Unlock()
-	return c.state != established && c.state != closeWait
+	return c.state == closed
 }
 
 // ReadMsg implements the MsgReader interface. If b is too short to hold the
@@ -209,7 +207,7 @@ func (c *Handle) sender() {
 		err = c.ss.writePacket(c.server.udpConn, msg.msgType, msg.data, &c.ss.serverToClientKey)
 		if err != nil {
 			logrus.Errorf("handle: resetting connection. unable to write packet: %s", err)
-			go c.Reset()
+			go c.Close()
 		}
 	}
 }
@@ -217,7 +215,7 @@ func (c *Handle) sender() {
 func (c *Handle) handleControl(msg []byte) (err error) {
 	if len(msg) != 1 {
 		logrus.Error("handle: invalid control message: ", msg)
-		c.Reset()
+		c.Close()
 		return ErrInvalidMessage
 	}
 
@@ -229,63 +227,11 @@ func (c *Handle) handleControl(msg []byte) (err error) {
 
 	case ControlMessageClose:
 		logrus.Debug("handle: got close message")
-		if c.state == established {
-			logrus.Debug("handle: established->closeWait")
-			c.state = closeWait
-		} else if c.state == finWait1 {
-			logrus.Debug("handle: finWait1->closing")
-			c.state = closing
-		} else if c.state == finWait2 {
-			logrus.Debug("handle: finWait2->timeWait")
-			c.state = timeWait
-			if c.waitTimer == nil {
-				c.waitTimer = time.AfterFunc(5*time.Second, func() {
-					logrus.Debug("handle: finished lingering")
-					c.closed <- struct{}{}
-				})
-			}
-		} else {
-			logrus.Debugf("handle: got close in invalid state: %d", c.state)
-			err = ErrInvalidMessage
-		}
 		c.recv.Close()
-		c.writeControl(ControlMessageAckClose)
-		go c.Close()
 		return
-
-	case ControlMessageAckClose:
-		logrus.Debug("handle: got ack of close")
-		if c.state == finWait1 {
-			logrus.Debug("handle: finWait1->finWait2")
-			c.state = finWait2
-		} else if c.state == closing {
-			logrus.Debug("handle: closing->timeWait")
-			c.state = timeWait
-			if c.waitTimer == nil {
-				c.waitTimer = time.AfterFunc(5*time.Second, func() {
-					logrus.Debug("handle: finished lingering")
-					c.closed <- struct{}{}
-				})
-			}
-		} else if c.state == lastAck {
-			logrus.Debug("handle: lastAck->closed")
-			c.state = closed
-			c.closed <- struct{}{}
-		} else {
-			logrus.Debugf("handle: got ack of fin in invalid state: %d", c.state)
-			return ErrInvalidMessage
-		}
-		return nil
-
-	case ControlMessageReset:
-		logrus.Errorf("server: connection reset by remote peer")
-		c.server.m.Lock()
-		defer c.server.m.Unlock()
-		return c.shutdown()
-
 	default:
 		logrus.Errorf("server: unexpected control message: %x", msg)
-		c.Reset()
+		c.Close()
 		return ErrInvalidMessage
 	}
 }
@@ -296,84 +242,33 @@ func (c *Handle) Start() {
 	defer c.m.Unlock()
 
 	c.state = established
-	c.closed = make(chan struct{})
 
 	c.sendWg.Add(1)
 	go c.sender()
 }
 
-// Reset closes the connection without waiting for graceful shutdown
-func (c *Handle) Reset() error {
-	c.writeControl(ControlMessageReset)
-
-	c.m.Lock()
-	defer c.m.Unlock()
-
-	c.server.m.Lock()
-	defer c.server.m.Unlock()
-	return c.shutdown()
-}
-
-// Close closes the connection. Future operations on non-buffered data will
-// return io.EOF.
+// Close closes the connection. Future operations on non-buffered data will return io.EOF.
 func (c *Handle) Close() error {
 	c.m.Lock()
 	defer c.m.Unlock()
 
-	switch c.state {
-	case established:
-		logrus.Debug("handle: established->finWait1")
-		c.state = finWait1
-	case closeWait:
-		logrus.Debug("handle: closeWait->lastAck")
-		c.state = lastAck
-	default:
+	if c.state == closed {
 		return io.EOF
 	}
 
-	logrus.Debug("handle: starting close")
+	logrus.Debug("handle: closing")
 
 	c.writeControl(ControlMessageClose)
-
-	c.m.Unlock()
-	<-c.closed
-	c.m.Lock()
-
-	c.server.m.Lock()
-	defer c.server.m.Unlock()
-	return c.shutdown()
-
-	/*
-	 * Two cases, either we have gotten a fin before this or we have not
-	 *
-	 * if we have, send an ACK (in handle control)
-	 * send our fin
-	 * wait for an ack
-	 * retransmit if needed
-	 * if we get an ACK, end immediately
-	 * otherwise, timeout
-	 *
-	 * if we have not gotten a fin yet,
-	 * send our fin
-	 * wait for both a fin and an ack
-	 * when we get both, linger for a bit
-	 * clean everything up
-	 * the server shouldn't care if this blocks for a while
-	 */
-}
-
-// Note that the lock here refers to the server's lock
-// +checklocks:c.server.m
-// +checklocks:c.m
-func (c *Handle) shutdown() error {
 	c.recv.Close()
 	c.send.Close()
 
-	// Wait for the sending goroutines to exit
+	// Wait for the sending goroutine to exit
 	c.sendWg.Wait()
 
 	c.state = closed
 
+	c.server.m.Lock()
+	defer c.server.m.Unlock()
 	c.server.clearHandleLocked(c.ss.sessionID)
 
 	return nil

@@ -105,8 +105,6 @@ type ControlMessage byte
 // TODO(hosono) pick values for these
 const (
 	ControlMessageClose    ControlMessage = 0x01
-	ControlMessageAckClose ControlMessage = 0x02
-	ControlMessageReset    ControlMessage = 0x03
 )
 
 // states that a Handle or Client can be in. Most of them are needed to handle closing
@@ -116,12 +114,6 @@ type connState uint32
 const (
 	finishingHandshake connState = iota
 	established
-	closeWait
-	lastAck
-	finWait1
-	finWait2
-	closing
-	timeWait
 	closed
 )
 

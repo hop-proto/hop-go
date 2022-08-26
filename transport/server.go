@@ -569,7 +569,7 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	default:
 		logrus.Warnf("server: session %x: pending connections queue is full, dropping handshake", h.ss.sessionID)
 		s.clearHandle(h.ss.sessionID)
-		h.Reset()
+		h.Close()
 	}
 	return nil
 }
@@ -639,21 +639,21 @@ func (s *Server) Close() (err error) {
 	for _, h := range s.handles {
 		if h != nil {
 			wg.Add(1)
-			go func() {
+			go func(h *Handle) {
 				defer wg.Done()
 				h.Close()
-			}()
+			}(h)
 		}
 	}
 
 	close(s.pendingConnections)
-	for handle := range s.pendingConnections {
-		if handle != nil {
+	for h := range s.pendingConnections {
+		if h != nil {
 			wg.Add(1)
-			go func() {
+			go func(h *Handle) {
 				defer wg.Done()
-				handle.Close()
-			}()
+				h.Close()
+			}(h)
 		} else {
 			logrus.Error("server: nil handle in pending connections")
 		}

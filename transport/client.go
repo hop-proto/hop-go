@@ -35,8 +35,6 @@ type Client struct {
 
 	//+checklocks:m
 	state     connState
-	closed    chan struct{}
-	waitTimer *time.Timer
 
 	wg sync.WaitGroup
 
@@ -88,7 +86,7 @@ func (c *Client) unlockUser() {
 func (c *Client) IsClosed() bool {
 	c.m.Lock()
 	defer c.m.Unlock()
-	return c.state != established && c.state != closeWait
+	return c.state == closed
 }
 
 // handshake complete returns true if the client has finished its handshake with the server
@@ -311,10 +309,20 @@ func (c *Client) WriteMsg(b []byte) error {
 
 }
 
-// shutdown cleans up resources associated with the client
-// it also cancels all pending reads and writes
-// +checklocks:c.m
-func (c *Client) shutdown() error {
+// Close immediately tears down the connection.
+// Future operations on non-buffered data will return io.EOF
+func (c *Client) Close() error {
+	c.m.Lock()
+	defer c.m.Unlock()
+
+	if c.state == closed {
+		return io.EOF
+	}
+
+	logrus.Debug("client: closing")
+
+	c.writeControl(ControlMessageClose)
+
 	c.recv.Close()
 	err := c.underlyingConn.Close()
 
@@ -326,39 +334,6 @@ func (c *Client) shutdown() error {
 	return err
 }
 
-// Reset immediately destroys the connection without waiting for graceful shutdown
-func (c *Client) Reset() error {
-	c.writeControl(ControlMessageReset)
-	return c.shutdown()
-}
-
-// Close gracefully shuts down the connection. Repeated calls to close will error.
-func (c *Client) Close() error {
-	c.m.Lock()
-	defer c.m.Unlock()
-
-	switch c.state {
-	case established:
-		logrus.Debug("client: established->finWait1")
-		c.state = finWait1
-	case closeWait:
-		logrus.Debug("client: closeWait->lastAck")
-		c.state = lastAck
-	default:
-		return io.EOF
-	}
-
-	logrus.Debug("client: starting close")
-
-	c.writeControl(ControlMessageClose)
-
-	c.m.Unlock()
-	<-c.closed
-	c.m.Lock()
-
-	return c.shutdown()
-}
-
 func (c *Client) listen() {
 	defer c.wg.Done()
 	for {
@@ -367,7 +342,7 @@ func (c *Client) listen() {
 		if err != nil {
 			if !errors.Is(err, net.ErrClosed) {
 				logrus.Errorf("client: %s", err)
-				go c.Reset()
+				go c.Close()
 			}
 			break
 		}
@@ -383,16 +358,16 @@ func (c *Client) listen() {
 		case MessageTypeControl:
 			if n != 1 {
 				logrus.Errorf("client: malformed control message: %s", c.plaintext[:n])
-				go c.Reset()
+				go c.Close()
 			}
 			msg := ControlMessage(c.plaintext[0])
 			err := c.handleControlMsg(msg)
 			if err != nil {
-				go c.Reset()
+				go c.Close()
 			}
 		default:
 			logrus.Errorf("client: unexpected message type %x", mt)
-			go c.Reset()
+			go c.Close()
 		}
 	}
 }
@@ -404,67 +379,12 @@ func (c *Client) handleControlMsg(msg ControlMessage) (err error) {
 	switch msg {
 	case ControlMessageClose:
 		logrus.Debug("client: got close message")
-		switch c.state {
-		case established:
-			logrus.Debug("client: established->closeWait")
-			c.state = closeWait
-		case finWait1:
-			logrus.Debug("client: finWait1->closing")
-			c.state = closing
-		case finWait2:
-			logrus.Debug("client: finWait2->timeWait")
-			c.state = timeWait
-			c.waitTimer = time.AfterFunc(5*time.Second, func() {
-				logrus.Debug("client: finished lingering")
-				select {
-				case c.closed <- struct{}{}:
-					break
-				default:
-					break
-				}
-			})
-		default:
-			logrus.Debugf("client: got close in invalid state: %d", c.state)
-			err = ErrInvalidMessage
-		}
 		c.recv.Close()
-		c.writeControl(ControlMessageAckClose)
 		return
-
-	case ControlMessageAckClose:
-		logrus.Debug("client: got ack of close")
-		switch c.state {
-		case finWait1:
-			logrus.Debug("client: finWait1->finWait2")
-			c.state = finWait2
-		case closing:
-			logrus.Debug("client: closing->timeWait")
-			c.state = timeWait
-			c.waitTimer = time.AfterFunc(5*time.Second, func() {
-				select {
-				case c.closed <- struct{}{}:
-					break
-				default:
-					break
-				}
-			})
-		case lastAck:
-			logrus.Debug("client: lastAck->closed")
-			c.state = closed
-			c.closed <- struct{}{}
-		default:
-			logrus.Debugf("client: got ack of close in bad state: %d", c.state)
-			return ErrInvalidMessage
-		}
-
-	case ControlMessageReset:
-		logrus.Errorf("client: connection reset by remote peer")
-		go c.shutdown()
-		return nil
 
 	default:
 		logrus.Errorf("client: invalid control message: %x", msg)
-		go c.Reset()
+		go c.Close()
 		return ErrInvalidMessage
 	}
 
@@ -631,7 +551,6 @@ func NewClient(conn UDPLike, server *net.UDPAddr, config ClientConfig) *Client {
 		ciphertext:     make([]byte, 65535),
 		plaintext:      make([]byte, PlaintextLen(65535)),
 		recv:           common.NewDeadlineChan[[]byte](config.maxBufferedPackets()),
-		closed:         make(chan struct{}, 1),
 	}
 	return c
 }
