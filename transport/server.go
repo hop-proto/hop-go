@@ -221,8 +221,9 @@ func (s *Server) readPacket() error {
 		}
 		return nil
 	default:
-		// TODO(dadrian): Make this an explicit error once all handshake message types are handled
-		return errors.New("unimplemented")
+		// If the message is authenticated, this will closed the connection
+		s.handleSessionMessage(addr, s.rawRead[:msgLen])
+		return ErrInvalidMessage
 	}
 	return nil
 }
@@ -479,6 +480,8 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte) (int, error
 	case MessageTypeControl:
 		h.handleControl(s.plaintext[:n])
 	default:
+		// Close the connection on an unknown message type
+		h.Close()
 		return 0, ErrInvalidMessage
 	}
 
