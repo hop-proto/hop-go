@@ -616,7 +616,7 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	default:
 		logrus.Warnf("server: session %x: pending connections queue is full, dropping handshake", h.ss.sessionID)
 		s.clearHandle(h.ss.sessionID)
-		h.Reset()
+		h.Close()
 	}
 	return nil
 }
