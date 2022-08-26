@@ -561,6 +561,14 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 		return ErrUnknownSession
 	}
 
+	// This allows the handshake to be dropped early if pendingoConnections if full
+	if len(s.pendingConnections) == cap(s.pendingConnections) {
+		logrus.Warnf("server: session %x: pending connections queue is full, dropping handshake", h.ss.sessionID)
+		s.clearHandle(h.ss.sessionID)
+		h.Close()
+		return nil
+	}
+
 	logrus.Debugf("server: finishing handshake for session %x", h.ss.sessionID)
 
 	err := hs.deriveFinalKeys(&h.ss.clientToServerKey, &h.ss.serverToClientKey)
@@ -570,14 +578,9 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 
 	h.m.Lock()
 	h.clientLeaf = hs.clientLeaf
-	h.m.Unlock()
-
-	h.m.Lock()
 	h.state = established
 	h.m.Unlock()
 
-	// TODO(dadrian): Create this earlier on so that the handshake fails earlier
-	// if the queue is full.
 	select {
 	case s.pendingConnections <- h:
 		break
