@@ -44,17 +44,12 @@ type Server struct {
 	cookieKey [KeyLen]byte
 
 	wg sync.WaitGroup
-}
 
-// FetchClientLeaf returns the client leaf certificate used in handshake with associated handle's sessionID
-// TODO(hosono) delete this. I don't think we need this
-/*
- *func (s *Server) FetchClientLeaf(h *Handle) certs.Certificate {
- *    s.m.RLock()
- *    defer s.m.RUnlock()
- *    return h.ss.clientLeaf
- *}
- */
+	// scratch space to decrypt messages into
+	// +checklocks:plaintextLock
+	plaintext []byte
+	plaintextLock sync.Mutex
+}
 
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
 	s.m.Lock()
@@ -153,6 +148,7 @@ func (s *Server) writePacket(pkt []byte, dst *net.UDPAddr) error {
 	return err
 }
 
+// +checklocks:s.plaintextLock
 func (s *Server) readPacket() error {
 	msgLen, oobn, flags, addr, err := s.udpConn.ReadMsgUDP(s.rawRead, nil)
 	if err != nil {
@@ -219,9 +215,7 @@ func (s *Server) readPacket() error {
 		return ErrUnexpectedMessage
 	case MessageTypeTransport, MessageTypeControl:
 		logrus.Tracef("server: received transport/control message from %s", addr)
-		// TODO(dadrian): Avoid allocation
-		plaintext := make([]byte, 65535)
-		_, err := s.handleSessionMessage(addr, s.rawRead[:msgLen], plaintext)
+		_, err := s.handleSessionMessage(addr, s.rawRead[:msgLen])
 		if err != nil {
 			return err
 		}
@@ -445,11 +439,14 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	return pos, hs, nil
 }
 
-func (s *Server) readPacketFromSession(ss *SessionState, plaintext []byte, pkt []byte, key *[KeyLen]byte) (int, MessageType, error) {
-	return ss.readPacket(plaintext, pkt, &ss.clientToServerKey)
+// writes decrypted packet into s.plaintext
+// +checklocks:s.plaintextLock
+func (s *Server) readPacketFromSession(ss *SessionState, pkt []byte, key *[KeyLen]byte) (int, MessageType, error) {
+	return ss.readPacket(s.plaintext, pkt, &ss.clientToServerKey)
 }
 
-func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte, plaintext []byte) (int, error) {
+// +checklocks:s.plaintextLock
+func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte) (int, error) {
 	sessionID, err := PeekSession(msg)
 	if err != nil {
 		return 0, err
@@ -464,7 +461,7 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte, plaintext [
 		return 0, io.EOF
 	}
 
-	n, mt, err := s.readPacketFromSession(h.ss, plaintext, msg, &h.ss.clientToServerKey)
+	n, mt, err := s.readPacketFromSession(h.ss, msg, &h.ss.clientToServerKey)
 	if err != nil {
 		return 0, err
 	}
@@ -474,13 +471,13 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte, plaintext [
 	switch mt {
 	case MessageTypeTransport:
 		select {
-		case h.recv.C <- plaintext[:n]:
+		case h.recv.C <- append([]byte{}, s.plaintext[:n]...):
 			break
 		default:
 			logrus.Warnf("session %x: recv queue full, dropping packet", sessionID)
 		}
 	case MessageTypeControl:
-		h.handleControl(plaintext[:n])
+		h.handleControl(s.plaintext[:n])
 	default:
 		return 0, ErrInvalidMessage
 	}
@@ -501,6 +498,9 @@ func (s *Server) Serve() error {
 	s.wg.Add(2)
 	go func() {
 		defer s.wg.Done()
+
+		s.plaintextLock.Lock()
+		defer s.plaintextLock.Unlock()
 		for !s.closed.Load() {
 			err := s.readPacket()
 			logrus.Tracef("read a packet")
@@ -736,6 +736,7 @@ func NewServer(conn UDPLike, config ServerConfig) (*Server, error) {
 	s := Server{
 		udpConn: conn,
 		config:  config,
+		plaintext: make([]byte, 65535),
 	}
 	err := s.init()
 	return &s, err
