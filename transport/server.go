@@ -46,9 +46,18 @@ type Server struct {
 	wg sync.WaitGroup
 
 	// scratch space to decrypt messages into
-	// +checklocks:plaintextLock
+	// +checklocks:serveLock
 	plaintext []byte
-	plaintextLock sync.Mutex
+
+	// scratch space for unauthenticated handshakes
+	// +checklocks:serveLock
+	scratchHS HandshakeState
+
+	// This lock ensures that Serve() is called exactly once on a given server
+	// using sync.Once would be more correct, but checklocks cannot verify that Serve()
+	// has exclusive access to certain buffers
+	// TODO(hosono) confirm that there is not a better way to do this
+	serveLock sync.Mutex
 }
 
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
@@ -148,7 +157,7 @@ func (s *Server) writePacket(pkt []byte, dst *net.UDPAddr) error {
 	return err
 }
 
-// +checklocks:s.plaintextLock
+// +checklocks:s.serveLock
 func (s *Server) readPacket() error {
 	msgLen, oobn, flags, addr, err := s.udpConn.ReadMsgUDP(s.rawRead, nil)
 	if err != nil {
@@ -161,14 +170,14 @@ func (s *Server) readPacket() error {
 	mt := MessageType(s.rawRead[0])
 	switch mt {
 	case MessageTypeClientHello:
-		hs, err := s.handleClientHello(s.rawRead[:msgLen])
+		err := s.handleClientHello(s.rawRead[:msgLen])
 		if err != nil {
 			return err
 		}
-		logrus.Debugf("server: client ephemeral: %x", hs.remoteEphemeral)
-		hs.cookieKey = &s.cookieKey
-		hs.remoteAddr = addr
-		n, err := writeServerHello(hs, s.handshakeBuf)
+		logrus.Debugf("server: client ephemeral: %x", s.scratchHS.remoteEphemeral)
+		s.scratchHS.cookieKey = &s.cookieKey
+		s.scratchHS.remoteAddr = addr
+		n, err := writeServerHello(&s.scratchHS, s.handshakeBuf)
 		if err != nil {
 			return err
 		}
@@ -176,6 +185,9 @@ func (s *Server) readPacket() error {
 		if err := s.writePacket(s.handshakeBuf[:n], addr); err != nil {
 			return err
 		}
+
+		// reset scratch space to avoid lingering data
+		s.scratchHS = HandshakeState{}
 	case MessageTypeClientAck:
 		logrus.Debug("server: about to handle client ack")
 		n, hs, err := s.handleClientAck(s.rawRead[:msgLen], addr)
@@ -441,12 +453,12 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 }
 
 // writes decrypted packet into s.plaintext
-// +checklocks:s.plaintextLock
+// +checklocks:s.serveLock
 func (s *Server) readPacketFromSession(ss *SessionState, pkt []byte, key *[KeyLen]byte) (int, MessageType, error) {
 	return ss.readPacket(s.plaintext, pkt, &ss.clientToServerKey)
 }
 
-// +checklocks:s.plaintextLock
+// +checklocks:s.serveLock
 func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte) (int, error) {
 	sessionID, err := PeekSession(msg)
 	if err != nil {
@@ -502,8 +514,8 @@ func (s *Server) Serve() error {
 	go func() {
 		defer s.wg.Done()
 
-		s.plaintextLock.Lock()
-		defer s.plaintextLock.Unlock()
+		s.serveLock.Lock()
+		defer s.serveLock.Unlock()
 		for !s.closed.Load() {
 			err := s.readPacket()
 			logrus.Tracef("read a packet")
@@ -520,21 +532,19 @@ func (s *Server) Serve() error {
 	return nil
 }
 
-func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
-	// TODO(dadrian): Avoid this allocation? It's kind of big to do on an
-	// unauthenticated handshake.
-	hs := new(HandshakeState)
-	hs.duplex.InitializeEmpty()
-	hs.duplex.Absorb([]byte(ProtocolName))
-	n, err := readClientHello(hs, b)
+// +checklocks:s.serveLock
+func (s *Server) handleClientHello(b []byte) error {
+	s.scratchHS.duplex.InitializeEmpty()
+	s.scratchHS.duplex.Absorb([]byte(ProtocolName))
+	n, err := readClientHello(&s.scratchHS, b)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if n != len(b) {
-		return nil, ErrInvalidMessage
+		return ErrInvalidMessage
 	}
-	hs.ephemeral.Generate()
-	return hs, nil
+	s.scratchHS.ephemeral.Generate()
+	return nil
 }
 
 func (s *Server) finishHandshake(hs *HandshakeState) error {
@@ -566,7 +576,6 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	h.state = established
 	h.m.Unlock()
 
-	//hs.leaf
 	// TODO(dadrian): Create this earlier on so that the handshake fails earlier
 	// if the queue is full.
 	select {
