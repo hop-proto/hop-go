@@ -271,9 +271,7 @@ func (c *Handle) Close() error {
 	c.state = closed
 
 	go func() {
-		c.server.m.Lock()
-		defer c.server.m.Unlock()
-		c.server.clearHandleLocked(c.ss.sessionID)
+		c.server.clearHandle(c.ss.sessionID)
 	}()
 
 	if c.state == closed {
