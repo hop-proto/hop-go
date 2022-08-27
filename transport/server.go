@@ -41,7 +41,10 @@ type Server struct {
 
 	pendingConnections chan *Handle
 
+	// +checklocks:cookieLock
 	cookieKey [KeyLen]byte
+	cookieLock sync.Mutex
+	stopCookieRotate chan struct{}
 
 	wg sync.WaitGroup
 
@@ -170,12 +173,14 @@ func (s *Server) readPacket() error {
 	mt := MessageType(s.rawRead[0])
 	switch mt {
 	case MessageTypeClientHello:
+		s.cookieLock.Lock()
+		defer s.cookieLock.Unlock()
 		err := s.handleClientHello(s.rawRead[:msgLen])
 		if err != nil {
 			return err
 		}
 		logrus.Debugf("server: client ephemeral: %x", s.scratchHS.remoteEphemeral)
-		s.scratchHS.cookieKey = &s.cookieKey
+		s.scratchHS.cookieKey = s.cookieKey
 		s.scratchHS.remoteAddr = addr
 		n, err := writeServerHello(&s.scratchHS, s.handshakeBuf)
 		if err != nil {
@@ -510,7 +515,8 @@ func (s *Server) Serve() error {
 	// TODO(dadrian): These should be smaller buffers
 	s.rawRead = make([]byte, 65535)
 	s.handshakeBuf = make([]byte, 65535)
-	s.wg.Add(2)
+	s.wg.Add(3)
+
 	go func() {
 		defer s.wg.Done()
 
@@ -527,6 +533,25 @@ func (s *Server) Serve() error {
 			}
 		}
 	}()
+
+	go func() {
+		defer s.wg.Done()
+
+		for !s.closed.Load() {
+			t := time.NewTicker(2*time.Minute)
+			select {
+			case <-t.C:
+				s.cookieLock.Lock()
+				_, err := rand.Read(s.cookieKey[:])
+				if err != nil {
+					logrus.Panicf("rand.Read failed: %s", err.Error())
+				}
+				s.cookieLock.Unlock()
+			case <- s.stopCookieRotate:
+			}
+		}
+	}()
+
 	s.wg.Done()
 	s.wg.Wait()
 	return nil
@@ -660,6 +685,9 @@ func (s *Server) Close() (err error) {
 
 	// TODO(hosono) fix the weirdness around locking stuff
 	s.m.Lock()
+	s.closed.Store(true)
+
+	close(s.stopCookieRotate)
 
 	wg := sync.WaitGroup{}
 
@@ -690,7 +718,6 @@ func (s *Server) Close() (err error) {
 	// wait for all handles to close
 	wg.Wait()
 
-	s.closed.Store(true)
 	s.udpConn.Close()
 	s.wg.Wait()
 
@@ -729,7 +756,9 @@ func (s *Server) init() error {
 	}
 
 	// TODO(dadrian): Let this be specified or rotated
+	s.cookieLock.Lock()
 	_, err := rand.Read(s.cookieKey[:])
+	s.cookieLock.Unlock()
 	if err != nil {
 		panic(err.Error())
 	}
@@ -752,6 +781,7 @@ func NewServer(conn UDPLike, config ServerConfig) (*Server, error) {
 		udpConn: conn,
 		config:  config,
 		plaintext: make([]byte, 65535),
+		stopCookieRotate: make(chan struct{}),
 	}
 	err := s.init()
 	return &s, err

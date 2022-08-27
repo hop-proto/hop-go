@@ -270,9 +270,11 @@ func (c *Handle) Close() error {
 
 	c.state = closed
 
-	c.server.m.Lock()
-	defer c.server.m.Unlock()
-	c.server.clearHandleLocked(c.ss.sessionID)
+	go func() {
+		c.server.m.Lock()
+		defer c.server.m.Unlock()
+		c.server.clearHandleLocked(c.ss.sessionID)
+	}()
 
 	return nil
 }

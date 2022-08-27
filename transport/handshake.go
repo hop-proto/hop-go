@@ -42,7 +42,7 @@ type HandshakeState struct {
 	clientLeaf certs.Certificate // TODO(dadrian): Is this necessary?
 	sessionID  [SessionIDLen]byte
 
-	cookieKey *[KeyLen]byte // server only
+	cookieKey [KeyLen]byte // server only
 
 	cookie []byte // client only
 
