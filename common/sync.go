@@ -247,6 +247,7 @@ type Deadline struct {
 func (d *Deadline) Done() chan error {
 	d.chanLock.Lock()
 	defer d.chanLock.Unlock()
+	// TODO(hosono) avoid leaking channels
 	ch := make(chan error, 1)
 	if !d.active.Load() {
 		ch <- d.err
