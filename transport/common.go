@@ -95,14 +95,13 @@ const (
 	MessageTypeServerAuth  MessageType = 0x04
 	MessageTypeClientAuth  MessageType = 0x05
 	MessageTypeTransport   MessageType = 0x10
-	MessageTypeControl     MessageType = 0xff // TODO(hosono) what should this byte be?
+	MessageTypeControl     MessageType = 0x80
 )
 
 // ControlMessage specifies the bytes that indicate different control messages.
 type ControlMessage byte
 
 // ControlMessage constants for each control message
-// TODO(hosono) pick values for these
 const (
 	ControlMessageClose ControlMessage = 0x01
 )
