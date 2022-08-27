@@ -683,7 +683,6 @@ func (s *Server) Close() (err error) {
 		return io.EOF
 	}
 
-	// TODO(hosono) fix the weirdness around locking stuff
 	s.m.Lock()
 	s.closed.Store(true)
 
@@ -755,7 +754,6 @@ func (s *Server) init() error {
 		}
 	}
 
-	// TODO(dadrian): Let this be specified or rotated
 	s.cookieLock.Lock()
 	_, err := rand.Read(s.cookieKey[:])
 	s.cookieLock.Unlock()
