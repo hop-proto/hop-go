@@ -120,7 +120,6 @@ const (
 type ControlMessage byte
 
 // ControlMessage constants for each control message
-// TODO(hosono) pick values for these
 const (
 	ControlMessageClose ControlMessage = 0x01
 )
