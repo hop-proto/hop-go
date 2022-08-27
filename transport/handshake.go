@@ -39,7 +39,7 @@ type HandshakeState struct {
 
 	sni certs.Name
 
-	sessionID  [SessionIDLen]byte
+	sessionID [SessionIDLen]byte
 
 	cookieKey [KeyLen]byte // server only
 
