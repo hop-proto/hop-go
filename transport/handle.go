@@ -67,7 +67,6 @@ func (c *Handle) IsClosed() bool {
 // ReadMsg implements the MsgReader interface. If b is too short to hold the
 // message, it returns ErrBufOverflow.
 func (c *Handle) ReadMsg(b []byte) (int, error) {
-	// TODO(dadrian): This duplicates a lot of code from Read().
 	c.readLock.Lock()
 	defer c.readLock.Unlock()
 

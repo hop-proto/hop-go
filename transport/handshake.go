@@ -39,7 +39,6 @@ type HandshakeState struct {
 
 	sni certs.Name
 
-	clientLeaf certs.Certificate // TODO(dadrian): Is this necessary?
 	sessionID  [SessionIDLen]byte
 
 	cookieKey [KeyLen]byte // server only
