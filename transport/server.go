@@ -42,8 +42,8 @@ type Server struct {
 	pendingConnections chan *Handle
 
 	// +checklocks:cookieLock
-	cookieKey [KeyLen]byte
-	cookieLock sync.Mutex
+	cookieKey        [KeyLen]byte
+	cookieLock       sync.Mutex
 	stopCookieRotate chan struct{}
 
 	wg sync.WaitGroup
@@ -538,7 +538,7 @@ func (s *Server) Serve() error {
 		defer s.wg.Done()
 
 		for !s.closed.Load() {
-			t := time.NewTicker(2*time.Minute)
+			t := time.NewTicker(2 * time.Minute)
 			select {
 			case <-t.C:
 				s.cookieLock.Lock()
@@ -547,7 +547,7 @@ func (s *Server) Serve() error {
 					logrus.Panicf("rand.Read failed: %s", err.Error())
 				}
 				s.cookieLock.Unlock()
-			case <- s.stopCookieRotate:
+			case <-s.stopCookieRotate:
 			}
 		}
 	}()
@@ -633,7 +633,7 @@ func (s *Server) createHandleLocked(hs *HandshakeState) *Handle {
 }
 
 // Accept wraps AcceptTimeout with no timeout set. This reflects the net.Listener API
-func (s *Server) Accep() (*Handle, error) {
+func (s *Server) Accept() (*Handle, error) {
 	for {
 		h, err := s.AcceptTimeout(5 * time.Second)
 		if err != ErrTimeout {
@@ -776,9 +776,9 @@ func (s *Server) init() error {
 // returned Server object is a valid net.Listener.
 func NewServer(conn UDPLike, config ServerConfig) (*Server, error) {
 	s := Server{
-		udpConn: conn,
-		config:  config,
-		plaintext: make([]byte, 65535),
+		udpConn:          conn,
+		config:           config,
+		plaintext:        make([]byte, 65535),
 		stopCookieRotate: make(chan struct{}),
 	}
 	err := s.init()

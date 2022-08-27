@@ -39,8 +39,8 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 
 	// +checklocks:m
 	clientLeaf certs.Certificate
-	ss     *SessionState
-	server *Server
+	ss         *SessionState
+	server     *Server
 }
 
 var _ MsgReader = &Handle{}
@@ -277,6 +277,7 @@ func (c *Handle) Close() error {
 	return nil
 }
 
+// FetchClientLeaf return the certificate the client presented when setting up the connection
 func (c *Handle) FetchClientLeaf() certs.Certificate {
 	c.m.Lock()
 	defer c.m.Unlock()

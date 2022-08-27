@@ -387,8 +387,6 @@ func (c *Client) handleControlMsg(msg ControlMessage) (err error) {
 		go c.Close()
 		return ErrInvalidMessage
 	}
-
-	return nil
 }
 
 // readMsg reads one packet from the underlying connection, and writes it into c.plaintext
