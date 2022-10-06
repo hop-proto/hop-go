@@ -475,7 +475,7 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte) (int, error
 		return 0, ErrUnknownSession
 	}
 
-	if h.GetState() == closed {
+	if h.getState() == closed {
 		return 0, io.EOF
 	}
 
