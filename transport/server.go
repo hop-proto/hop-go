@@ -417,7 +417,8 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	if int(leafLen) != len(rawLeaf) {
 		return pos, nil, errors.New("extra bytes after leaf certificate")
 	}
-	h.clientLeaf = leaf
+
+	h.SetClientLeaf(leaf)
 
 	intermediate := certs.Certificate{}
 	if len(rawIntermediate) > 0 {
