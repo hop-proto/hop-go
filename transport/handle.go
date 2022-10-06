@@ -49,8 +49,7 @@ var _ MsgConn = &Handle{}
 
 var _ net.Conn = &Handle{}
 
-// GetState returns the state that the handle is in
-func (c *Handle) GetState() connState {
+func (c *Handle) getState() connState {
 	c.m.Lock()
 	defer c.m.Unlock()
 	return c.state
@@ -276,11 +275,18 @@ func (c *Handle) Close() error {
 	return nil
 }
 
-// FetchClientLeaf return the certificate the client presented when setting up the connection
+// FetchClientLeaf returns the certificate the client presented when setting up the connection
 func (c *Handle) FetchClientLeaf() certs.Certificate {
 	c.m.Lock()
 	defer c.m.Unlock()
 	return c.clientLeaf
+}
+
+// SetClientLeaf stores the certificate presented by the client when setting up the connection
+func (c *Handle) SetClientLeaf(leaf certs.Certificate) {
+	c.m.Lock()
+	defer c.m.Unlock()
+	c.clientLeaf = leaf
 }
 
 // LocalAddr implements net.Conn.

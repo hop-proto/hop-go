@@ -417,7 +417,8 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	if int(leafLen) != len(rawLeaf) {
 		return pos, nil, errors.New("extra bytes after leaf certificate")
 	}
-	h.clientLeaf = leaf
+
+	h.SetClientLeaf(leaf)
 
 	intermediate := certs.Certificate{}
 	if len(rawIntermediate) > 0 {
@@ -475,7 +476,7 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte) (int, error
 		return 0, ErrUnknownSession
 	}
 
-	if h.GetState() == closed {
+	if h.getState() == closed {
 		return 0, io.EOF
 	}
 
