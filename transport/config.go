@@ -55,7 +55,7 @@ const (
 	// ServerDefaultMaxBufferedPacketsPerSession sets the maximum number of packets
 	// (not bytes) than can be buffered by the server per accepted session.
 	// Packets after this will dropped until the user calls Read.
-	ServerDefaultMaxBufferedPacketsPerSession = 100
+	ServerDefaultMaxBufferedPacketsPerSession = 10000
 
 	// ClientDefaultMaxBufferedPacketsPerSession sets the maximum number of packets
 	// (not bytes) that can be buffered for a session. Packets after this will
