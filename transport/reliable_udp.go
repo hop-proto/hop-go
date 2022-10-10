@@ -59,11 +59,13 @@ func (r *ReliableUDP) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.U
 
 	ch := r.readDeadline.Done()
 	select {
-	case err = <-ch:
+	case <-ch:
+		err = r.readDeadline.Err()
 		return
 	default:
 		select {
-		case err = <-ch:
+		case <-ch:
+			err = r.readDeadline.Err()
 			return
 		case msg, ok := <-r.recv:
 			if !ok {
@@ -97,11 +99,13 @@ func (r *ReliableUDP) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int
 
 	// This is how we give priority to receiving from Done over sending on send
 	select {
-	case err = <-r.writeDeadline.Done():
+	case <-r.writeDeadline.Done():
+		err = r.writeDeadline.Err()
 		return
 	default:
 		select {
-		case err = <-r.writeDeadline.Done():
+		case <-r.writeDeadline.Done():
+			err = r.writeDeadline.Err()
 			return
 		case r.send <- append([]byte(nil), b...):
 			n = len(b)

@@ -22,8 +22,8 @@ func TestFutureDeadline(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		err := <-deadline.Done()
-		assert.ErrorType(t, err, os.ErrDeadlineExceeded)
+		<-deadline.Done()
+		assert.ErrorType(t, deadline.Err(), os.ErrDeadlineExceeded)
 	}()
 
 	deadline.SetDeadline(time.Now().Add(time.Millisecond))
@@ -38,8 +38,8 @@ func TestManyDeadlines(t *testing.T) {
 	for i := 0; i < numLoops; i++ {
 		go func() {
 			defer wg.Done()
-			err := <-deadline.Done()
-			assert.ErrorType(t, err, os.ErrDeadlineExceeded)
+			<-deadline.Done()
+			assert.ErrorType(t, deadline.Err(), os.ErrDeadlineExceeded)
 		}()
 	}
 
@@ -55,8 +55,8 @@ func TestPastDeadline(t *testing.T) {
 	for i := 0; i < numLoops; i++ {
 		go func() {
 			defer wg.Done()
-			err := <-deadline.Done()
-			assert.ErrorType(t, err, os.ErrDeadlineExceeded)
+			<-deadline.Done()
+			assert.ErrorType(t, deadline.Err(), os.ErrDeadlineExceeded)
 		}()
 	}
 
@@ -72,8 +72,8 @@ func TestPresentDeadline(t *testing.T) {
 	for i := 0; i < numLoops; i++ {
 		go func() {
 			defer wg.Done()
-			err := <-deadline.Done()
-			assert.ErrorType(t, err, os.ErrDeadlineExceeded)
+			<-deadline.Done()
+			assert.ErrorType(t, deadline.Err(), os.ErrDeadlineExceeded)
 		}()
 	}
 
@@ -89,8 +89,8 @@ func TestCancel(t *testing.T) {
 	for i := 0; i < numLoops; i++ {
 		go func() {
 			defer wg.Done()
-			err := <-deadline.Done()
-			assert.ErrorType(t, err, ErrTest)
+			<-deadline.Done()
+			assert.ErrorType(t, deadline.Err(), ErrTest)
 		}()
 	}
 
@@ -107,8 +107,8 @@ func TestDoneOnTimedOut(t *testing.T) {
 	for i := 0; i < numLoops; i++ {
 		go func() {
 			defer wg.Done()
-			err := <-deadline.Done()
-			assert.ErrorType(t, err, os.ErrDeadlineExceeded)
+			<-deadline.Done()
+			assert.ErrorType(t, deadline.Err(), os.ErrDeadlineExceeded)
 		}()
 	}
 
@@ -124,12 +124,32 @@ func TestDoneOnCanceled(t *testing.T) {
 	for i := 0; i < numLoops; i++ {
 		go func() {
 			defer wg.Done()
-			err := <-deadline.Done()
-			assert.ErrorType(t, err, ErrTest)
+			<-deadline.Done()
+			assert.ErrorType(t, deadline.Err(), ErrTest)
 		}()
 	}
 
 	wg.Wait()
+}
+
+func TestDoubleCancel(t *testing.T) {
+	deadline := NewDeadline(time.Now())
+	deadline.Cancel(nil)
+	deadline.Cancel(nil)
+}
+
+func TestUncancel(t *testing.T) {
+	deadline := NewDeadline(time.Now())
+	_, open := <-deadline.Done()
+	assert.DeepEqual(t, open, false)
+
+	deadline.SetDeadline(time.Now().Add(time.Hour))
+	select {
+	case <-deadline.Done():
+		t.Error("Deadline should not have expired")
+	default:
+		break
+	}
 }
 
 func TestDeadlineRecv(t *testing.T) {

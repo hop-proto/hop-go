@@ -61,7 +61,7 @@ const (
 	// (not bytes) that can be buffered for a session. Packets after this will
 	// be dropped unless the user calls Read
 	// TODO(hosono) pick a good default value
-	ClientDefaultMaxBufferedPacketsPerSession = 2048
+	ClientDefaultMaxBufferedPacketsPerSession = 10000
 )
 
 // ClientHandshakeInfo contains information about an attempted handshake. It is
