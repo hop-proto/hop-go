@@ -255,6 +255,26 @@ func TestDeadlineSendCancel(t *testing.T) {
 	wg.Wait()
 }
 
+func TestDoubleCancel(t *testing.T) {
+	deadline := NewDeadline(time.Now())
+	deadline.Cancel(nil)
+	deadline.Cancel(nil)
+}
+
+func TestUncancel(t *testing.T) {
+	deadline := NewDeadline(time.Now())
+	_, open := <-deadline.Done()
+	assert.DeepEqual(t, open, false)
+
+	deadline.SetDeadline(time.Now().Add(time.Hour))
+	select {
+	case <-deadline.Done():
+		t.Error("Deadline should not have expired")
+	default:
+		break
+	}
+}
+
 func TestDeadlineRecv(t *testing.T) {
 	ch := NewDeadlineChan[[]byte](numLoops)
 

@@ -1,6 +1,7 @@
 package common
 
 import (
+	"math"
 	"io"
 	"math"
 	"os"
@@ -228,8 +229,8 @@ func NewDeadlineChan[T any](size int) *DeadlineChan[T] {
 // an expired deadline to become unexpired.
 type Deadline struct {
 	chanLock sync.Mutex
-	// +checklocks:chanLock
-	chans []chan error
+	// +checklock:chanlock
+	ch chan struct{}
 
 	timerLock sync.Mutex
 	// +checklocks:timerLock
@@ -244,18 +245,10 @@ type Deadline struct {
 // Done returns a channel. The Deadline will send an error on the channel
 // when the deadline is exceeded or Cancel is called.
 // This allows a function to select on either the deadline or another channel
-func (d *Deadline) Done() chan error {
+func (d *Deadline) Done() <-chan struct{} {
 	d.chanLock.Lock()
 	defer d.chanLock.Unlock()
-	// TODO(hosono) avoid leaking channels
-	ch := make(chan error, 1)
-	if !d.active.Load() {
-		ch <- d.err
-		close(ch)
-	} else {
-		d.chans = append(d.chans, ch)
-	}
-	return ch
+	return d.ch
 }
 
 // Cancel send err to every channel created by calling Done
@@ -264,15 +257,17 @@ func (d *Deadline) Cancel(err error) {
 	d.chanLock.Lock()
 	defer d.chanLock.Unlock()
 
-	d.active.Store(false)
 	d.err = err
 
-	for _, ch := range d.chans {
-		ch <- err
-		close(ch)
+	if d.active.Swap(false) {
+		close(d.ch)
 	}
+}
 
-	d.chans = nil
+func (d *Deadline) Err() error {
+	d.chanLock.Lock()
+	defer d.chanLock.Unlock()
+	return d.err
 }
 
 func (d *Deadline) timeout() {
@@ -296,6 +291,13 @@ func (d *Deadline) SetDeadline(t time.Time) error {
 		}
 	}
 
+	// Replace the channel to unexpire it
+	d.chanLock.Lock()
+	if !d.active.Load() {
+		d.ch = make(chan struct{})
+	}
+	d.chanLock.Unlock()
+
 	if t.IsZero() {
 		d.active.Store(true)
 		return nil
@@ -315,10 +317,14 @@ func (d *Deadline) SetDeadline(t time.Time) error {
 // NewDeadline returns a pointer to a new deadline expiring at time t
 func NewDeadline(t time.Time) *Deadline {
 	d := &Deadline{}
-	d.timer = time.AfterFunc(time.Hour, d.timeout)
+	// When first constructed, we want a timer that will never expire
+	// Since there is no way create this, we make a timer that expires
+	// far in the future (~290 years) and immediately cancel it.
+	d.timer = time.AfterFunc(math.MaxInt64, d.timeout)
 	if !d.timer.Stop() {
 		<-d.timer.C
 	}
+	d.ch = make(chan struct{})
 	d.active.Store(true)
 	d.SetDeadline(t)
 	return d
@@ -352,11 +358,13 @@ func (d *DeadlineChan[T]) Recv() (b T, err error) {
 
 	errChan := d.deadline.Done()
 	select {
-	case err = <-errChan:
+	case <-errChan:
+		err = d.deadline.Err()
 		return
 	default:
 		select {
-		case err = <-errChan:
+		case <-errChan:
+			err = d.deadline.Err()
 			return
 		case b = <-d.C:
 			return
@@ -374,11 +382,13 @@ func (d *DeadlineChan[T]) Send(b T) (err error) {
 
 	errChan := d.deadline.Done()
 	select {
-	case err = <-errChan:
+	case <-errChan:
+		err = d.deadline.Err()
 		return
 	default:
 		select {
-		case err = <-errChan:
+		case <-errChan:
+			err = d.deadline.Err()
 			return
 		case d.C <- b:
 			return
