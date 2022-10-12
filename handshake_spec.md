@@ -10,7 +10,7 @@ Draft Authors: Wilson Nguyen, Gerry Wan, David Adrian, Zakir Durumeric
 
 ### Permutation Based Cryptography
 
-A cryptographic library often is an amalgamation of symmetric cryptographic implementations (AES-GCM, CHACHA-Poly1305, SHA3, SipHash, BLAKE2, HKDF, HMAC). This has caused a combinatorial explosion of mixing and matching and increased code complexity and code size. 
+A cryptographic library often is an amalgamation of symmetric cryptographic implementations (AES-GCM, CHACHA-Poly1305, SHA3, SipHash, BLAKE2, HKDF, HMAC). This has caused a combinatorial explosion of mixing and matching and increased code complexity and code size.
 
 > *A **random permutation** is sufficient to implement a majority of symmetric cryptographic primitives*
 
@@ -20,31 +20,31 @@ Therefore, we can significantly reduce code complexity, size, and proofs by buil
 
 ---
 
-A [**sponge function**](https://keccak.team/sponge_duplex.html) is a generalization of a hash function that provides extendable output as a truncated random oracle. 
+A [**sponge function**](https://keccak.team/sponge_duplex.html) is a generalization of a hash function that provides extendable output as a truncated random oracle.
 
 > The term *sponge* is used to because these functions **absorb** input material and **squeeze** output material
 
->  **Example:** SHA3 is a fixed-size output sponge function based upon the **keccak** permutation. 
+>  **Example:** SHA3 is a fixed-size output sponge function based upon the **keccak** permutation.
 
-A sponge function can be described as $F: \mathbb{Z}_2^*\rightarrow\mathbb{Z}_2^*$ parameterized by $r$ (rate), $c$ (capacity), and an $n$-bit permutation $f$. The capacity $c$-bits of a sponge function is the private state of the permutation. 
+A sponge function can be described as $F: \mathbb{Z}_2^*\rightarrow\mathbb{Z}_2^*$ parameterized by $r$ (rate), $c$ (capacity), and an $n$-bit permutation $f$. The capacity $c$-bits of a sponge function is the private state of the permutation.
 
 <img src="https://keccak.team/images/Sponge-150.png" alt="sponge construction" style="zoom: 67%;" />
 
-> $F(M)=Z$ is computed by absorbing $r$-bit chunks of $M$ and squeezes out $r$-bit chunks of $Z$. 
+> $F(M)=Z$ is computed by absorbing $r$-bit chunks of $M$ and squeezes out $r$-bit chunks of $Z$.
 
-A **duplex object** is a construction related to sponge functions that allow for [incrementality](https://archive.fosdem.org/2020/schedule/event/security_incrementality_and_deck_functions/). 
+A **duplex object** is a construction related to sponge functions that allow for [incrementality](https://archive.fosdem.org/2020/schedule/event/security_incrementality_and_deck_functions/).
 
 <img src="https://keccak.team/images/Duplex-150.png" alt="sponge construction" style="zoom:67%;" />
 
-> The duplex object absorbs $\sigma_i$ and outputs $Z_i$. Note that $Z_i$ depends on all $\sigma_j$ for $j<i$. 
+> The duplex object absorbs $\sigma_i$ and outputs $Z_i$. Note that $Z_i$ depends on all $\sigma_j$ for $j<i$.
 
-The duplex object can be used to implement PRFs, hash functions, eXentable output functions (XOFs), authenticated encryption, macs, AD, KDFs and supports ratchet operations. Since duplex objects are incremental, they provide a natural session mode that authenticates the full transcript of operations. 
+The duplex object can be used to implement PRFs, hash functions, eXentable output functions (XOFs), authenticated encryption, macs, AD, KDFs and supports ratchet operations. Since duplex objects are incremental, they provide a natural session mode that authenticates the full transcript of operations.
 
 > [Strobe](https://eprint.iacr.org/2017/003) (RWC 2017) implementation of a duplex object.
 
-We will use the [Cyclist](https://eprint.iacr.org/2018/767.pdf) implementation of a duplex object instantiated with the **keccak** permutation. 
+We will use the [Cyclist](https://eprint.iacr.org/2018/767.pdf) implementation of a duplex object instantiated with the **keccak** permutation.
 
-The following primitive is not necessary to understand deeply.  For completion, we will include it because it provide us a a robust CTR mode AEAD over data of arbitrary size.  
+The following primitive is not necessary to understand deeply.  For completion, we will include it because it provide us a a robust CTR mode AEAD over data of arbitrary size.
 
 A [**deck function**](https://archive.fosdem.org/2020/schedule/event/security_incrementality_and_deck_functions/attachments/slides/3725/export/events/attachments/security_incrementality_and_deck_functions/slides/3725/InDF_FOSDEM2020.pdf) $F_K: \mathbb{(Z_2^*)^*\rightarrow (Z_2^n)^*}$ is a doubly extendable cryptographic keyed function.
 $$
@@ -56,7 +56,7 @@ $$
   - PRF of the input
   - $Z$ is the concatenation of $n$ bit chunks and is practically infinite
 
-Deck functions enable a session supporting and nonce based AEAD encryption mode called **Deck-SANE**. 
+Deck functions enable a session supporting and nonce based AEAD encryption mode called **Deck-SANE**.
 
 We will instantiate Deck-SANE in a CTR based mode with Kravatte as the deck function. To do this, we will use a CTR as the starting nonce and use Deck-SANE in a [stateless mode](https://keccak.team/2020/stateless_deck_based_modes.html).
 
@@ -80,7 +80,7 @@ $\rightarrow e$
 
 $\leftarrow e, ee$
 
-> Client sends to server it's ephemeral DH public key, the server sends to client it's ephemeral DH public key, and both parties perform $\text{DH}(e,e)$ and absorb this into a KDF and hash transcript chain. 
+> Client sends to server it's ephemeral DH public key, the server sends to client it's ephemeral DH public key, and both parties perform $\text{DH}(e,e)$ and absorb this into a KDF and hash transcript chain.
 
 We will use the following handshake patterns:
 
@@ -325,6 +325,7 @@ mac = duplex.squeeze()
 - Is the mac the same (after DH)
 
 #### Client Auth
+OUT OF DATE
 
 ---
 
@@ -401,7 +402,7 @@ Encrypted data will contain a nonce at the front, if necessary, and a Mac. The A
 ---
 
 ```python
-# Eventually 
+# Eventually
 # aead = SANE_init(server_to_client_key, counter)
 # Now
 aead = aes_gcm(key, nonce_size=12)
@@ -544,4 +545,8 @@ To split trust, we simply just create a DH oracle $\mathcal{O}_\beta$, where $\b
 $$
 \mathcal{O}_\beta (X) = \mathcal{O}_{\alpha_1}\mathcal{O}_{\alpha_2}...\mathcal{O}_{\alpha_n}(X)
 $$
-Thus, to a remote party, the client appears to have local key pair $\beta, \beta G$. 
+Thus, to a remote party, the client appears to have local key pair $\beta, \beta G$.
+
+
+## Secure Identity Forwarding (Authorization Grant Protocol)
+
