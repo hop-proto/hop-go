@@ -152,7 +152,7 @@ Note that `absorb([a, b])`operates on the concatenation of `a` and `b`, and shou
 
 ---
 
-- $I_c$ is a 32 bit random index similar to IPsec's Security Parameter Index (SPI). This is used to identify sessions.
+- $I_c$ is a 32 bit random index similar to IPsec's Security Parameter Index (SPI). This is used to identify sessions. TODO: what is this?
 - ephemeral is set to the client ephemeral public key.
 
 ```python
@@ -210,7 +210,7 @@ cookie = data + tag
 duplex.absorb(cookie)
 mac = duplex.squeeze()
 ```
-
+TODO: the number of cookie bytes differs in the paper.
 We'll want to adjust nonce sizes once we're using SANE (/if we don't end up using SANE). It would be nice to get the cookie down to 48 bytes.
 
 ##### Client Logic
@@ -430,7 +430,7 @@ TODO(dadrian): Implement and update docs
 ---
 
 #### Client Auth Message
-
+TODO: also out of date (need client certs)
 ---
 
 |   type $:=$ 0x7 (1 byte)    |  Protocol Version (1 byte)  |
