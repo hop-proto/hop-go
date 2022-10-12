@@ -550,3 +550,59 @@ Thus, to a remote party, the client appears to have local key pair $\beta, \beta
 
 ## Secure Identity Forwarding (Authorization Grant Protocol)
 
+Hop seeks to provide native support for secure identity forwarding that abides by the Secure Delegation Principal outlined by Kogan et al. In contrast to ssh-agent identity forwarding, Hop seeks to avoid exposing agents to unauthenticated key challenges and to provide fine-grained control over how the principal identity is used by semi-trusted delegates.
+
+**Secure Delegation Principle**: The delegate is only able to act under the principal's authority after the principal can verify and enforce the delegate's intent. The intent consists of 4 components (will be discussed in much greater detail below):
+1. **Who** (the delegate)
+2. **What** (the action)
+3. **To Whom** (the target)
+4. **When** (deadline/expiration date)
+
+On inception a hop client process determines whether it is acting as a Principal (P) or Delegate (D). The default behavior is for the hop client to be a D (TODO(baumanl): confirm this is desired default), but this can be overriden via the client config file or command line arguments.
+
+**Principal** Client:
+- must have proof of identity (e.g. cert + static private key)
+- handles requests for authorization grants from delegates
+
+**Delegate** Client:
+- must request an authorization grant from a Principal Client
+- must be a descendant process of hopd
+- to request an auth grant: hopd must still have an active hop session with a P hop client (once an auth grant has been issued the hop session with the principal can terminate, but no further auth grants can be granted and further identity chaining will not be possible.)
+
+## Authgrant Flow
+
+```sequence
+PClient-->ServerA: Principal connects to ServerA
+...
+DClient--ServerA-->PClient: Intent Request
+Authorize Intent
+PClient--ServerA-->ServerB: Intent Communication
+ServerB--ServerA--PClient--ServerA-->DClient: Intent Confirmation
+PClient-->ServerB: Delegate connects to ServerB
+```
+### Principal Client Connects to ServerA
+- Principal client performs a standard hop handshake with serverA and starts a hop session
+- within this hop session the user starts a Delegate Hop Client on Server A. (e.g. hopd--bash(PID)--hop or just hopd--hop(PID) if executing a single command)
+- hopd adds an entry to a map of PID --> hop session with principal
+- hopd listens on an abstract unix domain socket for requests from descendent processes to contact their respective principal
+
+### Intent Request
+
+<img src="imgs/intent.png" alt="intent request diagram" style="zoom: 67%;" />
+
+- **SHA-3 Client Identifier** (32 bytes): digest of the delegate's "static" public key
+- **Delegate Username (32 bytes)**: the local user that the delegate is running as on Server A. (note: no way for the principal to really authenticate this, but useful for displaying prompt to user.) Populated by hopd on ServerA (derived by looking up user name corresponding to DClient process).
+- **Target Username** (32 bytes): the user on the target server that the delegate wants to perform the action as (the *to whom* or *as whom* I guess). Populated by DClient from default (local username) or CLI flags/config.
+- **Target SNI** (256 bytes): the identifier of the server that the delegate wants to connect to (the other part of the *to/as whom*). In the format of a cert ID Block. Populated by DClient from CLI flags/config.
+- **Port** (2 bytes): what port to connect to on the target. Populated by DClient from default or CLI flags/config.
+- **Grant Type** (1 byte): indicates how to interpret the "Associated Data" section. Can be one of "shell", "cmd", "local PF", "remote PF", etc. Populated by DClient. TODO(baumanl): is this actually necessary/how was I using it exactly before...?
+- **Associated Data** (* bytes): More information about specific action (e.g. command to run, ports to forward, etc.)
+
+- Delegate hop client forms an Intent Request
+
+###
+
+Other Discussion Points:
+- TODO(baumanl): any use case for attempting to dynamically determine whether it should act as a P/D? (e.g. by determining if it was spawned by a hopd process?)
+- TODO(baumanl): as described above the current standard is to have the delegate client process request the auth grant and use the auth grant --> there is no flexibility to allow the auth grant to persist between different processes (i.e. have one process **request** the auth grant and then have another process **use** the auth grant)
+- TODO(baumanl): specify threat model better (how much do we trust the delegate/authorization grant requests that the principal receives?
