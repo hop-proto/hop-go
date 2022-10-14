@@ -588,6 +588,10 @@ PClient-->ServerB: Delegate connects to ServerB
 
 ### Intent Request
 
+- The delegate client (DClient) uses IPC to contact the hopd server (ServerA) and request to send an intent request to its principal (PClient)
+- ServerA verifies that DClient is a descendent process and uses it's PID to locate the hop session it has with its principal. TODO(baumanl): this portion of code is very unix specific --> either generalize or weaken this guarantee.
+- ServerA opens an authorization grant tube (AGT) with PClient and sends the intent request message (outlined below).
+
 <img src="imgs/intent.png" alt="intent request diagram" style="zoom: 67%;" />
 
 - **SHA-3 Client Identifier** (32 bytes): digest of the delegate's "static" public key
@@ -598,11 +602,33 @@ PClient-->ServerB: Delegate connects to ServerB
 - **Grant Type** (1 byte): indicates how to interpret the "Associated Data" section. Can be one of "shell", "cmd", "local PF", "remote PF", etc. Populated by DClient. TODO(baumanl): is this actually necessary/how was I using it exactly before...?
 - **Associated Data** (* bytes): More information about specific action (e.g. command to run, ports to forward, etc.)
 
-- Delegate hop client forms an Intent Request
+- **TODO**(baumanl): missing some concept of the "when" (start time, duration, repeatability of the grant)
+
+### Authorize Intent
+
+- upon receiving the IR from ServerA, PClient needs to either approve or deny the request. This could be accomplished in many ways (e.g. prompting user for approval, reading a "policy" file, etc.)
+- If the IR is denied, then PClient sends an Intent Denied message with an optional reason for the denial. It keeps the AGT open in case the Delegate would like to send more IRs.
+
+### Intent Communication
+
+- Assuming the Principal approves the IR, then it needs to communicate the IR to the target server (ServerB).
+- It does this by establishing a hop session with the target proxied through the delegate (it is not required that the principal be able to directly connect to the target server).
+- The principal verifies that the target server's certificate matches the Target SNI field in the IR, and then sends the IR over.
+
+### Intent Confirmation or Denial
+
+- The target server (ServerB) verifies that the principal (PClient) has sufficient authority to grant the request and otherwise ensures that the request is acceptable.
+- If the target agrees to authorize the request then it stores the an *authorization grant* (consisting of data from the intent request) in an in-memory map of Client Identifiers (from the IR) --> authorization grants[].
+- It sends back an Intent Confirmation or an Intent Denied (with optional reason) back to the Principal. The Principal forwards this response to the Delegate.
+
+### DClient connects to ServerB (target)
+
+- Now, upon completing the transport layer handshake with ServerB (using the keypair/cert corresponding to the client identifier for the authgrants), DClient can use any of the authgrants to perform authorized actions on the client. As authgrants are used/expire ServerB (Target) removes them from the authgrant map.
 
 ###
 
 Other Discussion Points:
-- TODO(baumanl): any use case for attempting to dynamically determine whether it should act as a P/D? (e.g. by determining if it was spawned by a hopd process?)
+- TODO(baumanl): are all of the fields in the Intent Request necessary/are any missing? Specifically, it used to also include the Delegate SNI, but I think the principal should actually just keep track of it since it will have received the Delegate's certificate when connecting to it.
+- TODO(baumanl): any use case for attempting to *dynamically* determine whether a client should act as a P/D? (e.g. by determining if it was spawned by a hopd process?)
 - TODO(baumanl): as described above the current standard is to have the delegate client process request the auth grant and use the auth grant --> there is no flexibility to allow the auth grant to persist between different processes (i.e. have one process **request** the auth grant and then have another process **use** the auth grant)
 - TODO(baumanl): specify threat model better (how much do we trust the delegate/authorization grant requests that the principal receives?
