@@ -1,8 +1,8 @@
 package common
 
 import (
-	"math"
 	"io"
+	"math"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -14,7 +14,7 @@ import (
 // an expired deadline to become unexpired.
 type Deadline struct {
 	chanLock sync.Mutex
-	// +checklock:chanlock
+	// +checklocks:chanLock
 	ch chan struct{}
 
 	timerLock sync.Mutex
@@ -36,7 +36,7 @@ func (d *Deadline) Done() <-chan struct{} {
 	return d.ch
 }
 
-// Cancel send err to every channel created by calling Done
+// Cancel sends err to every channel created by calling Done
 // This allows selects statements to return before the deadline expires
 func (d *Deadline) Cancel(err error) {
 	d.chanLock.Lock()
@@ -49,6 +49,9 @@ func (d *Deadline) Cancel(err error) {
 	}
 }
 
+// Err returns the type of error that last caused the deadline to expire
+// TODO(hosono) there's technically a race condition here because the error
+// is not checked at the same time a channel signals done. Is this a real problem?
 func (d *Deadline) Err() error {
 	d.chanLock.Lock()
 	defer d.chanLock.Unlock()
