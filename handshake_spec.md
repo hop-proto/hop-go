@@ -580,6 +580,8 @@ PClient--ServerA-->ServerB: Intent Communication
 ServerB--ServerA--PClient--ServerA-->DClient: Intent Confirmation
 PClient-->ServerB: Delegate connects to ServerB
 ```
+I made a rudimentary animation of this process in google slides (present and click through animations). The demo is [here](https://docs.google.com/presentation/d/1ko2Q3L3h53x7km9UPEJ0RhSkpTbN8zR1naasRe5R1kE/edit#slide=id.g16983377a29_0_217)
+
 ### Principal Client Connects to ServerA
 - Principal client performs a standard hop handshake with serverA and starts a hop session
 - within this hop session the user starts a Delegate Hop Client on Server A. (e.g. hopd--bash(PID)--hop or just hopd--hop(PID) if executing a single command)
@@ -600,9 +602,15 @@ PClient-->ServerB: Delegate connects to ServerB
 - **Target SNI** (256 bytes): the identifier of the server that the delegate wants to connect to (the other part of the *to/as whom*). In the format of a cert ID Block. Populated by DClient from CLI flags/config.
 - **Port** (2 bytes): what port to connect to on the target. Populated by DClient from default or CLI flags/config.
 - **Grant Type** (1 byte): indicates how to interpret the "Associated Data" section. Can be one of "shell", "cmd", "local PF", "remote PF", etc. Populated by DClient. TODO(baumanl): is this actually necessary/how was I using it exactly before...?
+- **Reps** (1 byte): How many times this authorization grant can be used (single use or multi-use). Don't know if we care about this or if we should allocate more than one byte.
+- **Start Time** (8 bytes): timestamp of when the authorization grant becomes effective.
+- **Duration** (8 bytes): how many seconds after the start time that the authorization grant is good for. (Start time + Duration = Expiration time).
 - **Associated Data** (* bytes): More information about specific action (e.g. command to run, ports to forward, etc.)
 
-- **TODO**(baumanl): missing some concept of the "when" (start time, duration, repeatability of the grant)
+
+**TODO**(baumanl): Previously the intent request was missing some concept of the "when" (start time, duration, repeatability of the grant). What exactly do we want to support/what should the defaults be? I added the Reps, Start Time, and Duration fields to account for this, but they were not mentioned in the original outline of the auth grant protocol and I did not implement them previously.
+
+
 
 ### Authorize Intent
 
