@@ -78,7 +78,7 @@ type ServerConfig struct {
 	MaxPendingConnections           int
 	MaxBufferedPacketsPerConnection int
 
-	HandshakeTimeout     time.Duration
+	HandshakeTimeout time.Duration
 
 	KeyPair      *keys.X25519KeyPair
 	Certificate  *certs.Certificate
