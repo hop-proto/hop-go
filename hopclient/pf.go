@@ -80,7 +80,7 @@ func (c *HopClient) confirmWithRemote(req *authgrants.Intent, npAgc *authgrants.
 
 // reroutes remote port forwarding connections to the appropriate destination
 // TODO(baumanl): add ability to handle multiple PF relationships
-func (c *HopClient) handleRemote(tube *tubes.Reliable) error {
+func (c *HopClient) handleRemote(tube tubes.Tube) error {
 	panic("update me!")
 	// defer tube.Close()
 	// //if multiple remote pf relationships, figure out which one this corresponds to

@@ -45,7 +45,7 @@ type authGrant struct {
 type hopSession struct {
 	transportConn   *transport.Handle
 	tubeMuxer       *tubes.Muxer
-	tubeQueue       chan *tubes.Reliable
+	tubeQueue       chan tubes.Tube
 	done            chan int
 	controlChannels []net.Conn
 
@@ -62,7 +62,11 @@ type hopSession struct {
 }
 
 func (sess *hopSession) checkAuthorization() bool {
-	uaTube, _ := sess.tubeMuxer.Accept()
+	t, _ := sess.tubeMuxer.Accept()
+	uaTube, ok := t.(*tubes.Reliable)
+	if !ok || uaTube.Type() != common.UserAuthTube {
+		return false
+	}
 	logrus.Info("S: Accepted USER AUTH tube")
 	defer uaTube.Close()
 	username := userauth.GetInitMsg(uaTube) //client sends desired username
@@ -154,19 +158,24 @@ func (sess *hopSession) start() {
 			return
 		case tube := <-sess.tubeQueue:
 			logrus.Infof("S: ACCEPTED NEW TUBE (%v)", tube.Type())
+			r, ok := tube.(*tubes.Reliable)
+			if !ok {
+				// TODO(hosono) handle unreliable tubes
+				continue
+			}
 			switch tube.Type() {
 			case common.ExecTube:
-				go sess.startCodex(tube)
+				go sess.startCodex(r)
 			case common.AuthGrantTube:
-				go sess.handleAgc(tube)
+				go sess.handleAgc(r)
 			case common.NetProxyTube:
-				go sess.startNetProxy(tube)
+				go sess.startNetProxy(r)
 			case common.RemotePFTube:
-				go sess.startRemote(tube)
+				go sess.startRemote(r)
 			case common.LocalPFTube:
-				go sess.startLocal(tube)
+				go sess.startLocal(r)
 			case common.WinSizeTube:
-				go sess.startSizeTube(tube)
+				go sess.startSizeTube(r)
 			default:
 				tube.Close() //Close unrecognized tube types
 			}
@@ -506,7 +515,7 @@ func (sess *hopSession) RemoteServer(tube *tubes.Reliable, arg string) {
 			return
 		}
 		logrus.Info("server got a uds conn from child")
-		t, err := sess.tubeMuxer.CreateTube(common.RemotePFTube)
+		t, err := sess.tubeMuxer.CreateReliableTube(common.RemotePFTube)
 		if err != nil {
 			logrus.Error("error creating tube", err)
 			return

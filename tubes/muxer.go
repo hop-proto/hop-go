@@ -14,15 +14,19 @@ import (
 // Tube interface is shared between Reliable and Unreliable Tubes
 type Tube interface {
 	net.Conn
+	receiveInitiatePkt(*initiateFrame) error
+	receive(*frame) error
 	Type() TubeType
+	GetID() byte
+	IsReliable() bool
 }
 
 // Muxer handles delivering and sending tube messages
 type Muxer struct {
 	// +checklocks:m
-	tubes map[byte]*Reliable
+	tubes map[byte]Tube
 	// Channels waiting for an Accept() call.
-	tubeQueue chan *Reliable
+	tubeQueue chan Tube
 	m         sync.Mutex
 	// All hop tubes write raw bytes for a tube packet to this golang chan.
 	sendQueue  chan []byte
@@ -35,8 +39,8 @@ type Muxer struct {
 // NewMuxer starts a new tube muxer
 func NewMuxer(msgConn transport.MsgConn, netConn net.Conn, timeout time.Duration) *Muxer {
 	return &Muxer{
-		tubes:      make(map[byte]*Reliable),
-		tubeQueue:  make(chan *Reliable, 128),
+		tubes:      make(map[byte]Tube),
+		tubeQueue:  make(chan Tube, 128),
 		m:          sync.Mutex{},
 		sendQueue:  make(chan []byte),
 		underlying: msgConn,
@@ -45,31 +49,39 @@ func NewMuxer(msgConn transport.MsgConn, netConn net.Conn, timeout time.Duration
 	}
 }
 
-func (m *Muxer) addTube(c *Reliable) {
+func (m *Muxer) addTube(c Tube) {
 	m.m.Lock()
-	m.tubes[c.id] = c
+	m.tubes[c.GetID()] = c
 	m.m.Unlock()
 }
 
-func (m *Muxer) getTube(tubeID byte) (*Reliable, bool) {
+func (m *Muxer) getTube(tubeID byte) (Tube, bool) {
 	m.m.Lock()
 	defer m.m.Unlock()
 	c, ok := m.tubes[tubeID]
 	return c, ok
 }
 
-// CreateTube starts a new reliable tube
-func (m *Muxer) CreateTube(tType TubeType) (*Reliable, error) {
-	r, err := newReliableTube(m.underlying, m.netConn, m.sendQueue, tType)
-	m.addTube(r)
-	logrus.Infof("Created Tube: %v", r.id)
-	return r, err
+// CreateReliableTube starts a new reliable tube
+func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
+	tube, err := newReliableTube(m.underlying, m.netConn, m.sendQueue, tType)
+	m.addTube(tube)
+	logrus.Infof("Created Tube: %v", tube.GetID())
+	return tube, err
 }
 
-// Accept blocks for and accepts a new reliable tube
-func (m *Muxer) Accept() (*Reliable, error) {
+// CreateUnreliableTube starts a new unreliable tube
+func (m *Muxer) CreateUnreliableTube(tType TubeType) (*Unreliable, error) {
+	tube, err := newUnreliableTube(m.underlying, m.netConn, m.sendQueue, tType)
+	m.addTube(tube)
+	logrus.Infof("Created Tube: %v", tube.GetID())
+	return tube, err
+}
+
+// Accept blocks for and accepts a new tube
+func (m *Muxer) Accept() (Tube, error) {
 	s := <-m.tubeQueue
-	logrus.Infof("Accepted Tube: %v", s.id)
+	logrus.Infof("Accepted Tube: %v", s.GetID())
 	return s, nil
 }
 
@@ -166,9 +178,9 @@ func (m *Muxer) Stop() {
 	wg := sync.WaitGroup{}
 	for _, v := range m.tubes {
 		wg.Add(1)
-		go func(v *Reliable) { //parallelized closing tubes because other side may close them in a different order
+		go func(v Tube) { //parallelized closing tubes because other side may close them in a different order
 			defer wg.Done()
-			logrus.Info("Closing tube: ", v.id)
+			logrus.Info("Closing tube: ", v.GetID())
 			v.Close() //TODO(baumanl): If a tube was already closed this returns an error that is ignored atm. Remove tube from map after closing?
 		}(v)
 	}

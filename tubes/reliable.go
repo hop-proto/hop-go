@@ -56,6 +56,7 @@ type Reliable struct {
 // Reliable implements net.Conn
 var _ net.Conn = &Reliable{}
 
+// Reliable tubes are tubes
 var _ Tube = &Reliable{}
 
 func (r *Reliable) getState() state {
@@ -282,6 +283,16 @@ func (r *Reliable) Close() error {
 // Type returns tube type
 func (r *Reliable) Type() TubeType {
 	return r.tType
+}
+
+// GetID returns the tube ID
+func (r *Reliable) GetID() byte {
+	return r.id
+}
+
+// IsReliable returns whether the tube is reliable. Always true
+func (r *Reliable) IsReliable() bool {
+	return true
 }
 
 // LocalAddr returns tube local address

@@ -155,7 +155,7 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 		transportConn: serverConn,
 		// TODO(hosono) choose timeout. Allow timeout to be configured
 		tubeMuxer:       tubes.NewMuxer(serverConn, serverConn, s.config.DataTimeout),
-		tubeQueue:       make(chan *tubes.Reliable),
+		tubeQueue:       make(chan tubes.Tube),
 		done:            make(chan int),
 		controlChannels: []net.Conn{},
 		server:          s,
