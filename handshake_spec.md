@@ -652,7 +652,6 @@ I made a rudimentary animation of this process in google slides (present and cli
 Other Discussion Points:
 - TODO(baumanl): are all of the fields in the Intent Request necessary/are any missing? Specifically, it used to also include the Delegate SNI, but I think the principal should actually just keep track of it since it will have received the Delegate's certificate when connecting to it.
 - TODO(baumanl): any use case for attempting to *dynamically* determine whether a client should act as a P/D? (e.g. by determining if it was spawned by a hopd process?)
-- TODO(baumanl): as described above the current standard is to have the delegate client process request the auth grant and use the auth grant --> there is no flexibility to allow the auth grant to persist between different processes (i.e. have one process **request** the auth grant and then have another process **use** the auth grant)
 - TODO(baumanl): specify threat model better (how much do we trust the delegate/authorization grant requests that the principal receives?
 
 Questions about Client Certs:
