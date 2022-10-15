@@ -56,6 +56,8 @@ type Reliable struct {
 // Reliable implements net.Conn
 var _ net.Conn = &Reliable{}
 
+var _ Tube = &Reliable{}
+
 func (r *Reliable) getState() state {
 	r.m.Lock()
 	defer r.m.Unlock()

@@ -8,11 +8,18 @@ import (
 	"hop.computer/hop/transport"
 )
 
+// Unreliable implements UDP-like messages for Hop
 type Unreliable struct {
 }
 
+// Unreliable tubes implement net.Conn
 var _ net.Conn = &Unreliable{}
+
+// Unreliable tubes work as a drop in replacement for UDP
 var _ transport.UDPLike = &Unreliable{}
+
+// Unreliable tubes are tubes
+var _ Tube = &Unreliable{}
 
 func (u *Unreliable) Read(b []byte) (n int, err error) {
 	panic("unimplemented")
@@ -51,5 +58,9 @@ func (u *Unreliable) SetReadDeadline(t time.Time) error {
 }
 
 func (u *Unreliable) SetWriteDeadline(t time.Time) error {
+	panic("unimplemented")
+}
+
+func (u *Unreliable) Type() TubeType {
 	panic("unimplemented")
 }

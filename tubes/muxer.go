@@ -11,6 +11,12 @@ import (
 	"hop.computer/hop/transport"
 )
 
+// Tube interface is shared between Reliable and Unreliable Tubes
+type Tube interface {
+	net.Conn
+	Type() TubeType
+}
+
 // Muxer handles delivering and sending tube messages
 type Muxer struct {
 	// +checklocks:m
