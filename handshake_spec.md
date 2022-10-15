@@ -594,23 +594,32 @@ I made a rudimentary animation of this process in google slides (present and cli
 - ServerA verifies that DClient is a descendent process and uses it's PID to locate the hop session it has with its principal. TODO(baumanl): this portion of code is very unix specific --> either generalize or weaken this guarantee.
 - ServerA opens an authorization grant tube (AGT) with PClient and sends the intent request message (outlined below).
 
-<img src="imgs/intent.png" alt="intent request diagram" style="zoom: 67%;" />
+### Intent Request Fields
 
-- **SHA-3 Client Identifier** (32 bytes): digest of the delegate's "static" public key
-- **Delegate Username (32 bytes)**: the local user that the delegate is running as on Server A. (note: no way for the principal to really authenticate this, but useful for displaying prompt to user.) Populated by hopd on ServerA (derived by looking up user name corresponding to DClient process).
+| Field           | Size        |
+| -----------     | ----------- |
+| Target Username | 32 bytes    |
+| Target SNI      |  256 bytes       |
+| Target Port Number | 2 bytes |
+| Grant Type | 1 byte |
+| Reps | 1 byte|
+| Start Time | 8 bytes |
+| Expiration Time | 8 bytes |
+| Delegate Client Certificate | <= 660 bytes (?)|
+| Associated Data | * bytes |
+
 - **Target Username** (32 bytes): the user on the target server that the delegate wants to perform the action as (the *to whom* or *as whom* I guess). Populated by DClient from default (local username) or CLI flags/config.
 - **Target SNI** (256 bytes): the identifier of the server that the delegate wants to connect to (the other part of the *to/as whom*). In the format of a cert ID Block. Populated by DClient from CLI flags/config.
 - **Port** (2 bytes): what port to connect to on the target. Populated by DClient from default or CLI flags/config.
 - **Grant Type** (1 byte): indicates how to interpret the "Associated Data" section. Can be one of "shell", "cmd", "local PF", "remote PF", etc. Populated by DClient. TODO(baumanl): is this actually necessary/how was I using it exactly before...?
 - **Reps** (1 byte): How many times this authorization grant can be used (single use or multi-use). Don't know if we care about this or if we should allocate more than one byte.
 - **Start Time** (8 bytes): timestamp of when the authorization grant becomes effective.
-- **Duration** (8 bytes): how many seconds after the start time that the authorization grant is good for. (Start time + Duration = Expiration time).
+- **Expiration Time** (8 bytes): timestamp of when the authorization grant expires.
+- **Delegate Client Certificate** (<= 660 bytes): "self-signed" or otherwise; contains delegate's static public key.
 - **Associated Data** (* bytes): More information about specific action (e.g. command to run, ports to forward, etc.)
 
 
 **TODO**(baumanl): Previously the intent request was missing some concept of the "when" (start time, duration, repeatability of the grant). What exactly do we want to support/what should the defaults be? I added the Reps, Start Time, and Duration fields to account for this, but they were not mentioned in the original outline of the auth grant protocol and I did not implement them previously.
-
-
 
 ### Authorize Intent
 
@@ -626,12 +635,17 @@ I made a rudimentary animation of this process in google slides (present and cli
 ### Intent Confirmation or Denial
 
 - The target server (ServerB) verifies that the principal (PClient) has sufficient authority to grant the request and otherwise ensures that the request is acceptable.
-- If the target agrees to authorize the request then it stores the an *authorization grant* (consisting of data from the intent request) in an in-memory map of Client Identifiers (from the IR) --> authorization grants[].
+- If the target agrees to authorize the request then it stores the  *authorization grant* (consisting of data from the intent request) in an in-memory map of Client Identifiers --> authorization grants[]. TODO(baumanl): what should the keys for this map actually be? Full client cert seems excesive, just keep as SHA3(delegate_static_public_key)?
 - It sends back an Intent Confirmation or an Intent Denied (with optional reason) back to the Principal. The Principal forwards this response to the Delegate.
 
 ### DClient connects to ServerB (target)
 
-- Now, upon completing the transport layer handshake with ServerB (using the keypair/cert corresponding to the client identifier for the authgrants), DClient can use any of the authgrants to perform authorized actions on the client. As authgrants are used/expire ServerB (Target) removes them from the authgrant map.
+- Now, upon completing the transport layer handshake with ServerB (using the keypair/cert corresponding to the client identifier for the authgrants), DClient can use any of the authgrants to perform authorized actions on the client. As authgrants are used/expire, ServerB (Target) removes them from the authgrant map.
+
+- TODO(baumanl): In order for an authgrant to be used, the delegate must be able to complete a hop handshake with the server. This brings up the concern of client authentication. If the delegate is using a self-signed certificate (basically a wrapper around a temporary "static" key) then the server must be willing to complete the handshake even though there is no real client certificate involved. This has a few implications that I see:
+  1. If the hop server does not want to trust self-signed certificates, then the delegate client must have access to a static key and certificate that the transport layer will accept. Then, after the handshake, it can have an authorization grant giving it temporary access from another user. This seems borderline redundant and like it could potentially cause issues if a delegate cert is given too much baseline power. However, currently I think this is the correct approach for cases where the hop server is configured to not allow self-signed connections.
+  2. On the otherhand, if the server always completes handshakes with all self-signed certificates then it seems like client certs are somewhat pointless to begin with.
+  3. Or, and this would probably involve breaking layering, we could attempt to allow the hop transport layer can trust self-signed certs only in the case that they have a corresponding outstanding authgrant.
 
 ###
 
@@ -640,3 +654,7 @@ Other Discussion Points:
 - TODO(baumanl): any use case for attempting to *dynamically* determine whether a client should act as a P/D? (e.g. by determining if it was spawned by a hopd process?)
 - TODO(baumanl): as described above the current standard is to have the delegate client process request the auth grant and use the auth grant --> there is no flexibility to allow the auth grant to persist between different processes (i.e. have one process **request** the auth grant and then have another process **use** the auth grant)
 - TODO(baumanl): specify threat model better (how much do we trust the delegate/authorization grant requests that the principal receives?
+
+Questions about Client Certs:
+- Minimum number of bytes?
+- Use cases for multiple ID blocks?
