@@ -1,3 +1,4 @@
+// hack to run Hop in docker
 package main
 
 import (
