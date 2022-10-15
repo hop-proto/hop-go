@@ -55,12 +55,13 @@ const (
 	// ServerDefaultMaxBufferedPacketsPerSession sets the maximum number of packets
 	// (not bytes) than can be buffered by the server per accepted session.
 	// Packets after this will dropped until the user calls Read.
+	// TODO(hosono) fixing the reliable tubes may let us reduce this number
 	ServerDefaultMaxBufferedPacketsPerSession = 10000
 
 	// ClientDefaultMaxBufferedPacketsPerSession sets the maximum number of packets
 	// (not bytes) that can be buffered for a session. Packets after this will
 	// be dropped unless the user calls Read
-	// TODO(hosono) pick a good default value
+	// TODO(hosono) fixing the reliable tubes may let us reduce this number
 	ClientDefaultMaxBufferedPacketsPerSession = 10000
 )
 
@@ -78,8 +79,6 @@ type ServerConfig struct {
 	MaxBufferedPacketsPerConnection int
 
 	HandshakeTimeout     time.Duration
-	StartingReadTimeout  time.Duration // TODO(hosono) currently unused
-	StartingWriteTimeout time.Duration // TODO(hosono) currently unused
 
 	KeyPair      *keys.X25519KeyPair
 	Certificate  *certs.Certificate

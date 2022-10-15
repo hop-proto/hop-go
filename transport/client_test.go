@@ -15,7 +15,6 @@ import (
 func TestClientCertificates(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	baseConfig, verify := newTestServerConfig(t)
-	baseConfig.StartingReadTimeout = 10 * time.Second
 	baseConfig.MaxPendingConnections = 1
 	baseConfig.MaxBufferedPacketsPerConnection = 5
 

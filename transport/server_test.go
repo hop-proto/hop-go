@@ -111,7 +111,6 @@ func TestServerRead(t *testing.T) {
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
 	config, verify := newTestServerConfig(t)
-	config.StartingReadTimeout = 10 * time.Second
 	config.MaxPendingConnections = 1
 	config.MaxBufferedPacketsPerConnection = 5
 	server, err := NewServer(pc.(*net.UDPConn), *config)
@@ -192,7 +191,6 @@ func TestServerWrite(t *testing.T) {
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
 	config, verify := newTestServerConfig(t)
-	config.StartingReadTimeout = 10 * time.Second
 	config.MaxPendingConnections = 1
 	config.MaxBufferedPacketsPerConnection = 5
 	server, err := NewServer(pc.(*net.UDPConn), *config)

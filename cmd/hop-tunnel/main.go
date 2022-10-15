@@ -119,7 +119,6 @@ func main() {
 		}
 
 		config := transport.ServerConfig{}
-		config.StartingReadTimeout = forever
 		config.KeyPair = keyPair
 		config.Certificate = leaf
 		config.Intermediate = intermediate
