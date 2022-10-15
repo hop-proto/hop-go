@@ -23,7 +23,9 @@ import (
 type Server struct {
 	m sync.RWMutex
 
-	rawRead      []byte
+	// +checklocks:serveLock
+	rawRead []byte
+	// +checklocks:serveLock
 	handshakeBuf []byte
 
 	udpConn UDPLike
@@ -513,9 +515,6 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte) (int, error
 
 // Serve blocks until the server is closed.
 func (s *Server) Serve() error {
-	// TODO(dadrian): These should be smaller buffers
-	s.rawRead = make([]byte, 65535)
-	s.handshakeBuf = make([]byte, 65535)
 	s.wg.Add(3)
 
 	go func() {
@@ -523,6 +522,11 @@ func (s *Server) Serve() error {
 
 		s.serveLock.Lock()
 		defer s.serveLock.Unlock()
+
+		// TODO(dadrian): These should be smaller buffers
+		s.rawRead = make([]byte, 65535)
+		s.handshakeBuf = make([]byte, 65535)
+
 		for !s.closed.Load() {
 			err := s.readPacket()
 			logrus.Tracef("read a packet")
