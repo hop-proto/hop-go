@@ -29,11 +29,17 @@ type ReliableUDP struct {
 }
 
 var _ UDPLike = &ReliableUDP{}
+var _ MsgConn = &ReliableUDP{}
 
 // Read reads data into b
 func (r *ReliableUDP) Read(b []byte) (n int, err error) {
 	n, _, _, _, err = r.ReadMsgUDP(b, nil)
 	return n, err
+}
+
+// ReadMsg implements the MsgConn interface
+func (r *ReliableUDP) ReadMsg(b []byte) (n int, err error) {
+	return r.Read(b)
 }
 
 // ReadMsgUDP implements to UDPLike interface
@@ -91,6 +97,12 @@ func (r *ReliableUDP) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.U
 func (r *ReliableUDP) Write(b []byte) (n int, err error) {
 	n, _, err = r.WriteMsgUDP(b, nil, nil)
 	return n, err
+}
+
+// WriteMsg implements the MsgConn interface
+func (r *ReliableUDP) WriteMsg(b []byte) (err error) {
+	_, err = r.Write(b)
+	return
 }
 
 // WriteMsgUDP implements the UDPLike interface
