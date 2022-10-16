@@ -77,12 +77,12 @@ func (r *Reliable) send() {
 }
 
 func newReliableTubeWithTubeID(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType TubeType, tubeID byte) *Reliable {
-	r := makeTube(underlying, netConn, sendQueue, tubeType, tubeID)
+	r := makeReliableTube(underlying, netConn, sendQueue, tubeType, tubeID)
 	go r.initiate(false)
 	return r
 }
 
-func makeTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType TubeType, tubeID byte) *Reliable {
+func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType TubeType, tubeID byte) *Reliable {
 	r := &Reliable{
 		id:        tubeID,
 		tubeState: created,
@@ -128,7 +128,7 @@ func newReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue c
 	if err != nil || n != 1 {
 		return nil, err
 	}
-	r := makeTube(underlying, netConn, sendQueue, tType, cid[0])
+	r := makeReliableTube(underlying, netConn, sendQueue, tType, cid[0])
 	go r.initiate(true)
 	return r, nil
 }
@@ -151,6 +151,7 @@ func (r *Reliable) initiate(req bool) {
 				FIN:  false,
 				REQ:  req,
 				RESP: !req,
+				REL:  true,
 			},
 		}
 		r.sendQueue <- p.toBytes()
