@@ -71,6 +71,7 @@ func (r *Reliable) send() {
 		pkt.tubeID = r.id
 		pkt.ackNo = r.recvWindow.getAck()
 		pkt.flags.ACK = true
+		pkt.flags.REL = true
 		logrus.Debug("sending pkt ", pkt.frameNo, pkt.ackNo, pkt.flags.FIN, pkt.flags.ACK)
 		r.sendQueue <- pkt.toBytes()
 	}

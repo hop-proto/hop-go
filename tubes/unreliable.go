@@ -5,11 +5,14 @@ import (
 	"crypto/rand"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"time"
 
 	"hop.computer/hop/common"
 	"hop.computer/hop/transport"
+
+	//"github.com/sirupsen/logrus"
 )
 
 // Unreliable implements UDP-like messages for Hop
@@ -23,6 +26,8 @@ type Unreliable struct {
 
 	recv *common.DeadlineChan[[]byte]
 	send *common.DeadlineChan[[]byte]
+
+	frameNo uint32
 
 	localAddr  net.Addr
 	remoteAddr net.Addr
@@ -72,6 +77,24 @@ func makeUnreliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueu
 	return u
 }
 
+func (u *Unreliable) sender() {
+	for {
+		// TODO(hosono) this will busywait if the deadline expires
+		b, err := u.send.Recv()
+		if err != nil {
+			if err == os.ErrDeadlineExceeded {
+				continue
+			} else if err == io.EOF {
+				break
+			}
+		}
+		u.sendQueue <- b
+	}
+	for pkt := range(u.send.C) {
+		u.sendQueue <- pkt
+	}
+}
+
 // req: whether the tube is requesting to initiate a tube (true), or whether is respondding to an initiation request (false)
 func (u *Unreliable) initiate(req bool) {
 	notInit := true
@@ -99,6 +122,8 @@ func (u *Unreliable) initiate(req bool) {
 		timer := time.NewTimer(retransmitOffset)
 		<-timer.C
 	}
+
+	go u.sender()
 }
 
 func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
@@ -113,7 +138,11 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 }
 
 func (u *Unreliable) receive(pkt *frame) error {
-	u.recv.C <- pkt.data
+	if pkt.flags.FIN {
+		u.recv.Close()
+	} else {
+		u.recv.C <- pkt.data
+	}
 	return nil
 }
 
@@ -137,7 +166,7 @@ func (u *Unreliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UD
 	}
 	n = copy(b, msg)
 	if n < len(msg) {
-		err = transport.ErrBufUnderflow
+		err = transport.ErrBufOverflow
 		// TODO(hosono) save buffer leftovers?
 	}
 	return
@@ -158,7 +187,29 @@ func (u *Unreliable) WriteMsg(b []byte) (err error) {
 // WriteMsgUDP implements implements the UDPLike interface
 // oob and addr are ignored
 func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
-	err = u.send.Send(b)
+	dataLength := uint16(len(b))
+	if uint16(len(b)) > maxFrameDataLength {
+		err = transport.ErrBufOverflow
+		return
+	}
+
+	pkt := frame{
+		tubeID: u.id,
+		flags: frameFlags{
+			ACK: false,
+			FIN: false,
+			REQ: false,
+			RESP: false,
+			REL: false,
+		},
+
+		dataLength: dataLength,
+		frameNo: u.frameNo,
+		data: b,
+	}
+	u.frameNo++
+
+	err = u.send.Send(pkt.toBytes())
 	if err != nil {
 		return
 	}
@@ -170,13 +221,34 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 func (u *Unreliable) Close() error {
 	u.m.Lock()
 	defer u.m.Unlock()
+
 	if u.tubeState == closed {
 		return io.EOF
 	}
+
+	pkt := frame{
+		tubeID: u.id,
+		flags: frameFlags{
+			ACK: false,
+			FIN: true,
+			REQ: false,
+			RESP: false,
+			REL: false,
+		},
+
+		dataLength: 0,
+		frameNo: u.frameNo,
+		data: []byte{},
+	}
+	u.frameNo++
+
+	err := u.send.Send(pkt.toBytes())
+
+	u.frameNo++
 	u.send.Close()
 	u.recv.Close()
 
-	return nil
+	return err
 }
 
 // LocalAddr implements net.Conn

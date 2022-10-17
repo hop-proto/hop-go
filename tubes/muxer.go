@@ -147,7 +147,11 @@ func (m *Muxer) Start() error {
 				if err != nil {
 					return err
 				}
-				tube = newReliableTubeWithTubeID(m.underlying, m.netConn, m.sendQueue, initFrame.tubeType, initFrame.tubeID)
+				if initFrame.flags.REL {
+					tube = newReliableTubeWithTubeID(m.underlying, m.netConn, m.sendQueue, initFrame.tubeType, initFrame.tubeID)
+				} else {
+					tube = newUnreliableTubeWithTubeID(m.underlying, m.netConn, m.sendQueue, initFrame.tubeType, initFrame.tubeID)
+				}
 				m.addTube(tube)
 				m.tubeQueue <- tube
 			}
