@@ -36,6 +36,9 @@ var _ net.Conn = &Unreliable{}
 // Unreliable tubes work as a drop in replacement for UDP
 var _ transport.UDPLike = &Unreliable{}
 
+// Unreliable tubes are message oriented data streams
+var _ transport.MsgConn = &Unreliable{}
+
 // Unreliable tubes are tubes
 var _ Tube = &Unreliable{}
 
@@ -50,10 +53,10 @@ func newUnreliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue
 	return u, nil
 }
 
-func newUnreliableTubeWithTubeID(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType TubeType, tubeID byte) (*Unreliable, error) {
+func newUnreliableTubeWithTubeID(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType TubeType, tubeID byte) *Unreliable {
 	u := makeUnreliableTube(underlying, netConn, sendQueue, tubeType, tubeID)
 	go u.initiate(false)
-	return u, nil
+	return u
 }
 
 func makeUnreliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType TubeType, tubeID byte) *Unreliable {
@@ -120,7 +123,13 @@ func (u *Unreliable) Read(b []byte) (n int, err error) {
 	return
 }
 
-// ReadMsgUDP implements the UDPLike interface
+// ReadMsg implements transport.MsgConn. It wraps Read
+func (u *Unreliable) ReadMsg(b []byte) (n int, err error) {
+	n, err = u.Read(b)
+	return
+}
+
+// ReadMsgUDP implements the UDPLike interface. addr is always nil
 func (u *Unreliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
 	msg, err := u.recv.Recv()
 	if err != nil {
@@ -136,7 +145,13 @@ func (u *Unreliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UD
 
 // Write implements net.Conn. It wraps WriteMsgUDP
 func (u *Unreliable) Write(b []byte) (n int, err error) {
-	n, _, err = u.WriteMsgUDP(b, nil, u.remoteAddr.(*net.UDPAddr))
+	n, _, err = u.WriteMsgUDP(b, nil, nil)
+	return
+}
+
+// WriteMsg implements transport.MsgConn. It wraps Write
+func (u *Unreliable) WriteMsg(b []byte) (err error) {
+	_, err = u.Write(b)
 	return
 }
 
