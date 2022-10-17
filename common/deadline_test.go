@@ -152,6 +152,29 @@ func TestUncancel(t *testing.T) {
 	}
 }
 
+func TestDeadlineStress(t *testing.T) {
+	deadline := NewDeadline(time.Now())
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	go func() {
+		for i := 0; i < 1000; i++ {
+			deadline.SetDeadline(time.Now())
+		}
+		wg.Done()
+	}()
+
+	go func() {
+		for i := 0; i < 1000; i++ {
+			c := deadline.Done()
+			<-c
+		}
+		wg.Done()
+	}()
+
+	wg.Wait()
+}
+
 func TestDeadlineRecv(t *testing.T) {
 	ch := NewDeadlineChan[[]byte](numLoops)
 

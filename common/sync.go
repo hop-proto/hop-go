@@ -13,17 +13,15 @@ import (
 // SetDeadline method. It allows the deadline to be extended and allows
 // an expired deadline to become unexpired.
 type Deadline struct {
-	chanLock sync.Mutex
-	// +checklocks:chanLock
+	m sync.Mutex
+
+	// +checklocks:m
 	ch chan struct{}
 
-	timerLock sync.Mutex
-	// +checklocks:timerLock
+	// +checklocks:m
 	timer *time.Timer
 
-	active atomic.Bool
-
-	// +checklocks:chanLock
+	// +checklocks:m
 	err error
 }
 
@@ -31,20 +29,23 @@ type Deadline struct {
 // when the deadline is exceeded or Cancel is called.
 // This allows a function to select on either the deadline or another channel
 func (d *Deadline) Done() <-chan struct{} {
-	d.chanLock.Lock()
-	defer d.chanLock.Unlock()
+	d.m.Lock()
+	defer d.m.Unlock()
 	return d.ch
 }
 
 // Cancel sends err to every channel created by calling Done
 // This allows selects statements to return before the deadline expires
 func (d *Deadline) Cancel(err error) {
-	d.chanLock.Lock()
-	defer d.chanLock.Unlock()
+	d.m.Lock()
+	defer d.m.Unlock()
 
 	d.err = err
 
-	if d.active.Swap(false) {
+	select {
+	case <-d.ch:
+		break
+	default:
 		close(d.ch)
 	}
 }
@@ -53,8 +54,8 @@ func (d *Deadline) Cancel(err error) {
 // TODO(hosono) there's technically a race condition here because the error
 // is not checked at the same time a channel signals done. Is this a real problem?
 func (d *Deadline) Err() error {
-	d.chanLock.Lock()
-	defer d.chanLock.Unlock()
+	d.m.Lock()
+	defer d.m.Unlock()
 	return d.err
 }
 
@@ -67,8 +68,8 @@ func (d *Deadline) timeout() {
 // before or after the current deadline. Calling SetDeadline with
 // the zero value for time.Time will cause the deadline to never expire
 func (d *Deadline) SetDeadline(t time.Time) error {
-	d.timerLock.Lock()
-	defer d.timerLock.Unlock()
+	d.m.Lock()
+	defer d.m.Unlock()
 
 	if !d.timer.Stop() {
 		select {
@@ -80,22 +81,24 @@ func (d *Deadline) SetDeadline(t time.Time) error {
 	}
 
 	// Replace the channel to unexpire it
-	d.chanLock.Lock()
-	if !d.active.Load() {
-		d.ch = make(chan struct{})
+	select {
+	case _, ok := <-d.ch:
+		if !ok {
+			d.ch = make(chan struct{})
+		}
+	default:
+		break
 	}
-	d.chanLock.Unlock()
 
 	if t.IsZero() {
-		d.active.Store(true)
 		return nil
 	}
 
 	start := time.Now()
 	if t.Before(start) {
-		d.timeout()
+		d.err = os.ErrDeadlineExceeded
+		close(d.ch)
 	} else {
-		d.active.Store(true)
 		d.timer.Reset(t.Sub(start))
 	}
 
@@ -113,7 +116,6 @@ func NewDeadline(t time.Time) *Deadline {
 		<-d.timer.C
 	}
 	d.ch = make(chan struct{})
-	d.active.Store(true)
 	d.SetDeadline(t)
 	return d
 }
