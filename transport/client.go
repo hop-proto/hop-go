@@ -77,9 +77,9 @@ func (c *Client) lockUser() {
 // +checklocksrelease:c.readLock
 // +checklocksrelease:c.writeLock
 func (c *Client) unlockUser() {
-	c.m.Unlock()
 	c.readLock.Unlock()
 	c.writeLock.Unlock()
+	c.m.Unlock()
 }
 
 // IsClosed returns true if Close() has been called
@@ -510,15 +510,11 @@ func (c *Client) Read(b []byte) (n int, err error) {
 
 // LocalAddr returns the underlying UDP address.
 func (c *Client) LocalAddr() net.Addr {
-	c.lockUser()
-	defer c.unlockUser()
 	return c.underlyingConn.LocalAddr()
 }
 
 // RemoteAddr returns the underlying remote UDP address.
 func (c *Client) RemoteAddr() net.Addr {
-	c.lockUser()
-	defer c.unlockUser()
 	return c.underlyingConn.RemoteAddr()
 }
 
