@@ -19,10 +19,8 @@ import (
 
 // ExecTube wraps a code execution tube with additional terminal state
 type ExecTube struct {
-	Tube  *tubes.Reliable
+	tube  *tubes.Reliable
 	state *term.State
-	shell bool
-	wg    *sync.WaitGroup
 	redir bool
 	r     *io.PipeReader
 	w     *io.PipeWriter
@@ -94,7 +92,7 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 	//get confirmation that cmd started successfully before piping IO
 	err := getStatus(tube)
 	if err != nil {
-		if shell && oldState != nil {
+		if oldState != nil {
 			term.Restore(int(os.Stdin.Fd()), oldState)
 		}
 		logrus.Error("C: server failed to start cmd with error: ", err)
@@ -122,10 +120,8 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 
 	r, w := io.Pipe()
 	ex := ExecTube{
-		Tube:  tube,
+		tube:  tube,
 		state: oldState,
-		shell: shell,
-		wg:    wg,
 		redir: false,
 		r:     r,
 		w:     w,
@@ -299,15 +295,4 @@ func (e *ExecTube) Raw() {
 	if e.state != nil {
 		term.MakeRaw(int(os.Stdin.Fd()))
 	}
-}
-
-// Close the ExecTube. Called automatically if ExecTube is constructed with shell=true
-func (e *ExecTube) Close() error {
-	if e.shell && e.state != nil {
-		term.Restore(int(os.Stdin.Fd()), e.state)
-	}
-	logrus.Info("closing ExecTube")
-	err := e.Tube.Close()
-	e.wg.Done()
-	return err
 }

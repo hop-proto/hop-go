@@ -100,8 +100,8 @@ func LoadClientConfigFromFlags(f *ClientFlags) (*config.HostConfig, error) {
 	return mergeClientFlagsAndConfig(f, cc, dc)
 }
 
-// DefineClientFlags calls fs.StringVar for Client
-func DefineClientFlags(fs *flag.FlagSet, f *ClientFlags) {
+// defineClientFlags calls fs.StringVar for Client
+func defineClientFlags(fs *flag.FlagSet, f *ClientFlags) {
 	fs.Func("R", "perform remote port forwarding", func(s string) error {
 		f.RemoteArgs = append(f.RemoteArgs, s)
 		return nil
@@ -142,7 +142,7 @@ func DefineClientFlags(fs *flag.FlagSet, f *ClientFlags) {
 func ParseClientArgs(args []string) (*ClientFlags, error) {
 	f := new(ClientFlags)
 	fs := new(flag.FlagSet)
-	DefineClientFlags(fs, f)
+	defineClientFlags(fs, f)
 
 	// For SSH compatibility
 	var port, username string
