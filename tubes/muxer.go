@@ -1,6 +1,7 @@
 package tubes
 
 import (
+	"crypto/rand"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/common"
 	"hop.computer/hop/transport"
 )
 
@@ -34,10 +36,11 @@ type Muxer struct {
 	underlying transport.MsgConn
 	netConn    net.Conn
 	timeout    time.Duration
+	log        *logrus.Entry
 }
 
 // NewMuxer starts a new tube muxer
-func NewMuxer(msgConn transport.MsgConn, netConn net.Conn, timeout time.Duration) *Muxer {
+func NewMuxer(msgConn transport.MsgConn, netConn net.Conn, timeout time.Duration, log *logrus.Entry) *Muxer {
 	return &Muxer{
 		tubes:      make(map[byte]Tube),
 		tubeQueue:  make(chan Tube, 128),
@@ -46,6 +49,7 @@ func NewMuxer(msgConn transport.MsgConn, netConn net.Conn, timeout time.Duration
 		underlying: msgConn,
 		netConn:    netConn,
 		timeout:    timeout,
+		log:        log,
 	}
 }
 
@@ -66,22 +70,57 @@ func (m *Muxer) getTube(tubeID byte) (Tube, bool) {
 func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
 	tube, err := newReliableTube(m.underlying, m.netConn, m.sendQueue, tType)
 	m.addTube(tube)
-	logrus.Infof("Created Tube: %v", tube.GetID())
+	m.log.Infof("Created Tube: %v", tube.GetID())
 	return tube, err
 }
 
 // CreateUnreliableTube starts a new unreliable tube
 func (m *Muxer) CreateUnreliableTube(tType TubeType) (*Unreliable, error) {
-	tube, err := newUnreliableTube(m.underlying, m.netConn, m.sendQueue, tType)
+	// TODO(hosono) we should pick tube IDs sequentially not in order
+	tubeID := []byte{0}
+	rand.Read(tubeID)
+	tube := &Unreliable{
+		tType:      tType,
+		id:         tubeID[0],
+		sendQueue:  m.sendQueue,
+		localAddr:  m.netConn.LocalAddr(),
+		remoteAddr: m.netConn.RemoteAddr(),
+		recv:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
+		send:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
+		state:      atomic.Value{},
+		initiated:  make(chan struct{}, 1),
+		req:        true,
+		log:        m.log.WithField("tube", tubeID[0]),
+	}
+	go tube.initiate(true)
 	m.addTube(tube)
-	logrus.Infof("Created Tube: %v", tube.GetID())
-	return tube, err
+	m.log.Infof("Created Tube: %v", tube.GetID())
+	return tube, nil
+}
+
+func (m *Muxer) newUnreliableTubeFromRequest(tType TubeType, tubeID byte) {
+	tube := &Unreliable{
+		tType:      tType,
+		id:         tubeID,
+		sendQueue:  m.sendQueue,
+		localAddr:  m.netConn.LocalAddr(),
+		remoteAddr: m.netConn.RemoteAddr(),
+		recv:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
+		send:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
+		state:      atomic.Value{},
+		initiated:  make(chan struct{}, 1),
+		req:        false,
+		log:        m.log.WithField("tube", tubeID),
+	}
+	go tube.initiate(false)
+	m.addTube(tube)
+	m.tubeQueue <- tube
 }
 
 // Accept blocks for and accepts a new tube
 func (m *Muxer) Accept() (Tube, error) {
 	s := <-m.tubeQueue
-	logrus.Infof("Accepted Tube: %v", s.GetID())
+	m.log.Infof("Accepted Tube: %v", s.GetID())
 	return s, nil
 }
 
@@ -139,7 +178,7 @@ func (m *Muxer) Start() error {
 		}
 		tube, ok := m.getTube(frame.tubeID)
 		if !ok {
-			//logrus.Info("NO CHANNEL")
+			m.log.WithField("tube", frame.tubeID).Info("tube not found")
 			initFrame, err := fromInitiateBytes(frame.toBytes())
 
 			if initFrame.flags.REQ {
@@ -148,12 +187,13 @@ func (m *Muxer) Start() error {
 					return err
 				}
 				if initFrame.flags.REL {
+					// TODO(hosono) make these methods on the muxer
 					tube = newReliableTubeWithTubeID(m.underlying, m.netConn, m.sendQueue, initFrame.tubeType, initFrame.tubeID)
+					m.addTube(tube)
+					m.tubeQueue <- tube
 				} else {
-					tube = newUnreliableTubeWithTubeID(m.underlying, m.netConn, m.sendQueue, initFrame.tubeType, initFrame.tubeID)
+					m.newUnreliableTubeFromRequest(initFrame.tubeType, initFrame.tubeID)
 				}
-				m.addTube(tube)
-				m.tubeQueue <- tube
 			}
 
 		}
@@ -161,14 +201,16 @@ func (m *Muxer) Start() error {
 		if tube != nil {
 			if frame.flags.REQ || frame.flags.RESP {
 				initFrame, err := fromInitiateBytes(frame.toBytes())
-				//logrus.Info("RECEIVING INITIATE FRAME ", initFrame.tubeID, " ", initFrame.frameNo, " ", frame.flags.REQ, " ", frame.flags.RESP)
+				// m.log.Info("RECEIVING INITIATE FRAME ", initFrame.tubeID, " ", initFrame.frameNo, " ", frame.flags.REQ, " ", frame.flags.RESP)
 				if err != nil {
 					return err
 				}
 				go tube.receiveInitiatePkt(initFrame)
 			} else {
-				//logrus.Info("RECEIVING NORMAL FRAME")
-				go tube.receive(frame)
+				// m.log.Info("RECEIVING NORMAL FRAME")
+				// TODO(hosono) doing this in a gorouting messes up the nettests
+				// so it's probably time to fork the nettests and be done with it
+				tube.receive(frame)
 			}
 		}
 
@@ -184,12 +226,12 @@ func (m *Muxer) Stop() {
 		wg.Add(1)
 		go func(v Tube) { //parallelized closing tubes because other side may close them in a different order
 			defer wg.Done()
-			logrus.Info("Closing tube: ", v.GetID())
+			m.log.Info("Closing tube: ", v.GetID())
 			v.Close() //TODO(baumanl): If a tube was already closed this returns an error that is ignored atm. Remove tube from map after closing?
 		}(v)
 	}
 	m.m.Unlock()
 	wg.Wait()
 	m.stopped.Store(true) //This has to come after all the tubes are closed otherwise the tubes can't finish sending all their frames and deadlock
-	logrus.Info("Muxer.Stop() finished")
+	m.log.Info("Muxer.Stop() finished")
 }

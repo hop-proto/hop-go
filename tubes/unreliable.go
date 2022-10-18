@@ -2,17 +2,17 @@
 package tubes
 
 import (
-	"crypto/rand"
 	"io"
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"hop.computer/hop/common"
 	"hop.computer/hop/transport"
 
-	//"github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 )
 
 // Unreliable implements UDP-like messages for Hop
@@ -21,18 +21,27 @@ type Unreliable struct {
 	id        byte
 	sendQueue chan []byte
 	m         sync.Mutex
-	// +checklocks:m
-	tubeState state
+
+	state     atomic.Value
+	initiated chan struct{}
+
+	// true if this tube began the request. false otherwise
+	// TODO(hosono) can be replaced with parity of tubeID
+	req bool
 
 	recv *common.DeadlineChan[[]byte]
 	send *common.DeadlineChan[[]byte]
 
+	// +checklocks:m
 	frameNo uint32
 
 	localAddr  net.Addr
 	remoteAddr net.Addr
+
+	log *logrus.Entry
 }
 
+// TODO(hosono) pick a value for this
 var maxBufferedPackets = 1000
 
 // Unreliable tubes implement net.Conn
@@ -47,24 +56,25 @@ var _ transport.MsgConn = &Unreliable{}
 // Unreliable tubes are tubes
 var _ Tube = &Unreliable{}
 
-func newUnreliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType TubeType) (*Unreliable, error) {
+/*
+func newUnreliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType TubeType, log *logrus.Entry) (*Unreliable, error) {
 	cid := []byte{0}
 	n, err := rand.Read(cid)
 	if err != nil || n != 1 {
 		return nil, err
 	}
-	u := makeUnreliableTube(underlying, netConn, sendQueue, tubeType, cid[0])
+	u := makeUnreliableTube(underlying, netConn, sendQueue, tubeType, cid[0], log)
 	go u.initiate(true)
 	return u, nil
 }
 
-func newUnreliableTubeWithTubeID(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType TubeType, tubeID byte) *Unreliable {
-	u := makeUnreliableTube(underlying, netConn, sendQueue, tubeType, tubeID)
+func newUnreliableTubeWithTubeID(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType TubeType, tubeID byte, log *logrus.Entry) *Unreliable {
+	u := makeUnreliableTube(underlying, netConn, sendQueue, tubeType, tubeID, log)
 	go u.initiate(false)
 	return u
 }
 
-func makeUnreliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType TubeType, tubeID byte) *Unreliable {
+func makeUnreliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType TubeType, tubeID byte, log *logrus.Entry) *Unreliable {
 	u := &Unreliable{
 		tType:      tType,
 		id:         tubeID,
@@ -73,9 +83,12 @@ func makeUnreliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueu
 		remoteAddr: netConn.RemoteAddr(),
 		recv:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
 		send:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
+		state:      atomic.Value{},
+		initiated:   make(chan struct{}),
 	}
 	return u
 }
+*/
 
 func (u *Unreliable) sender() {
 	for {
@@ -90,15 +103,21 @@ func (u *Unreliable) sender() {
 		}
 		u.sendQueue <- b
 	}
-	for pkt := range(u.send.C) {
+	// TODO(hosono) this won't finish because this channel is not closed
+	for pkt := range u.send.C {
 		u.sendQueue <- pkt
 	}
 }
 
-// req: whether the tube is requesting to initiate a tube (true), or whether is respondding to an initiation request (false)
+// req: whether the tube is requesting to initiate a tube (true), or whether is responding to an initiation request (false)
 func (u *Unreliable) initiate(req bool) {
-	notInit := true
+	if req {
+		u.state.Store(created)
+	} else {
+		u.state.Store(initiated)
+	}
 
+	notInit := true
 	for notInit {
 		p := initiateFrame{
 			tubeID:     u.id,
@@ -116,32 +135,61 @@ func (u *Unreliable) initiate(req bool) {
 			},
 		}
 		u.sendQueue <- p.toBytes()
-		u.m.Lock()
-		notInit = u.tubeState == created
-		u.m.Unlock()
-		timer := time.NewTimer(retransmitOffset)
-		<-timer.C
+
+		if req {
+			timer := time.NewTimer(retransmitOffset)
+			select {
+			case <-timer.C:
+				u.log.Warn("init rto exceeded")
+				break
+			case <-u.initiated:
+				break
+			}
+		}
+		notInit = u.state.Load() == created
 	}
 
 	go u.sender()
 }
 
 func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
-	u.m.Lock()
-	defer u.m.Unlock()
+	u.log.Debugf("receive initiate frame")
 
-	if u.tubeState == created {
-		u.tubeState = initiated
+	u.state.CompareAndSwap(created, initiated)
+
+	if !u.req {
+		p := initiateFrame{
+			tubeID:     u.id,
+			tubeType:   u.tType,
+			data:       []byte{},
+			dataLength: 0,
+			frameNo:    0,
+			windowSize: 0,
+			flags: frameFlags{
+				ACK:  true,
+				FIN:  false,
+				REQ:  false,
+				RESP: true,
+				REL:  false,
+			},
+		}
+		u.sendQueue <- p.toBytes()
+	}
+
+	select {
+	case u.initiated <- struct{}{}:
+		break
+	default:
+		break
 	}
 
 	return nil
 }
 
 func (u *Unreliable) receive(pkt *frame) error {
+	u.recv.C <- pkt.data
 	if pkt.flags.FIN {
 		u.recv.Close()
-	} else {
-		u.recv.C <- pkt.data
 	}
 	return nil
 }
@@ -187,6 +235,9 @@ func (u *Unreliable) WriteMsg(b []byte) (err error) {
 // WriteMsgUDP implements implements the UDPLike interface
 // oob and addr are ignored
 func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
+	u.m.Lock()
+	defer u.m.Unlock()
+
 	dataLength := uint16(len(b))
 	if uint16(len(b)) > maxFrameDataLength {
 		err = transport.ErrBufOverflow
@@ -196,16 +247,16 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 	pkt := frame{
 		tubeID: u.id,
 		flags: frameFlags{
-			ACK: false,
-			FIN: false,
-			REQ: false,
+			ACK:  false,
+			FIN:  false,
+			REQ:  false,
 			RESP: false,
-			REL: false,
+			REL:  false,
 		},
 
 		dataLength: dataLength,
-		frameNo: u.frameNo,
-		data: b,
+		frameNo:    u.frameNo,
+		data:       b,
 	}
 	u.frameNo++
 
@@ -214,7 +265,7 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 		return
 	}
 	n = len(b)
-	return
+	return n, 0, err
 }
 
 // Close implements the net.Conn interface. Future io operations will return io.EOF
@@ -222,23 +273,23 @@ func (u *Unreliable) Close() error {
 	u.m.Lock()
 	defer u.m.Unlock()
 
-	if u.tubeState == closed {
+	if u.state.Swap(closed) == closed {
 		return io.EOF
 	}
 
 	pkt := frame{
 		tubeID: u.id,
 		flags: frameFlags{
-			ACK: false,
-			FIN: true,
-			REQ: false,
+			ACK:  false,
+			FIN:  true,
+			REQ:  false,
 			RESP: false,
-			REL: false,
+			REL:  false,
 		},
 
 		dataLength: 0,
-		frameNo: u.frameNo,
-		data: []byte{},
+		frameNo:    u.frameNo,
+		data:       []byte{},
 	}
 	u.frameNo++
 
