@@ -76,29 +76,16 @@ func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
 
 // CreateUnreliableTube starts a new unreliable tube
 func (m *Muxer) CreateUnreliableTube(tType TubeType) (*Unreliable, error) {
-	// TODO(hosono) we should pick tube IDs sequentially not in order
+	// TODO(hosono) we should pick tube IDs sequentially not randomly
 	tubeID := []byte{0}
 	rand.Read(tubeID)
-	tube := &Unreliable{
-		tType:      tType,
-		id:         tubeID[0],
-		sendQueue:  m.sendQueue,
-		localAddr:  m.netConn.LocalAddr(),
-		remoteAddr: m.netConn.RemoteAddr(),
-		recv:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
-		send:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
-		state:      atomic.Value{},
-		initiated:  make(chan struct{}, 1),
-		req:        true,
-		log:        m.log.WithField("tube", tubeID[0]),
-	}
-	go tube.initiate(true)
-	m.addTube(tube)
+	tube := m.makeUnreliableTubeWithID(tType, tubeID[0], true)
 	m.log.Infof("Created Tube: %v", tube.GetID())
 	return tube, nil
 }
 
-func (m *Muxer) newUnreliableTubeFromRequest(tType TubeType, tubeID byte) {
+// req is true if the tube is a new request. False otherwise
+func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) *Unreliable {
 	tube := &Unreliable{
 		tType:      tType,
 		id:         tubeID,
@@ -109,12 +96,15 @@ func (m *Muxer) newUnreliableTubeFromRequest(tType TubeType, tubeID byte) {
 		send:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
 		state:      atomic.Value{},
 		initiated:  make(chan struct{}, 1),
-		req:        false,
+		req:        req,
 		log:        m.log.WithField("tube", tubeID),
 	}
-	go tube.initiate(false)
+	go tube.initiate()
 	m.addTube(tube)
-	m.tubeQueue <- tube
+	if !req {
+		m.tubeQueue <- tube
+	}
+	return tube
 }
 
 // Accept blocks for and accepts a new tube
@@ -192,7 +182,7 @@ func (m *Muxer) Start() error {
 					m.addTube(tube)
 					m.tubeQueue <- tube
 				} else {
-					m.newUnreliableTubeFromRequest(initFrame.tubeType, initFrame.tubeID)
+					m.makeUnreliableTubeWithID(initFrame.tubeType, initFrame.tubeID, false)
 				}
 			}
 

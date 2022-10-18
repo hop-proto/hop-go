@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -20,7 +19,6 @@ type Unreliable struct {
 	tType     TubeType
 	id        byte
 	sendQueue chan []byte
-	m         sync.Mutex
 
 	state     atomic.Value
 	initiated chan struct{}
@@ -32,8 +30,7 @@ type Unreliable struct {
 	recv *common.DeadlineChan[[]byte]
 	send *common.DeadlineChan[[]byte]
 
-	// +checklocks:m
-	frameNo uint32
+	frameNo atomic.Uint32
 
 	localAddr  net.Addr
 	remoteAddr net.Addr
@@ -109,9 +106,27 @@ func (u *Unreliable) sender() {
 	}
 }
 
+func (u *Unreliable) makeInitFrame() initiateFrame {
+	return initiateFrame{
+		tubeID:     u.id,
+		tubeType:   u.tType,
+		data:       []byte{},
+		dataLength: 0,
+		frameNo:    0,
+		windowSize: 0,
+		flags: frameFlags{
+			ACK:  true,
+			FIN:  false,
+			REQ:  u.req,
+			RESP: !u.req,
+			REL:  false,
+		},
+	}
+}
+
 // req: whether the tube is requesting to initiate a tube (true), or whether is responding to an initiation request (false)
-func (u *Unreliable) initiate(req bool) {
-	if req {
+func (u *Unreliable) initiate() {
+	if u.req {
 		u.state.Store(created)
 	} else {
 		u.state.Store(initiated)
@@ -119,24 +134,10 @@ func (u *Unreliable) initiate(req bool) {
 
 	notInit := true
 	for notInit {
-		p := initiateFrame{
-			tubeID:     u.id,
-			tubeType:   u.tType,
-			data:       []byte{},
-			dataLength: 0,
-			frameNo:    0,
-			windowSize: 0,
-			flags: frameFlags{
-				ACK:  true,
-				FIN:  false,
-				REQ:  req,
-				RESP: !req,
-				REL:  false,
-			},
-		}
+		p := u.makeInitFrame()
 		u.sendQueue <- p.toBytes()
 
-		if req {
+		if u.req {
 			timer := time.NewTimer(retransmitOffset)
 			select {
 			case <-timer.C:
@@ -158,21 +159,7 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 	u.state.CompareAndSwap(created, initiated)
 
 	if !u.req {
-		p := initiateFrame{
-			tubeID:     u.id,
-			tubeType:   u.tType,
-			data:       []byte{},
-			dataLength: 0,
-			frameNo:    0,
-			windowSize: 0,
-			flags: frameFlags{
-				ACK:  true,
-				FIN:  false,
-				REQ:  false,
-				RESP: true,
-				REL:  false,
-			},
-		}
+		p := u.makeInitFrame()
 		u.sendQueue <- p.toBytes()
 	}
 
@@ -235,9 +222,6 @@ func (u *Unreliable) WriteMsg(b []byte) (err error) {
 // WriteMsgUDP implements implements the UDPLike interface
 // oob and addr are ignored
 func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
-	u.m.Lock()
-	defer u.m.Unlock()
-
 	dataLength := uint16(len(b))
 	if uint16(len(b)) > maxFrameDataLength {
 		err = transport.ErrBufOverflow
@@ -255,10 +239,10 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 		},
 
 		dataLength: dataLength,
-		frameNo:    u.frameNo,
+		frameNo:    u.frameNo.Load(),
 		data:       b,
 	}
-	u.frameNo++
+	u.frameNo.Add(1)
 
 	err = u.send.Send(pkt.toBytes())
 	if err != nil {
@@ -270,9 +254,6 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 
 // Close implements the net.Conn interface. Future io operations will return io.EOF
 func (u *Unreliable) Close() error {
-	u.m.Lock()
-	defer u.m.Unlock()
-
 	if u.state.Swap(closed) == closed {
 		return io.EOF
 	}
@@ -288,14 +269,13 @@ func (u *Unreliable) Close() error {
 		},
 
 		dataLength: 0,
-		frameNo:    u.frameNo,
+		frameNo:    u.frameNo.Load(),
 		data:       []byte{},
 	}
-	u.frameNo++
+	u.frameNo.Add(1)
 
 	err := u.send.Send(pkt.toBytes())
 
-	u.frameNo++
 	u.send.Close()
 	u.recv.Close()
 
