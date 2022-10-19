@@ -169,7 +169,7 @@ func (r *ReliableUDP) SetWriteDeadline(t time.Time) error {
 	return r.writeDeadline.SetDeadline(t)
 }
 
-// MakeRelaibleUDPConn returns two pointers to ReliableUDP structs
+// MakeReliableUDPConn returns two pointers to ReliableUDP structs
 // Writes and reads from one connection can be seen on the other one
 // eof is true if closing one end of the connection should cause reads from the other to return io.EOF
 func MakeReliableUDPConn(eof bool) (c1, c2 *ReliableUDP) {
