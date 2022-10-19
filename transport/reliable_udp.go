@@ -181,7 +181,7 @@ func MakeReliableUDPConn(eof bool) (c1, c2 *ReliableUDP) {
 		recv:          ch2,
 		readDeadline:  common.NewDeadline(time.Time{}),
 		writeDeadline: common.NewDeadline(time.Time{}),
-		eof: eof,
+		eof:           eof,
 	}
 
 	c2 = &ReliableUDP{
@@ -189,7 +189,7 @@ func MakeReliableUDPConn(eof bool) (c1, c2 *ReliableUDP) {
 		recv:          ch1,
 		readDeadline:  common.NewDeadline(time.Time{}),
 		writeDeadline: common.NewDeadline(time.Time{}),
-		eof: eof,
+		eof:           eof,
 	}
 
 	return c1, c2
