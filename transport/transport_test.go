@@ -32,7 +32,7 @@ func makeConn(t *testing.T, fakeUDP bool) (*Client, *Handle, *Server, func(), er
 	var serverUDP UDPLike
 	var clientUDP UDPLike
 	if fakeUDP {
-		serverUDP, clientUDP = MakeRelaibleUDPConn()
+		serverUDP, clientUDP = MakeReliableUDPConn(false)
 	} else {
 		serverPkt, err := net.ListenPacket("udp", "localhost:7777")
 		assert.NilError(t, err)
@@ -263,7 +263,7 @@ func serverClose(t *testing.T) {
 }
 
 func makeReliableUDPPipe() (net.Conn, net.Conn, func(), error) {
-	c1, c2 := MakeRelaibleUDPConn()
+	c1, c2 := MakeReliableUDPConn(true)
 	stop := func() {
 		c1.Close()
 		c2.Close()
@@ -271,10 +271,7 @@ func makeReliableUDPPipe() (net.Conn, net.Conn, func(), error) {
 	return c1, c2, stop, nil
 }
 
-// This test only works if closing one side of reliable UDP causes
-// the other side to return EOF on reads. This behavior prevents us from
-// testing the closing behavior of Client and Server connections.
-func DontTestReliableUDP(t *testing.T) {
+func TestReliableUDP(t *testing.T) {
 	mp := nettest.MakePipe(makeReliableUDPPipe)
 	nettest.TestConn(t, mp)
 }

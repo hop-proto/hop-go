@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -24,6 +25,8 @@ type ReliableUDP struct {
 	writeDeadline *common.Deadline
 
 	closed atomic.Bool
+
+	eof bool
 }
 
 var _ UDPLike = &ReliableUDP{}
@@ -43,7 +46,11 @@ func (r *ReliableUDP) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.U
 
 	// return buffered packets even after closed
 	select {
-	case msg := <-r.recv:
+	case msg, ok := <-r.recv:
+		if !ok {
+			err = io.EOF
+			return
+		}
 		n = copy(b, msg)
 		if n < len(msg) {
 			panic("buffer too small")
@@ -69,7 +76,7 @@ func (r *ReliableUDP) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.U
 			return
 		case msg, ok := <-r.recv:
 			if !ok {
-				err = net.ErrClosed
+				err = io.EOF
 				return
 			}
 			n = copy(b, msg)
@@ -129,7 +136,9 @@ func (r *ReliableUDP) Close() error {
 	r.writeLock.Lock()
 	defer r.writeLock.Unlock()
 
-	//close(r.send)
+	if r.eof {
+		close(r.send)
+	}
 	return nil
 }
 
@@ -162,7 +171,8 @@ func (r *ReliableUDP) SetWriteDeadline(t time.Time) error {
 
 // MakeRelaibleUDPConn returns two pointers to ReliableUDP structs
 // Writes and reads from one connection can be seen on the other one
-func MakeRelaibleUDPConn() (c1, c2 *ReliableUDP) {
+// eof is true if closing one end of the connection should cause reads from the other to return io.EOF
+func MakeReliableUDPConn(eof bool) (c1, c2 *ReliableUDP) {
 	ch1 := make(chan []byte, 1<<16)
 	ch2 := make(chan []byte, 1<<16)
 
@@ -171,6 +181,7 @@ func MakeRelaibleUDPConn() (c1, c2 *ReliableUDP) {
 		recv:          ch2,
 		readDeadline:  common.NewDeadline(time.Time{}),
 		writeDeadline: common.NewDeadline(time.Time{}),
+		eof: eof,
 	}
 
 	c2 = &ReliableUDP{
@@ -178,6 +189,7 @@ func MakeRelaibleUDPConn() (c1, c2 *ReliableUDP) {
 		recv:          ch1,
 		readDeadline:  common.NewDeadline(time.Time{}),
 		writeDeadline: common.NewDeadline(time.Time{}),
+		eof: eof,
 	}
 
 	return c1, c2
