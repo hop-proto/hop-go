@@ -154,8 +154,9 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 	sess := &hopSession{
 		transportConn: serverConn,
 		// TODO(hosono) choose timeout. Allow timeout to be configured
-		tubeMuxer:       tubes.NewMuxer(serverConn, serverConn, s.config.DataTimeout),
-		tubeQueue:       make(chan *tubes.Reliable),
+		// TODO(hosono) add logging context to server
+		tubeMuxer:       tubes.NewMuxer(serverConn, serverConn, s.config.DataTimeout, logrus.WithField("TODO", "add logger to server")),
+		tubeQueue:       make(chan tubes.Tube),
 		done:            make(chan int),
 		controlChannels: []net.Conn{},
 		server:          s,

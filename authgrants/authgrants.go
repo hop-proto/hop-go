@@ -21,7 +21,7 @@ type AuthGrantConn struct {
 
 // NewAuthGrantConnFromMux starts a new Tube using provided muxer and uses it for an AuthGrantConn
 func NewAuthGrantConnFromMux(m *tubes.Muxer) (*AuthGrantConn, error) {
-	t, e := m.CreateTube(common.AuthGrantTube)
+	t, e := m.CreateReliableTube(common.AuthGrantTube)
 	if e != nil {
 		return nil, e
 	}

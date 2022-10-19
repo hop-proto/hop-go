@@ -129,7 +129,8 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	// authgrant procedure.
 	// c.address = address
 	c.authenticator = authenticator
-	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.TransportConn, c.hostconfig.DataTimeout)
+	// TODO(hosono) add logging context to client
+	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.TransportConn, c.hostconfig.DataTimeout, logrus.WithField("TODO", "add logger to client"))
 	go func() {
 		err := c.TubeMuxer.Start()
 		if c.ExecTube != nil {
@@ -421,7 +422,7 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 
 func (c *HopClient) userAuthorization() error {
 	//*****PERFORM USER AUTHORIZATION******
-	uaCh, _ := c.TubeMuxer.CreateTube(common.UserAuthTube)
+	uaCh, _ := c.TubeMuxer.CreateReliableTube(common.UserAuthTube)
 	defer uaCh.Close()
 	logrus.Infof("requesting auth for %s", c.hostconfig.User)
 	if ok := userauth.RequestAuthorization(uaCh, c.hostconfig.User); !ok {
@@ -437,12 +438,12 @@ func (c *HopClient) startExecTube() error {
 	// TODO(baumanl): provide support for Cmd in ClientConfig
 
 	logrus.Infof("Performing action: %v", c.hostconfig.Cmd)
-	ch, err := c.TubeMuxer.CreateTube(common.ExecTube)
+	ch, err := c.TubeMuxer.CreateReliableTube(common.ExecTube)
 	if err != nil {
 		logrus.Error(err)
 		return err
 	}
-	winSizeTube, err := c.TubeMuxer.CreateTube(common.WinSizeTube)
+	winSizeTube, err := c.TubeMuxer.CreateReliableTube(common.WinSizeTube)
 	if err != nil {
 		logrus.Error(err)
 		return err
@@ -462,9 +463,10 @@ func (c *HopClient) HandleTubes() {
 			logrus.Errorf("Error accepting tube: %v", e)
 			continue
 		}
-		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v", t.Type())
-		if t.Type() == common.AuthGrantTube && c.hostconfig.Headless {
-			go c.principal(t)
+		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v. Reliable? %t", t.Type(), t.IsReliable())
+
+		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.Headless {
+			go c.principal(r)
 		} else if t.Type() == common.RemotePFTube {
 			go c.handleRemote(t)
 		} else {

@@ -56,6 +56,9 @@ type Reliable struct {
 // Reliable implements net.Conn
 var _ net.Conn = &Reliable{}
 
+// Reliable tubes are tubes
+var _ Tube = &Reliable{}
+
 func (r *Reliable) getState() state {
 	r.m.Lock()
 	defer r.m.Unlock()
@@ -68,18 +71,19 @@ func (r *Reliable) send() {
 		pkt.tubeID = r.id
 		pkt.ackNo = r.recvWindow.getAck()
 		pkt.flags.ACK = true
+		pkt.flags.REL = true
 		logrus.Debug("sending pkt ", pkt.frameNo, pkt.ackNo, pkt.flags.FIN, pkt.flags.ACK)
 		r.sendQueue <- pkt.toBytes()
 	}
 }
 
 func newReliableTubeWithTubeID(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType TubeType, tubeID byte) *Reliable {
-	r := makeTube(underlying, netConn, sendQueue, tubeType, tubeID)
+	r := makeReliableTube(underlying, netConn, sendQueue, tubeType, tubeID)
 	go r.initiate(false)
 	return r
 }
 
-func makeTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType TubeType, tubeID byte) *Reliable {
+func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType TubeType, tubeID byte) *Reliable {
 	r := &Reliable{
 		id:        tubeID,
 		tubeState: created,
@@ -125,7 +129,7 @@ func newReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue c
 	if err != nil || n != 1 {
 		return nil, err
 	}
-	r := makeTube(underlying, netConn, sendQueue, tType, cid[0])
+	r := makeReliableTube(underlying, netConn, sendQueue, tType, cid[0])
 	go r.initiate(true)
 	return r, nil
 }
@@ -148,6 +152,7 @@ func (r *Reliable) initiate(req bool) {
 				FIN:  false,
 				REQ:  req,
 				RESP: !req,
+				REL:  true,
 			},
 		}
 		r.sendQueue <- p.toBytes()
@@ -280,6 +285,16 @@ func (r *Reliable) Close() error {
 // Type returns tube type
 func (r *Reliable) Type() TubeType {
 	return r.tType
+}
+
+// GetID returns the tube ID
+func (r *Reliable) GetID() byte {
+	return r.id
+}
+
+// IsReliable returns whether the tube is reliable. Always true
+func (r *Reliable) IsReliable() bool {
+	return true
 }
 
 // LocalAddr returns tube local address
