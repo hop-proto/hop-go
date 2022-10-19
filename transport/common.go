@@ -116,23 +116,5 @@ const (
 	closed
 )
 
-// ControlMessage specifies the bytes that indicate different control messages.
-type ControlMessage byte
-
-// ControlMessage constants for each control message
-const (
-	ControlMessageClose ControlMessage = 0x01
-)
-
-// states that a Handle or Client can be in. Most of them are needed to handle closing
-// most of these names are taken from the RFC 793 (TCP) for familiarity
-type connState uint32
-
-const (
-	finishingHandshake connState = iota
-	established
-	closed
-)
-
 // IsHandshakeType returns true if the message type is part of the handshake, not the transport.
 func (mt MessageType) IsHandshakeType() bool { return (byte(mt) & byte(0x0F)) != 0 }

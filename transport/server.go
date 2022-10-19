@@ -680,18 +680,6 @@ func (s *Server) CloseSession(sessionID SessionID) error {
 	return nil
 }
 
-// This wrapper is needed to make checklocks happy
-// +checklocks:s.m
-// +checklocksalias:c.server.m=s.m
-func (s *Server) closeHandleWrapper(c *Handle) error {
-	// TODO(hosono) this is not the correct closing behavior
-	// but making it correct would require changing the locking behavior
-	c.m.Lock()
-	defer c.m.Unlock()
-	c.writeControl(ControlMessageClose)
-	return c.shutdown()
-}
-
 // Close stops the server, causing Serve() to return.
 func (s *Server) Close() (err error) {
 	// This will end the reading goroutine and wait for it to exit
@@ -703,8 +691,6 @@ func (s *Server) Close() (err error) {
 	s.closed.Store(true)
 
 	close(s.stopCookieRotate)
-
-	wg := sync.WaitGroup{}
 
 	wg := sync.WaitGroup{}
 

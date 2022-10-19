@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -81,7 +82,7 @@ func (r *ReliableUDP) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.U
 			return
 		case msg, ok := <-r.recv:
 			if !ok {
-				err = net.ErrClosed
+				err = io.EOF
 				return
 			}
 			n = copy(b, msg)

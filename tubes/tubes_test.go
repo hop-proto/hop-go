@@ -16,7 +16,7 @@ import (
 
 // rel is true for reliable tubes and false for unreliable ones
 func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), err error) {
-	c1, c2 := transport.MakeReliableUDPConn()
+	c1, c2 := transport.MakeReliableUDPConn(false)
 
 	muxer1 := NewMuxer(c1, c1, 0, logrus.WithField("muxer", "m1"))
 	muxer2 := NewMuxer(c2, c2, 0, logrus.WithField("muxer", "m2"))

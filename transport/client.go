@@ -61,8 +61,6 @@ type Client struct {
 
 	recv *common.DeadlineChan[[]byte]
 
-	recv *common.DeadlineChan
-
 	config ClientConfig
 }
 
@@ -82,20 +80,6 @@ func (c *Client) unlockUser() {
 	c.readLock.Unlock()
 	c.writeLock.Unlock()
 	c.m.Unlock()
-}
-
-// IsClosed returns true if Close() has been called
-func (c *Client) IsClosed() bool {
-	c.m.Lock()
-	defer c.m.Unlock()
-	return c.state == closed
-}
-
-// handshake complete returns true if the client has finished its handshake with the server
-func (c *Client) handshakeComplete() bool {
-	c.m.Lock()
-	defer c.m.Unlock()
-	return c.state != finishingHandshake
 }
 
 // IsClosed returns true if Close() has been called
@@ -403,64 +387,6 @@ func (c *Client) handleControlMsg(msg ControlMessage) (err error) {
 		go c.Close()
 		return ErrInvalidMessage
 	}
-}
-
-func (c *Client) listen() {
-	c.wg.Add(1)
-	defer c.wg.Done()
-	for !c.closed.Load() {
-		n, mt, err := c.readMsg()
-
-		if err != nil {
-			if !errors.Is(err, net.ErrClosed) {
-				logrus.Errorf("client: %s", err)
-				go c.Reset()
-			}
-			break
-		}
-
-		switch mt {
-		case MessageTypeTransport:
-			select {
-			case c.recv.C <- append([]byte(nil), c.plaintext[:n]...):
-				break
-			default:
-				logrus.Warn("client: recv queue full. dropping message")
-			}
-		case MessageTypeControl:
-			if n != 1 {
-				logrus.Errorf("client: malformed control message: %s", c.plaintext[:n])
-				go c.Close()
-			}
-			msg := ControlMessage(c.plaintext[0])
-			err := c.handleControlMsg(msg)
-			if err != nil {
-				go c.Close()
-			}
-		default:
-			logrus.Errorf("client: unexpected message type %x", mt)
-			go c.Close()
-		}
-	}
-}
-
-// handleControlMsg must only be called on authenticated packets after the handshake is complete.
-// Due to the spoofable nature of UDP, control messages can be injected by third parties.
-// both on the connection patch an off the connection path
-func (c *Client) handleControlMsg(msg ControlMessage) (err error) {
-	switch msg {
-	case ControlMessageClose:
-		logrus.Debug("client: got close message")
-		c.recv.Close()
-		return
-
-	default:
-		logrus.Errorf("client: invalid control message: %x", msg)
-		go c.Close()
-		return ErrInvalidMessage
-	}
-
-	return nil
 }
 
 // readMsg reads one packet from the underlying connection, and writes it into c.plaintext

@@ -141,21 +141,6 @@ func (m *Muxer) Start() error {
 	go m.sender()
 	m.stopped.Store(false)
 
-	defer func() {
-		// This case indicates that the muxer was stopped by m.Close()
-		if errors.Is(err, os.ErrDeadlineExceeded) && m.stopped.IsSet() {
-			err = nil
-		} else if err != nil {
-			logrus.Errorf("Muxer ended with error: %s", err)
-			m.Stop()
-		}
-	}()
-
-	defer func() {
-		// TODO(hosono) prevent panic by making sure this happens only once prevent panic by making sure this happens only once
-		close(m.muxerStopped)
-	}()
-
 	// Set initial timeout
 	if m.timeout != 0 {
 		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
