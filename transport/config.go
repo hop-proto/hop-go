@@ -29,6 +29,7 @@ type IdentityConfig struct {
 
 // ClientConfig contains client-specific configuration settings.
 type ClientConfig struct {
+	MaxBufferedPackets int
 	Exchanger          keys.Exchangable
 	Verify             VerifyConfig
 	Leaf, Intermediate *certs.Certificate
@@ -38,16 +39,30 @@ type ClientConfig struct {
 	KeepAlive          time.Duration
 }
 
+func (c *ClientConfig) maxBufferedPackets() int {
+	if c.MaxBufferedPackets == 0 {
+		return ClientDefaultMaxBufferedPacketsPerSession
+	}
+	return c.MaxBufferedPackets
+}
+
 const (
 
-	// DefaultMaxPendingConnections sets the maximum number of handshakes
+	// ServerDefaultMaxPendingConnections sets the maximum number of handshakes
 	// waiting for a call to Accept().
-	DefaultMaxPendingConnections = 10
+	ServerDefaultMaxPendingConnections = 10
 
-	// DefaultMaxBufferedPacketsPerSession sets the maximum number of packets
+	// ServerDefaultMaxBufferedPacketsPerSession sets the maximum number of packets
 	// (not bytes) than can be buffered by the server per accepted session.
 	// Packets after this will dropped until the user calls Read.
-	DefaultMaxBufferedPacketsPerSession = 100
+	// TODO(hosono) fixing the reliable tubes may let us reduce this number
+	ServerDefaultMaxBufferedPacketsPerSession = 10000
+
+	// ClientDefaultMaxBufferedPacketsPerSession sets the maximum number of packets
+	// (not bytes) that can be buffered for a session. Packets after this will
+	// be dropped unless the user calls Read
+	// TODO(hosono) fixing the reliable tubes may let us reduce this number
+	ClientDefaultMaxBufferedPacketsPerSession = 10000
 )
 
 // ClientHandshakeInfo contains information about an attempted handshake. It is
@@ -63,9 +78,7 @@ type ServerConfig struct {
 	MaxPendingConnections           int
 	MaxBufferedPacketsPerConnection int
 
-	HandshakeTimeout     time.Duration
-	StartingReadTimeout  time.Duration
-	StartingWriteTimeout time.Duration
+	HandshakeTimeout time.Duration
 
 	KeyPair      *keys.X25519KeyPair
 	Certificate  *certs.Certificate
@@ -78,14 +91,14 @@ type ServerConfig struct {
 
 func (c *ServerConfig) maxPendingConnections() int {
 	if c.MaxPendingConnections == 0 {
-		return DefaultMaxPendingConnections
+		return ServerDefaultMaxPendingConnections
 	}
 	return c.MaxPendingConnections
 }
 
 func (c *ServerConfig) maxBufferedPacketsPerConnection() int {
 	if c.MaxBufferedPacketsPerConnection == 0 {
-		return DefaultMaxBufferedPacketsPerSession
+		return ServerDefaultMaxBufferedPacketsPerSession
 	}
 	return c.MaxBufferedPacketsPerConnection
 }

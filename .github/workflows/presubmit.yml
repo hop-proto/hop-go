@@ -28,7 +28,7 @@ jobs:
       - name: install
         run: make install
       - name: lint
-        uses: golangci/golangci-lint-action@v2
+        uses: golangci/golangci-lint-action@v3
         with:
           version: v1.45
           args: --deadline 1m

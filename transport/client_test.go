@@ -15,7 +15,6 @@ import (
 func TestClientCertificates(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 	baseConfig, verify := newTestServerConfig(t)
-	baseConfig.StartingReadTimeout = 10 * time.Second
 	baseConfig.MaxPendingConnections = 1
 	baseConfig.MaxBufferedPacketsPerConnection = 5
 
@@ -89,7 +88,7 @@ func TestClientCertificates(t *testing.T) {
 	}
 
 	assertHandshake := func(t *testing.T, clientConfig ClientConfig, server *Server) {
-		client, err := Dial("udp", server.ListenAddress().String(), clientConfig)
+		client, err := Dial("udp", server.Addr().String(), clientConfig)
 		assert.NilError(t, err)
 
 		err = client.Handshake()
@@ -101,7 +100,7 @@ func TestClientCertificates(t *testing.T) {
 	}
 
 	assertNoHandshake := func(t *testing.T, clientConfig ClientConfig, server *Server) {
-		client, err := Dial("udp", server.ListenAddress().String(), clientConfig)
+		client, err := Dial("udp", server.Addr().String(), clientConfig)
 		assert.NilError(t, err)
 
 		go func() {

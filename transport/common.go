@@ -78,7 +78,6 @@ var ErrWouldBlock = errors.New("operation would block")
 
 // ErrTimeout is returned for operations that timed out
 // Timeouts must wrap os.ErrDeadlineExceeded as per the net.Conn docs for SetDeadline()
-// TODO(hosono) do we need to import fmt? I can't find another way, but it's weird
 var ErrTimeout = fmt.Errorf("operation timed out [%w]", os.ErrDeadlineExceeded)
 
 // ErrReplay is returned when a message is a duplicate. This should not
@@ -96,6 +95,25 @@ const (
 	MessageTypeServerAuth  MessageType = 0x04
 	MessageTypeClientAuth  MessageType = 0x05
 	MessageTypeTransport   MessageType = 0x10
+	MessageTypeControl     MessageType = 0x80
+)
+
+// ControlMessage specifies the bytes that indicate different control messages.
+type ControlMessage byte
+
+// ControlMessage constants for each control message
+const (
+	ControlMessageClose ControlMessage = 0x01
+)
+
+// states that a Handle or Client can be in. Most of them are needed to handle closing
+// most of these names are taken from the RFC 793 (TCP) for familiarity
+type connState uint32
+
+const (
+	finishingHandshake connState = iota
+	established
+	closed
 )
 
 // IsHandshakeType returns true if the message type is part of the handshake, not the transport.

@@ -2,39 +2,45 @@ package transport
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net"
+	"os"
 	"sync"
-	"sync/atomic"
 	"time"
+
+	"github.com/sirupsen/logrus"
+
+	"hop.computer/hop/certs"
+	"hop.computer/hop/common"
 )
+
+type message struct {
+	msgType MessageType
+	data    []byte
+}
 
 // Handle implements net.Conn and MsgConn for connections accepted by a Server.
 type Handle struct { // nolint:maligned // unclear if 120-byte struct is better than 128
-
-	// TODO(dadrian): Not all of these are used, but also not all of the
-	// functions are implemented yet. Remove unused variables when the
-	// implementation settles down.
-	m         sync.Mutex
 	readLock  sync.Mutex
 	writeLock sync.Mutex
 
-	// TODO(dadrian): This might need to be a real condition variable. We don't
-	// currently wait on it, but we Add/Done in the actual send write function.
-	writeWg sync.WaitGroup
+	sendWg sync.WaitGroup
 
-	readTimeout  atomicTimeout
-	writeTimeout atomicTimeout
+	recv *common.DeadlineChan[[]byte]  // incoming transport messages
+	send *common.DeadlineChan[message] // outgoing messages
 
-	sessionID SessionID
-
-	recv chan []byte
-	send chan []byte
-
-	closed atomic.Bool
+	// +checklocks:m
+	state connState
+	m     sync.Mutex
 
 	// +checklocks:readLock
 	buf bytes.Buffer
+
+	// +checklocks:m
+	clientLeaf certs.Certificate
+	ss         *SessionState
+	server     *Server
 }
 
 var _ MsgReader = &Handle{}
@@ -43,16 +49,23 @@ var _ MsgConn = &Handle{}
 
 var _ net.Conn = &Handle{}
 
-// IsClosed returns closed member variable value
+func (c *Handle) getState() connState {
+	c.m.Lock()
+	defer c.m.Unlock()
+	return c.state
+}
+
+// IsClosed returns true if the handle is closed or in the process of closing.
+// Writes and reads to the handle return io.EOF if and only if IsClosed returns true
 func (c *Handle) IsClosed() bool {
-	return c.closed.Load()
+	c.m.Lock()
+	defer c.m.Unlock()
+	return c.state == closed
 }
 
 // ReadMsg implements the MsgReader interface. If b is too short to hold the
 // message, it returns ErrBufOverflow.
 func (c *Handle) ReadMsg(b []byte) (int, error) {
-	// TODO(dadrian): Should we close the connection on read errors?
-	// TODO(dadrian): This duplicates a lot of code from Read().
 	c.readLock.Lock()
 	defer c.readLock.Unlock()
 
@@ -68,28 +81,9 @@ func (c *Handle) ReadMsg(b []byte) (int, error) {
 
 	// Check and see if there are pending messages. This causes the queue to get
 	// drained even if the connection is closed.
-	var msg []byte
-	select {
-	case msg = <-c.recv:
-		break
-	default:
-		if c.closed.Load() {
-			return 0, io.EOF
-		}
-	}
-
-	// Wait for a message until timeout
-	if msg == nil && c.readTimeout.get() != 0 {
-		timer := time.NewTimer(c.readTimeout.get())
-		select {
-		case msg = <-c.recv:
-			if !timer.Stop() {
-				<-timer.C
-			}
-			break
-		case <-timer.C:
-			return 0, ErrTimeout
-		}
+	msg, err := c.recv.Recv()
+	if err != nil {
+		return 0, err
 	}
 
 	// If the input is long enough, just copy into it
@@ -99,7 +93,7 @@ func (c *Handle) ReadMsg(b []byte) (int, error) {
 	}
 
 	// Input was too short, buffer this message and return ErrBufOverflow
-	_, err := c.buf.Write(msg)
+	_, err = c.buf.Write(msg)
 	if err != nil {
 		return 0, err
 	}
@@ -120,32 +114,11 @@ func (c *Handle) Read(b []byte) (int, error) {
 		return n, err
 	}
 
-	// There must not be buffered data, fetch a message off the channel
-	var msg []byte
-
 	// Check and see if there are pending messages. This causes the queue to get
 	// drained even if the connection is closed.
-	select {
-	case msg = <-c.recv:
-		break
-	default:
-		if c.closed.Load() {
-			return 0, io.EOF
-		}
-	}
-
-	// Wait for a message until timeout
-	if msg == nil && c.readTimeout != 0 {
-		timer := time.NewTimer(c.readTimeout.get())
-		select {
-		case msg = <-c.recv:
-			if !timer.Stop() {
-				<-timer.C
-			}
-			break
-		case <-timer.C:
-			return 0, ErrTimeout
-		}
+	msg, err := c.recv.Recv()
+	if err != nil {
+		return 0, err
 	}
 
 	// Copy as much data as possible into the output data
@@ -154,52 +127,45 @@ func (c *Handle) Read(b []byte) (int, error) {
 		return n, nil
 	}
 	// If there was leftover data, buffer it
-	_, err := c.buf.Write(msg[n:])
+	_, err = c.buf.Write(msg[n:])
 	return n, err
 }
 
 // WriteMsg writes b as a single packet. If b is too long, WriteMsg returns
 // ErrBufOverlow.
 func (c *Handle) WriteMsg(b []byte) error {
+	c.writeLock.Lock()
+	defer c.writeLock.Unlock()
+
+	if c.IsClosed() {
+		return io.EOF
+	}
+
 	if len(b) > MaxPlaintextSize {
 		return ErrBufOverflow
 	}
-	if c.closed.Load() {
-		return io.EOF
-	}
-	select {
-	case c.send <- b:
-		return nil
-	default:
-		if c.closed.Load() {
-			return io.EOF
-		}
-	}
 
-	timer := time.NewTimer(c.writeTimeout.get())
-	select {
-	case c.send <- b:
-		if !timer.Stop() {
-			<-timer.C
-		}
-		return nil
-	case <-timer.C:
-		if c.closed.Load() {
-			return io.EOF
-		}
-		return ErrTimeout
+	msg := message{
+		data:    append([]byte{}, b...),
+		msgType: MessageTypeTransport,
 	}
+	return c.send.Send(msg)
 }
 
 // Write implements io.Writer. It will split b into segments of length
 // MaxPlaintextLength and send them using WriteMsg. Each call to WriteMsg is
 // subject to the timeout.
-func (c *Handle) Write(b []byte) (int, error) {
-	if c.closed.Load() {
+func (c *Handle) Write(buf []byte) (int, error) {
+	if c.IsClosed() {
 		return 0, io.EOF
 	}
+	b := append([]byte{}, buf...)
 	if len(b) <= MaxPlaintextSize {
-		return len(b), c.WriteMsg(b)
+		err := c.WriteMsg(b)
+		if err != nil {
+			return 0, err
+		}
+		return len(b), nil
 	}
 	total := 0
 	for i := MaxPlaintextSize; i < len(b); i += MaxPlaintextSize {
@@ -207,7 +173,7 @@ func (c *Handle) Write(b []byte) (int, error) {
 		if end > len(b) {
 			end = len(b)
 		}
-		err := c.WriteMsg(b[i:end])
+		err := c.WriteMsg((b[i:end]))
 		if err != nil {
 			return total, err
 		}
@@ -216,103 +182,139 @@ func (c *Handle) Write(b []byte) (int, error) {
 	return total, nil
 }
 
-func (c *Handle) close() {
-	// TODO(dadrian): Implement
-	// Remove the reference to the session, so it can be cleaned up
-	// Close all the channels
-	// Set the closed state
+// writeControl writes a control message to the remote host
+func (c *Handle) writeControl(msg ControlMessage) error {
+	toSend := message{
+		data:    []byte{byte(msg)},
+		msgType: MessageTypeControl,
+	}
+	return c.send.Send(toSend)
 }
 
-// Close closes the connection. Future operations on non-buffered data will
-// return io.EOF.
-//
-// TODO(dadrian): Implement
+func (c *Handle) sender() {
+	defer c.sendWg.Done()
+	for {
+		msg, err := c.send.Recv()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			} else if errors.Is(err, os.ErrDeadlineExceeded) {
+				continue
+			} else {
+				logrus.Errorf("handle: error receiving from send channel: %s", err)
+			}
+		}
+
+		err = c.ss.writePacket(c.server.udpConn, msg.msgType, msg.data, &c.ss.serverToClientKey)
+		if err != nil {
+			logrus.Errorf("handle: resetting connection. unable to write packet: %s", err)
+			go c.Close()
+		}
+	}
+}
+
+func (c *Handle) handleControl(msg []byte) (err error) {
+	if len(msg) != 1 {
+		logrus.Error("handle: invalid control message: ", msg)
+		c.Close()
+		return ErrInvalidMessage
+	}
+
+	c.m.Lock()
+	defer c.m.Unlock()
+
+	ctrlMsg := ControlMessage(msg[0])
+	switch ctrlMsg {
+
+	case ControlMessageClose:
+		logrus.Debug("handle: got close message")
+		c.recv.Close()
+		return
+	default:
+		logrus.Errorf("server: unexpected control message: %x", msg)
+		c.Close()
+		return ErrInvalidMessage
+	}
+}
+
+// Start starts the goroutines that handle messages
+func (c *Handle) Start() {
+	c.m.Lock()
+	defer c.m.Unlock()
+
+	c.state = established
+
+	c.sendWg.Add(1)
+	go c.sender()
+}
+
+// Close closes the connection. Future operations on non-buffered data will return io.EOF.
 func (c *Handle) Close() error {
 	c.m.Lock()
 	defer c.m.Unlock()
 
+	if c.state == closed {
+		return io.EOF
+	}
+
+	logrus.Debug("handle: closing")
+
+	c.writeControl(ControlMessageClose)
+	c.recv.Close()
+	c.send.Close()
+
+	// Wait for the sending goroutine to exit
+	c.sendWg.Wait()
+
+	c.state = closed
+
+	go func() {
+		c.server.clearHandle(c.ss.sessionID)
+	}()
+
 	return nil
+}
+
+// FetchClientLeaf returns the certificate the client presented when setting up the connection
+func (c *Handle) FetchClientLeaf() certs.Certificate {
+	c.m.Lock()
+	defer c.m.Unlock()
+	return c.clientLeaf
+}
+
+// SetClientLeaf stores the certificate presented by the client when setting up the connection
+func (c *Handle) SetClientLeaf(leaf certs.Certificate) {
+	c.m.Lock()
+	defer c.m.Unlock()
+	c.clientLeaf = leaf
 }
 
 // LocalAddr implements net.Conn.
-//
-// TODO(dadrian): Implement
 func (c *Handle) LocalAddr() net.Addr {
-	panic("unimplemented")
+	return c.server.udpConn.LocalAddr()
 }
 
 // RemoteAddr implements net.Conn.
-//
-// TODO(dadrian): Implement
 func (c *Handle) RemoteAddr() net.Addr {
-	panic("unimplemented")
+	return c.server.udpConn.RemoteAddr()
 }
 
-// SetDeadline sets a deadline at which future operations will stop. It *might*
-// not affect in-progress operations. It is implemented as a timeout, not a
-// deadline.
-//
-// TODO(dadrian): Implement as a deadline.
+// SetDeadline sets a deadline at which future operations will stop.
+// Pending operations will be canceled
 func (c *Handle) SetDeadline(t time.Time) error {
-	if c.closed.Load() {
-		return io.EOF
-	}
-	now := time.Now()
-	var timeout time.Duration
-	if t.After(now) {
-		timeout = t.Sub(now)
-	}
-	c.readTimeout.set(timeout)
-	c.writeTimeout.set(timeout)
+	c.SetReadDeadline(t)
+	c.SetWriteDeadline(t)
 	return nil
 }
 
-// SetReadDeadline sets a deadline at which future read operations will stop. It
-// *might* not affect in-progress operations. It is implemented as a timeout,
-// not a deadline.
-//
-// TODO(dadrian): Implement as a deadline.
+// SetReadDeadline sets a deadline at which future read operations will stop
+// Pending reads will be canceled
 func (c *Handle) SetReadDeadline(t time.Time) error {
-	if c.closed.Load() {
-		return io.EOF
-	}
-
-	// a zero value for t means the connection will not timeout
-	if t.IsZero() {
-		c.readTimeout = 0
-		return nil
-	}
-
-	now := time.Now()
-	var timeout time.Duration
-	if t.After(now) {
-		timeout = t.Sub(now)
-	}
-	c.readTimeout.set(timeout)
-	return nil
+	return c.recv.SetDeadline(t)
 }
 
-// SetWriteDeadline sets a deadline at which future read operations will stop. It
-// *might* not affect in-progress operations. It is implemented as a timeout,
-// not a deadline.
-//
-// TODO(dadrian): Implement as a deadline.
+// SetWriteDeadline sets a deadline at which future read operations will stop
+// Pending writes will be canceled
 func (c *Handle) SetWriteDeadline(t time.Time) error {
-	if c.closed.Load() {
-		return io.EOF
-	}
-
-	// a zero value for t means the connection will not timeout
-	if t.IsZero() {
-		c.readTimeout = 0
-		return nil
-	}
-
-	now := time.Now()
-	var timeout time.Duration
-	if t.After(now) {
-		timeout = t.Sub(now)
-	}
-	c.writeTimeout.set(timeout)
-	return nil
+	return c.send.SetDeadline(t)
 }

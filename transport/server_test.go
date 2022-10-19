@@ -54,6 +54,10 @@ func TestMultipleHandshakes(t *testing.T) {
 	assert.NilError(t, err)
 	serverConfig, verifyConfig := newTestServerConfig(t)
 	s, err := NewServer(pc.(*net.UDPConn), *serverConfig)
+	defer func() {
+		err := s.Close()
+		assert.NilError(t, err)
+	}()
 	assert.NilError(t, err)
 	wg := sync.WaitGroup{}
 	go func() {
@@ -84,9 +88,9 @@ func TestMultipleHandshakes(t *testing.T) {
 			time.Sleep(time.Second)
 			assert.NilError(t, err, "error in client %d", i)
 
-			ss := s.fetchSessionState(c.ss.sessionID)
-			assert.Check(t, cmp.Equal(c.ss.clientToServerKey, ss.clientToServerKey))
-			assert.Check(t, cmp.Equal(c.ss.serverToClientKey, ss.serverToClientKey))
+			h := s.fetchHandle(c.ss.sessionID)
+			assert.Check(t, cmp.Equal(c.ss.clientToServerKey, h.ss.clientToServerKey))
+			assert.Check(t, cmp.Equal(c.ss.serverToClientKey, h.ss.serverToClientKey))
 			assert.Check(t, c.ss.clientToServerKey != zero)
 			assert.Check(t, c.ss.serverToClientKey != zero)
 		}(i)
@@ -107,10 +111,13 @@ func TestServerRead(t *testing.T) {
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
 	config, verify := newTestServerConfig(t)
-	config.StartingReadTimeout = 10 * time.Second
 	config.MaxPendingConnections = 1
 	config.MaxBufferedPacketsPerConnection = 5
 	server, err := NewServer(pc.(*net.UDPConn), *config)
+	defer func() {
+		err := server.Close()
+		assert.NilError(t, err)
+	}()
 	assert.NilError(t, err)
 	go func() {
 		server.Serve()
@@ -184,10 +191,13 @@ func TestServerWrite(t *testing.T) {
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
 	config, verify := newTestServerConfig(t)
-	config.StartingReadTimeout = 10 * time.Second
 	config.MaxPendingConnections = 1
 	config.MaxBufferedPacketsPerConnection = 5
 	server, err := NewServer(pc.(*net.UDPConn), *config)
+	defer func() {
+		err := server.Close()
+		assert.NilError(t, err)
+	}()
 	assert.NilError(t, err)
 	go func() {
 		server.Serve()

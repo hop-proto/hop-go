@@ -15,10 +15,13 @@ import (
 // equivalent after the server sent the Server Hello message. The returned
 // duplex has not yet processed the Client Ack.
 func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAddr *net.UDPAddr) (*HandshakeState, error) {
+	s.cookieLock.Lock()
+	defer s.cookieLock.Unlock()
+
 	out := new(HandshakeState)
 	copy(out.remoteEphemeral[:], clientEphemeral)
 	out.remoteAddr = clientAddr
-	out.cookieKey = &s.cookieKey
+	out.cookieKey = s.cookieKey
 
 	// Pull the private key out of the cookie
 	n, err := out.decryptCookie(cookie)

@@ -138,7 +138,7 @@ func (s *TestServer) StartTransport(t *testing.T) {
 		s.Transport, err = transport.NewServer(s.UDPConn, *s.TransportConfig)
 	}
 	assert.NilError(t, err)
-	logrus.Infof("Transport server listening on address: %s", s.Transport.ListenAddress().String())
+	logrus.Infof("Transport server listening on address: %s", s.Transport.Addr().String())
 }
 
 // StartHopServer starts hop server with optional config (otherwise default)

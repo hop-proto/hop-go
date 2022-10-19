@@ -43,12 +43,11 @@ func TestClientServerCompatibilityHandshake(t *testing.T) {
 	err = c.Handshake()
 	assert.Check(t, err)
 	time.Sleep(time.Second)
-	ss, ok := s.sessions[c.ss.sessionID]
-	assert.Assert(t, ok)
-	assert.DeepEqual(t, c.ss.sessionID, ss.sessionID)
+	h := s.fetchHandle(c.ss.sessionID)
+	assert.DeepEqual(t, c.ss.sessionID, h.ss.sessionID)
 	var zero [KeyLen]byte
-	assert.Check(t, cmp.Equal(c.ss.clientToServerKey, ss.clientToServerKey))
-	assert.Check(t, cmp.Equal(c.ss.serverToClientKey, ss.serverToClientKey))
+	assert.Check(t, cmp.Equal(c.ss.clientToServerKey, h.ss.clientToServerKey))
+	assert.Check(t, cmp.Equal(c.ss.serverToClientKey, h.ss.serverToClientKey))
 	assert.Check(t, c.ss.clientToServerKey != zero)
 	assert.Check(t, c.ss.serverToClientKey != zero)
 }
@@ -122,12 +121,11 @@ func TestClientServerHSWithAgent(t *testing.T) {
 	err = c.Handshake()
 	assert.Check(t, err)
 	time.Sleep(time.Second)
-	ss, ok := s.sessions[c.ss.sessionID]
-	assert.Assert(t, ok)
-	assert.DeepEqual(t, c.ss.sessionID, ss.sessionID)
+	h := s.fetchHandle(c.ss.sessionID)
+	assert.DeepEqual(t, c.ss.sessionID, h.ss.sessionID)
 	var zero [KeyLen]byte
-	assert.Check(t, cmp.Equal(c.ss.clientToServerKey, ss.clientToServerKey))
-	assert.Check(t, cmp.Equal(c.ss.serverToClientKey, ss.serverToClientKey))
+	assert.Check(t, cmp.Equal(c.ss.clientToServerKey, h.ss.clientToServerKey))
+	assert.Check(t, cmp.Equal(c.ss.serverToClientKey, h.ss.serverToClientKey))
 	assert.Check(t, c.ss.clientToServerKey != zero)
 	assert.Check(t, c.ss.serverToClientKey != zero)
 }
@@ -159,7 +157,7 @@ func TestCookie(t *testing.T) {
 		IP:   net.ParseIP("192.168.1.1"),
 		Port: 8675,
 	}
-	hs.cookieKey = &cookieKey
+	hs.cookieKey = cookieKey
 	cookie := make([]byte, 2*CookieLen)
 	n, err := hs.writeCookie(cookie)
 	assert.Check(t, cmp.Equal(CookieLen, n))

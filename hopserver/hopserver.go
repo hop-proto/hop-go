@@ -294,7 +294,7 @@ func (s *HopServer) ListenAddress() net.Addr {
 	if s.server == nil {
 		return &net.UDPAddr{}
 	}
-	return s.server.ListenAddress()
+	return s.server.Addr()
 }
 
 // authorizeKey returns nil if the publicKey is in the authorized_keys file for

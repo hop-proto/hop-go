@@ -49,7 +49,8 @@ type Reliable struct {
 	remoteAddr net.Addr
 	sender     sender
 	sendQueue  chan []byte
-	tubeState  state
+	// +checklocks:m
+	tubeState state
 }
 
 // Reliable implements net.Conn
@@ -161,6 +162,8 @@ func (r *Reliable) initiate(req bool) {
 }
 
 func (r *Reliable) receive(pkt *frame) error {
+	r.m.Lock()
+	defer r.m.Unlock()
 	if r.tubeState != initiated {
 		//logrus.Error("receiving non-initiate tube frames when not initiated")
 		return errors.New("receiving non-initiate tube frames when not initiated")

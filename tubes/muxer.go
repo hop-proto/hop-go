@@ -3,6 +3,7 @@ package tubes
 import (
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -19,7 +20,7 @@ type Muxer struct {
 	m         sync.Mutex
 	// All hop tubes write raw bytes for a tube packet to this golang chan.
 	sendQueue  chan []byte
-	stopped    bool
+	stopped    atomic.Bool
 	underlying transport.MsgConn
 	netConn    net.Conn
 	timeout    time.Duration
@@ -32,7 +33,6 @@ func NewMuxer(msgConn transport.MsgConn, netConn net.Conn, timeout time.Duration
 		tubeQueue:  make(chan *Reliable, 128),
 		m:          sync.Mutex{},
 		sendQueue:  make(chan []byte),
-		stopped:    false,
 		underlying: msgConn,
 		netConn:    netConn,
 		timeout:    timeout,
@@ -83,7 +83,7 @@ func (m *Muxer) readMsg() (*frame, error) {
 }
 
 func (m *Muxer) sender() {
-	for !m.stopped {
+	for !m.stopped.Load() {
 		rawBytes := <-m.sendQueue
 		m.underlying.WriteMsg(rawBytes)
 	}
@@ -92,13 +92,13 @@ func (m *Muxer) sender() {
 // Start allows a muxer to start listening and handling incoming tube requests and messages
 func (m *Muxer) Start() error {
 	go m.sender()
-	m.stopped = false
+	m.stopped.Store(false)
 
 	// Set initial timeout
 	if m.timeout != 0 {
 		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
 	}
-	for !m.stopped {
+	for !m.stopped.Load() {
 		frame, err := m.readMsg()
 		if err != nil {
 			// TODO(hosono) Are there any recoverable errors? (os.ErrDeadlineExceeded isn't)
@@ -153,6 +153,6 @@ func (m *Muxer) Stop() {
 	}
 	m.m.Unlock()
 	wg.Wait()
-	m.stopped = true //This has to come after all the tubes are closed otherwise the tubes can't finish sending all their frames and deadlock
+	m.stopped.Store(true) //This has to come after all the tubes are closed otherwise the tubes can't finish sending all their frames and deadlock
 	logrus.Info("Muxer.Stop() finished")
 }

@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"io"
 	"net"
+	"sync"
 
 	"github.com/sirupsen/logrus"
 
-	"hop.computer/hop/certs"
 	"hop.computer/hop/kravatte"
 )
 
@@ -25,11 +25,8 @@ type SessionState struct {
 	serverToClientKey [KeyLen]byte
 	remoteAddr        *net.UDPAddr
 
-	handle *Handle
-
-	//clientStatic keys.PublicKey //needed after handshake for user authorization step
-	clientLeaf certs.Certificate
-
+	m sync.Mutex
+	// +checklocks:m
 	rawWrite bytes.Buffer
 }
 
@@ -90,14 +87,17 @@ func (ss *SessionState) readCounter(b []byte) (count uint64) {
 	return
 }
 
-func (ss *SessionState) writePacket(conn UDPLike, in []byte, key *[KeyLen]byte) error {
+func (ss *SessionState) writePacket(conn UDPLike, msgType MessageType, in []byte, key *[KeyLen]byte) error {
+	ss.m.Lock()
+	defer ss.m.Unlock()
+
 	length := HeaderLen + SessionIDLen + CounterLen + len(in) + TagLen
 	ss.rawWrite.Reset()
 	if ss.rawWrite.Cap() < length {
 		ss.rawWrite.Grow(length)
 	}
 
-	ss.rawWrite.WriteByte(byte(MessageTypeTransport))
+	ss.rawWrite.WriteByte(byte(msgType))
 	ss.rawWrite.WriteByte(0)
 	ss.rawWrite.WriteByte(0)
 	ss.rawWrite.WriteByte(0)
@@ -107,7 +107,7 @@ func (ss *SessionState) writePacket(conn UDPLike, in []byte, key *[KeyLen]byte) 
 
 	// Counter
 	ss.writeCounter(&ss.rawWrite)
-	logrus.Debugf("ss: writing packet with count %d", ss.count)
+	logrus.Tracef("ss: writing packet with count %d", ss.count)
 
 	// Encrypt the message. The associated data is the message header. There is
 	// no nonce. The output has an overhead of TagLength.
@@ -117,8 +117,8 @@ func (ss *SessionState) writePacket(conn UDPLike, in []byte, key *[KeyLen]byte) 
 	}
 	buf := make([]byte, TagLen+len(in))
 	enc := aead.Seal(buf[:0], nil, in, ss.rawWrite.Bytes()[:AssociatedDataLen])
-	logrus.Debugf("write: %x %x", buf[:12], enc)
-	logrus.Debugf("write(buf): %x", buf)
+	logrus.Tracef("write: %x %x", buf[:12], enc)
+	logrus.Tracef("write(buf): %x", buf)
 	if len(enc) != len(buf) {
 		logrus.Panicf("expected len(buf) = len(enc), got: %d = %d + 12", len(buf), len(enc))
 	}
@@ -137,56 +137,57 @@ func (ss *SessionState) writePacket(conn UDPLike, in []byte, key *[KeyLen]byte) 
 	return nil
 }
 
-func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (int, error) {
+func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (int, MessageType, error) {
 	plaintextLen := PlaintextLen(len(pkt))
 	ciphertextLen := plaintextLen + TagLen
 	if plaintextLen > len(plaintext) {
-		return 0, ErrBufOverflow
+		return 0, 0x0, ErrBufOverflow
 	}
 
 	// Header
 	b := pkt
-	if mt := MessageType(b[0]); mt != MessageTypeTransport {
-		return 0, ErrUnexpectedMessage
+	var mt MessageType
+	if mt = MessageType(b[0]); mt != MessageTypeTransport && mt != MessageTypeControl {
+		return 0, 0x0, ErrUnexpectedMessage
 	}
 	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
-		return 0, ErrInvalidMessage
+		return 0, 0x0, ErrInvalidMessage
 	}
 	b = b[HeaderLen:]
 
 	// SessionID
 	if !bytes.Equal(ss.sessionID[:], b[:SessionIDLen]) {
-		return 0, ErrUnknownSession
+		return 0, 0x0, ErrUnknownSession
 	}
 	b = b[SessionIDLen:]
 
 	// Counter
 	count := ss.readCounter(b)
-	logrus.Debugf("ss: read packet with count %d", count)
+	logrus.Tracef("ss: read packet with count %d", count)
 	if !ss.window.Check(count) {
 		logrus.Debugf("ss: rejecting replayed packet")
-		return 0, ErrReplay
+		return 0, 0x0, ErrReplay
 	}
 	b = b[CounterLen:]
 
 	aead, err := kravatte.NewSANSE(key[:])
 	if err != nil {
-		return 0, err
+		return 0, 0x0, err
 	}
 	enc := b[:ciphertextLen]
-	logrus.Debugf("read enc: %x", enc)
+	logrus.Tracef("read enc: %x", enc)
 	b = b[ciphertextLen:]
 	if len(b) != 0 {
 		logrus.Panicf("len(b) = %d, expected 0", len(b))
 	}
 	out, err := aead.Open(plaintext[:0], nil, enc, pkt[:AssociatedDataLen])
 	if err != nil {
-		return 0, err
+		return 0, 0x0, err
 	}
 	if len(out) != plaintextLen {
 		logrus.Panicf("len(out) = %d, expected plaintextLen = %d", len(out), plaintextLen)
 	}
 	ss.window.Mark(count)
 
-	return plaintextLen, nil
+	return plaintextLen, mt, nil
 }
