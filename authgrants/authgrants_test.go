@@ -1,9 +1,14 @@
 package authgrants
 
 import (
+	"encoding/gob"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
+	"time"
+
+	"hop.computer/hop/certs"
 
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
@@ -17,53 +22,42 @@ func TestIntentRequest(t *testing.T) {
 
 	clientConn, err := net.Dial("tcp", tcpListener.Addr().String())
 	assert.NilError(t, err)
+	clientEnc := gob.NewEncoder(clientConn)
 
 	serverConn, err := tcpListener.Accept()
 	assert.NilError(t, err)
+	serverDec := gob.NewDecoder(serverConn)
 	defer serverConn.Close()
 
-	agc := NewAuthGrantConn(clientConn)
+	target := certs.DNSName("github.com")
+	cert, err := new(certs.Certificate).Marshal()
+	assert.NilError(t, err)
 
-	sagc := &AuthGrantConn{conn: serverConn}
+	intent := Intent{
+		GrantType:      grantType(ShellAction),
+		Reserved:       0,
+		TargetPort:     55,
+		StartTime:      time.Now().Unix(),
+		ExpTime:        time.Now().Add(time.Hour).Unix(),
+		TargetUsername: "laura",
+		TargetSNI:      target,
+		DelegateCert:   cert,
+	}
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ir := newIntent([32]byte{}, "user", "host", "port", 2, "myCmd")
-		logrus.Info("C: Made req: ",
-			"clientsni: ", ir.clientSNI, " ",
-			"client user: ", ir.clientUsername, " ",
-			"port: ", ir.port, " ",
-			"serversni: ", ir.serverSNI, " ",
-			"serverUser: ", ir.serverUsername, " ",
-			"grantType: ", ir.actionType, " ",
-			"sha3: ", ir.sha3)
-		err := agc.sendIntentRequest([32]byte{}, "user", "host", "port", 2, "myCmd")
+		fmt.Printf("intent: %v\n", intent)
+		err = clientEnc.Encode(intent)
 		assert.NilError(t, err)
-		logrus.Info("Sent req ok")
-		rtype, response, err := agc.ReadResponse()
-		assert.NilError(t, err)
-		switch rtype {
-		case IntentConfirmation:
-			logrus.Info("C: Got conf with deadline: ", fromIntentConfirmationBytes(response[dataOffset:]).deadline)
-		case IntentDenied:
-			logrus.Infof("C: Got den with reason: %v", fromIntentDeniedBytes(response[dataOffset:]).reason)
-			assert.Equal(t, fromIntentDeniedBytes(response[dataOffset:]).reason, "because I say so")
-		}
-		agc.Close()
 	}()
 
-	ir, err := sagc.GetIntentRequest()
-	assert.NilError(t, err)
-	logrus.Info("S: Got req: ",
-		"clientsni: ", ir.clientSNI, " ",
-		"client user: ", ir.clientUsername, " ",
-		"port: ", ir.port, " ",
-		"serversni: ", ir.serverSNI, " ",
-		"serverUser: ", ir.serverUsername, " ",
-		"grantType: ", ir.actionType, " ",
-		"sha3: ", ir.sha3)
-	//err = sagc.SendIntentConf(time.Now())
-	err = sagc.SendIntentDenied("because I say so")
-	assert.NilError(t, err)
+	var recIntent Intent
+	fmt.Printf("%p\n", &recIntent)
+	fmt.Printf("%p\n", &intent)
 	wg.Wait()
+	err = serverDec.Decode(&recIntent)
+	fmt.Printf("recIntent: %v\n", recIntent)
+	assert.DeepEqual(t, intent, recIntent)
+
 }

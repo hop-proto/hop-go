@@ -13,7 +13,6 @@ import (
 	"github.com/sbinet/pstree"
 	"github.com/sirupsen/logrus"
 
-	"hop.computer/hop/authgrants"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/config"
 	"hop.computer/hop/core"
@@ -32,7 +31,7 @@ type HopServer struct {
 	// +checklocks:m
 	principals map[int32]*hopSession
 	// +checklocks:m
-	authgrants map[keys.PublicKey]*authGrant //static key -> authgrant associated with that key
+	// authgrants map[keys.PublicKey]*authGrant //static key -> authgrant associated with that key
 	// +checklocks:m
 	outstandingAuthgrants int
 
@@ -63,13 +62,13 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig) 
 	// }
 	// logrus.Infof("address: %v", authgrantServer.Addr())
 
-	principals := make(map[int32]*hopSession)         //PID -> principal hop session
-	authgrants := make(map[keys.PublicKey]*authGrant) //static key -> authgrant
+	principals := make(map[int32]*hopSession) //PID -> principal hop session
+	// authgrants := make(map[keys.PublicKey]*authGrant) //static key -> authgrant
 
 	server := &HopServer{
-		m:                     sync.Mutex{},
-		principals:            principals,
-		authgrants:            authgrants,
+		m:          sync.Mutex{},
+		principals: principals,
+		// authgrants:            authgrants,
 		outstandingAuthgrants: 0,
 
 		config: config,
@@ -206,45 +205,46 @@ func (s *HopServer) SetFSystem(fsystem fstest.MapFS) {
 // proxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
 // Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
 func (s *HopServer) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn) { // nolint TODO(hosono) add linting back
-	logrus.Info("S: ACCEPTED NEW UDS CONNECTION")
-	defer c.Close()
+	panic("unimplemented")
+	// logrus.Info("S: ACCEPTED NEW UDS CONNECTION")
+	// defer c.Close()
 
-	if principalSess.transportConn.IsClosed() {
-		logrus.Error("S: Connection with Principal is closed")
-		return
-	}
-	logrus.Infof("S: CLIENT CONNECTED [%s]", c.RemoteAddr().Network())
-	agc := authgrants.NewAuthGrantConn(c)
-	principalAgc, err := authgrants.NewAuthGrantConnFromMux(principalSess.tubeMuxer)
-	if err != nil {
-		logrus.Errorf("S: ERROR MAKING AGT WITH PRINCIPAL: %v", err)
-		return
-	}
-	defer principalAgc.Close()
-	logrus.Infof("S: CREATED AGC")
-	for {
-		req, e := agc.ReadIntentRequest()
-		if e != nil { //if client closes agc this will error out and the loop will end
-			logrus.Info("Delegate client closed IPC AGC with delegate server.")
-			return
-		}
-		err = principalAgc.WriteRawBytes(req)
-		if err != nil {
-			logrus.Errorf("S: ERROR WRITING TO CHANNEL: %v", err)
-			return
-		}
-		logrus.Infof("S: WROTE INTENT_REQUEST TO AGC")
-		_, response, err := principalAgc.ReadResponse()
-		if err != nil {
-			logrus.Errorf("S: ERROR GETTING RESPONSE: %v, %v", err, response)
-			return
-		}
-		err = agc.WriteRawBytes(response)
-		if err != nil {
-			logrus.Errorf("S: ERROR WRITING TO CHANNEL: %v", err)
-			return
-		}
-	}
+	// if principalSess.transportConn.IsClosed() {
+	// 	logrus.Error("S: Connection with Principal is closed")
+	// 	return
+	// }
+	// logrus.Infof("S: CLIENT CONNECTED [%s]", c.RemoteAddr().Network())
+	// agc := authgrants.NewAuthGrantConn(c)
+	// principalAgc, err := authgrants.NewAuthGrantConnFromMux(principalSess.tubeMuxer)
+	// if err != nil {
+	// 	logrus.Errorf("S: ERROR MAKING AGT WITH PRINCIPAL: %v", err)
+	// 	return
+	// }
+	// defer principalAgc.Close()
+	// logrus.Infof("S: CREATED AGC")
+	// for {
+	// 	req, e := agc.ReadIntentRequest()
+	// 	if e != nil { //if client closes agc this will error out and the loop will end
+	// 		logrus.Info("Delegate client closed IPC AGC with delegate server.")
+	// 		return
+	// 	}
+	// 	err = principalAgc.WriteRawBytes(req)
+	// 	if err != nil {
+	// 		logrus.Errorf("S: ERROR WRITING TO CHANNEL: %v", err)
+	// 		return
+	// 	}
+	// 	logrus.Infof("S: WROTE INTENT_REQUEST TO AGC")
+	// 	_, response, err := principalAgc.ReadResponse()
+	// 	if err != nil {
+	// 		logrus.Errorf("S: ERROR GETTING RESPONSE: %v, %v", err, response)
+	// 		return
+	// 	}
+	// 	err = agc.WriteRawBytes(response)
+	// 	if err != nil {
+	// 		logrus.Errorf("S: ERROR WRITING TO CHANNEL: %v", err)
+	// 		return
+	// 	}
+	// }
 }
 
 // verifies that client is a descendent of a process started by the principal and returns its ancestor process PID if found

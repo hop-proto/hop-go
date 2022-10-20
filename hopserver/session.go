@@ -3,7 +3,6 @@ package hopserver
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"os"
@@ -12,7 +11,6 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/AstromechZA/etcpwdparse"
 	"github.com/creack/pty"
@@ -30,17 +28,17 @@ import (
 )
 
 // AuthGrant contains deadline, user, data
-type data struct {
-	actionType     byte
-	associatedData string
-}
+// type data struct {
+// 	actionType     byte
+// 	associatedData string
+// }
 
-type authGrant struct {
-	deadline         time.Time
-	actions          map[*data]bool //apparently golang doesn't have sets...? Found this on StackOverflow. too hacky???
-	user             string
-	principalSession *hopSession
-}
+// type authGrant struct {
+// 	deadline         time.Time
+// 	actions          map[*data]bool //apparently golang doesn't have sets...? Found this on StackOverflow. too hacky???
+// 	user             string
+// 	principalSession *hopSession
+// }
 
 type hopSession struct {
 	transportConn   *transport.Handle
@@ -55,7 +53,7 @@ type hopSession struct {
 	// authorizedKeysLocation string
 
 	isPrincipal bool
-	authgrant   *authGrant
+	// authgrant   *authGrant
 
 	// We use a channel (with size 1) to avoid reading window sizes before we've created the pty
 	pty chan *os.File
@@ -186,9 +184,9 @@ func (sess *hopSession) start() {
 
 func (sess *hopSession) close() error {
 	var err, err2 error
-	if !sess.isPrincipal {
-		err = sess.authgrant.principalSession.close() //TODO: move where principalSession stored?
-	}
+	// if !sess.isPrincipal {
+	// 	// err = sess.authgrant.principalSession.close() //TODO: move where principalSession stored?
+	// }
 
 	sess.tubeMuxer.Stop()
 	//err2 = sess.transportConn.Close() //(not implemented yet)
@@ -200,56 +198,58 @@ func (sess *hopSession) close() error {
 
 // handleAgc handles Intent Communications from principals and updates the outstanding authgrants maps appropriately
 func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
-	agc := authgrants.NewAuthGrantConn(tube)
-	defer agc.Close()
-	for {
-		k, t, user, arg, grantType, e := agc.HandleIntentComm()
-		if e != nil {
-			//better error handling
-			logrus.Infof("agc closed: %v", e)
-			return
-		}
-		logrus.Info("got intent comm")
-		sess.server.m.Lock()
-		// TODO(baumanl): add this back? Or not necessary? Concept of maxoutstanding
-		// was mentioned in original authgrant protocol
-		// if sess.server.outstandingAuthgrants >= sess.server.config.MaxOutstandingAuthgrants {
-		// 	sess.server.m.Unlock()
-		// 	logrus.Info("Server exceeded max number of authgrants")
-		// 	agc.SendIntentDenied("Server denied. Too many outstanding authgrants.")
-		// 	return
-		// }
-		if _, ok := sess.server.authgrants[k]; !ok {
-			sess.server.outstandingAuthgrants++
-			sess.server.authgrants[k] = &authGrant{
-				deadline:         t,
-				user:             user,
-				principalSession: sess,
-				actions:          make(map[*data]bool),
-			}
-		}
-		sess.server.authgrants[k].actions[&data{
-			actionType:     grantType,
-			associatedData: arg,
-		}] = true
-		logrus.Infof("Added AG: action %v, type %v", arg, grantType)
-		sess.server.m.Unlock()
-		agc.SendIntentConf(t)
-		logrus.Info("Sent intent conf")
-	}
+	panic("unimplemented")
+	// agc := authgrants.NewAuthGrantConn(tube)
+	// defer agc.Close()
+	// for {
+	// 	k, t, user, arg, grantType, e := agc.HandleIntentComm()
+	// 	if e != nil {
+	// 		//better error handling
+	// 		logrus.Infof("agc closed: %v", e)
+	// 		return
+	// 	}
+	// 	logrus.Info("got intent comm")
+	// 	sess.server.m.Lock()
+	// 	// TODO(baumanl): add this back? Or not necessary? Concept of maxoutstanding
+	// 	// was mentioned in original authgrant protocol
+	// 	// if sess.server.outstandingAuthgrants >= sess.server.config.MaxOutstandingAuthgrants {
+	// 	// 	sess.server.m.Unlock()
+	// 	// 	logrus.Info("Server exceeded max number of authgrants")
+	// 	// 	agc.SendIntentDenied("Server denied. Too many outstanding authgrants.")
+	// 	// 	return
+	// 	// }
+	// 	if _, ok := sess.server.authgrants[k]; !ok {
+	// 		sess.server.outstandingAuthgrants++
+	// 		sess.server.authgrants[k] = &authGrant{
+	// 			deadline:         t,
+	// 			user:             user,
+	// 			principalSession: sess,
+	// 			actions:          make(map[*data]bool),
+	// 		}
+	// 	}
+	// 	sess.server.authgrants[k].actions[&data{
+	// 		actionType:     grantType,
+	// 		associatedData: arg,
+	// 	}] = true
+	// 	logrus.Infof("Added AG: action %v, type %v", arg, grantType)
+	// 	sess.server.m.Unlock()
+	// 	agc.SendIntentConf(t)
+	// 	logrus.Info("Sent intent conf")
+	// }
 }
 
 // server enforces that delegates only execute approved actions
 func (sess *hopSession) checkAction(action string, actionType byte) error {
-	logrus.Info("CHECKING ACTION IS AUTHORIZED")
-	for elem := range sess.authgrant.actions {
-		if elem.actionType == actionType && elem.associatedData == action {
-			delete(sess.authgrant.actions, elem)
-			return nil
-		}
-	}
-	err := fmt.Errorf("no authgrant of action: %v and type: %v, found", action, actionType)
-	return err
+	panic("unimplemented")
+	// logrus.Info("CHECKING ACTION IS AUTHORIZED")
+	// for elem := range sess.authgrant.actions {
+	// 	if elem.actionType == actionType && elem.associatedData == action {
+	// 		delete(sess.authgrant.actions, elem)
+	// 		return nil
+	// 	}
+	// }
+	// err := fmt.Errorf("no authgrant of action: %v and type: %v, found", action, actionType)
+	// return err
 
 }
 
@@ -353,7 +353,7 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 
 		sess.server.m.Lock()
 		if !sess.isPrincipal {
-			sess.server.principals[int32(c.Process.Pid)] = sess.authgrant.principalSession
+			// sess.server.principals[int32(c.Process.Pid)] = sess.authgrant.principalSession
 		} else {
 			logrus.Infof("S: using standard muxer")
 			sess.server.principals[int32(c.Process.Pid)] = sess

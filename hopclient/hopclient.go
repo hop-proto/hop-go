@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -13,7 +12,6 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/agent"
-	"hop.computer/hop/authgrants"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/codex"
 	"hop.computer/hop/common"
@@ -466,7 +464,7 @@ func (c *HopClient) HandleTubes() {
 		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v. Reliable? %t", t.Type(), t.IsReliable())
 
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.Headless {
-			go c.principal(r)
+			// go c.principal(r)
 		} else if t.Type() == common.RemotePFTube {
 			go c.handleRemote(t)
 		} else {
@@ -486,57 +484,57 @@ func (c *HopClient) HandleTubes() {
 	*/
 }
 
-func (c *HopClient) principal(tube *tubes.Reliable) {
-	defer tube.Close()
-	logrus.SetOutput(io.Discard)
-	agt := authgrants.NewAuthGrantConn(tube)
-	var remoteSession *HopClient
-	var targetAgt *authgrants.AuthGrantConn
+// func (c *HopClient) principal(tube *tubes.Reliable) {
+// 	defer tube.Close()
+// 	logrus.SetOutput(io.Discard)
+// 	agt := authgrants.NewAuthGrantConn(tube)
+// 	var remoteSession *HopClient
+// 	var targetAgt *authgrants.AuthGrantConn
 
-	for { //allows for user to retry sending intent request if denied
-		intent, err := agt.GetIntentRequest()
-		if err != nil { //when the agt is closed this will error out
-			logrus.Error("error getting intent request")
-			return
-		}
-		//logrus.SetOutput(os.Stdout)
-		c.ExecTube.Restore()
-		r := c.ExecTube.Redirect()
+// 	for { //allows for user to retry sending intent request if denied
+// 		intent, err := agt.GetIntentRequest()
+// 		if err != nil { //when the agt is closed this will error out
+// 			logrus.Error("error getting intent request")
+// 			return
+// 		}
+// 		//logrus.SetOutput(os.Stdout)
+// 		c.ExecTube.Restore()
+// 		r := c.ExecTube.Redirect()
 
-		allow := intent.Prompt(r)
+// 		allow := intent.Prompt(r)
 
-		c.ExecTube.Raw()
-		c.ExecTube.Resume()
-		//logrus.SetOutput(io.Discard)
-		if !allow {
-			agt.SendIntentDenied("User denied")
-			continue
-		}
-		if remoteSession == nil {
-			remoteSession, err = c.setupRemoteSession(intent)
-			if err != nil {
-				logrus.Errorf("error getting remote session from principal: %v", err)
-				agt.SendIntentDenied("Unable to connect to remote server")
-				break
-			}
-			targetAgt, err = authgrants.NewAuthGrantConnFromMux(remoteSession.TubeMuxer)
-			if err != nil {
-				logrus.Fatal("Error creating AGC: ", err)
-			}
-			defer targetAgt.Close()
-			logrus.Info("CREATED AGC")
-		}
-		response, err := remoteSession.confirmWithRemote(intent, targetAgt, agt)
-		if err != nil {
-			logrus.Error("error getting confirmation from remote server")
-			agt.SendIntentDenied("Unable to connect to remote server")
-			break
-		}
-		//write response back to server asking for Authorization Grant
-		err = agt.WriteRawBytes(response)
-		if err != nil {
-			logrus.Errorf("C: error writing to agt: %v", err)
-			break
-		}
-	}
-}
+// 		c.ExecTube.Raw()
+// 		c.ExecTube.Resume()
+// 		//logrus.SetOutput(io.Discard)
+// 		if !allow {
+// 			agt.SendIntentDenied("User denied")
+// 			continue
+// 		}
+// 		if remoteSession == nil {
+// 			remoteSession, err = c.setupRemoteSession(intent)
+// 			if err != nil {
+// 				logrus.Errorf("error getting remote session from principal: %v", err)
+// 				agt.SendIntentDenied("Unable to connect to remote server")
+// 				break
+// 			}
+// 			targetAgt, err = authgrants.NewAuthGrantConnFromMux(remoteSession.TubeMuxer)
+// 			if err != nil {
+// 				logrus.Fatal("Error creating AGC: ", err)
+// 			}
+// 			defer targetAgt.Close()
+// 			logrus.Info("CREATED AGC")
+// 		}
+// 		response, err := remoteSession.confirmWithRemote(intent, targetAgt, agt)
+// 		if err != nil {
+// 			logrus.Error("error getting confirmation from remote server")
+// 			agt.SendIntentDenied("Unable to connect to remote server")
+// 			break
+// 		}
+// 		//write response back to server asking for Authorization Grant
+// 		err = agt.WriteRawBytes(response)
+// 		if err != nil {
+// 			logrus.Errorf("C: error writing to agt: %v", err)
+// 			break
+// 		}
+// 	}
+// }
