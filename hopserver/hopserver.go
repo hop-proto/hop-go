@@ -21,12 +21,13 @@ import (
 	"hop.computer/hop/tubes"
 )
 
+// Authgrants Hop server TODOs
+// - Listen for descendent clients and proxy their requests back to principal
+// - check that connecting clients have appropriate authgrants for actions.
+
 // HopServer represents state/conns needed for a hop server
 type HopServer struct {
 	m sync.Mutex
-	// +checklocks:m
-	// +checklocks:m
-	// +checklocks:m
 
 	config *config.ServerConfig
 

@@ -24,6 +24,12 @@ import (
 	"hop.computer/hop/userauth"
 )
 
+// Authgrant TODOs for hopclient
+// Principal:
+// - accept and process delegate requests
+// Delegate:
+// - contact hopd and issue requests
+
 // HopClient holds state for client's perspective of session. It is not safe to
 // copy a HopClient.
 type HopClient struct { // nolint:maligned
@@ -355,7 +361,7 @@ func (c *HopClient) HandleTubes() {
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.Headless {
 			// go c.principal(r)
 		} else if t.Type() == common.RemotePFTube {
-			go c.handleRemote(t)
+			panic("unimplemented")
 		} else {
 			//Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
 			e := t.Close()
