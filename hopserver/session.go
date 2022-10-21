@@ -16,7 +16,6 @@ import (
 	"github.com/creack/pty"
 	"github.com/sirupsen/logrus"
 
-	"hop.computer/hop/authgrants"
 	"hop.computer/hop/codex"
 	"hop.computer/hop/common"
 	"hop.computer/hop/keys"
@@ -239,19 +238,19 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 }
 
 // server enforces that delegates only execute approved actions
-func (sess *hopSession) checkAction(action string, actionType byte) error {
-	panic("unimplemented")
-	// logrus.Info("CHECKING ACTION IS AUTHORIZED")
-	// for elem := range sess.authgrant.actions {
-	// 	if elem.actionType == actionType && elem.associatedData == action {
-	// 		delete(sess.authgrant.actions, elem)
-	// 		return nil
-	// 	}
-	// }
-	// err := fmt.Errorf("no authgrant of action: %v and type: %v, found", action, actionType)
-	// return err
+// func (sess *hopSession) checkAction(action string, actionType byte) error {
+// 	panic("unimplemented")
+// 	logrus.Info("CHECKING ACTION IS AUTHORIZED")
+// 	for elem := range sess.authgrant.actions {
+// 		if elem.actionType == actionType && elem.associatedData == action {
+// 			delete(sess.authgrant.actions, elem)
+// 			return nil
+// 		}
+// 	}
+// 	err := fmt.Errorf("no authgrant of action: %v and type: %v, found", action, actionType)
+// 	return err
 
-}
+// }
 
 func getGroups(uid int) (groups []uint32) {
 	groups = append(groups, uint32(uid))
@@ -277,17 +276,17 @@ func getGroups(uid int) (groups []uint32) {
 func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 	cmd, termEnv, shell, size, _ := codex.GetCmd(tube)
 	logrus.Info("CMD: ", cmd)
-	if !sess.isPrincipal {
-		err := sess.checkAction(cmd, authgrants.CommandAction)
-		if err != nil {
-			err = sess.checkAction(cmd, authgrants.ShellAction)
-		}
-		if err != nil {
-			logrus.Error(err)
-			codex.SendFailure(tube, err)
-			return
-		}
-	}
+	// if !sess.isPrincipal {
+	// 	err := sess.checkAction(cmd, authgrants.Command)
+	// 	if err != nil {
+	// 		err = sess.checkAction(cmd, authgrants.Shell)
+	// 	}
+	// 	if err != nil {
+	// 		logrus.Error(err)
+	// 		codex.SendFailure(tube, err)
+	// 		return
+	// 	}
+	// }
 	cache, err := etcpwdparse.NewLoadedEtcPasswdCache() //Best way to do this? should I load this only once and then just reload on misses? What if /etc/passwd modified between accesses?
 	if err != nil {
 		err := errors.New("issue loading /etc/passwd")
@@ -381,14 +380,14 @@ func (sess *hopSession) startLocal(ch *tubes.Reliable) {
 	arg := make([]byte, l)
 	io.ReadFull(ch, arg)
 	//Check authorization
-	if !sess.isPrincipal {
-		err := sess.checkAction(string(arg), authgrants.LocalPFAction)
-		if err != nil {
-			logrus.Error(err)
-			ch.Write([]byte{netproxy.NpcDen})
-			return
-		}
-	}
+	// if !sess.isPrincipal {
+	// 	err := sess.checkAction(string(arg), authgrants.LocalPF)
+	// 	if err != nil {
+	// 		logrus.Error(err)
+	// 		ch.Write([]byte{netproxy.NpcDen})
+	// 		return
+	// 	}
+	// }
 	sess.LocalServer(ch, string(arg))
 }
 
@@ -399,14 +398,14 @@ func (sess *hopSession) startRemote(tube *tubes.Reliable) {
 	arg := make([]byte, l)
 	io.ReadFull(tube, arg)
 	//Check authorization
-	if !sess.isPrincipal {
-		err := sess.checkAction(string(arg), authgrants.RemotePFAction)
-		if err != nil {
-			logrus.Error(err)
-			tube.Write([]byte{netproxy.NpcDen})
-			return
-		}
-	}
+	// if !sess.isPrincipal {
+	// 	err := sess.checkAction(string(arg), authgrants.RemotePF)
+	// 	if err != nil {
+	// 		logrus.Error(err)
+	// 		tube.Write([]byte{netproxy.NpcDen})
+	// 		return
+	// 	}
+	// }
 	sess.RemoteServer(tube, string(arg))
 }
 

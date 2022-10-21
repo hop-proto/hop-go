@@ -2,42 +2,75 @@ package authgrants
 
 import "hop.computer/hop/certs"
 
-// Authgrant Mmessage: Type || Data
-type agMessage struct { //nolint
-	MsgType byte
-	Data    *byte
-}
-
 // Authgrant Message Types:
 // IntentRequest: Delegate -> Principal
 // IntentCommunication: Principal -> Target
 // IntentConfirmation/IntentDenied: Target -> Principal and/or Principal -> Delegate
 const (
-	IntentRequest       = byte(1)
-	IntentCommunication = byte(2)
-	IntentConfirmation  = byte(3)
-	IntentDenied        = byte(4)
+	IntentRequest       = msgType(1)
+	IntentCommunication = msgType(2)
+	IntentConfirmation  = msgType(3)
+	IntentDenied        = msgType(4)
 )
 
-// Action Type Constants
+type msgType byte
+
+// AgMessage Type || Data
+type AgMessage struct {
+	MsgType msgType
+	Data    any
+}
+
+// Grant Type Constants
 const (
-	ShellAction    = byte(1)
-	CommandAction  = byte(2)
-	LocalPFAction  = byte(3)
-	RemotePFAction = byte(4)
+	Shell    = grantType(1)
+	Command  = grantType(2)
+	LocalPF  = grantType(3)
+	RemotePF = grantType(4)
 )
 
 type grantType byte
 
-// Intent contains all data fields of an Intent Request or Intent Communication
+// Intent contains body of an Intent Request or Intent Communication
 type Intent struct {
 	GrantType      grantType
 	Reserved       byte
 	TargetPort     uint16
 	StartTime      int64
 	ExpTime        int64
-	TargetUsername string
 	TargetSNI      certs.Name
+	TargetUsername string
 	DelegateCert   []byte
-	AssociatedData []byte
+	AssociatedData GrantData
+}
+
+// Denial is the body of an IntentDenied message (contains an optional reason)
+type Denial struct {
+	Reason string
+}
+
+// GrantData is an interface for Intent Associated data for diff grant types
+type GrantData interface {
+}
+
+// ShellGrantData info needed for authgrant for shell access
+type ShellGrantData struct {
+}
+
+// CommandGrantData info needed for authgrant for executing a cmd
+type CommandGrantData struct {
+	Cmd string
+}
+
+// LocalPFGrantData info for local pf authgrant
+type LocalPFGrantData struct {
+}
+
+// RemotePFGrantData info for remote pf authgrant
+type RemotePFGrantData struct {
+}
+
+// NewAuthGrantMessage makes an agMessage with type and data
+func NewAuthGrantMessage(t msgType, data any) AgMessage {
+	return AgMessage{t, data}
 }
