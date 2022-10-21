@@ -49,6 +49,11 @@ type Denial struct {
 	Reason string
 }
 
+// TODO(baumanl): not sure if this is the best way to approach this.
+// For shell/cmd access not much additional data is needed. Port forwarding
+// may require more --> once this is implemented should inform the design
+// decision here.
+
 // GrantData is an interface for Intent Associated data for diff grant types
 type GrantData interface {
 }

@@ -16,21 +16,18 @@ import (
 )
 
 func checkAgMessage(t *testing.T, msg AgMessage) bool {
+	ok := false
 	switch msg.MsgType {
 	case IntentRequest:
-		_, ok := msg.Data.(Intent)
-		return ok
+		_, ok = msg.Data.(Intent) // type assertion
 	case IntentCommunication:
-		_, ok := msg.Data.(Intent)
-		return ok
+		_, ok = msg.Data.(Intent) // type assertion
 	case IntentDenied:
-		_, ok := msg.Data.(Denial)
-		return ok
+		_, ok = msg.Data.(Denial) // type assertion
 	case IntentConfirmation:
-		ok := msg.Data == nil
-		return ok
+		ok = msg.Data == nil
 	}
-	return false
+	return ok
 }
 
 func TestEnc(t *testing.T) {
@@ -42,7 +39,7 @@ func TestEnc(t *testing.T) {
 	enc := gob.NewEncoder(&network) // Will write to network.
 	dec := gob.NewDecoder(&network) // Will read from network.
 
-	target := certs.DNSName("github.com")
+	target := certs.RawStringName("Laura")
 	cert, err := new(certs.Certificate).Marshal()
 	assert.NilError(t, err)
 
