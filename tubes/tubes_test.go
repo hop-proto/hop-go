@@ -9,13 +9,13 @@ import (
 	"gotest.tools/assert"
 
 	"hop.computer/hop/common"
+	"hop.computer/hop/nettest"
 	"hop.computer/hop/transport"
-
-	"golang.org/x/net/nettest"
 )
 
 // rel is true for reliable tubes and false for unreliable ones
-func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), err error) {
+func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err error) {
+	r = rel
 	c1, c2 := transport.MakeReliableUDPConn(false)
 
 	muxer1 := NewMuxer(c1, c1, 0, logrus.WithField("muxer", "m1"))
@@ -65,18 +65,18 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), err error) 
 	stop = func() {
 		t1.Close()
 		t2.Close()
-		muxer1.Close()
-		muxer2.Close()
+		muxer1.Stop()
+		muxer2.Stop()
 	}
 
-	return t1, t2, stop, err
+	return t1, t2, stop, rel, err
 }
 
 // TODO(hosono) make reliable tubes pass these tests
-func DontTestReliable(t *testing.T) {
+func TestReliable(t *testing.T) {
 	logrus.SetLevel(logrus.DebugLevel)
 
-	f := func() (c1, c2 net.Conn, stop func(), err error) {
+	f := func() (c1, c2 net.Conn, stop func(), rel bool, err error) {
 		return makeConn(t, true)
 	}
 
@@ -85,7 +85,7 @@ func DontTestReliable(t *testing.T) {
 }
 
 func CheckUnreliable(t *testing.T) {
-	c1, c2, stop, err := makeConn(t, false)
+	c1, c2, stop, _, err := makeConn(t, false)
 	assert.NilError(t, err)
 
 	c1.Write([]byte("hello"))
@@ -100,7 +100,7 @@ func CheckUnreliable(t *testing.T) {
 }
 
 func UnreliableCount(t *testing.T) {
-	c1, c2, stop, err := makeConn(t, false)
+	c1, c2, stop, _, err := makeConn(t, false)
 	assert.NilError(t, err)
 
 	for i := 0; i < 8; i++ {
@@ -124,7 +124,7 @@ func TestUnreliable(t *testing.T) {
 	t.Run("CheckUnreliable", CheckUnreliable)
 	t.Run("Count", UnreliableCount)
 
-	f := func() (c1, c2 net.Conn, stop func(), err error) {
+	f := func() (c1, c2 net.Conn, stop func(), rel bool, err error) {
 		return makeConn(t, false)
 	}
 	mp := nettest.MakePipe(f)

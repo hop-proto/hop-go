@@ -12,6 +12,7 @@ import (
 	"math/rand"
 	"net"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,7 +22,9 @@ import (
 // as c1 and c2, such that anything written to c1 is read by c2 and vice-versa.
 // The stop function closes all resources, including c1, c2, and the underlying
 // net.Listener (if there is one), and should not be nil.
-type MakePipe func() (c1, c2 net.Conn, stop func(), err error)
+// rel indicates that this is a reliable connection. If rel is false,'
+// then the BasicIO test will be skipped
+type MakePipe func() (c1, c2 net.Conn, stop func(), rel bool, err error)
 
 // TestConn tests that a net.Conn implementation properly satisfies the interface.
 // The tests should not produce any false positives, but may experience
@@ -46,10 +49,15 @@ type connTester func(t *testing.T, c1, c2 net.Conn)
 
 func timeoutWrapper(t *testing.T, mp MakePipe, f connTester) {
 	t.Helper()
-	c1, c2, stop, err := mp()
+	c1, c2, stop, rel, err := mp()
 	if err != nil {
 		t.Fatalf("unable to make pipe: %v", err)
 	}
+
+	if !rel && strings.Contains(t.Name(), "BasicIO") {
+		t.Skip("Skipping BasicIO for unreliable connection")
+	}
+
 	var once sync.Once
 	defer once.Do(func() { stop() })
 	timer := time.AfterFunc(time.Minute, func() {
