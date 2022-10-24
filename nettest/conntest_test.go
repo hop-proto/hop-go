@@ -27,10 +27,10 @@ func TestTestConn(t *testing.T) {
 				t.Skipf("%s not supported on %s/%s", tt.network, runtime.GOOS, runtime.GOARCH)
 			}
 
-			mp := func() (c1, c2 net.Conn, stop func(), err error) {
+			mp := func() (c1, c2 net.Conn, stop func(), rel bool, err error) {
 				ln, err := NewLocalListener(tt.network)
 				if err != nil {
-					return nil, nil, nil, err
+					return nil, nil, nil, false, err
 				}
 
 				// Start a connection between two endpoints.
@@ -60,12 +60,12 @@ func TestTestConn(t *testing.T) {
 				switch {
 				case err1 != nil:
 					stop()
-					return nil, nil, nil, err1
+					return nil, nil, nil, false, err1
 				case err2 != nil:
 					stop()
-					return nil, nil, nil, err2
+					return nil, nil, nil, false, err2
 				default:
-					return c1, c2, stop, nil
+					return c1, c2, stop, false, nil
 				}
 			}
 

@@ -147,13 +147,13 @@ func (r *receiver) receive(p *frame) error {
 			"windowEnd":   windowEnd,
 		}).Debugf("out of bounds frame")
 		return errors.New("received dataframe out of receive window bounds")
-	} else {
-		r.log.WithFields(logrus.Fields{
-			"frameNo":     frameNo,
-			"windowStart": windowStart,
-			"windowEnd":   windowEnd,
-		}).Tracef("got in bounds frame.")
 	}
+
+	r.log.WithFields(logrus.Fields{
+		"frameNo":     frameNo,
+		"windowStart": windowStart,
+		"windowEnd":   windowEnd,
+	}).Tracef("got in bounds frame.")
 
 	if (p.dataLength > 0 || p.flags.FIN) && (frameNo >= r.windowStart) {
 		heap.Push(&r.fragments, &pqItem{

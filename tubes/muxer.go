@@ -229,7 +229,7 @@ func (m *Muxer) Start() (err error) {
 				}
 				if initFrame.flags.REL {
 					// TODO(hosono) make these methods on the muxer
-					tube, err = m.makeReliableTubeWithID(initFrame.tubeType, initFrame.tubeID)
+					tube, _ = m.makeReliableTubeWithID(initFrame.tubeType, initFrame.tubeID)
 					// TODO(hosono) error handling
 					m.addTube(tube)
 					m.tubeQueue <- tube

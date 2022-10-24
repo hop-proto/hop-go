@@ -163,10 +163,6 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 	return nil
 }
 
-func (r *Reliable) WaitForInitiated() {
-	<-r.initRecv
-}
-
 func (r *Reliable) Read(b []byte) (n int, err error) {
 	if r.tubeState.Load() != initiated {
 		err = errTubeNotInitiated
@@ -214,6 +210,7 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 	return n, 0, 0, nil, e
 }
 
+// Reset immediately tears down the connection
 func (r *Reliable) Reset() (err error) {
 	// TODO(hosono) add a reset flag
 
