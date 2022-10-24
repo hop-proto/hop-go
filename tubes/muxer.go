@@ -1,14 +1,15 @@
 package tubes
 
 import (
+	"bytes"
 	"crypto/rand"
 	"errors"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
-	"os"
 
 	"github.com/sirupsen/logrus"
 
@@ -78,11 +79,52 @@ func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
 }
 
 func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte) (*Reliable, error) {
-	r := makeTube(tType, tubeID, m.underlying.LocalAddr(), m.underlying.RemoteAddr(), m.sendQueue)
+	tubeLog := m.log.WithFields(logrus.Fields{
+		"tube":     tubeID,
+		"reliable": true,
+		"tubeType": tType,
+	})
+	r := &Reliable{
+		id:          tubeID,
+		localAddr:   m.underlying.LocalAddr(),
+		remoteAddr:  m.underlying.RemoteAddr(),
+		sendStopped: make(chan struct{}, 1),
+		initRecv:    make(chan struct{}),
+		closing:     make(chan struct{}, 1),
+		reset:       make(chan struct{}, 1),
+		recvWindow: receiver{
+			dataReady:   common.NewDeadlineChan[struct{}](1),
+			buffer:      new(bytes.Buffer),
+			fragments:   make(PriorityQueue, 0),
+			windowSize:  windowSize,
+			windowStart: 1,
+			log:         tubeLog.WithField("receiver", ""),
+		},
+		sender: sender{
+			ackNo:  1,
+			buffer: make([]byte, 0),
+			// closed defaults to false
+			// finSent defaults to false
+			frameDataLengths: make(map[uint32]uint16),
+			RTOTicker:        time.NewTicker(retransmitOffset),
+			RTO:              retransmitOffset,
+			windowSize:       windowSize,
+			endRetransmit:    make(chan struct{}),
+			windowOpen:       make(chan struct{}, 1),
+			sendQueue:        make(chan *frame),
+			retransmitEnded:  make(chan struct{}, 1),
+			log:              tubeLog.WithField("sender", ""),
+		},
+		sendQueue: m.sendQueue,
+		tType:     tType,
+		log:       tubeLog,
+	}
+	r.sender.frameNo.Store(1)
+	r.tubeState.Store(created)
+	r.recvWindow.init()
 	go r.initiate(true)
 	return r, nil
 }
-
 
 // CreateUnreliableTube starts a new unreliable tube
 func (m *Muxer) CreateUnreliableTube(tType TubeType) (*Unreliable, error) {
@@ -107,7 +149,11 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 		state:      atomic.Value{},
 		initiated:  make(chan struct{}, 1),
 		req:        req,
-		log:        m.log.WithField("tube", tubeID),
+		log: m.log.WithFields(logrus.Fields{
+			"tube":     tubeID,
+			"reliable": false,
+			"tubeType": tType,
+		}),
 	}
 	go tube.initiate()
 	m.addTube(tube)

@@ -56,12 +56,14 @@ type sender struct {
 	// +checklocks:l
 	deadline time.Time
 
-	endRetransmit chan struct{}
+	endRetransmit   chan struct{}
 	retransmitEnded chan struct{}
 
 	windowOpen chan struct{}
 
 	sendQueue chan *frame
+
+	log *logrus.Entry
 }
 
 func (s *sender) unsentFramesRemaining() int {
@@ -111,7 +113,10 @@ func (s *sender) recvAck(ackNo uint32) error {
 	s.l.Lock()
 	defer s.l.Unlock()
 	newAckNo := uint64(ackNo)
-	logrus.Tracef("received ack. orig ackno: %d, new ackno: %d", s.ackNo, newAckNo)
+	s.log.WithFields(logrus.Fields{
+		"orig ackno": s.ackNo,
+		"new ackno":  newAckNo,
+	}).Tracef("received ack")
 	if newAckNo < s.ackNo && (newAckNo+(1<<32)-s.ackNo <= uint64(s.windowSize)) { // wrap around
 		newAckNo = newAckNo + (1 << 32)
 	}
@@ -119,7 +124,7 @@ func (s *sender) recvAck(ackNo uint32) error {
 	for s.ackNo < newAckNo {
 		_, ok := s.frameDataLengths[uint32(s.ackNo)]
 		if !ok {
-			logrus.Debugf("data length missing for frame %d", s.ackNo)
+			s.log.WithField("ackNo", s.ackNo).Debug("data length missing for frame")
 			return errors.New("no data length")
 		}
 		delete(s.frameDataLengths, uint32(s.ackNo))
@@ -140,8 +145,8 @@ func (s *sender) recvAck(ackNo uint32) error {
 func (s *sender) sendEmptyPacket() *frame {
 	pkt := &frame{
 		dataLength: 0,
-		frameNo: s.frameNo.Load(),
-		data: []byte{},
+		frameNo:    s.frameNo.Load(),
+		data:       []byte{},
 		flags: frameFlags{
 			FIN: s.finSent.Load(),
 		},
@@ -155,7 +160,7 @@ func (s *sender) sendEmptyPacket() *frame {
 func (s *sender) fillWindow(rto bool) {
 	for i := 0; i < len(s.frames) && i < int(s.windowSize) && (i < maxFragTransPerRTO || !rto); i++ {
 		s.sendQueue <- s.frames[i]
-		logrus.Tracef("Putting packet on queue. fin? %t", s.frames[i].flags.FIN)
+		s.log.WithField("fin", s.frames[i].flags.FIN).Trace("Putting packet on queue")
 	}
 }
 
@@ -166,7 +171,7 @@ func (s *sender) retransmit() {
 		case <-s.RTOTicker.C:
 			s.l.Lock()
 			if len(s.frames) == 0 { // Keep Alive messages
-				logrus.Tracef("Keep alive sent. frameno: %d", s.frameNo.Load())
+				s.log.WithField("frameno", s.frameNo.Load()).Trace("Keep alive sent")
 				s.sendEmptyPacket()
 			} else {
 				s.fillWindow(true)
@@ -234,6 +239,6 @@ func (s *sender) sendFin() error {
 	s.frameNo.Add(1)
 	s.frames = append(s.frames, &pkt)
 	s.sendQueue <- &pkt
-	logrus.Debug("sending FIN packet")
+	s.log.Debug("sending FIN packet")
 	return nil
 }

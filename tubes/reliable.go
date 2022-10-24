@@ -2,7 +2,6 @@
 package tubes
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -12,8 +11,6 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-
-	"hop.computer/hop/common"
 )
 
 // How David would approach this:
@@ -29,11 +26,13 @@ const windowSize = 128
 // TubeType represents identifier bytes of Tubes.
 type TubeType byte
 
+type state int32
+
 const (
-	created    int32 = iota
-	initiated  int32 = iota
-	closeStart int32 = iota
-	closed     int32 = iota
+	created    state = iota
+	initiated  state = iota
+	closeStart state = iota
+	closed     state = iota
 )
 
 var errTubeNotInitiated = errors.New("tube not initiated")
@@ -49,11 +48,12 @@ type Reliable struct {
 	remoteAddr  net.Addr
 	sender      sender
 	sendQueue   chan []byte
-	tubeState atomic.Int32 // TODO(hosono) this could just be atomic
-	initRecv  chan struct{}
+	tubeState   atomic.Value
+	initRecv    chan struct{}
 	sendStopped chan struct{}
-	l         sync.Mutex
-	finAcked  atomic.Bool
+	l           sync.Mutex
+	finAcked    atomic.Bool
+	log         *logrus.Entry
 }
 
 // Reliable implements net.Conn
@@ -62,49 +62,9 @@ var _ net.Conn = &Reliable{}
 // Reliable tubes are tubes
 var _ Tube = &Reliable{}
 
-// TODO(hosono) make this a muxer method
-func makeTube(tType TubeType, tubeID byte, laddr, raddr net.Addr, sendQueue chan []byte) *Reliable {
-	r := &Reliable{
-		id:          tubeID,
-		localAddr:   laddr,
-		remoteAddr:  raddr,
-		sendStopped: make(chan struct{}, 1),
-		initRecv:    make(chan struct{}),
-		closing:     make(chan struct{}, 1),
-		reset:       make(chan struct{}, 1),
-		recvWindow: receiver{
-			dataReady:   common.NewDeadlineChan[struct{}](1),
-			buffer:      new(bytes.Buffer),
-			fragments:   make(PriorityQueue, 0),
-			windowSize:  windowSize,
-			windowStart: 1,
-		},
-		sender: sender{
-			ackNo:  1,
-			buffer: make([]byte, 0),
-			// closed defaults to false
-			// finSent defaults to false
-			frameDataLengths: make(map[uint32]uint16),
-			RTOTicker:        time.NewTicker(retransmitOffset),
-			RTO:              retransmitOffset,
-			windowSize:       windowSize,
-			endRetransmit:    make(chan struct{}),
-			windowOpen:       make(chan struct{}, 1),
-			sendQueue:        make(chan *frame),
-			retransmitEnded:  make(chan struct{}, 1),
-		},
-		sendQueue: sendQueue,
-		tType:     tType,
-	}
-	r.sender.frameNo.Store(1)
-	r.tubeState.Store(created)
-	r.recvWindow.init()
-	return r
-}
-
 /* req: whether the tube is requesting to initiate a tube (true), or whether is respondding to an initiation request (false).*/
 func (r *Reliable) initiate(req bool) {
-	//logrus.Errorf("Tube %d initiated", r.id)
+	//r.log.Errorf("Tube %d initiated", r.id)
 	tubeType := r.tType
 	notInit := true
 
@@ -138,7 +98,7 @@ func (r *Reliable) initiate(req bool) {
 }
 
 func (r *Reliable) send() {
-	for pkt := range(r.sender.sendQueue) {
+	for pkt := range r.sender.sendQueue {
 		pkt.tubeID = r.id
 		pkt.ackNo = r.recvWindow.getAck()
 		pkt.flags.ACK = true
@@ -153,13 +113,17 @@ func (r *Reliable) receive(pkt *frame) error {
 	defer r.l.Unlock()
 
 	tubeState := r.tubeState.Load()
-	if tubeState != initiated && tubeState != closeStart{
-		logrus.Errorf("receive for uninitiated tube %d. fin? %t", r.id, pkt.flags.FIN)
+	if tubeState != initiated && tubeState != closeStart {
+		r.log.WithField("fin", pkt.flags.FIN).Errorf("receive for uninitiated tube")
 		r.Reset()
 		return errTubeNotInitiated
 	}
 
-	logrus.Tracef("receving packet. ackno: %d, ack? %t, fin? %t", pkt.ackNo, pkt.flags.ACK, pkt.flags.FIN)
+	r.log.WithFields(logrus.Fields{
+		"ackno": pkt.ackNo,
+		"ack":   pkt.flags.ACK,
+		"fin":   pkt.flags.FIN,
+	}).Trace("receiving packet")
 	err := r.recvWindow.receive(pkt)
 	if pkt.flags.ACK {
 		r.sender.recvAck(pkt.ackNo)
@@ -190,7 +154,7 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		r.recvWindow.m.Lock()
 		r.recvWindow.ackNo = 1
 		r.recvWindow.m.Unlock()
-		//logrus.Debug("INITIATED! ", pkt.flags.REQ, " ", pkt.flags.RESP)
+		r.log.Debug("INITIATED!")
 		r.tubeState.Store(initiated)
 		r.sender.recvAck(1)
 		close(r.initRecv)
@@ -255,11 +219,11 @@ func (r *Reliable) Reset() (err error) {
 
 	oldState := r.tubeState.Swap(closed)
 	if oldState == closed {
-		logrus.Warnf("Resetting of closed tube %d", r.id)
+		r.log.Warn("Resetting closed tube")
 		return io.EOF
 	}
 
-	logrus.Warnf("Resetting tube %d", r.id)
+	r.log.Warn("Resetting tube")
 
 	r.sender.Reset()
 	r.recvWindow.Close()
@@ -281,7 +245,7 @@ func (r *Reliable) Close() (err error) {
 	if !r.tubeState.CompareAndSwap(initiated, closeStart) {
 		return io.EOF
 	}
-	logrus.Debugf("Starting close of tube %d", r.id)
+	r.log.Debug("Starting close")
 
 	// Prevent future writes from succeeding
 	r.sender.Close()
@@ -293,13 +257,13 @@ closeLoop:
 		select {
 		case <-r.closing:
 			if r.sender.unsentFramesRemaining() == 0 && r.recvWindow.closed.Load() {
-				logrus.Debugf("sent all frames and got fin for tube %d", r.id)
+				r.log.Debug("sent all frames and got fin")
 				break closeLoop
 			} else {
-				logrus.Debugf("closing. packets left to ack: %d", r.sender.unsentFramesRemaining())
+				r.log.WithField("packet left to ack", r.sender.unsentFramesRemaining()).Debug("closing")
 			}
 		case <-r.reset:
-			logrus.Debugf("got reset in close loop for tube %d", r.id)
+			r.log.Debug("got reset in close loop")
 			break closeLoop
 		}
 	}
@@ -309,7 +273,7 @@ closeLoop:
 	r.l.Lock()
 	defer r.l.Unlock()
 	r.sender.Reset()
-	logrus.Debugf("closed tube: %v", r.id)
+	r.log.Debugf("closed tube")
 
 	close(r.sender.sendQueue)
 	<-r.sendStopped
