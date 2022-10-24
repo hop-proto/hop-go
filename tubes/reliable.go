@@ -62,31 +62,8 @@ var _ net.Conn = &Reliable{}
 // Reliable tubes are tubes
 var _ Tube = &Reliable{}
 
-func (r *Reliable) getState() state {
-	r.m.Lock()
-	defer r.m.Unlock()
-	return r.tubeState
-}
-
-func (r *Reliable) send() {
-	for r.getState() == initiated || r.getState() == closeStart {
-		pkt := <-r.sender.sendQueue
-		pkt.tubeID = r.id
-		pkt.ackNo = r.recvWindow.getAck()
-		pkt.flags.ACK = true
-		pkt.flags.REL = true
-		logrus.Debug("sending pkt ", pkt.frameNo, pkt.ackNo, pkt.flags.FIN, pkt.flags.ACK)
-		r.sendQueue <- pkt.toBytes()
-	}
-}
-
-func newReliableTubeWithTubeID(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType TubeType, tubeID byte) *Reliable {
-	r := makeReliableTube(underlying, netConn, sendQueue, tubeType, tubeID)
-	go r.initiate(false)
-	return r
-}
-
-func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType TubeType, tubeID byte) *Reliable {
+// TODO(hosono) make this a muxer method
+func makeTube(tType TubeType, tubeID byte, laddr, raddr net.Addr, sendQueue chan []byte) *Reliable {
 	r := &Reliable{
 		id:          tubeID,
 		localAddr:   laddr,
@@ -125,45 +102,26 @@ func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue 
 	return r
 }
 
-func newReliableTube(muxer *Muxer, tType TubeType) (*Reliable, error) {
-	cid := []byte{0}
-	n, err := rand.Read(cid) // TODO(hosono) make sure there are no tube conflicts
-	if err != nil || n != 1 {
-		return nil, err
-	}
-	r := makeReliableTube(underlying, netConn, sendQueue, tType, cid[0])
-	go r.initiate(true)
-	return r, nil
-}
-
 /* req: whether the tube is requesting to initiate a tube (true), or whether is respondding to an initiation request (false).*/
 func (r *Reliable) initiate(req bool) {
 	//logrus.Errorf("Tube %d initiated", r.id)
 	tubeType := r.tType
 	notInit := true
 
-	for notInit {
-		p := initiateFrame{
-			tubeID:     r.id,
-			tubeType:   tubeType,
-			data:       []byte{},
-			dataLength: 0,
-			frameNo:    0,
-			windowSize: r.recvWindow.windowSize,
-			flags: frameFlags{
-				ACK:  true,
-				FIN:  false,
-				REQ:  req,
-				RESP: !req,
-				REL:  true,
-			},
-		}
-		r.sendQueue <- p.toBytes()
-		r.m.Lock()
-		notInit = r.tubeState == created
-		r.m.Unlock()
-		timer := time.NewTimer(retransmitOffset)
-		<-timer.C
+	p := initiateFrame{
+		tubeID:     r.id,
+		tubeType:   tubeType,
+		data:       []byte{},
+		dataLength: 0,
+		frameNo:    0,
+		windowSize: r.recvWindow.windowSize,
+		flags: frameFlags{
+			REQ:  req,
+			RESP: !req,
+			REL:  true,
+			ACK:  true,
+			FIN:  false,
+		},
 	}
 	ticker := time.NewTicker(retransmitOffset)
 	for notInit {
@@ -191,11 +149,14 @@ func (r *Reliable) send() {
 }
 
 func (r *Reliable) receive(pkt *frame) error {
-	r.m.Lock()
-	defer r.m.Unlock()
-	if r.tubeState != initiated {
-		//logrus.Error("receiving non-initiate tube frames when not initiated")
-		return errors.New("receiving non-initiate tube frames when not initiated")
+	r.l.Lock()
+	defer r.l.Unlock()
+
+	tubeState := r.tubeState.Load()
+	if tubeState != initiated && tubeState != closeStart{
+		logrus.Errorf("receive for uninitiated tube %d. fin? %t", r.id, pkt.flags.FIN)
+		r.Reset()
+		return errTubeNotInitiated
 	}
 
 	logrus.Tracef("receving packet. ackno: %d, ack? %t, fin? %t", pkt.ackNo, pkt.flags.ACK, pkt.flags.FIN)
@@ -372,7 +333,7 @@ func (r *Reliable) IsReliable() bool {
 	return true
 }
 
-// LocalAddr returns tube local address
+// LocalAddr returns the local address for the tube
 func (r *Reliable) LocalAddr() net.Addr {
 	return r.localAddr
 }

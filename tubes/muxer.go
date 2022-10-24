@@ -2,10 +2,13 @@ package tubes
 
 import (
 	"crypto/rand"
+	"errors"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
+	"os"
 
 	"github.com/sirupsen/logrus"
 
@@ -66,11 +69,20 @@ func (m *Muxer) getTube(tubeID byte) (Tube, bool) {
 
 // CreateReliableTube starts a new reliable tube
 func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
-	tube, err := newReliableTube(m.underlying, m.netConn, m.sendQueue, tType)
+	cid := []byte{0}
+	rand.Read(cid)
+	tube, err := m.makeReliableTubeWithID(tType, cid[0])
 	m.addTube(tube)
 	m.log.Infof("Created Tube: %v", tube.GetID())
 	return tube, err
 }
+
+func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte) (*Reliable, error) {
+	r := makeTube(tType, tubeID, m.underlying.LocalAddr(), m.underlying.RemoteAddr(), m.sendQueue)
+	go r.initiate(true)
+	return r, nil
+}
+
 
 // CreateUnreliableTube starts a new unreliable tube
 func (m *Muxer) CreateUnreliableTube(tType TubeType) (*Unreliable, error) {
@@ -88,8 +100,8 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 		tType:      tType,
 		id:         tubeID,
 		sendQueue:  m.sendQueue,
-		localAddr:  m.netConn.LocalAddr(),
-		remoteAddr: m.netConn.RemoteAddr(),
+		localAddr:  m.underlying.LocalAddr(),
+		remoteAddr: m.underlying.RemoteAddr(),
 		recv:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
 		send:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
 		state:      atomic.Value{},
@@ -141,17 +153,12 @@ func (m *Muxer) Start() (err error) {
 
 	defer func() {
 		// This case indicates that the muxer was stopped by m.Close()
-		if errors.Is(err, os.ErrDeadlineExceeded) && m.stopped.IsSet() {
+		if errors.Is(err, os.ErrDeadlineExceeded) && m.stopped.Load() {
 			err = nil
 		} else if err != nil {
 			logrus.Errorf("Muxer ended with error: %s", err)
 			m.Stop()
 		}
-	}()
-
-	defer func() {
-		// TODO(hosono) prevent panic by making sure this happens only once prevent panic by making sure this happens only once
-		close(m.muxerStopped)
 	}()
 
 	// Set initial timeout
@@ -176,7 +183,8 @@ func (m *Muxer) Start() (err error) {
 				}
 				if initFrame.flags.REL {
 					// TODO(hosono) make these methods on the muxer
-					tube = newReliableTubeWithTubeID(m.underlying, m.netConn, m.sendQueue, initFrame.tubeType, initFrame.tubeID)
+					tube, err = m.makeReliableTubeWithID(initFrame.tubeType, initFrame.tubeID)
+					// TODO(hosono) error handling
 					m.addTube(tube)
 					m.tubeQueue <- tube
 				} else {
@@ -207,15 +215,12 @@ func (m *Muxer) Start() (err error) {
 	return nil
 }
 
-// Close ensures all the muxer tubes are closed
-func (m *Muxer) Close() (err error) {
-	m.closeLock.Lock()
-	defer m.closeLock.Unlock()
-	if m.stopped.IsSet() {
+// Stop ensures all the muxer tubes are closed
+func (m *Muxer) Stop() (err error) {
+	if m.stopped.Load() {
 		return io.EOF
 	}
 	wg := sync.WaitGroup{}
-	m.tubeLock.Lock()
 	for _, v := range m.tubes {
 		wg.Add(1)
 		go func(v Tube) { //parallelized closing tubes because other side may close them in a different order
@@ -227,4 +232,5 @@ func (m *Muxer) Close() (err error) {
 	wg.Wait()
 	m.stopped.Store(true) //This has to come after all the tubes are closed otherwise the tubes can't finish sending all their frames and deadlock
 	m.log.Info("Muxer.Stop() finished")
+	return nil
 }

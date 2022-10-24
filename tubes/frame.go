@@ -26,18 +26,21 @@ type frameFlags struct {
 	REQ bool
 	// Flag to accept tube initiation.
 	RESP bool
-	// Flag to indicate reliable tubes
+	// Flag is indicate a reliable tube
 	REL bool
+	// Flag to update the acknowledgement number from the sender of the packet for the receiver of the packet.
+	ACK bool
+	// Flag to teardown tube.
+	FIN bool
 }
 
 // The bit index for each of these flags.
-// TODO(hosono) these do not match the paper
 const (
-	ACKIdx  = 0
-	FINIdx  = 1
-	REQIdx  = 2
-	RESPIdx = 3
-	RELIdx  = 4
+	REQIdx  = 0
+	RESPIdx = 1
+	RELIdx  = 2
+	ACKIdx  = 3
+	FINIdx  = 4
 )
 
 func flagsToMetaByte(p *frameFlags) byte {
@@ -51,6 +54,12 @@ func flagsToMetaByte(p *frameFlags) byte {
 	if p.REL {
 		meta = meta | (1 << RELIdx)
 	}
+	if p.ACK {
+		meta = meta | (1 << ACKIdx)
+	}
+	if p.FIN {
+		meta = meta | (1 << FINIdx)
+	}
 	return meta
 }
 
@@ -59,6 +68,8 @@ func metaToFlags(b byte) frameFlags {
 		REQ:  b&(1<<REQIdx) != 0,
 		RESP: b&(1<<RESPIdx) != 0,
 		REL:  b&(1<<RELIdx) != 0,
+		ACK:  b&(1<<ACKIdx) != 0,
+		FIN:  b&(1<<FINIdx) != 0,
 	}
 	return flags
 }

@@ -61,8 +61,6 @@ type Client struct {
 
 	recv *common.DeadlineChan[[]byte]
 
-	recv *common.DeadlineChan
-
 	config ClientConfig
 }
 
@@ -388,52 +386,6 @@ func (c *Client) handleControlMsg(msg ControlMessage) (err error) {
 		logrus.Errorf("client: invalid control message: %x", msg)
 		go c.Close()
 		return ErrInvalidMessage
-	}
-}
-
-func (c *Client) listen() {
-	c.wg.Add(1)
-	defer c.wg.Done()
-	for !c.closed.IsSet() {
-		n, mt, err := c.readMsg()
-
-		if err != nil {
-			if !errors.Is(err, net.ErrClosed) {
-				logrus.Errorf("client: %s", err)
-			}
-			c.recv.Close()
-			c.underlyingConn.SetDeadline(time.Now())
-			break
-		}
-
-		switch mt {
-		case MessageTypeTransport:
-			select {
-			case c.recv.C <- append([]byte(nil), c.plaintext[:n]...):
-				break
-			default:
-				logrus.Warn("client: recv queue full. dropping message")
-			}
-		case MessageTypeControl:
-			if n != 1 {
-				logrus.Fatalf("client: malformed control message: %s", c.plaintext[:n])
-			}
-			msg := ControlMessage(c.plaintext[0])
-			c.handleControlMsg(msg)
-		default:
-			// TODO(hosono) Maybe silently discard instead of panic?
-			// Messages must be authenticated to reach this point
-			logrus.Panicf("client: unexpected message %x", mt)
-		}
-	}
-}
-
-func (c *Client) handleControlMsg(msg ControlMessage) error {
-	switch msg {
-	case ControlMessageClose:
-		return c.recv.Close()
-	default:
-		return nil
 	}
 }
 

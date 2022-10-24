@@ -167,7 +167,8 @@ func (sess *hopSession) start() {
 func (sess *hopSession) close() error {
 	var err, err2 error
 
-	sess.tubeMuxer.Stop()
+<<<<<<< HEAD
+	sess.tubeMuxer.Close()
 
 	// remove from server session map
 	sess.server.sessionLock.Lock()
@@ -175,6 +176,13 @@ func (sess *hopSession) close() error {
 	delete(sess.server.sessions, sess.ID)
 
 	//err2 = sess.transportConn.Close() //TODO(hosono) uncomment
+||||||| parent of b41973d (Fixed rebase conflicts)
+	sess.tubeMuxer.Close()
+	//err2 = sess.transportConn.Close() //TODO(hosono) uncomment
+=======
+	sess.tubeMuxer.Stop()
+	//err2 = sess.transportConn.Close() //(not implemented yet)
+>>>>>>> b41973d (Fixed rebase conflicts)
 	if err != nil {
 		return err
 	}

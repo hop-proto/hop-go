@@ -1,11 +1,8 @@
 package tubes
 
 import (
-	"io"
 	"net"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -68,8 +65,8 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), err error) 
 	stop = func() {
 		t1.Close()
 		t2.Close()
-		muxer1.Stop()
-		muxer2.Stop()
+		muxer1.Close()
+		muxer2.Close()
 	}
 
 	return t1, t2, stop, err
@@ -98,10 +95,6 @@ func CheckUnreliable(t *testing.T) {
 	assert.NilError(t, err)
 
 	assert.DeepEqual(t, buf, []byte("hello"))
-
-	n, err = server.Read(b)
-	assert.DeepEqual(t, n, 0)
-	assert.ErrorType(t, err, io.EOF)
 
 	stop()
 }
