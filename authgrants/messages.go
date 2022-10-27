@@ -21,6 +21,7 @@ const (
 
 type msgType byte
 
+// MessageData interface describes what the data field of ag msg can do
 type MessageData interface {
 	io.WriterTo
 	io.ReaderFrom
@@ -55,8 +56,8 @@ type Intent struct {
 	AssociatedData GrantData
 }
 
-// TODO: does this struct need other info? or just use a raw string
 // Denial is the body of an IntentDenied message (contains an optional reason)
+// TODO: does this struct need other info? or just use a raw string
 type Denial struct {
 	Reason string
 }
@@ -112,6 +113,7 @@ func (m *AgMessage) WriteTo(w io.Writer) (int64, error) {
 	return written, nil
 }
 
+// ReadFrom reads a serialized ag msg
 func (m *AgMessage) ReadFrom(r io.Reader) (int64, error) {
 	var bytesRead int64
 	// read message type
@@ -174,6 +176,7 @@ func (i *Intent) WriteTo(w io.Writer) (int64, error) {
 	return written, nil
 }
 
+// ReadFrom reads a serialized intent block
 func (i *Intent) ReadFrom(r io.Reader) (int64, error) {
 	var bytesRead int64
 	// read grantType and reserved byte
@@ -190,7 +193,7 @@ func (i *Intent) ReadFrom(r io.Reader) (int64, error) {
 // helper function to write a string preceded by its length.
 func writeString(s string, w io.Writer) (int64, error) {
 	var written int64
-	nameLen := len(s)
+	nameLen := uint32(len(s)) //?
 	err := binary.Write(w, binary.BigEndian, nameLen)
 	if err != nil {
 		return written, err
@@ -204,7 +207,9 @@ func writeString(s string, w io.Writer) (int64, error) {
 	return written, nil
 }
 
+// helper function that reads a string
 func readString(r io.Reader) string {
+	panic("unimplemented")
 	// read len
 	// read string
 }
@@ -214,8 +219,11 @@ func (d *Denial) WriteTo(w io.Writer) (int64, error) {
 	return writeString(d.Reason, w)
 }
 
+// ReadFrom reads a serialized denial block
 func (d *Denial) ReadFrom(r io.Reader) (int64, error) {
 	// read denial reason
+	readString(r)
+	panic("unimplemented")
 }
 
 // WriteTo serializes command grant data  and implements the io.WriterTo interface
@@ -223,18 +231,23 @@ func (d *CommandGrantData) WriteTo(w io.Writer) (int64, error) {
 	return writeString(d.Cmd, w)
 }
 
+// ReadFrom reads a serialized commandgrantdata block
 func (d *CommandGrantData) ReadFrom(r io.Reader) (int64, error) {
 	// read command
+	panic("unimplemented")
 }
 
+// WriteTo writes serialized shell grant data
 func (d *ShellGrantData) WriteTo(w io.Writer) (int64, error) {
 	panic("unimplemented")
 }
 
+// WriteTo writes serialized local pf grant data
 func (d *LocalPFGrantData) WriteTo(w io.Writer) (int64, error) {
 	panic("unimplemented")
 }
 
+// WriteTo writes serialized remote pf grant data
 func (d *RemotePFGrantData) WriteTo(w io.Writer) (int64, error) {
 	panic("unimplemented")
 }
