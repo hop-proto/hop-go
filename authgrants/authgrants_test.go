@@ -32,9 +32,6 @@ func checkAgMessage(t *testing.T, msg AgMessage) bool {
 
 func TestEnc(t *testing.T) {
 	var network bytes.Buffer // Stand-in for a network connection
-	gob.Register(Intent{})
-	gob.Register(Denial{})
-	gob.Register(CommandGrantData{})
 
 	enc := gob.NewEncoder(&network) // Will write to network.
 	dec := gob.NewDecoder(&network) // Will read from network.
@@ -47,8 +44,8 @@ func TestEnc(t *testing.T) {
 		GrantType:      Shell,
 		Reserved:       0,
 		TargetPort:     55,
-		StartTime:      time.Now().Unix(),
-		ExpTime:        time.Now().Add(time.Hour).Unix(),
+		StartTime:      time.Now(),
+		ExpTime:        time.Now().Add(time.Hour),
 		TargetUsername: "laura",
 		TargetSNI:      target,
 		DelegateCert:   cert,
