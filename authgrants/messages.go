@@ -2,7 +2,10 @@ package authgrants
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
+	"math"
+	"strings"
 	"time"
 
 	"hop.computer/hop/certs"
@@ -21,10 +24,10 @@ const (
 
 type msgType byte
 
-// MessageData interface describes what the data field of ag msg can do
-type MessageData interface {
-	io.WriterTo
-	io.ReaderFrom
+// MessageData represents either intent or denial reason
+type MessageData struct {
+	Intent Intent
+	Denial string
 }
 
 // AgMessage Type || Data
@@ -56,21 +59,17 @@ type Intent struct {
 	AssociatedData GrantData
 }
 
-// Denial is the body of an IntentDenied message (contains an optional reason)
-// TODO: does this struct need other info? or just use a raw string
-type Denial struct {
-	Reason string
-}
-
 // TODO(baumanl): not sure if this is the best way to approach this.
 // For shell/cmd access not much additional data is needed. Port forwarding
 // may require more --> once this is implemented should inform the design
 // decision here.
 
-// GrantData is an interface for Intent Associated data for diff grant types
-type GrantData interface {
-	io.WriterTo
-	io.ReaderFrom
+// GrantData is a struct for Intent Associated data for diff grant types
+type GrantData struct {
+	ShellGrantData    ShellGrantData
+	CommandGrantData  CommandGrantData
+	LocalPFGrantData  LocalPFGrantData
+	RemotePFGrantData RemotePFGrantData
 }
 
 // ShellGrantData info needed for authgrant for shell access
@@ -105,7 +104,17 @@ func (m *AgMessage) WriteTo(w io.Writer) (int64, error) {
 		return written, err
 	}
 	// write message data
-	dataLen, err := m.Data.WriteTo(w)
+	var dataLen int64
+	switch m.MsgType {
+	case IntentRequest:
+		dataLen, err = m.Data.Intent.WriteTo(w)
+	case IntentCommunication:
+		dataLen, err = m.Data.Intent.WriteTo(w)
+	case IntentConfirmation:
+		dataLen = 0
+	case IntentDenied:
+		dataLen, err = writeString(m.Data.Denial, w)
+	}
 	written += dataLen
 	if err != nil {
 		return written, err
@@ -117,7 +126,26 @@ func (m *AgMessage) WriteTo(w io.Writer) (int64, error) {
 func (m *AgMessage) ReadFrom(r io.Reader) (int64, error) {
 	var bytesRead int64
 	// read message type
+	err := binary.Read(r, binary.BigEndian, &m.MsgType)
+	if err != nil {
+		return bytesRead, err
+	}
+	bytesRead++
 	// read message data
+	var dataBytes int64
+	switch m.MsgType {
+	case IntentRequest:
+		dataBytes, err = m.Data.Intent.ReadFrom(r)
+	case IntentCommunication:
+		dataBytes, err = m.Data.Intent.ReadFrom(r)
+	case IntentDenied:
+		m.Data.Denial, dataBytes, err = readString(r)
+	}
+
+	bytesRead += dataBytes
+	if err != nil {
+		return bytesRead, err
+	}
 	return bytesRead, nil
 }
 
@@ -167,7 +195,17 @@ func (i *Intent) WriteTo(w io.Writer) (int64, error) {
 		return written, err
 	}
 	// write all associated data
-	assocDataLen, err := i.AssociatedData.WriteTo(w)
+	var assocDataLen int64
+	switch i.GrantType {
+	case Command:
+		assocDataLen, err = i.AssociatedData.CommandGrantData.WriteTo(w)
+	case Shell:
+		assocDataLen, err = i.AssociatedData.ShellGrantData.WriteTo(w)
+	case LocalPF:
+		assocDataLen, err = i.AssociatedData.LocalPFGrantData.WriteTo(w)
+	case RemotePF:
+		assocDataLen, err = i.AssociatedData.RemotePFGrantData.WriteTo(w)
+	}
 	written += assocDataLen
 	if err != nil {
 		return written, err
@@ -180,26 +218,94 @@ func (i *Intent) WriteTo(w io.Writer) (int64, error) {
 func (i *Intent) ReadFrom(r io.Reader) (int64, error) {
 	var bytesRead int64
 	// read grantType and reserved byte
+	err := binary.Read(r, binary.BigEndian, &i.GrantType)
+	if err != nil {
+		return bytesRead, err
+	}
+	bytesRead++
+
+	err = binary.Read(r, binary.BigEndian, &i.Reserved)
+	if err != nil {
+		return bytesRead, err
+	}
+	bytesRead++
 	// read target port
+	err = binary.Read(r, binary.BigEndian, &i.TargetPort)
+	if err != nil {
+		return bytesRead, err
+	}
+	bytesRead += 2
+
 	// read start time
+	var t uint64
+	err = binary.Read(r, binary.BigEndian, &t)
+	if err != nil {
+		return bytesRead, err
+	}
+	if t > math.MaxInt64 {
+		return bytesRead, errors.New("start timestamp too large")
+	}
+	bytesRead += 8
+	i.StartTime = time.Unix(int64(t), 0)
 	// read exp time
+	err = binary.Read(r, binary.BigEndian, &t)
+	if err != nil {
+		return bytesRead, err
+	}
+	if t > math.MaxInt64 {
+		return bytesRead, errors.New("exp timestamp too large")
+	}
+	bytesRead += 8
+	i.ExpTime = time.Unix(int64(t), 0)
 	// read targetSNI
+	n, err := i.TargetSNI.ReadFrom(r)
+	if err != nil {
+		return bytesRead, err
+	}
+	bytesRead += n
 	// read targetUsername
+	username, usernameBytes, err := readString(r)
+	if err != nil {
+		return bytesRead, err
+	}
+	bytesRead += usernameBytes
+	i.TargetUsername = username
 	// read delegateCert
+	certBytes, err := i.DelegateCert.ReadFrom(r)
+	if err != nil {
+		return bytesRead, err
+	}
+	bytesRead += certBytes
 	// read all associatedData
+	var assocDataBytes int64
+	switch i.GrantType {
+	case Command:
+		assocDataBytes, err = i.AssociatedData.CommandGrantData.ReadFrom(r)
+	case Shell:
+		assocDataBytes, err = i.AssociatedData.ShellGrantData.ReadFrom(r)
+	case LocalPF:
+		assocDataBytes, err = i.AssociatedData.LocalPFGrantData.ReadFrom(r)
+	case RemotePF:
+		assocDataBytes, err = i.AssociatedData.RemotePFGrantData.ReadFrom(r)
+	}
+
+	if err != nil {
+		return bytesRead, err
+	}
+	bytesRead += assocDataBytes
 	return bytesRead, nil
 }
 
 // helper function to write a string preceded by its length.
 func writeString(s string, w io.Writer) (int64, error) {
 	var written int64
-	nameLen := uint32(len(s)) //?
-	err := binary.Write(w, binary.BigEndian, nameLen)
+	// write length of string as one byte
+	n, err := w.Write([]byte{byte(len(s))})
+	written += int64(n)
 	if err != nil {
 		return written, err
 	}
-	written += 4
-	n, err := w.Write([]byte(s))
+	n, err = w.Write([]byte(s))
 	written += int64(n)
 	if err != nil {
 		return written, err
@@ -208,22 +314,21 @@ func writeString(s string, w io.Writer) (int64, error) {
 }
 
 // helper function that reads a string
-func readString(r io.Reader) string {
-	panic("unimplemented")
+func readString(r io.Reader) (string, int64, error) {
+	var bytesRead int64
 	// read len
+	var len byte
+	err := binary.Read(r, binary.BigEndian, &len)
+	if err != nil {
+		return "", bytesRead, err
+	}
+	bytesRead++
 	// read string
-}
+	builder := strings.Builder{}
+	copied, err := io.CopyN(&builder, r, int64(len))
+	bytesRead += copied
+	return builder.String(), bytesRead, err
 
-// WriteTo serializes a denial msg and implements the io.WriterTo interface
-func (d *Denial) WriteTo(w io.Writer) (int64, error) {
-	return writeString(d.Reason, w)
-}
-
-// ReadFrom reads a serialized denial block
-func (d *Denial) ReadFrom(r io.Reader) (int64, error) {
-	// read denial reason
-	readString(r)
-	panic("unimplemented")
 }
 
 // WriteTo serializes command grant data  and implements the io.WriterTo interface
@@ -234,11 +339,20 @@ func (d *CommandGrantData) WriteTo(w io.Writer) (int64, error) {
 // ReadFrom reads a serialized commandgrantdata block
 func (d *CommandGrantData) ReadFrom(r io.Reader) (int64, error) {
 	// read command
-	panic("unimplemented")
+	cmd, cmdBytes, err := readString(r)
+	d.Cmd = cmd
+	return cmdBytes, err
+
 }
 
 // WriteTo writes serialized shell grant data
 func (d *ShellGrantData) WriteTo(w io.Writer) (int64, error) {
+	panic("unimplemented")
+}
+
+// ReadFrom reads a serialized commandgrantdata block
+func (d *ShellGrantData) ReadFrom(r io.Reader) (int64, error) {
+	// read command
 	panic("unimplemented")
 }
 
@@ -247,7 +361,19 @@ func (d *LocalPFGrantData) WriteTo(w io.Writer) (int64, error) {
 	panic("unimplemented")
 }
 
+// ReadFrom reads a serialized commandgrantdata block
+func (d *LocalPFGrantData) ReadFrom(r io.Reader) (int64, error) {
+	// read command
+	panic("unimplemented")
+}
+
 // WriteTo writes serialized remote pf grant data
 func (d *RemotePFGrantData) WriteTo(w io.Writer) (int64, error) {
+	panic("unimplemented")
+}
+
+// ReadFrom reads a serialized commandgrantdata block
+func (d *RemotePFGrantData) ReadFrom(r io.Reader) (int64, error) {
+	// read command
 	panic("unimplemented")
 }
