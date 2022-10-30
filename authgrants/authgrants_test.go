@@ -1,69 +1,103 @@
 package authgrants
 
 import (
-	"net"
-	"sync"
+	"bytes"
+	"crypto/rand"
 	"testing"
+	"time"
 
-	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
+
+	"hop.computer/hop/certs"
 )
 
-func TestIntentRequest(t *testing.T) {
-	wg := sync.WaitGroup{}
-	logrus.SetLevel(logrus.DebugLevel)
-	tcpListener, err := net.Listen("tcp", "localhost:0")
-	assert.NilError(t, err)
+func TestAgMessageDenialEncodeDecode(t *testing.T) {
+	b := &bytes.Buffer{}
+	msg := AgMessage{
+		MsgType: IntentDenied,
+		Data:    MessageData{Denial: "I say so"},
+	}
 
-	clientConn, err := net.Dial("tcp", tcpListener.Addr().String())
+	recMsg := new(AgMessage)
+	n, err := msg.WriteTo(b)
 	assert.NilError(t, err)
-
-	serverConn, err := tcpListener.Accept()
+	m, err := recMsg.ReadFrom(b)
 	assert.NilError(t, err)
-	defer serverConn.Close()
+	assert.Equal(t, n, m)
 
-	agc := NewAuthGrantConn(clientConn)
+}
 
-	sagc := &AuthGrantConn{conn: serverConn}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ir := newIntent([32]byte{}, "user", "host", "port", 2, "myCmd")
-		logrus.Info("C: Made req: ",
-			"clientsni: ", ir.clientSNI, " ",
-			"client user: ", ir.clientUsername, " ",
-			"port: ", ir.port, " ",
-			"serversni: ", ir.serverSNI, " ",
-			"serverUser: ", ir.serverUsername, " ",
-			"grantType: ", ir.actionType, " ",
-			"sha3: ", ir.sha3)
-		err := agc.sendIntentRequest([32]byte{}, "user", "host", "port", 2, "myCmd")
-		assert.NilError(t, err)
-		logrus.Info("Sent req ok")
-		rtype, response, err := agc.ReadResponse()
-		assert.NilError(t, err)
-		switch rtype {
-		case IntentConfirmation:
-			logrus.Info("C: Got conf with deadline: ", fromIntentConfirmationBytes(response[dataOffset:]).deadline)
-		case IntentDenied:
-			logrus.Infof("C: Got den with reason: %v", fromIntentDeniedBytes(response[dataOffset:]).reason)
-			assert.Equal(t, fromIntentDeniedBytes(response[dataOffset:]).reason, "because I say so")
-		}
-		agc.Close()
-	}()
+// copied cert stuff from certificate_test.go
+type keypair struct {
+	public, private [certs.KeyLen]byte
+}
 
-	ir, err := sagc.GetIntentRequest()
+func fakeSignature() [certs.SignatureLen]byte {
+	var out [certs.SignatureLen]byte
+	rand.Read(out[:])
+	return out
+}
+
+func TestAgMessageIntentEncodeDecode(t *testing.T) {
+	startTime := time.Now().Unix()
+	expTime := time.Now().Add(time.Hour).Unix()
+	b := &bytes.Buffer{}
+	var testKeyPair keypair
+	rand.Read(testKeyPair.public[:])
+	rand.Read(testKeyPair.private[:])
+	msg := AgMessage{
+		MsgType: IntentRequest,
+		Data: MessageData{
+			Intent: Intent{
+				GrantType:      Command,
+				Reserved:       0,
+				TargetPort:     7777,
+				StartTime:      time.Unix(startTime, 0),
+				ExpTime:        time.Unix(expTime, 0),
+				TargetSNI:      certs.RawStringName("target"),
+				TargetUsername: "user",
+				DelegateCert: certs.Certificate{
+					Version:   1,
+					Type:      certs.Leaf,
+					IssuedAt:  time.Unix(int64(0x0102030405060708), 0),
+					ExpiresAt: time.Unix(int64(0x0FEDCBA098765432), 0),
+					IDChunk: certs.IDChunk{
+						Blocks: []certs.Name{
+							{
+								Type:  certs.TypeDNSName,
+								Label: []byte("example.domain"),
+							},
+						},
+					},
+					PublicKey: testKeyPair.public,
+					Parent:    certs.SHA3Fingerprint{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32},
+					Signature: fakeSignature(),
+				},
+				AssociatedData: GrantData{CommandGrantData: CommandGrantData{
+					Cmd: "echo hello world",
+				}},
+			},
+		},
+	}
+
+	recMsg := new(AgMessage)
+	n, err := msg.WriteTo(b)
 	assert.NilError(t, err)
-	logrus.Info("S: Got req: ",
-		"clientsni: ", ir.clientSNI, " ",
-		"client user: ", ir.clientUsername, " ",
-		"port: ", ir.port, " ",
-		"serversni: ", ir.serverSNI, " ",
-		"serverUser: ", ir.serverUsername, " ",
-		"grantType: ", ir.actionType, " ",
-		"sha3: ", ir.sha3)
-	//err = sagc.SendIntentConf(time.Now())
-	err = sagc.SendIntentDenied("because I say so")
+	m, err := recMsg.ReadFrom(b)
 	assert.NilError(t, err)
-	wg.Wait()
+	assert.Equal(t, n, m)
+	assert.Equal(t, msg.MsgType, recMsg.MsgType)
+	assert.Equal(t, msg.Data.Denial, recMsg.Data.Denial)
+	assert.Equal(t, msg.Data.Intent.GrantType, recMsg.Data.Intent.GrantType)
+	assert.Equal(t, msg.Data.Intent.Reserved, recMsg.Data.Intent.Reserved)
+	assert.Equal(t, msg.Data.Intent.TargetPort, recMsg.Data.Intent.TargetPort)
+	assert.DeepEqual(t, msg.Data.Intent.StartTime, recMsg.Data.Intent.StartTime)
+	assert.DeepEqual(t, msg.Data.Intent.ExpTime, recMsg.Data.Intent.ExpTime)
+	assert.DeepEqual(t, msg.Data.Intent.TargetSNI, recMsg.Data.Intent.TargetSNI)
+	assert.Equal(t, msg.Data.Intent.TargetUsername, recMsg.Data.Intent.TargetUsername)
+	buf, err := msg.Data.Intent.DelegateCert.Marshal()
+	assert.NilError(t, err)
+	recBuf, err := recMsg.Data.Intent.DelegateCert.Marshal()
+	assert.NilError(t, err)
+	assert.DeepEqual(t, buf, recBuf)
 }
