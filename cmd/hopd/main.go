@@ -33,6 +33,7 @@ func main() {
 			logrus.Fatalf("error loading config: %s", err)
 		}
 	}
+	// TODO(baumanl): fix this
 	sc.HandshakeTimeout = 15 * time.Second
 
 	s, err := hopserver.NewHopServer(sc)

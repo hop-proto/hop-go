@@ -12,10 +12,9 @@ var ErrExcessArgs = errors.New("excess arguments provided")
 
 // ServerFlags holds CLI args for Hop server.
 type ServerFlags struct {
-	ConfigPath string
-	Verbose    bool
-	// TODO(baumanl): is it even worth allowing flags for servers? Or should they
-	// always be started from a config file?
+	ConfigPath       string
+	Verbose          bool
+	EnableAuthgrants bool
 }
 
 // ParseServerArgs defines and parses the flags from the cmd line for hop server
@@ -39,6 +38,7 @@ func defineServerFlags(fs *flag.FlagSet, f *ServerFlags) {
 	// fs.StringVar(&sockAddr, "s", hopserver.DefaultHopAuthSocket, "indicates custom sockaddr to use for auth grant")
 	fs.StringVar(&f.ConfigPath, "C", "", "path to server config file")
 	fs.BoolVar(&f.Verbose, "V", false, "verbose logging")
+	fs.BoolVar(&f.EnableAuthgrants, "A", true, "enable authgrants")
 }
 
 func mergeServerFlagsAndConfig(f *ServerFlags, sc *config.ServerConfig) error {
