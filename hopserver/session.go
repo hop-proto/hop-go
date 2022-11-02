@@ -13,6 +13,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/authgrants"
 	"hop.computer/hop/codex"
 	"hop.computer/hop/common"
 	"hop.computer/hop/keys"
@@ -31,10 +32,6 @@ type hopSession struct {
 
 	server *HopServer
 	user   string
-
-	// authorizedKeysLocation string
-
-	isPrincipal bool
 
 	// We use a channel (with size 1) to avoid reading window sizes before we've created the pty
 	pty chan *os.File
@@ -63,7 +60,6 @@ func (sess *hopSession) checkAuthorization() bool {
 	sess.user = username
 
 	logrus.Info("USER AUTHORIZED")
-	sess.isPrincipal = true
 	uaTube.Write([]byte{userauth.UserAuthConf})
 	return true
 }
@@ -143,9 +139,36 @@ func (sess *hopSession) close() error {
 	return err2
 }
 
+// checkIntent looks at details of Intent Request and ensures they follow its policies
+func (sess *hopSession) checkIntent(tube *tubes.Reliable) (authgrants.MessageData, bool) {
+	// read intent:
+	var ir authgrants.AgMessage
+	_, err := ir.ReadFrom(tube)
+	if err != nil {
+		return authgrants.MessageData{Denial: authgrants.MalformedIntentDen}, false
+	}
+
+	// TODO(baumanl): add in fine grained policy checks/options
+	// TODO(baumanl): add authorization grant to server mappings
+
+	// fine grained
+	return authgrants.MessageData{}, true
+}
+
 // handleAgc handles Intent Communications from principals and updates the outstanding authgrants maps appropriately
 func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
-	panic("unimplemented")
+	var msg authgrants.AgMessage
+	// Check server config (coarse grained enable/disable)
+	if *sess.server.config.AllowAuthgrants {
+		data := authgrants.MessageData{Denial: authgrants.TargetDenial}
+		msg = authgrants.NewAuthGrantMessage(authgrants.IntentDenied, data)
+	} else if data, ok := sess.checkIntent(tube); !ok {
+		msg = authgrants.NewAuthGrantMessage(authgrants.IntentDenied, data)
+	} else {
+		msg = authgrants.NewAuthGrantMessage(authgrants.IntentConfirmation, data)
+	}
+	msg.WriteTo(tube)
+	tube.Close()
 }
 
 func getGroups(uid int) (groups []uint32) {

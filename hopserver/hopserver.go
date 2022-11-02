@@ -24,6 +24,7 @@ import (
 // Authgrants Hop server TODOs
 // - Listen for descendent clients and proxy their requests back to principal
 // - check that connecting clients have appropriate authgrants for actions.
+// - act as a target: authorize/deny intent requests forwarded from principal
 
 // HopServer represents state/conns needed for a hop server
 type HopServer struct {

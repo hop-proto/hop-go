@@ -35,6 +35,8 @@ type ServerConfig struct {
 
 	HandshakeTimeout time.Duration
 	DataTimeout      time.Duration
+
+	AllowAuthgrants *bool // as an authgrant Target this server will/will not approve/accept authgrants
 }
 
 // HostConfigOptional contains a definition of a host pattern in a client

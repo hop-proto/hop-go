@@ -30,6 +30,9 @@ type MessageData struct {
 	Denial string
 }
 
+const TargetDenial = "Authgrants not enabled on target server."
+const MalformedIntentDen = "Malformed intent request"
+
 // AgMessage Type || Data
 type AgMessage struct {
 	MsgType msgType
