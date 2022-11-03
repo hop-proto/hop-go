@@ -3,6 +3,7 @@ package transport
 import (
 	"time"
 
+	"hop.computer/hop/authkeys"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
 )
@@ -11,6 +12,12 @@ import (
 type VerifyConfig struct {
 	// Store contains the trusted root certificates
 	Store certs.Store
+
+	// AuthKeys contains trusted keys
+	AuthKeys authkeys.AuthKeyStore
+
+	// Enable vs. Disable authenticating with authorized keys
+	AuthKeysAllowed bool
 
 	// When InsecureSkipVerify is true, all chain building and verification is skipped.
 	InsecureSkipVerify bool

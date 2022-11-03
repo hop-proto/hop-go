@@ -30,7 +30,10 @@ type MessageData struct {
 	Denial string
 }
 
+// TargetDenial reason msg for when Target has policy against authgrants
 const TargetDenial = "Authgrants not enabled on target server."
+
+// MalformedIntentDen reason msg fro when the intent request is malformed
 const MalformedIntentDen = "Malformed intent request"
 
 // AgMessage Type || Data

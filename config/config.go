@@ -36,6 +36,11 @@ type ServerConfig struct {
 	HandshakeTimeout time.Duration
 	DataTimeout      time.Duration
 
+	// transport layer client validation options
+	InsecureSkipVerify          *bool
+	EnableCertificateValidation *bool
+	EnableAuthorizedKeys        *bool
+
 	AllowAuthgrants *bool // as an authgrant Target this server will/will not approve/accept authgrants
 }
 

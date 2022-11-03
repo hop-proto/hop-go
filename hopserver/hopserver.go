@@ -12,6 +12,7 @@ import (
 	"github.com/sbinet/pstree"
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/authkeys"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/config"
 	"hop.computer/hop/core"
@@ -35,6 +36,7 @@ type HopServer struct {
 	fsystem fs.FS
 
 	server   *transport.Server
+	keyStore *authkeys.AuthKeyStore
 	authsock net.Listener //nolint TODO(hosono) add linting back
 }
 
@@ -76,11 +78,33 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	}
 
 	tconf := transport.ServerConfig{
-		ClientVerify: &transport.VerifyConfig{
-			InsecureSkipVerify: true, // Do authorized keys instead
-		},
 		GetCertificate:   getCert,
 		HandshakeTimeout: sc.HandshakeTimeout,
+	}
+
+	// TODO(baumanl): serverConfig options should inform verify config settings
+	// 4 main options right now:
+	// 1. InsecureSkipVerify: no verification of client cert
+	// 2. Certificate Validation ONLY: fails if invalid cert chain
+	// 3. Cert Validation or Authorized Keys
+	// 4. Authorized keys only
+
+	// Explicitly setting sc.InsecureSkipVerify overrides everything else
+	if sc.InsecureSkipVerify != nil && *sc.InsecureSkipVerify {
+		tconf.ClientVerify = &transport.VerifyConfig{
+			InsecureSkipVerify: true,
+		}
+	} else if sc.EnableCertificateValidation == nil || *sc.EnableCertificateValidation {
+		tconf.ClientVerify = &transport.VerifyConfig{
+			Store: certs.Store{}, // TODO(baumanl): get the store from somewhere
+		}
+	} else if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
+		// must be explicitly set to true
+		keyStore := authkeys.NewAuthKeyStore()
+
+		tconf.ClientVerify = &transport.VerifyConfig{
+			AuthKeys: keyStore, // TODO(baumanl): load initial (stable trusted keys)
+		}
 	}
 
 	underlying, err := transport.NewServer(udpConn, tconf)
@@ -88,7 +112,14 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		logrus.Fatalf("unable to open transport server: %s", err)
 	}
 
-	return NewHopServerExt(underlying, sc)
+	server, err := NewHopServerExt(underlying, sc)
+	if err != nil {
+		return server, err
+	}
+	if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
+		server.keyStore = &tconf.ClientVerify.AuthKeys
+	}
+	return server, err
 
 }
 
