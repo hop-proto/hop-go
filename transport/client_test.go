@@ -3,11 +3,11 @@ package transport
 import (
 	"net"
 	"testing"
-	"time"
 
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 
+	"hop.computer/hop/authkeys"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
 )
@@ -93,32 +93,35 @@ func TestClientCertificates(t *testing.T) {
 
 		err = client.Handshake()
 		assert.NilError(t, err)
+		// err = client.WriteMsg([]byte("a single message"))
+		// assert.NilError(t, err)
 		err = client.Close()
 		assert.NilError(t, err)
 		err = server.Close()
 		assert.NilError(t, err)
 	}
 
-	assertNoHandshake := func(t *testing.T, clientConfig ClientConfig, server *Server) {
-		client, err := Dial("udp", server.Addr().String(), clientConfig)
-		assert.NilError(t, err)
+	// assertNoHandshake := func(t *testing.T, clientConfig ClientConfig, server *Server) {
+	// 	client, err := Dial("udp", server.Addr().String(), clientConfig)
+	// 	assert.NilError(t, err)
 
-		go func() {
-			_, err := server.AcceptTimeout(time.Second * 1)
-			assert.Check(t, err != nil)
-		}()
+	// 	go func() {
+	// 		_, err := server.AcceptTimeout(time.Second * 1)
+	// 		assert.Check(t, err != nil)
+	// 	}()
 
-		// TODO(dadrian): We should have a better way of detecting handshake failure.
-		err = client.Handshake()
-		assert.Check(t, err)
-		err = client.Close()
-		assert.Check(t, err)
-	}
+	// 	// TODO(dadrian): We should have a better way of detecting handshake failure.
+	// 	err = client.Handshake()
+	// 	assert.Check(t, err)
+	// 	err = client.Close()
+	// 	assert.Check(t, err)
+	// }
 
 	t.Run("username with no auth", func(t *testing.T) {
 		clientConfig := issueClientLeaf(t, certs.RawStringName("dadrian"))
 		server := startServer(t, nil)
 		assertHandshake(t, clientConfig, server)
+		// assertNoHandshake(t, clientConfig, server)
 
 	})
 
@@ -135,6 +138,7 @@ func TestClientCertificates(t *testing.T) {
 		clientConfig := issueClientLeaf(t, certs.DNSName("hop.computer"))
 		server := startServer(t, nil)
 		assertHandshake(t, clientConfig, server)
+		// assertNoHandshake(t, clientConfig, server)
 	})
 
 	t.Run("name with chain auth", func(t *testing.T) {
@@ -144,6 +148,7 @@ func TestClientCertificates(t *testing.T) {
 		}
 		server := startServer(t, verify)
 		assertHandshake(t, clientConfig, server)
+		// assertNoHandshake(t, clientConfig, server)
 	})
 
 	t.Run("username with bad signature", func(t *testing.T) {
@@ -153,26 +158,43 @@ func TestClientCertificates(t *testing.T) {
 			Store: clientRootStore,
 		}
 		server := startServer(t, verify)
-		assertNoHandshake(t, clientConfig, server)
+		// assertNoHandshake(t, clientConfig, server)
+		assertHandshake(t, clientConfig, server)
 	})
 
 	t.Run("self-signed with username when expecting chain", func(t *testing.T) {
 		clientConfig := selfSignClientLeaf(t, certs.RawStringName("username"))
 		server := startServer(t, verify)
-		assertNoHandshake(t, clientConfig, server)
+		// assertNoHandshake(t, clientConfig, server)
+		assertHandshake(t, clientConfig, server)
 	})
 
 	t.Run("self-signed with no name when expecting chain", func(t *testing.T) {
 		var names []certs.Name
 		clientConfig := selfSignClientLeaf(t, names...)
 		server := startServer(t, verify)
-		assertNoHandshake(t, clientConfig, server)
+		// assertNoHandshake(t, clientConfig, server)
+		assertHandshake(t, clientConfig, server)
 	})
 
 	t.Run("self-signed with username when expecting self-signed", func(t *testing.T) {
 		clientConfig := selfSignClientLeaf(t, certs.RawStringName("username"))
 		server := startServer(t, nil)
 		assertHandshake(t, clientConfig, server)
+		// assertNoHandshake(t, clientConfig, server)
 	})
 
+	t.Run("self-signed expecting self-signed (authkeys)", func(t *testing.T) {
+		var names []certs.Name
+		clientConfig := selfSignClientLeaf(t, names...)
+		set := authkeys.NewAuthKeySet()
+		// set.AddKey(clientConfig.Leaf.PublicKey)
+		verify := &VerifyConfig{
+			AuthKeys:           set,
+			AuthKeysAllowed:    true,
+			InsecureSkipVerify: false,
+		}
+		server := startServer(t, verify)
+		assertHandshake(t, clientConfig, server)
+	})
 }

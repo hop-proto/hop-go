@@ -14,12 +14,12 @@ type VerifyConfig struct {
 	Store certs.Store
 
 	// AuthKeys contains trusted keys
-	AuthKeys authkeys.AuthKeyStore
+	AuthKeys authkeys.AuthKeySet
 
 	// Enable vs. Disable authenticating with authorized keys
 	AuthKeysAllowed bool
 
-	// When InsecureSkipVerify is true, all chain building and verification is skipped.
+	// When InsecureSkipVerify is true, all chain building and verification is skipped (authkeys can still happen if enabled)
 	InsecureSkipVerify bool
 
 	// Name is used for SNI and compared to the certificate when non-empty.

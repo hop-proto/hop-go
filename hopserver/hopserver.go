@@ -36,7 +36,7 @@ type HopServer struct {
 	fsystem fs.FS
 
 	server   *transport.Server
-	keyStore *authkeys.AuthKeyStore
+	keyStore *authkeys.AuthKeySet
 	authsock net.Listener //nolint TODO(hosono) add linting back
 }
 
@@ -100,10 +100,8 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		}
 	} else if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
 		// must be explicitly set to true
-		keyStore := authkeys.NewAuthKeyStore()
-
 		tconf.ClientVerify = &transport.VerifyConfig{
-			AuthKeys: keyStore, // TODO(baumanl): load initial (stable trusted keys)
+			AuthKeys: authkeys.NewAuthKeySet(), // TODO(baumanl): load initial (stable trusted keys)
 		}
 	}
 

@@ -269,6 +269,16 @@ func (s Store) VerifyLeaf(leaf *Certificate, opts VerifyOptions) error {
 	return nil
 }
 
+func VerifyLeafFormat(leaf *Certificate, opts VerifyOptions) error {
+	if leaf.Type != Leaf {
+		return unexpectedTypeError(leaf, Leaf)
+	}
+	if !opts.Name.IsZero() && !leaf.MatchesName(opts.Name) {
+		return mismatchedName(leaf, opts.Name)
+	}
+	return nil
+}
+
 // LoadRootStoreFromPEMFile allocates a new Store from a set of certificates
 // encoded in PEM format in a single file.
 func LoadRootStoreFromPEMFile(path string) (*Store, error) {

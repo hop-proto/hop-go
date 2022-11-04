@@ -434,13 +434,36 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		opts.PresentedIntermediate = &intermediate
 	}
 
-	if hs.certVerify != nil && !hs.certVerify.InsecureSkipVerify {
+	// nil certVerify --> fail
+	if hs.certVerify == nil {
+		return pos, nil, errors.New("server: no client verify provided")
+	}
+
+	// InsecureSkipVerify skips all verification
+	if !hs.certVerify.InsecureSkipVerify {
+		// Certificate Verification
 		err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
 		if err != nil {
-			logrus.Errorf("server: failed to verify certificate: %s", err)
+			if hs.certVerify.AuthKeysAllowed {
+				err2 := hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
+				if err2 != nil {
+					logrus.Errorf("server: failed to verify certificate: %s and key unauthorized: %s", err, err2)
+					return pos, nil, err2
+				}
+			} else {
+				logrus.Errorf("server: failed to verify certificate: %s", err)
+				return pos, nil, err
+			}
+		}
+	} else if hs.certVerify.AuthKeysAllowed {
+		err = hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
+		if err != nil {
+			logrus.Errorf("server: key not authorized")
 			return pos, nil, err
 		}
 	}
+	// TODO(baumanl): check authorized keys
+	// TODO(baumanl): potentially allow verifyClient callback for raw cert?
 
 	hs.se, err = hs.ephemeral.DH(leaf.PublicKey[:])
 	if err != nil {
