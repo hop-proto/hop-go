@@ -3,7 +3,6 @@ package authkeys
 import (
 	"errors"
 
-	"github.com/sirupsen/logrus"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
 )
@@ -39,8 +38,6 @@ func (s *AuthKeySet) VerifyLeaf(leaf *certs.Certificate, opts certs.VerifyOption
 
 	if _, isPresent := s.keySet[leaf.PublicKey]; !isPresent {
 		return errors.New("client static not found in authorized key set")
-	} else {
-		logrus.Errorf("key is present????")
 	}
 	return nil
 }

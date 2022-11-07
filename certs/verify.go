@@ -269,6 +269,7 @@ func (s Store) VerifyLeaf(leaf *Certificate, opts VerifyOptions) error {
 	return nil
 }
 
+// VerifyLeafFormat is used to check self-signed cert well formatted
 func VerifyLeafFormat(leaf *Certificate, opts VerifyOptions) error {
 	if leaf.Type != Leaf {
 		return unexpectedTypeError(leaf, Leaf)
@@ -276,6 +277,7 @@ func VerifyLeafFormat(leaf *Certificate, opts VerifyOptions) error {
 	if !opts.Name.IsZero() && !leaf.MatchesName(opts.Name) {
 		return mismatchedName(leaf, opts.Name)
 	}
+	// TODO(baumnanl): anything else that should be checked? (i.e. restrictions on id blocks or smthing?)
 	return nil
 }
 
