@@ -12,6 +12,7 @@ import (
 	"github.com/sbinet/pstree"
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/authgrants"
 	"hop.computer/hop/authkeys"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/config"
@@ -29,7 +30,8 @@ import (
 
 // HopServer represents state/conns needed for a hop server
 type HopServer struct {
-	m sync.Mutex
+	m          sync.Mutex
+	authgrants map[keys.PrivateKey][]authgrants.Authgrant
 
 	config *config.ServerConfig
 
@@ -43,7 +45,8 @@ type HopServer struct {
 // NewHopServerExt returns a Hop Server using the provided transport server.
 func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig) (*HopServer, error) {
 	server := &HopServer{
-		m: sync.Mutex{},
+		m:          sync.Mutex{},
+		authgrants: make(map[keys.PrivateKey][]authgrants.Authgrant),
 
 		config: config,
 

@@ -8,12 +8,14 @@ import (
 	"os/user"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/AstromechZA/etcpwdparse"
 	"github.com/creack/pty"
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/authgrants"
+	"hop.computer/hop/certs"
 	"hop.computer/hop/codex"
 	"hop.computer/hop/common"
 	"hop.computer/hop/keys"
@@ -68,6 +70,7 @@ func (sess *hopSession) checkAuthorization() bool {
 // calls close when it receives a signal from the code execution tube that it is finished
 // TODO(baumanl): change closing behavior for sessions without cmd/shell --> integrate port forwarding duration
 func (sess *hopSession) start() {
+	// starting tube muxer, but not yet accepting incoming tubes
 	go func() {
 		err := sess.tubeMuxer.Start()
 		sess.done <- 1
@@ -77,12 +80,13 @@ func (sess *hopSession) start() {
 	}()
 	logrus.Info("S: STARTED CHANNEL MUXER")
 
-	//User Authorization Step
+	// User Authorization
 	if !sess.checkAuthorization() {
 		return
 		//TODO(baumanl): Check closing behavior. how to end session completely
 	}
 
+	// start accepting incoming tubes
 	logrus.Info("STARTING TUBE LOOP")
 	go func() {
 		for {
@@ -147,9 +151,48 @@ func (sess *hopSession) checkIntent(tube *tubes.Reliable) (authgrants.MessageDat
 	if err != nil {
 		return authgrants.MessageData{Denial: authgrants.MalformedIntentDen}, false
 	}
+	if ir.MsgType != authgrants.IntentCommunication {
+		return authgrants.MessageData{Denial: authgrants.UnexpectedMessageType}, false
+	}
+	intent := ir.Data.Intent
 
-	// TODO(baumanl): add in fine grained policy checks/options
+	// check that requested time is valid
+	if intent.ExpTime.Before(time.Now()) {
+		return authgrants.MessageData{Denial: "invalid expiration time"}, false
+	}
+
+	// TODO(baumanl): check target SNI matches the current hostname of this server? necessary?
+
+	// check target username matches current username that client
+	// logged in as. (necessary?)
+	if sess.user != intent.TargetUsername {
+		return authgrants.MessageData{Denial: "Current user and requested user mismatch"}, false
+	}
+
+	// check that DelegateCert is well formatted
+	if err = certs.VerifyLeafFormat(&intent.DelegateCert, certs.VerifyOptions{}); err != nil {
+		return authgrants.MessageData{Denial: "Ill-formatted delegate certificate"}, false
+	}
+
+	// pass the intent to handlers for each type of authgrant
+	switch intent.GrantType {
+	case authgrants.Shell:
+		// TODO(baumanl)
+
+	case authgrants.Command:
+		// TODO
+	case authgrants.LocalPF:
+		// TODO
+	case authgrants.RemotePF:
+		// TODO
+	default:
+		return authgrants.MessageData{Denial: authgrants.UnrecognizedGrantType}, false
+
+	}
+
+	// TODO(baumanl): add in finer grained policy checks/options? i.e. account level access control
 	// TODO(baumanl): add authorization grant to server mappings
+	// TODO(baumanl): add delegate key from cert to transport server authorized key pool
 
 	// fine grained
 	return authgrants.MessageData{}, true
@@ -159,7 +202,7 @@ func (sess *hopSession) checkIntent(tube *tubes.Reliable) (authgrants.MessageDat
 func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 	var msg authgrants.AgMessage
 	// Check server config (coarse grained enable/disable)
-	if *sess.server.config.AllowAuthgrants {
+	if sess.server.config.AllowAuthgrants != nil && !*sess.server.config.AllowAuthgrants {
 		data := authgrants.MessageData{Denial: authgrants.TargetDenial}
 		msg = authgrants.NewAuthGrantMessage(authgrants.IntentDenied, data)
 	} else if data, ok := sess.checkIntent(tube); !ok {

@@ -36,6 +36,12 @@ const TargetDenial = "Authgrants not enabled on target server."
 // MalformedIntentDen reason msg fro when the intent request is malformed
 const MalformedIntentDen = "Malformed intent request"
 
+// UnexpectedMessageType reason msg for when the expected intent msg is not a communication message
+const UnexpectedMessageType = "Unexpected message type"
+
+// UnrecognizedGrantType reason msg for when the grant type is not known by the target
+const UnrecognizedGrantType = "Unrecognized grant type"
+
 // AgMessage Type || Data
 type AgMessage struct {
 	MsgType msgType
@@ -44,17 +50,17 @@ type AgMessage struct {
 
 // Grant Type Constants
 const (
-	Shell    = grantType(1)
-	Command  = grantType(2)
-	LocalPF  = grantType(3)
-	RemotePF = grantType(4)
+	Shell    = GrantType(1)
+	Command  = GrantType(2)
+	LocalPF  = GrantType(3)
+	RemotePF = GrantType(4)
 )
 
-type grantType byte
+type GrantType byte
 
 // Intent contains body of an Intent Request or Intent Communication
 type Intent struct {
-	GrantType      grantType
+	GrantType      GrantType
 	Reserved       byte
 	TargetPort     uint16
 	StartTime      time.Time
@@ -93,6 +99,11 @@ type LocalPFGrantData struct {
 
 // RemotePFGrantData info for remote pf authgrant
 type RemotePFGrantData struct {
+}
+
+type Authgrant struct {
+	Type GrantType
+	Data GrantData
 }
 
 // NewAuthGrantMessage makes an agMessage with type and data
