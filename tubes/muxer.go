@@ -72,13 +72,13 @@ func (m *Muxer) getTube(tubeID byte) (Tube, bool) {
 func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
 	cid := []byte{0}
 	rand.Read(cid)
-	tube, err := m.makeReliableTubeWithID(tType, cid[0])
+	tube, err := m.makeReliableTubeWithID(tType, cid[0], true)
 	m.addTube(tube)
 	m.log.Infof("Created Tube: %v", tube.GetID())
 	return tube, err
 }
 
-func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte) (*Reliable, error) {
+func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*Reliable, error) {
 	tubeLog := m.log.WithFields(logrus.Fields{
 		"tube":     tubeID,
 		"reliable": true,
@@ -88,6 +88,7 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte) (*Reliable, 
 		id:          tubeID,
 		localAddr:   m.underlying.LocalAddr(),
 		remoteAddr:  m.underlying.RemoteAddr(),
+		tubeState:   created,
 		sendStopped: make(chan struct{}, 1),
 		initRecv:    make(chan struct{}),
 		closing:     make(chan struct{}, 1),
@@ -120,9 +121,8 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte) (*Reliable, 
 		log:       tubeLog,
 	}
 	r.sender.frameNo.Store(1)
-	r.tubeState.Store(created)
 	r.recvWindow.init()
-	go r.initiate(true)
+	go r.initiate(req)
 	return r, nil
 }
 
@@ -229,7 +229,7 @@ func (m *Muxer) Start() (err error) {
 				}
 				if initFrame.flags.REL {
 					// TODO(hosono) make these methods on the muxer
-					tube, _ = m.makeReliableTubeWithID(initFrame.tubeType, initFrame.tubeID)
+					tube, _ = m.makeReliableTubeWithID(initFrame.tubeType, initFrame.tubeID, false)
 					// TODO(hosono) error handling
 					m.addTube(tube)
 					m.tubeQueue <- tube

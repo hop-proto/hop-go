@@ -66,7 +66,7 @@ type sender struct {
 	log *logrus.Entry
 }
 
-func (s *sender) unsentFramesRemaining() int {
+func (s *sender) unAckedFramesRemaining() int {
 	s.l.Lock()
 	defer s.l.Unlock()
 	return len(s.frames)
@@ -238,7 +238,6 @@ func (s *sender) sendFin() error {
 	s.frameDataLengths[pkt.frameNo] = 0
 	s.frameNo.Add(1)
 	s.frames = append(s.frames, &pkt)
-	s.sendQueue <- &pkt
 	s.log.Debug("sending FIN packet")
 	return nil
 }
