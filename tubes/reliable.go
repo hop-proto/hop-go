@@ -31,11 +31,19 @@ type state int32
 const (
 	created    state = iota
 	initiated  state = iota
-	closeStart state = iota
+
+	// These states are pull from the TCP state machine.
+	closeWait  state = iota
+	lastAck    state = iota
+	finWait1   state = iota
+	finWait2   state = iota
+	closing    state = iota
+	timeWait   state = iota
 	closed     state = iota
+
 )
 
-var errTubeNotInitiated = errors.New("tube not initiated")
+var errBadTubeState = errors.New("tube in bad state")
 
 // Reliable implements a reliable and receiveWindow tube on top
 type Reliable struct {
@@ -48,7 +56,9 @@ type Reliable struct {
 	remoteAddr  net.Addr
 	sender      sender
 	sendQueue   chan []byte
-	tubeState   atomic.Value
+	// TODO(hosono) probably we shouldn't just have one lock that manages everything
+	// +checklocks:l
+	tubeState   state
 	initRecv    chan struct{}
 	sendStopped chan struct{}
 	l           sync.Mutex
@@ -90,7 +100,7 @@ func (r *Reliable) initiate(req bool) {
 		case <-ticker.C:
 			continue
 		case <-r.initRecv:
-			notInit = r.tubeState.Load() == created
+			notInit = r.tubeState == created
 		}
 	}
 	go r.send()
@@ -112,11 +122,13 @@ func (r *Reliable) receive(pkt *frame) error {
 	r.l.Lock()
 	defer r.l.Unlock()
 
-	tubeState := r.tubeState.Load()
-	if tubeState != initiated && tubeState != closeStart {
-		r.log.WithField("fin", pkt.flags.FIN).Errorf("receive for uninitiated tube")
+	if r.tubeState == created || r.tubeState == closed {
+		r.log.WithFields(logrus.Fields{
+			"fin": pkt.flags.FIN,
+			"state": r.tubeState,
+		}).Errorf("receive for tube in bad state")
 		r.Reset()
-		return errTubeNotInitiated
+		return errBadTubeState
 	}
 
 	r.log.WithFields(logrus.Fields{
@@ -129,9 +141,31 @@ func (r *Reliable) receive(pkt *frame) error {
 		r.sender.recvAck(pkt.ackNo)
 	}
 
-	if pkt.flags.FIN && !r.finAcked.CompareAndSwap(false, true) {
+	// handle closing states of FIN packets
+	if pkt.flags.FIN {
+		switch r.tubeState {
+		case initiated:
+			r.tubeState = closeWait
+		case finWait1:
+			r.tubeState = closing
+		case finWait2:
+			r.tubeState = timeWait
+		}
 		r.sender.sendEmptyPacket()
 	}
+
+	// State transitions for ACK of FIN
+	if pkt.flags.ACK && r.tubeState != initiated && r.sender.unAckedFramesRemaining() == 0{
+		switch r.tubeState {
+		case finWait1:
+			r.tubeState = finWait2
+		case closing:
+			r.tubeState = timeWait
+		case lastAck:
+			r.tubeState = closed
+		}
+	}
+
 	// TODO(hosono) fix this check to be better
 	/*
 	 *if (r.recvWindow.getAck() - r.sender.lastAckSent.Load()) >= windowSize / 2{
@@ -150,12 +184,12 @@ func (r *Reliable) receive(pkt *frame) error {
 }
 
 func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
-	if r.tubeState.Load() == created {
+	if r.tubeState == created {
 		r.recvWindow.m.Lock()
 		r.recvWindow.ackNo = 1
 		r.recvWindow.m.Unlock()
 		r.log.Debug("INITIATED!")
-		r.tubeState.Store(initiated)
+		r.tubeState = initiated
 		r.sender.recvAck(1)
 		close(r.initRecv)
 	}
@@ -164,25 +198,23 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 }
 
 func (r *Reliable) Read(b []byte) (n int, err error) {
-	if r.tubeState.Load() != initiated {
-		err = errTubeNotInitiated
-		return
+	if r.tubeState == created {
+		return 0, errBadTubeState
 	}
 	return r.recvWindow.read(b)
 }
 
 func (r *Reliable) Write(b []byte) (n int, err error) {
-	if r.tubeState.Load() != initiated {
-		err = errTubeNotInitiated
-		return
+	if r.tubeState == created {
+		return 0, errBadTubeState
 	}
 	return r.sender.write(b)
 }
 
 // WriteMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
-	if r.tubeState.Load() != initiated {
-		err = errTubeNotInitiated
+	if r.tubeState == created {
+		err = errBadTubeState
 		return
 	}
 	length := len(b)
@@ -194,8 +226,8 @@ func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, e
 
 // ReadMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
-	if r.tubeState.Load() != initiated {
-		err = errTubeNotInitiated
+	if r.tubeState == created {
+		err = errBadTubeState
 		return
 	}
 	h := make([]byte, 2)
@@ -214,7 +246,8 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 func (r *Reliable) Reset() (err error) {
 	// TODO(hosono) add a reset flag
 
-	oldState := r.tubeState.Swap(closed)
+	oldState := r.tubeState
+	r.tubeState = closed
 	if oldState == closed {
 		r.log.Warn("Resetting closed tube")
 		return io.EOF
@@ -239,42 +272,61 @@ func (r *Reliable) Reset() (err error) {
 
 // Close handles closing reliable tubes
 func (r *Reliable) Close() (err error) {
-	if !r.tubeState.CompareAndSwap(initiated, closeStart) {
-		return io.EOF
-	}
-	r.log.Debug("Starting close")
-
-	// Prevent future writes from succeeding
-	r.sender.Close()
-	r.recvWindow.Close()
-
-	// Wait until the other end of the connection has received the FIN packet from the other side.
-closeLoop:
-	for {
-		select {
-		case <-r.closing:
-			if r.sender.unsentFramesRemaining() == 0 && r.recvWindow.closed.Load() {
-				r.log.Debug("sent all frames and got fin")
-				break closeLoop
-			} else {
-				r.log.WithField("packet left to ack", r.sender.unsentFramesRemaining()).Debug("closing")
-			}
-		case <-r.reset:
-			r.log.Debug("got reset in close loop")
-			break closeLoop
-		}
-	}
-	// TODO(hosono) correctly linger
-	time.Sleep(5 * time.Second)
-
 	r.l.Lock()
 	defer r.l.Unlock()
-	r.sender.Reset()
-	r.log.Debugf("closed tube")
 
-	close(r.sender.sendQueue)
-	<-r.sendStopped
-	r.tubeState.Store(closed)
+	switch r.tubeState {
+	case created:
+		return errors.New("tube not initiated")
+	case initiated:
+		r.tubeState = finWait1
+	case closeWait:
+		r.tubeState = lastAck
+	default:
+		return io.EOF
+	}
+
+	return r.sender.sendFin()
+
+
+/*
+ *    if !r.tubeState.CompareAndSwap(initiated, closeStart) {
+ *        return io.EOF
+ *    }
+ *    r.log.Debug("Starting close")
+ *
+ *    // Prevent future writes from succeeding
+ *    r.sender.Close()
+ *    r.recvWindow.Close()
+ *
+ *    // Wait until the other end of the connection has received the FIN packet from the other side.
+ *closeLoop:
+ *    for {
+ *        select {
+ *        case <-r.closing:
+ *            if r.sender.unsentFramesRemaining() == 0 && r.recvWindow.closed.Load() {
+ *                r.log.Debug("sent all frames and got fin")
+ *                break closeLoop
+ *            } else {
+ *                r.log.WithField("packet left to ack", r.sender.unsentFramesRemaining()).Debug("closing")
+ *            }
+ *        case <-r.reset:
+ *            r.log.Debug("got reset in close loop")
+ *            break closeLoop
+ *        }
+ *    }
+ *    // TODO(hosono) correctly linger
+ *    time.Sleep(5 * time.Second)
+ *
+ *    r.l.Lock()
+ *    defer r.l.Unlock()
+ *    r.sender.Reset()
+ *    r.log.Debugf("closed tube")
+ *
+ *    close(r.sender.sendQueue)
+ *    <-r.sendStopped
+ *    r.tubeState.Store(closed)
+ */
 
 	return nil
 }
