@@ -171,7 +171,9 @@ func TestReliable(t *testing.T) {
 	}
 
 	mp := nettest.MakePipe(f)
-	nettest.TestConn(t, mp)
+	t.Run("Nettest", func(t *testing.T) {
+		nettest.TestConn(t, mp)
+	})
 }
 
 func TestUnreliable(t *testing.T) {

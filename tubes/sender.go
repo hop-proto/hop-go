@@ -213,6 +213,8 @@ func (s *sender) Reset() {
 func (s *sender) Close() error {
 	if s.closed.CompareAndSwap(false, true) {
 		s.stopRetransmit()
+		// TODO(hosono) prevent panic here
+		//close(s.sendQueue)
 		return nil
 	}
 	return io.EOF
@@ -242,5 +244,6 @@ func (s *sender) sendFin() error {
 	s.frameNo.Add(1)
 	s.frames = append(s.frames, &pkt)
 	s.log.Debug("sending FIN packet")
+	s.sendQueue <- &pkt
 	return nil
 }

@@ -141,23 +141,6 @@ func (r *Reliable) receive(pkt *frame) error {
 		r.sender.recvAck(pkt.ackNo)
 	}
 
-	// handle closing states of FIN packets
-	if pkt.flags.FIN {
-		switch r.tubeState {
-		case initiated:
-			r.tubeState = closeWait
-			r.log.Warn("got FIN packet. going from initiated to closeWait")
-		case finWait1:
-			r.tubeState = closing
-			r.log.Warn("got FIN packet. going from finWait1 to closing")
-		case finWait2:
-			r.tubeState = timeWait
-			r.log.Warn("got FIN packet. going from finWait2 to timeWait")
-			r.enterTimeWaitState()
-		}
-		r.sender.sendEmptyPacket()
-	}
-
 	// State transitions for ACK of FIN
 	if pkt.flags.ACK && r.tubeState != initiated && r.sender.unAckedFramesRemaining() == 0{
 		switch r.tubeState {
@@ -172,6 +155,26 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.tubeState = closed
 			r.log.Warn("got ACK of FIN packet. going from lastAck to closed")
 			r.enterClosedState()
+		}
+	}
+
+	// handle closing states of FIN packets
+	if pkt.flags.FIN {
+		switch r.tubeState {
+		case initiated:
+			r.tubeState = closeWait
+			r.log.Warn("got FIN packet. going from initiated to closeWait")
+		case finWait1:
+			r.tubeState = closing
+			r.log.Warn("got FIN packet. going from finWait1 to closing")
+		case finWait2:
+			r.tubeState = timeWait
+			r.log.Warn("got FIN packet. going from finWait2 to timeWait")
+			r.enterTimeWaitState()
+		}
+		if r.tubeState != closed {
+			r.log.Trace("sending ACK of FIN")
+			r.sender.sendEmptyPacket()
 		}
 	}
 
