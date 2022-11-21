@@ -1,6 +1,7 @@
 package tubes
 
 import (
+	"time"
 	"net"
 	"testing"
 
@@ -110,10 +111,10 @@ func makeConn(t *testing.T, rel bool, fake bool) (t1, t2 net.Conn, stop func(), 
 
 		// TODO(hosono) closing these connections causes a panic
 		if c1UDP != nil {
-			//c1UDP.Close()
+			c1UDP.Close()
 		}
 		if c2UDP != nil {
-			//c2UDP.Close()
+			c2UDP.Close()
 		}
 	}
 
@@ -121,7 +122,10 @@ func makeConn(t *testing.T, rel bool, fake bool) (t1, t2 net.Conn, stop func(), 
 }
 
 func ReliableClose(t *testing.T, rel bool) {
+	logrus.SetLevel(logrus.DebugLevel)
 	c1Conn, c2Conn, stop, _, err := makeConn(t, rel, false)
+	defer stop()
+
 	c1 := c1Conn.(*Reliable)
 	c2 := c2Conn.(*Reliable)
 
@@ -129,9 +133,13 @@ func ReliableClose(t *testing.T, rel bool) {
 
 	s := "hello"
 
+	time.Sleep(time.Second)
+
 	n, err := c1.Write([]byte(s))
 	assert.NilError(t,err)
 	assert.DeepEqual(t, n, len(s))
+
+	time.Sleep(time.Second)
 
 	b := make([]byte, len(s))
 	n, err = c2.Read(b)
@@ -139,12 +147,15 @@ func ReliableClose(t *testing.T, rel bool) {
 	assert.DeepEqual(t, string(b), s)
 
 	c1.Close()
+	time.Sleep(time.Millisecond)
 	c2.Close()
+
+	c1.WaitForClose()
+	c2.WaitForClose()
 
 	assert.DeepEqual(t, c1.tubeState, closed)
 	assert.DeepEqual(t, c2.tubeState, closed)
 
-	stop()
 }
 
 // TODO(hosono) make reliable tubes pass these tests

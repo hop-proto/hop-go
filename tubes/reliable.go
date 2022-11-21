@@ -48,7 +48,7 @@ var errBadTubeState = errors.New("tube in bad state")
 // Reliable implements a reliable and receiveWindow tube on top
 type Reliable struct {
 	reset       chan struct{}
-	closing     chan struct{}
+	closed     chan struct{}
 	tType       TubeType
 	id          byte
 	localAddr   net.Addr
@@ -127,7 +127,7 @@ func (r *Reliable) receive(pkt *frame) error {
 			"fin": pkt.flags.FIN,
 			"state": r.tubeState,
 		}).Errorf("receive for tube in bad state")
-		r.Reset()
+		//r.Reset()
 		return errBadTubeState
 	}
 
@@ -146,10 +146,14 @@ func (r *Reliable) receive(pkt *frame) error {
 		switch r.tubeState {
 		case initiated:
 			r.tubeState = closeWait
+			r.log.Warn("got FIN packet. going from initiated to closeWait")
 		case finWait1:
 			r.tubeState = closing
+			r.log.Warn("got FIN packet. going from finWait1 to closing")
 		case finWait2:
 			r.tubeState = timeWait
+			r.log.Warn("got FIN packet. going from finWait2 to timeWait")
+			r.enterTimeWaitState()
 		}
 		r.sender.sendEmptyPacket()
 	}
@@ -159,10 +163,15 @@ func (r *Reliable) receive(pkt *frame) error {
 		switch r.tubeState {
 		case finWait1:
 			r.tubeState = finWait2
+			r.log.Warn("got ACK of FIN packet. going from finWait1 to finWait2")
 		case closing:
 			r.tubeState = timeWait
+			r.log.Warn("got ACK of FIN packet. going from closing to timeWait")
+			r.enterTimeWaitState()
 		case lastAck:
 			r.tubeState = closed
+			r.log.Warn("got ACK of FIN packet. going from lastAck to closed")
+			r.enterClosedState()
 		}
 	}
 
@@ -173,14 +182,27 @@ func (r *Reliable) receive(pkt *frame) error {
 	 *}
 	 */
 
-	select {
-	case r.closing <- struct{}{}:
-		break
-	default:
-		break
-	}
-
 	return err
+}
+
+func (r *Reliable) enterTimeWaitState() {
+	// TODO(hosono) what should the wait time be?
+	// The linux kernel seems to wait 1 minute for connections on the loopback interface.
+	// Is that too long for a user to wait? We can't just hand this off to the kernel.
+	time.AfterFunc(3 * time.Second, func() {
+		r.l.Lock()
+		defer r.l.Unlock()
+		r.log.Warn("timer expired. going from timeWait to closed")
+		r.enterClosedState()
+	})
+}
+
+// +checklocks:r.l
+func (r *Reliable) enterClosedState() {
+	r.sender.Close()
+	r.recvWindow.Close()
+	r.tubeState = closed
+	close(r.closed)
 }
 
 func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
@@ -246,14 +268,14 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 func (r *Reliable) Reset() (err error) {
 	// TODO(hosono) add a reset flag
 
-	oldState := r.tubeState
-	r.tubeState = closed
-	if oldState == closed {
+	if r.tubeState == closed {
 		r.log.Warn("Resetting closed tube")
 		return io.EOF
+	} else {
+		r.log.Warn("Resetting tube")
 	}
 
-	r.log.Warn("Resetting tube")
+	r.tubeState = closed
 
 	r.sender.Reset()
 	r.recvWindow.Close()
@@ -280,8 +302,10 @@ func (r *Reliable) Close() (err error) {
 		return errors.New("tube not initiated")
 	case initiated:
 		r.tubeState = finWait1
+		r.log.Warn("call to close. going from initiated to finWait1")
 	case closeWait:
 		r.tubeState = lastAck
+		r.log.Warn("call to close. going from closeWait to lastAck")
 	default:
 		return io.EOF
 	}
@@ -327,8 +351,11 @@ func (r *Reliable) Close() (err error) {
  *    <-r.sendStopped
  *    r.tubeState.Store(closed)
  */
+}
 
-	return nil
+// WaitForClose blocks until the Tube is done closing
+func (r *Reliable) WaitForClose() {
+	<-r.closed
 }
 
 // Type returns tube type

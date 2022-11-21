@@ -3,10 +3,8 @@ package tubes
 import (
 	"bytes"
 	"crypto/rand"
-	"errors"
 	"io"
 	"net"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -91,7 +89,7 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 		tubeState:   created,
 		sendStopped: make(chan struct{}, 1),
 		initRecv:    make(chan struct{}),
-		closing:     make(chan struct{}, 1),
+		closed:      make(chan struct{}, 1),
 		reset:       make(chan struct{}, 1),
 		recvWindow: receiver{
 			dataReady:   common.NewDeadlineChan[struct{}](1),
@@ -199,7 +197,8 @@ func (m *Muxer) Start() (err error) {
 
 	defer func() {
 		// This case indicates that the muxer was stopped by m.Close()
-		if errors.Is(err, os.ErrDeadlineExceeded) && m.stopped.Load() {
+		if m.stopped.Load() {
+			// TODO(hosono) should errors during Stop affect the return value of Start?
 			err = nil
 		} else if err != nil {
 			logrus.Errorf("Muxer ended with error: %s", err)
@@ -273,6 +272,10 @@ func (m *Muxer) Stop() (err error) {
 			defer wg.Done()
 			m.log.Info("Closing tube: ", v.GetID())
 			v.Close() //TODO(baumanl): If a tube was already closed this returns an error that is ignored atm. Remove tube from map after closing?
+			rel, ok := v.(*Reliable)
+			if ok {
+				rel.WaitForClose()
+			}
 		}(v)
 	}
 	wg.Wait()

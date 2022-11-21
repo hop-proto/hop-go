@@ -160,7 +160,10 @@ func (s *sender) sendEmptyPacket() *frame {
 func (s *sender) fillWindow(rto bool) {
 	for i := 0; i < len(s.frames) && i < int(s.windowSize) && (i < maxFragTransPerRTO || !rto); i++ {
 		s.sendQueue <- s.frames[i]
-		s.log.WithField("fin", s.frames[i].flags.FIN).Trace("Putting packet on queue")
+		s.log.WithFields(logrus.Fields{
+			"fin": s.frames[i].flags.FIN,
+			"frameNo": s.frames[i].frameNo,
+		}).Trace("Putting packet on queue")
 	}
 }
 
@@ -209,7 +212,7 @@ func (s *sender) Reset() {
 
 func (s *sender) Close() error {
 	if s.closed.CompareAndSwap(false, true) {
-		s.sendFin()
+		s.stopRetransmit()
 		return nil
 	}
 	return io.EOF
