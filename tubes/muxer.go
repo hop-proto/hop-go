@@ -108,7 +108,7 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 			RTOTicker:        time.NewTicker(retransmitOffset),
 			RTO:              retransmitOffset,
 			windowSize:       windowSize,
-			endRetransmit:    make(chan struct{}),
+			endRetransmit:    make(chan struct{}, 1),
 			windowOpen:       make(chan struct{}, 1),
 			sendQueue:        make(chan *frame),
 			retransmitEnded:  make(chan struct{}, 1),

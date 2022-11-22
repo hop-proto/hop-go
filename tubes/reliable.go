@@ -192,6 +192,7 @@ func (r *Reliable) enterTimeWaitState() {
 	// TODO(hosono) what should the wait time be?
 	// The linux kernel seems to wait 1 minute for connections on the loopback interface.
 	// Is that too long for a user to wait? We can't just hand this off to the kernel.
+	r.sender.stopRetransmit()
 	time.AfterFunc(3 * time.Second, func() {
 		r.l.Lock()
 		defer r.l.Unlock()

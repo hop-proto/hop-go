@@ -177,14 +177,17 @@ func (s *sender) retransmit() {
 				s.log.WithField("frameno", s.frameNo.Load()).Trace("Keep alive sent")
 				s.sendEmptyPacket()
 			} else {
+				s.log.Trace("retransmitting")
 				s.fillWindow(true)
 			}
 			s.l.Unlock()
 		case <-s.windowOpen:
 			s.l.Lock()
+			s.log.Trace("window open. filling")
 			s.fillWindow(false)
 			s.l.Unlock()
 		case <-s.endRetransmit:
+			s.log.Debug("ending retransmit loop")
 			stop = true
 		}
 	}
@@ -199,6 +202,7 @@ func (s *sender) stopRetransmit() {
 	default:
 		break
 	}
+	<-s.retransmitEnded
 }
 
 func (s *sender) Start() {
@@ -207,14 +211,12 @@ func (s *sender) Start() {
 
 func (s *sender) Reset() {
 	s.stopRetransmit()
-	<-s.retransmitEnded
 }
 
 func (s *sender) Close() error {
 	if s.closed.CompareAndSwap(false, true) {
 		s.stopRetransmit()
-		// TODO(hosono) prevent panic here
-		//close(s.sendQueue)
+		close(s.sendQueue)
 		return nil
 	}
 	return io.EOF
