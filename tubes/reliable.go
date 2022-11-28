@@ -48,7 +48,7 @@ var errBadTubeState = errors.New("tube in bad state")
 // Reliable implements a reliable and receiveWindow tube on top
 type Reliable struct {
 	reset       chan struct{}
-	closed     chan struct{}
+	closed      chan struct{}
 	tType       TubeType
 	id          byte
 	localAddr   net.Addr
@@ -60,6 +60,7 @@ type Reliable struct {
 	// +checklocks:l
 	tubeState   state
 	initRecv    chan struct{}
+	initDone    chan struct{}
 	sendStopped chan struct{}
 	l           sync.Mutex
 	finAcked    atomic.Bool
@@ -74,7 +75,6 @@ var _ Tube = &Reliable{}
 
 /* req: whether the tube is requesting to initiate a tube (true), or whether is respondding to an initiation request (false).*/
 func (r *Reliable) initiate(req bool) {
-	//r.log.Errorf("Tube %d initiated", r.id)
 	tubeType := r.tType
 	notInit := true
 
@@ -100,11 +100,14 @@ func (r *Reliable) initiate(req bool) {
 		case <-ticker.C:
 			continue
 		case <-r.initRecv:
+			r.l.Lock()
 			notInit = r.tubeState == created
+			r.l.Unlock()
 		}
 	}
 	go r.send()
 	r.sender.Start()
+	close(r.initDone)
 }
 
 func (r *Reliable) send() {
@@ -122,26 +125,31 @@ func (r *Reliable) receive(pkt *frame) error {
 	r.l.Lock()
 	defer r.l.Unlock()
 
-	if r.tubeState == created || r.tubeState == closed {
-		r.log.WithFields(logrus.Fields{
-			"fin": pkt.flags.FIN,
-			"state": r.tubeState,
-		}).Errorf("receive for tube in bad state")
-		//r.Reset()
-		return errBadTubeState
-	}
-
+	// Log the packet
 	r.log.WithFields(logrus.Fields{
 		"ackno": pkt.ackNo,
 		"ack":   pkt.flags.ACK,
 		"fin":   pkt.flags.FIN,
 	}).Trace("receiving packet")
-	err := r.recvWindow.receive(pkt)
-	if pkt.flags.ACK {
-		r.sender.recvAck(pkt.ackNo)
+
+	// created and closed tubes cannot handle incoming packets
+	if r.tubeState == created || r.tubeState == closed {
+		r.log.WithFields(logrus.Fields{
+			"fin": pkt.flags.FIN,
+			"state": r.tubeState,
+		}).Errorf("receive for tube in bad state")
+
+		// TODO(hosono) send RST frame if this packet is not a reset packet
+		//r.Reset()
+
+		return errBadTubeState
 	}
 
-	// State transitions for ACK of FIN
+	// TODO(hosono) RST connections with REQ or RESP bits
+
+	// TODO(hosono) handle RST frames
+
+	// Handle ACK of FIN frame
 	if pkt.flags.ACK && r.tubeState != initiated && r.sender.unAckedFramesRemaining() == 0{
 		switch r.tubeState {
 		case finWait1:
@@ -158,7 +166,7 @@ func (r *Reliable) receive(pkt *frame) error {
 		}
 	}
 
-	// handle closing states of FIN packets
+	// Handle FIN frame
 	if pkt.flags.FIN {
 		switch r.tubeState {
 		case initiated:
@@ -178,7 +186,16 @@ func (r *Reliable) receive(pkt *frame) error {
 		}
 	}
 
-	// TODO(hosono) fix this check to be better
+	// Pass the frame to the receive window
+	err := r.recvWindow.receive(pkt)
+
+	// Pass the frame to the sender
+	if pkt.flags.ACK {
+		r.sender.recvAck(pkt.ackNo)
+	}
+
+
+	// TODO(hosono) send automatic ACK rather than waiting for rtt
 	/*
 	 *if (r.recvWindow.getAck() - r.sender.lastAckSent.Load()) >= windowSize / 2{
 	 *    r.sender.sendEmptyPacket()
@@ -192,6 +209,8 @@ func (r *Reliable) enterTimeWaitState() {
 	// TODO(hosono) what should the wait time be?
 	// The linux kernel seems to wait 1 minute for connections on the loopback interface.
 	// Is that too long for a user to wait? We can't just hand this off to the kernel.
+
+	//TODO(hosono) reset timer on new FINs
 	r.sender.stopRetransmit()
 	time.AfterFunc(3 * time.Second, func() {
 		r.l.Lock()
@@ -210,6 +229,8 @@ func (r *Reliable) enterClosedState() {
 }
 
 func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
+	r.l.Lock()
+	defer r.l.Unlock()
 	if r.tubeState == created {
 		r.recvWindow.m.Lock()
 		r.recvWindow.ackNo = 1
@@ -224,6 +245,10 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 }
 
 func (r *Reliable) Read(b []byte) (n int, err error) {
+	<-r.initDone
+	r.l.Lock()
+	defer r.l.Unlock()
+
 	if r.tubeState == created {
 		return 0, errBadTubeState
 	}
@@ -231,6 +256,9 @@ func (r *Reliable) Read(b []byte) (n int, err error) {
 }
 
 func (r *Reliable) Write(b []byte) (n int, err error) {
+	<-r.initDone
+	r.l.Lock()
+	defer r.l.Unlock()
 	if r.tubeState == created {
 		return 0, errBadTubeState
 	}
@@ -239,6 +267,10 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 
 // WriteMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
+	<-r.initDone
+	r.l.Lock()
+	defer r.l.Unlock()
+
 	if r.tubeState == created {
 		err = errBadTubeState
 		return
@@ -252,6 +284,9 @@ func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, e
 
 // ReadMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
+	<-r.initDone
+	r.l.Lock()
+	defer r.l.Unlock()
 	if r.tubeState == created {
 		err = errBadTubeState
 		return
@@ -271,6 +306,9 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 // Reset immediately tears down the connection
 func (r *Reliable) Reset() (err error) {
 	// TODO(hosono) add a reset flag
+	<-r.initDone
+	r.l.Lock()
+	defer r.l.Unlock()
 
 	if r.tubeState == closed {
 		r.log.Warn("Resetting closed tube")
@@ -298,6 +336,7 @@ func (r *Reliable) Reset() (err error) {
 
 // Close handles closing reliable tubes
 func (r *Reliable) Close() (err error) {
+	<-r.initDone
 	r.l.Lock()
 	defer r.l.Unlock()
 
@@ -389,6 +428,7 @@ func (r *Reliable) RemoteAddr() net.Addr {
 
 // SetDeadline (not implemented)
 func (r *Reliable) SetDeadline(t time.Time) error {
+	<-r.initDone
 	r.SetReadDeadline(t)
 	r.SetWriteDeadline(t)
 	return nil
@@ -396,11 +436,13 @@ func (r *Reliable) SetDeadline(t time.Time) error {
 
 // SetReadDeadline (not implemented)
 func (r *Reliable) SetReadDeadline(t time.Time) error {
+	<-r.initDone
 	return r.recvWindow.dataReady.SetDeadline(t)
 }
 
 // SetWriteDeadline (not implemented)
 func (r *Reliable) SetWriteDeadline(t time.Time) error {
+	<-r.initDone
 	r.sender.l.Lock()
 	defer r.sender.l.Unlock()
 	r.sender.deadline = t

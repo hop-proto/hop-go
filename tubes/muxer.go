@@ -89,6 +89,7 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 		tubeState:   created,
 		sendStopped: make(chan struct{}, 1),
 		initRecv:    make(chan struct{}),
+		initDone:    make(chan struct{}),
 		closed:      make(chan struct{}, 1),
 		reset:       make(chan struct{}, 1),
 		recvWindow: receiver{
@@ -262,6 +263,9 @@ func (m *Muxer) Start() (err error) {
 
 // Stop ensures all the muxer tubes are closed
 func (m *Muxer) Stop() (err error) {
+	m.m.Lock()
+	defer m.m.Unlock()
+
 	if m.stopped.Load() {
 		return io.EOF
 	}
