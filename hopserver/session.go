@@ -205,7 +205,7 @@ func (sess *hopSession) checkIntent(tube *tubes.Reliable) (authgrants.MessageDat
 func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 	var msg authgrants.AgMessage
 	// Check server config (coarse grained enable/disable)
-	if sess.server.config.AllowAuthgrants != nil && !*sess.server.config.AllowAuthgrants { // AuthGrants not enabled
+	if sess.server.config.AllowAuthgrants == nil || !*sess.server.config.AllowAuthgrants { // AuthGrants not enabled
 		data := authgrants.MessageData{Denial: authgrants.TargetDenial}
 		msg = authgrants.NewAuthGrantMessage(authgrants.IntentDenied, data)
 	} else if data, ok := sess.checkIntent(tube); !ok { // AuthGrants enabled, but failed check
