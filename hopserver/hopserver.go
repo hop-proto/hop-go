@@ -92,7 +92,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	// TODO(baumanl): serverConfig options should inform verify config settings
 	// 4 main options right now:
 	// 1. InsecureSkipVerify: no verification of client cert
-	// 2. Certificate Validation ONLY: fails immidiately if invalid cert chain
+	// 2. Certificate Validation ONLY: fails immediately if invalid cert chain
 	// 3. Cert Validation or Authorized Keys: will check for auth key if invalid cert chain
 	// 4. Authorized keys only: cert validation explicitly disabled and auth keys explicitly enabled
 
