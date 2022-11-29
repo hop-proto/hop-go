@@ -55,7 +55,9 @@ func makeConn(t *testing.T, rel bool, fake bool) (t1, t2 net.Conn, stop func(), 
 	}
 
 	muxer1 := NewMuxer(c1, c1, 0, logrus.WithField("muxer", "m1"))
+	muxer1.log.WithField("addr", c1.LocalAddr()).Info("Created")
 	muxer2 := NewMuxer(c2, c2, 0, logrus.WithField("muxer", "m2"))
+	muxer2.log.WithField("addr", c2.LocalAddr()).Info("Created")
 
 	go func() {
 		e := muxer1.Start()
@@ -154,7 +156,7 @@ func ReliableClose(t *testing.T, rel bool) {
 
 // TODO(hosono) make reliable tubes pass these tests
 func TestReliable(t *testing.T) {
-	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetLevel(logrus.TraceLevel)
 
 	t.Run("Close", func (t *testing.T) {
 		ReliableClose(t, true)

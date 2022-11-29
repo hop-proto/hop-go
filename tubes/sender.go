@@ -58,6 +58,7 @@ type sender struct {
 
 	endRetransmit   chan struct{}
 	retransmitEnded chan struct{}
+	stopRetransmitCalled atomic.Bool
 
 	windowOpen chan struct{}
 
@@ -121,6 +122,17 @@ func (s *sender) recvAck(ackNo uint32) error {
 		newAckNo = newAckNo + (1 << 32)
 	}
 
+	// Only fill the window if new space has really opened up
+	if s.ackNo < newAckNo {
+		s.RTOTicker.Reset(s.RTO)
+		select {
+		case s.windowOpen <- struct{}{}:
+			break
+		default:
+			break
+		}
+	}
+
 	for s.ackNo < newAckNo {
 		_, ok := s.frameDataLengths[uint32(s.ackNo)]
 		if !ok {
@@ -132,13 +144,6 @@ func (s *sender) recvAck(ackNo uint32) error {
 		s.frames = s.frames[1:]
 	}
 
-	select {
-	case s.windowOpen <- struct{}{}:
-		break
-	default:
-		break
-	}
-
 	return nil
 }
 
@@ -148,7 +153,12 @@ func (s *sender) sendEmptyPacket() *frame {
 		frameNo:    s.frameNo.Load(),
 		data:       []byte{},
 		flags: frameFlags{
-			FIN: s.finSent.Load(),
+			// This checks if the connection is in the timeWait state.
+			// If it is, we must not set the FIN flag because if the remote connection
+			// is also in the timeWait state, they will endlessly send acknowledgements
+			// between each other. We don't need to set the FIN flag because we can
+			// only move into the timeWait state if our FIN has been ACKed.
+			FIN: s.finSent.Load() && !s.stopRetransmitCalled.Load(),
 		},
 	}
 	s.sendQueue <- pkt
@@ -196,6 +206,7 @@ func (s *sender) retransmit() {
 }
 
 func (s *sender) stopRetransmit() {
+	s.stopRetransmitCalled.Store(true)
 	select {
 	case s.endRetransmit <- struct{}{}:
 		break

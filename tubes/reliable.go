@@ -149,6 +149,14 @@ func (r *Reliable) receive(pkt *frame) error {
 
 	// TODO(hosono) handle RST frames
 
+	// Pass the frame to the receive window
+	err := r.recvWindow.receive(pkt)
+
+	// Pass the frame to the sender
+	if pkt.flags.ACK {
+		r.sender.recvAck(pkt.ackNo)
+	}
+
 	// Handle ACK of FIN frame
 	if pkt.flags.ACK && r.tubeState != initiated && r.sender.unAckedFramesRemaining() == 0{
 		switch r.tubeState {
@@ -185,15 +193,6 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.sender.sendEmptyPacket()
 		}
 	}
-
-	// Pass the frame to the receive window
-	err := r.recvWindow.receive(pkt)
-
-	// Pass the frame to the sender
-	if pkt.flags.ACK {
-		r.sender.recvAck(pkt.ackNo)
-	}
-
 
 	// TODO(hosono) send automatic ACK rather than waiting for rtt
 	/*
