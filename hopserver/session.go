@@ -151,6 +151,7 @@ func (sess *hopSession) checkIntent(tube *tubes.Reliable) (authgrants.MessageDat
 	if err != nil {
 		return authgrants.MessageData{Denial: authgrants.MalformedIntentDen}, false
 	}
+	// check that msg type is correct
 	if ir.MsgType != authgrants.IntentCommunication {
 		return authgrants.MessageData{Denial: authgrants.UnexpectedMessageType}, false
 	}
@@ -164,7 +165,7 @@ func (sess *hopSession) checkIntent(tube *tubes.Reliable) (authgrants.MessageDat
 	// TODO(baumanl): check target SNI matches the current hostname of this server? necessary?
 
 	// check target username matches current username that client
-	// logged in as. (necessary?)
+	// logged in as.
 	if sess.user != intent.TargetUsername {
 		return authgrants.MessageData{Denial: "Current user and requested user mismatch"}, false
 	}
@@ -173,12 +174,12 @@ func (sess *hopSession) checkIntent(tube *tubes.Reliable) (authgrants.MessageDat
 	if err = certs.VerifyLeafFormat(&intent.DelegateCert, certs.VerifyOptions{}); err != nil {
 		return authgrants.MessageData{Denial: "Ill-formatted delegate certificate"}, false
 	}
-
+	// TODO(baumanl): add in finer grained policy checks/options? i.e. account level access control
+	// TODO(baumanl): enable fine grained checks based on config options
 	// pass the intent to handlers for each type of authgrant
 	switch intent.GrantType {
 	case authgrants.Shell:
 		// TODO(baumanl)
-
 	case authgrants.Command:
 		// TODO
 	case authgrants.LocalPF:
@@ -190,9 +191,11 @@ func (sess *hopSession) checkIntent(tube *tubes.Reliable) (authgrants.MessageDat
 
 	}
 
-	// TODO(baumanl): add in finer grained policy checks/options? i.e. account level access control
-	// TODO(baumanl): add authorization grant to server mappings
-	// TODO(baumanl): add delegate key from cert to transport server authorized key pool
+	// add authorization grant to server mappings
+	sess.server.authgrants[intent.DelegateCert.PublicKey] = append(sess.server.authgrants[intent.DelegateCert.PublicKey], intent)
+
+	//add delegate key from cert to transport server authorized key pool
+	sess.server.keyStore.AddKey(intent.DelegateCert.PublicKey)
 
 	// fine grained
 	return authgrants.MessageData{}, true
@@ -202,12 +205,12 @@ func (sess *hopSession) checkIntent(tube *tubes.Reliable) (authgrants.MessageDat
 func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 	var msg authgrants.AgMessage
 	// Check server config (coarse grained enable/disable)
-	if sess.server.config.AllowAuthgrants != nil && !*sess.server.config.AllowAuthgrants {
+	if sess.server.config.AllowAuthgrants != nil && !*sess.server.config.AllowAuthgrants { // AuthGrants not enabled
 		data := authgrants.MessageData{Denial: authgrants.TargetDenial}
 		msg = authgrants.NewAuthGrantMessage(authgrants.IntentDenied, data)
-	} else if data, ok := sess.checkIntent(tube); !ok {
+	} else if data, ok := sess.checkIntent(tube); !ok { // AuthGrants enabled, but failed check
 		msg = authgrants.NewAuthGrantMessage(authgrants.IntentDenied, data)
-	} else {
+	} else { // AuthGrants enabled and passed check
 		msg = authgrants.NewAuthGrantMessage(authgrants.IntentConfirmation, data)
 	}
 	msg.WriteTo(tube)

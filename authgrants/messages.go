@@ -56,6 +56,7 @@ const (
 	RemotePF = GrantType(4)
 )
 
+// GrantType differentiates between types of actions
 type GrantType byte
 
 // Intent contains body of an Intent Request or Intent Communication
@@ -99,11 +100,6 @@ type LocalPFGrantData struct {
 
 // RemotePFGrantData info for remote pf authgrant
 type RemotePFGrantData struct {
-}
-
-type Authgrant struct {
-	Type GrantType
-	Data GrantData
 }
 
 // NewAuthGrantMessage makes an agMessage with type and data

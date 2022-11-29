@@ -30,8 +30,9 @@ import (
 
 // HopServer represents state/conns needed for a hop server
 type HopServer struct {
-	m          sync.Mutex
-	authgrants map[keys.PrivateKey][]authgrants.Authgrant
+	m sync.Mutex
+	// TODO(baumanl): potentially don't need entire Intent
+	authgrants map[keys.PrivateKey][]authgrants.Intent
 
 	config *config.ServerConfig
 
@@ -46,7 +47,7 @@ type HopServer struct {
 func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig) (*HopServer, error) {
 	server := &HopServer{
 		m:          sync.Mutex{},
-		authgrants: make(map[keys.PrivateKey][]authgrants.Authgrant),
+		authgrants: make(map[keys.PrivateKey][]authgrants.Intent),
 
 		config: config,
 
