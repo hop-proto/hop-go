@@ -130,7 +130,7 @@ func makeConn(t *testing.T, rel bool, fake bool) (t1, t2 net.Conn, stop func(), 
 }
 
 func ReliableClose(t *testing.T, rel bool) {
-	logrus.SetLevel(logrus.TraceLevel)
+	logrus.SetLevel(logrus.DebugLevel)
 	c1Conn, c2Conn, stop, _, err := makeConn(t, rel, false)
 	assert.NilError(t, err)
 	defer stop()
@@ -156,7 +156,7 @@ func ReliableClose(t *testing.T, rel bool) {
 
 // TODO(hosono) make reliable tubes pass these tests
 func TestReliable(t *testing.T) {
-	logrus.SetLevel(logrus.TraceLevel)
+	logrus.SetLevel(logrus.DebugLevel)
 
 	t.Run("Close", func (t *testing.T) {
 		ReliableClose(t, true)

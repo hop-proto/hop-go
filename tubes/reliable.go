@@ -245,12 +245,13 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 
 func (r *Reliable) Read(b []byte) (n int, err error) {
 	<-r.initDone
-	r.l.Lock()
-	defer r.l.Unlock()
 
+	r.l.Lock()
 	if r.tubeState == created {
 		return 0, errBadTubeState
 	}
+	r.l.Unlock()
+
 	return r.recvWindow.read(b)
 }
 
@@ -266,14 +267,8 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 
 // WriteMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
-	<-r.initDone
-	r.l.Lock()
-	defer r.l.Unlock()
+	// This function can skip checking r.tubeState because r.Write() will do that
 
-	if r.tubeState == created {
-		err = errBadTubeState
-		return
-	}
 	length := len(b)
 	h := make([]byte, 2)
 	binary.BigEndian.PutUint16(h, uint16(length))
@@ -283,9 +278,8 @@ func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, e
 
 // ReadMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
 func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
-	<-r.initDone
-	r.l.Lock()
-	defer r.l.Unlock()
+	// This function can skip checking r.tubeState because r.Read() will do that
+
 	if r.tubeState == created {
 		err = errBadTubeState
 		return
