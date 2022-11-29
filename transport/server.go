@@ -434,33 +434,25 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		opts.PresentedIntermediate = &intermediate
 	}
 
-	// TODO(baumanl): do we want all verify logic to be some provided callback?
+	// TODO(baumanl): enable more general cert verify callback?
 	// TODO(baumanl): if certVerify is nil then no verification happens --> okay default?
-	if hs.certVerify != nil {
-		// InsecureSkipVerify skips certificate and chain verification
-		if !hs.certVerify.InsecureSkipVerify {
-			// Certificate Verification
-			err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
-			if err != nil {
-				if hs.certVerify.AuthKeysAllowed {
-					err2 := hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
-					if err2 != nil {
-						logrus.Errorf("server: failed to verify certificate: %s and key unauthorized: %s", err, err2)
-						return pos, nil, err2
-					}
-				} else {
-					logrus.Errorf("server: failed to verify certificate: %s", err)
-					return pos, nil, err
+
+	// skips all verification if certVerify nil or explicitly disabled
+	if hs.certVerify != nil && !hs.certVerify.InsecureSkipVerify {
+		// Certificate Verification
+		err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
+		if err != nil { // cert verifification failed
+			if hs.certVerify.AuthKeysAllowed { // authorized keys allowed
+				err2 := hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
+				if err2 != nil {
+					logrus.Errorf("server: failed to verify certificate: %s and key unauthorized: %s", err, err2)
+					return pos, nil, err2
 				}
-			}
-		} else if hs.certVerify.AuthKeysAllowed {
-			err = hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
-			if err != nil {
-				logrus.Errorf("server: key not authorized")
+			} else {
+				logrus.Errorf("server: failed to verify certificate: %s", err)
 				return pos, nil, err
 			}
 		}
-		// TODO(baumanl): potentially allow verifyClient callback for raw cert?
 	}
 
 	hs.se, err = hs.ephemeral.DH(leaf.PublicKey[:])

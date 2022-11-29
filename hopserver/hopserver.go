@@ -92,23 +92,28 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	// TODO(baumanl): serverConfig options should inform verify config settings
 	// 4 main options right now:
 	// 1. InsecureSkipVerify: no verification of client cert
-	// 2. Certificate Validation ONLY: fails if invalid cert chain
-	// 3. Cert Validation or Authorized Keys
-	// 4. Authorized keys only
+	// 2. Certificate Validation ONLY: fails immidiately if invalid cert chain
+	// 3. Cert Validation or Authorized Keys: will check for auth key if invalid cert chain
+	// 4. Authorized keys only: cert validation explicitly disabled and auth keys explicitly enabled
 
 	// Explicitly setting sc.InsecureSkipVerify overrides everything else
 	if sc.InsecureSkipVerify != nil && *sc.InsecureSkipVerify {
 		tconf.ClientVerify = &transport.VerifyConfig{
 			InsecureSkipVerify: true,
 		}
-	} else if sc.EnableCertificateValidation == nil || *sc.EnableCertificateValidation {
-		tconf.ClientVerify = &transport.VerifyConfig{
-			Store: certs.Store{}, // TODO(baumanl): get the store from somewhere
+	} else {
+		// Cert validation enabled
+		if sc.EnableCertificateValidation == nil || *sc.EnableCertificateValidation {
+			tconf.ClientVerify = &transport.VerifyConfig{
+				Store: certs.Store{}, // TODO(baumanl): get the store from somewhere
+			}
 		}
-	} else if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
-		// must be explicitly set to true
-		tconf.ClientVerify = &transport.VerifyConfig{
-			AuthKeys: authkeys.NewAuthKeySet(), // TODO(baumanl): load initial (stable trusted keys)
+		// Authorized keys enabled
+		if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
+			// must be explicitly set to true
+			tconf.ClientVerify = &transport.VerifyConfig{
+				AuthKeys: authkeys.NewAuthKeySet(), // TODO(baumanl): load initial (stable trusted keys)
+			}
 		}
 	}
 
