@@ -32,7 +32,7 @@ import (
 type HopServer struct {
 	m sync.Mutex
 	// TODO(baumanl): potentially don't need entire Intent
-	authgrants map[keys.PrivateKey][]authgrants.Intent
+	authgrants map[string]map[keys.PublicKey][]authgrants.Intent
 	agLock     sync.Mutex
 
 	config *config.ServerConfig
@@ -49,7 +49,7 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig) 
 	server := &HopServer{
 		m: sync.Mutex{},
 
-		authgrants: make(map[keys.PrivateKey][]authgrants.Intent),
+		authgrants: make(map[string]map[keys.PublicKey][]authgrants.Intent),
 		agLock:     sync.Mutex{},
 
 		config: config,
@@ -211,6 +211,24 @@ func (s *HopServer) authorizeKey(user string, publicKey keys.PublicKey) error {
 	return fmt.Errorf("key %s is not authorized for user %s", publicKey, user)
 }
 
+func (s *HopServer) authorizeKeyAuthGrant(user string, publicKey keys.PublicKey) ([]authgrants.Intent, error) {
+	if s.config.AllowAuthgrants != nil && *s.config.AllowAuthgrants {
+		s.agLock.Lock()
+		defer s.agLock.Unlock()
+		if _, ok := s.authgrants[user]; ok {
+			// user has some authgrants
+			if val, ok := s.authgrants[user][publicKey]; ok {
+				delete(s.authgrants[user], publicKey) // remove from server mapping
+				if len(s.authgrants[user]) == 0 {     // all authgrants have been removed for user
+					delete(s.authgrants, user)
+				}
+				return val, nil
+			}
+		}
+	}
+	return []authgrants.Intent{}, fmt.Errorf("auth grants not enabled")
+}
+
 // VirtualHosts is mapping from host patterns to Certificates.
 type VirtualHosts []VirtualHost
 
@@ -292,6 +310,8 @@ func (vhosts VirtualHosts) Match(name certs.Name) *VirtualHost {
 
 func (s *HopServer) addAuthGrant(intent *authgrants.Intent) {
 	s.agLock.Lock()
-	s.authgrants[intent.DelegateCert.PublicKey] = append(s.authgrants[intent.DelegateCert.PublicKey], *intent)
+	user := intent.TargetUsername
+	s.authgrants[user] = make(map[keys.PublicKey][]authgrants.Intent)
+	s.authgrants[user][intent.DelegateCert.PublicKey] = append(s.authgrants[user][intent.DelegateCert.PublicKey], *intent)
 	s.agLock.Unlock()
 }

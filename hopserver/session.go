@@ -2,6 +2,7 @@ package hopserver
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -35,6 +36,9 @@ type hopSession struct {
 	server *HopServer
 	user   string
 
+	usingAuthGrant    bool
+	authorizedActions []authgrants.Intent
+
 	// We use a channel (with size 1) to avoid reading window sizes before we've created the pty
 	pty chan *os.File
 }
@@ -47,18 +51,29 @@ func (sess *hopSession) checkAuthorization() bool {
 	}
 	logrus.Info("S: Accepted USER AUTH tube")
 	defer uaTube.Close()
-	username := userauth.GetInitMsg(uaTube) //client sends desired username
+	username := userauth.GetInitMsg(uaTube) // client sends desired username
 	logrus.Info("S: client req to access as: ", username)
 
 	leaf := sess.transportConn.FetchClientLeaf()
 	k := keys.PublicKey(leaf.PublicKey)
 	logrus.Info("got userauth init message: ", k.String())
 
-	if err := sess.server.authorizeKey(username, k); err != nil {
-		logrus.Errorf("rejecting key for %q: %s", username, err)
-		return false
+	sess.usingAuthGrant = false
+	err := sess.server.authorizeKey(username, k)
+	if err != nil {
+		if sess.server.config.AllowAuthgrants != nil && *sess.server.config.AllowAuthgrants {
+			actions, err := sess.server.authorizeKeyAuthGrant(username, k)
+			if err != nil {
+				logrus.Errorf("rejecting key for %q: %s", username, err)
+				return false
+			}
+			sess.usingAuthGrant = true
+			sess.authorizedActions = actions
+		} else {
+			logrus.Errorf("rejecting key for %q: %s", username, err)
+			return false
+		}
 	}
-
 	sess.user = username
 
 	logrus.Info("USER AUTHORIZED")
@@ -203,6 +218,7 @@ func (sess *hopSession) checkIntent(tube *tubes.Reliable) (authgrants.MessageDat
 
 // handleAgc handles Intent Communications from principals and updates the outstanding authgrants maps appropriately
 func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
+	// TODO(baumanl): add check for authgrant?
 	var msg authgrants.AgMessage
 	// Check server config (coarse grained enable/disable)
 	if sess.server.config.AllowAuthgrants == nil || !*sess.server.config.AllowAuthgrants { // AuthGrants not enabled
@@ -238,8 +254,30 @@ func getGroups(uid int) (groups []uint32) {
 	return
 }
 
+// checks if the session has an auth grant to perform cmd
+func (sess *hopSession) checkCmd(cmd string) error {
+	for i, intent := range sess.authorizedActions {
+		if intent.GrantType == authgrants.Command {
+			if intent.AssociatedData.CommandGrantData.Cmd == cmd {
+				sess.authorizedActions = append(sess.authorizedActions[:i], sess.authorizedActions[i+1:]...)
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("no auth grant for cmd: %s", cmd)
+}
+
 func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 	cmd, termEnv, shell, size, _ := codex.GetCmd(tube)
+	// if using an authgrant, check that the cmd is authorized
+	if sess.usingAuthGrant {
+		err := sess.checkCmd(cmd)
+		if err != nil {
+			codex.SendFailure(tube, err)
+			return
+		}
+	}
+
 	logrus.Info("CMD: ", cmd)
 	cache, err := etcpwdparse.NewLoadedEtcPasswdCache() //Best way to do this? should I load this only once and then just reload on misses? What if /etc/passwd modified between accesses?
 	if err != nil {
@@ -320,6 +358,7 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 }
 
 func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
+	// TODO(baumanl): add check for authgrant?
 	netproxy.Server(ch)
 }
 
