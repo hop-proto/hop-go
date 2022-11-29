@@ -192,7 +192,7 @@ func (sess *hopSession) checkIntent(tube *tubes.Reliable) (authgrants.MessageDat
 	}
 
 	// add authorization grant to server mappings
-	sess.server.authgrants[intent.DelegateCert.PublicKey] = append(sess.server.authgrants[intent.DelegateCert.PublicKey], intent)
+	sess.server.addAuthGrant(&intent)
 
 	//add delegate key from cert to transport server authorized key pool
 	sess.server.keyStore.AddKey(intent.DelegateCert.PublicKey)

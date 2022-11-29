@@ -33,6 +33,7 @@ type HopServer struct {
 	m sync.Mutex
 	// TODO(baumanl): potentially don't need entire Intent
 	authgrants map[keys.PrivateKey][]authgrants.Intent
+	agLock     sync.Mutex
 
 	config *config.ServerConfig
 
@@ -46,8 +47,10 @@ type HopServer struct {
 // NewHopServerExt returns a Hop Server using the provided transport server.
 func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig) (*HopServer, error) {
 	server := &HopServer{
-		m:          sync.Mutex{},
+		m: sync.Mutex{},
+
 		authgrants: make(map[keys.PrivateKey][]authgrants.Intent),
+		agLock:     sync.Mutex{},
 
 		config: config,
 
@@ -280,4 +283,10 @@ func (vhosts VirtualHosts) Match(name certs.Name) *VirtualHost {
 		}
 	}
 	return nil
+}
+
+func (s *HopServer) addAuthGrant(intent *authgrants.Intent) {
+	s.agLock.Lock()
+	s.authgrants[intent.DelegateCert.PublicKey] = append(s.authgrants[intent.DelegateCert.PublicKey], *intent)
+	s.agLock.Unlock()
 }
