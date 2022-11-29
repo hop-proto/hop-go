@@ -27,6 +27,10 @@ type sender struct {
 	// +checklocks:l
 	windowSize uint16
 
+	// The number of packets sent but not acked
+	// +checklocks:l
+	unacked uint16
+
 	finSent atomic.Bool
 	closed  atomic.Bool
 	// The buffer of unacknowledged tube frames that will be retransmitted if necessary.
@@ -103,9 +107,9 @@ func (s *sender) write(b []byte) (int, error) {
 		s.frames = append(s.frames, &pkt)
 	}
 
-	for i := startFrame; i < len(s.frames) && i < int(s.windowSize); i++ {
-		s.sendQueue <- s.frames[i]
-	}
+	s.fillWindow(false, startFrame)
+
+	// TODO(hosono) are there weird edge cases with the timer? Do we need to stop it and restart it?
 	s.RTOTicker.Reset(s.RTO)
 	return len(b), nil
 }
@@ -113,25 +117,18 @@ func (s *sender) write(b []byte) (int, error) {
 func (s *sender) recvAck(ackNo uint32) error {
 	s.l.Lock()
 	defer s.l.Unlock()
+
 	newAckNo := uint64(ackNo)
-	s.log.WithFields(logrus.Fields{
-		"orig ackno": s.ackNo,
-		"new ackno":  newAckNo,
-	}).Tracef("received ack")
 	if newAckNo < s.ackNo && (newAckNo+(1<<32)-s.ackNo <= uint64(s.windowSize)) { // wrap around
 		newAckNo = newAckNo + (1 << 32)
 	}
 
-	// Only fill the window if new space has really opened up
-	if s.ackNo < newAckNo {
-		s.RTOTicker.Reset(s.RTO)
-		select {
-		case s.windowOpen <- struct{}{}:
-			break
-		default:
-			break
-		}
-	}
+	s.log.WithFields(logrus.Fields{
+		"orig ackno": s.ackNo,
+		"new ackno":  newAckNo,
+	}).Tracef("received ack")
+
+	windowOpen := s.ackNo < newAckNo
 
 	for s.ackNo < newAckNo {
 		_, ok := s.frameDataLengths[uint32(s.ackNo)]
@@ -141,7 +138,19 @@ func (s *sender) recvAck(ackNo uint32) error {
 		}
 		delete(s.frameDataLengths, uint32(s.ackNo))
 		s.ackNo++
+		s.unacked--
 		s.frames = s.frames[1:]
+	}
+
+	// Only fill the window if new space has really opened up
+	if windowOpen {
+		s.RTOTicker.Reset(s.RTO)
+		select {
+		case s.windowOpen <- struct{}{}:
+			break
+		default:
+			break
+		}
 	}
 
 	return nil
@@ -167,14 +176,41 @@ func (s *sender) sendEmptyPacket() *frame {
 
 // rto is true if the window is filled due to a retransmission timeout and false otherwise
 // +checklocks:s.l
-func (s *sender) fillWindow(rto bool) {
-	for i := 0; i < len(s.frames) && i < int(s.windowSize) && (i < maxFragTransPerRTO || !rto); i++ {
-		s.sendQueue <- s.frames[i]
+func (s *sender) fillWindow(rto bool, startIndex int) {
+	// TODO(hosono) this is a mess because there's no builtin min or clamp functions
+	var numFrames int
+	if rto {
+		// Get the minimum of s.windowSize and maxFragTransPerRTO
+		if maxFragTransPerRTO > int(s.windowSize) {
+			numFrames = int(s.windowSize)
+		} else {
+			numFrames = maxFragTransPerRTO
+		}
+	} else {
+		// Clamp numFrames to avoid indexing out of bounds
+		numFrames = int(s.windowSize - s.unacked)
+	}
+
+	// Clamp value to avoid going out of bounds
+	if numFrames + startIndex > len(s.frames) {
+		numFrames = len(s.frames) - startIndex
+	}
+	if numFrames < 0 {
+		numFrames = 0
+	}
+
+	for i := 0; i < numFrames; i++ {
+		s.sendQueue <- s.frames[startIndex+i]
+		s.unacked++
 		s.log.WithFields(logrus.Fields{
-			"fin": s.frames[i].flags.FIN,
-			"frameNo": s.frames[i].frameNo,
+			"fin": s.frames[startIndex+i].flags.FIN,
+			"frameNo": s.frames[startIndex+i].frameNo,
 		}).Trace("Putting packet on queue")
 	}
+
+	s.log.WithFields(logrus.Fields{
+		"num sent": numFrames,
+	}).Trace("fillWindow called")
 }
 
 func (s *sender) retransmit() {
@@ -188,13 +224,13 @@ func (s *sender) retransmit() {
 				s.sendEmptyPacket()
 			} else {
 				s.log.Trace("retransmitting")
-				s.fillWindow(true)
+				s.fillWindow(true, 0)
 			}
 			s.l.Unlock()
 		case <-s.windowOpen:
 			s.l.Lock()
 			s.log.Trace("window open. filling")
-			s.fillWindow(false)
+			s.fillWindow(false, 0)
 			s.l.Unlock()
 		case <-s.endRetransmit:
 			s.log.Debug("ending retransmit loop")
@@ -256,7 +292,7 @@ func (s *sender) sendFin() error {
 	s.frameDataLengths[pkt.frameNo] = 0
 	s.frameNo.Add(1)
 	s.frames = append(s.frames, &pkt)
-	s.log.Debug("sending FIN packet")
-	s.sendQueue <- &pkt
+	s.log.WithField("frameNo", pkt.frameNo).Debug("sending FIN packet")
+	s.fillWindow(false, len(s.frames)-1)
 	return nil
 }

@@ -32,7 +32,7 @@ const (
 	created    state = iota
 	initiated  state = iota
 
-	// These states are pull from the TCP state machine.
+	// These states are pulled from the TCP state machine.
 	closeWait  state = iota
 	lastAck    state = iota
 	finWait1   state = iota
@@ -59,6 +59,7 @@ type Reliable struct {
 	// TODO(hosono) probably we shouldn't just have one lock that manages everything
 	// +checklocks:l
 	tubeState   state
+	lastAckSent atomic.Uint32
 	initRecv    chan struct{}
 	initDone    chan struct{}
 	sendStopped chan struct{}
@@ -114,6 +115,7 @@ func (r *Reliable) send() {
 	for pkt := range r.sender.sendQueue {
 		pkt.tubeID = r.id
 		pkt.ackNo = r.recvWindow.getAck()
+		r.lastAckSent.Store(pkt.ackNo)
 		pkt.flags.ACK = true
 		pkt.flags.REL = true
 		r.sendQueue <- pkt.toBytes()
@@ -127,10 +129,11 @@ func (r *Reliable) receive(pkt *frame) error {
 
 	// Log the packet
 	r.log.WithFields(logrus.Fields{
+		"frameno": pkt.frameNo,
 		"ackno": pkt.ackNo,
 		"ack":   pkt.flags.ACK,
 		"fin":   pkt.flags.FIN,
-	}).Trace("receiving packet")
+	}).Warn("receiving packet")
 
 	// created and closed tubes cannot handle incoming packets
 	if r.tubeState == created || r.tubeState == closed {
@@ -194,12 +197,10 @@ func (r *Reliable) receive(pkt *frame) error {
 		}
 	}
 
-	// TODO(hosono) send automatic ACK rather than waiting for rtt
-	/*
-	 *if (r.recvWindow.getAck() - r.sender.lastAckSent.Load()) >= windowSize / 2{
-	 *    r.sender.sendEmptyPacket()
-	 *}
-	 */
+	// TODO(hosono) is there a wrapping problem here?
+	if (r.recvWindow.getAck() - r.lastAckSent.Load()) >= windowSize / 2  && !pkt.flags.FIN && r.tubeState != closed{
+		r.sender.sendEmptyPacket()
+	}
 
 	return err
 }

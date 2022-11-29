@@ -49,22 +49,27 @@ Precondition: r.m mutex is held.
 func (r *receiver) processIntoBuffer() {
 	for r.fragments.Len() > 0 {
 		frag := heap.Pop(&(r.fragments)).(*pqItem)
+		
+		log := r.log.WithFields(logrus.Fields{
+			"window start":  r.windowStart,
+			"frameNo": frag.priority,
+			"FIN": frag.FIN,
+		})
 
 		if r.windowStart != frag.priority {
 			// This packet cannot be added to the buffer yet.
-			r.log.WithFields(logrus.Fields{
-				"window start":  r.windowStart,
-				"frag priority": frag.priority,
-			}).Trace()
+			log.Trace("cannot process packet yet")
 			if frag.priority > r.windowStart {
 				heap.Push(&r.fragments, frag)
 				break
 			}
 		} else if frag.FIN {
+			log.Trace("processing packet")
 			r.windowStart++
 			r.ackNo++
 			r.closed.Store(true)
 		} else {
+			log.Trace("processing packet")
 			r.buffer.Write(frag.value)
 			r.windowStart++
 			r.ackNo++
@@ -91,7 +96,7 @@ func (r *receiver) read(buf []byte) (int, error) {
 	defer r.m.Unlock()
 
 	nbytes, _ := r.buffer.Read(buf)
-	if r.closed.Load() {
+	if r.closed.Load() && r.buffer.Len() == 0{
 		return nbytes, io.EOF
 	}
 	return nbytes, nil
