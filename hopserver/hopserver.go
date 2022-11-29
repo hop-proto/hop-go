@@ -127,7 +127,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		return server, err
 	}
 	if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
-		server.keyStore = &tconf.ClientVerify.AuthKeys
+		server.keyStore = tconf.ClientVerify.AuthKeys
 	}
 	return server, err
 
@@ -221,6 +221,7 @@ func (s *HopServer) authorizeKeyAuthGrant(user string, publicKey keys.PublicKey)
 				delete(s.authgrants[user], publicKey) // remove from server mapping
 				if len(s.authgrants[user]) == 0 {     // all authgrants have been removed for user
 					delete(s.authgrants, user)
+					s.keyStore.RemoveKey(publicKey)
 				}
 				return val, nil
 			}
