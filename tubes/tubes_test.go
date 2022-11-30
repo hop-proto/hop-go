@@ -1,6 +1,7 @@
 package tubes
 
 import (
+	"io"
 	"net"
 	"testing"
 
@@ -129,28 +130,31 @@ func makeConn(t *testing.T, rel bool, fake bool) (t1, t2 net.Conn, stop func(), 
 	return t1, t2, stop, rel, err
 }
 
-func ReliableClose(t *testing.T, rel bool) {
-	c1Conn, c2Conn, stop, _, err := makeConn(t, rel, false)
+func CloseTest(t *testing.T, rel bool) {
+	c1, c2, stop, _, err := makeConn(t, rel, false)
 	assert.NilError(t, err)
 	defer stop()
-
-	c1 := c1Conn.(*Reliable)
-	c2 := c2Conn.(*Reliable)
 
 	c1.Close()
 	c2.Close()
 
-	c1.WaitForClose()
-	c2.WaitForClose()
+	if c1Rel, ok := c1.(*Reliable); ok {
+		c1Rel.WaitForClose()
+		c1Rel.l.Lock()
+		assert.DeepEqual(t, c1Rel.tubeState, closed)
+		c1Rel.l.Unlock()
+	}
 
-	c1.l.Lock()
-	assert.DeepEqual(t, c1.tubeState, closed)
-	c1.l.Unlock()
+	if c2Rel, ok := c1.(*Reliable); ok {
+		c2Rel.WaitForClose()
+		c2Rel.l.Lock()
+		assert.DeepEqual(t, c2Rel.tubeState, closed)
+		c2Rel.l.Unlock()
+	}
 
-	c2.l.Lock()
-	assert.DeepEqual(t, c2.tubeState, closed)
-	c2.l.Unlock()
-
+	n, err := c1.Write([]byte("hello world"))
+	assert.ErrorType(t, err, io.EOF)
+	assert.DeepEqual(t, n, 0)
 }
 
 // TODO(hosono) make reliable tubes pass these tests
@@ -158,7 +162,7 @@ func TestReliable(t *testing.T) {
 	logrus.SetLevel(logrus.TraceLevel)
 
 	t.Run("Close", func(t *testing.T) {
-		ReliableClose(t, true)
+		CloseTest(t, true)
 	})
 
 	f := func() (c1, c2 net.Conn, stop func(), rel bool, err error) {
@@ -172,7 +176,11 @@ func TestReliable(t *testing.T) {
 }
 
 func TestUnreliable(t *testing.T) {
-	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetLevel(logrus.TraceLevel)
+
+	t.Run("Close", func(t *testing.T) {
+		CloseTest(t, false)
+	})
 
 	f := func() (c1, c2 net.Conn, stop func(), rel bool, err error) {
 		return makeConn(t, false, true)
