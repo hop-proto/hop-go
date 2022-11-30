@@ -47,7 +47,6 @@ var errBadTubeState = errors.New("tube in bad state")
 
 // Reliable implements a reliable and receiveWindow tube on top
 type Reliable struct {
-	reset       chan struct{}
 	closed      chan struct{}
 	tType       TubeType
 	id          byte
@@ -62,9 +61,7 @@ type Reliable struct {
 	lastAckSent atomic.Uint32
 	initRecv    chan struct{}
 	initDone    chan struct{}
-	sendStopped chan struct{}
 	l           sync.Mutex
-	finAcked    atomic.Bool
 	log         *logrus.Entry
 }
 
@@ -85,7 +82,7 @@ func (r *Reliable) initiate(req bool) {
 		data:       []byte{},
 		dataLength: 0,
 		frameNo:    0,
-		windowSize: r.recvWindow.windowSize,
+		windowSize: r.recvWindow.getWindowSize(),
 		flags: frameFlags{
 			REQ:  req,
 			RESP: !req,
@@ -120,7 +117,6 @@ func (r *Reliable) send() {
 		pkt.flags.REL = true
 		r.sendQueue <- pkt.toBytes()
 	}
-	r.sendStopped <- struct{}{}
 }
 
 func (r *Reliable) receive(pkt *frame) error {
@@ -303,31 +299,33 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 
 // Reset immediately tears down the connection
 func (r *Reliable) Reset() (err error) {
-	// TODO(hosono) add a reset flag
-	<-r.initDone
-	r.l.Lock()
-	defer r.l.Unlock()
-
-	if r.tubeState == closed {
-		r.log.Warn("Resetting closed tube")
-		return io.EOF
-	} else {
-		r.log.Warn("Resetting tube")
-	}
-
-	r.tubeState = closed
-
-	r.sender.Reset()
-	r.recvWindow.Close()
-	close(r.sender.sendQueue)
-	<-r.sendStopped
-
-	select {
-	case r.reset <- struct{}{}:
-		break
-	default:
-		break
-	}
+	// TODO(hosono) implement
+/*
+ *    <-r.initDone
+ *    r.l.Lock()
+ *    defer r.l.Unlock()
+ *
+ *    if r.tubeState == closed {
+ *        r.log.Warn("Resetting closed tube")
+ *        return io.EOF
+ *    } else {
+ *        r.log.Warn("Resetting tube")
+ *    }
+ *
+ *    r.tubeState = closed
+ *
+ *    r.sender.Reset()
+ *    r.recvWindow.Close()
+ *    close(r.sender.sendQueue)
+ *    <-r.sendStopped
+ *
+ *    select {
+ *    case r.reset <- struct{}{}:
+ *        break
+ *    default:
+ *        break
+ *    }
+ */
 
 	return
 }

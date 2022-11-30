@@ -19,20 +19,27 @@ type receiver struct {
 		and not have to update our priority queue orderings in the case of a
 		wraparound.
 	*/
+	// +checklocks:m
 	ackNo       uint64
+	// +checklocks:m
 	windowStart uint64
+	// +checklocks:m
 	windowSize  uint16
 	closed      atomic.Bool
 	m           sync.Mutex
+	// +checklocks:m
 	fragments   PriorityQueue
 
 	dataReady *common.DeadlineChan[struct{}]
+	// +checklocks:m
 	buffer    *bytes.Buffer
 
 	log *logrus.Entry
 }
 
 func (r *receiver) init() {
+	r.m.Lock()
+	defer r.m.Unlock()
 	heap.Init(&r.fragments)
 }
 
@@ -40,6 +47,12 @@ func (r *receiver) getAck() uint32 {
 	r.m.Lock()
 	defer r.m.Unlock()
 	return uint32(r.ackNo)
+}
+
+func (r *receiver) getWindowSize() uint16 {
+	r.m.Lock()
+	defer r.m.Unlock()
+	return r.windowSize
 }
 
 /*

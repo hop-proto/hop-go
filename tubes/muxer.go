@@ -87,11 +87,9 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 		localAddr:   m.underlying.LocalAddr(),
 		remoteAddr:  m.underlying.RemoteAddr(),
 		tubeState:   created,
-		sendStopped: make(chan struct{}, 1),
 		initRecv:    make(chan struct{}),
 		initDone:    make(chan struct{}),
 		closed:      make(chan struct{}, 1),
-		reset:       make(chan struct{}, 1),
 		recvWindow: receiver{
 			dataReady:   common.NewDeadlineChan[struct{}](1),
 			buffer:      new(bytes.Buffer),
