@@ -133,7 +133,7 @@ func (r *Reliable) receive(pkt *frame) error {
 		"ackno": pkt.ackNo,
 		"ack":   pkt.flags.ACK,
 		"fin":   pkt.flags.FIN,
-	}).Warn("receiving packet")
+	}).Trace("receiving packet")
 
 	// created and closed tubes cannot handle incoming packets
 	if r.tubeState == created || r.tubeState == closed {
@@ -178,7 +178,7 @@ func (r *Reliable) receive(pkt *frame) error {
 	}
 
 	// Handle FIN frame
-	if pkt.flags.FIN {
+	if pkt.flags.FIN && r.recvWindow.closed.Load(){
 		switch r.tubeState {
 		case initiated:
 			r.tubeState = closeWait
@@ -198,7 +198,7 @@ func (r *Reliable) receive(pkt *frame) error {
 	}
 
 	// TODO(hosono) is there a wrapping problem here?
-	if (r.recvWindow.getAck() - r.lastAckSent.Load()) >= windowSize / 2  && !pkt.flags.FIN && r.tubeState != closed{
+	if (r.recvWindow.getAck() - r.lastAckSent.Load()) >= windowSize / 2  && !pkt.flags.FIN && r.tubeState != closed {
 		r.sender.sendEmptyPacket()
 	}
 
@@ -249,6 +249,7 @@ func (r *Reliable) Read(b []byte) (n int, err error) {
 
 	r.l.Lock()
 	if r.tubeState == created {
+		r.l.Unlock()
 		return 0, errBadTubeState
 	}
 	r.l.Unlock()
@@ -260,9 +261,16 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 	<-r.initDone
 	r.l.Lock()
 	defer r.l.Unlock()
-	if r.tubeState == created {
+
+	switch r.tubeState {
+	case created:
 		return 0, errBadTubeState
+	case initiated, closeWait:
+		break
+	default:
+		return 0, io.EOF
 	}
+
 	return r.sender.write(b)
 }
 
@@ -281,10 +289,6 @@ func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, e
 func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
 	// This function can skip checking r.tubeState because r.Read() will do that
 
-	if r.tubeState == created {
-		err = errBadTubeState
-		return
-	}
 	h := make([]byte, 2)
 	_, e := io.ReadFull(r, h)
 	if e != nil {
@@ -347,47 +351,10 @@ func (r *Reliable) Close() (err error) {
 		return io.EOF
 	}
 
+	// Cancel all pending read and write operations
+	r.SetDeadline(time.Now())
+
 	return r.sender.sendFin()
-
-
-/*
- *    if !r.tubeState.CompareAndSwap(initiated, closeStart) {
- *        return io.EOF
- *    }
- *    r.log.Debug("Starting close")
- *
- *    // Prevent future writes from succeeding
- *    r.sender.Close()
- *    r.recvWindow.Close()
- *
- *    // Wait until the other end of the connection has received the FIN packet from the other side.
- *closeLoop:
- *    for {
- *        select {
- *        case <-r.closing:
- *            if r.sender.unsentFramesRemaining() == 0 && r.recvWindow.closed.Load() {
- *                r.log.Debug("sent all frames and got fin")
- *                break closeLoop
- *            } else {
- *                r.log.WithField("packet left to ack", r.sender.unsentFramesRemaining()).Debug("closing")
- *            }
- *        case <-r.reset:
- *            r.log.Debug("got reset in close loop")
- *            break closeLoop
- *        }
- *    }
- *    // TODO(hosono) correctly linger
- *    time.Sleep(5 * time.Second)
- *
- *    r.l.Lock()
- *    defer r.l.Unlock()
- *    r.sender.Reset()
- *    r.log.Debugf("closed tube")
- *
- *    close(r.sender.sendQueue)
- *    <-r.sendStopped
- *    r.tubeState.Store(closed)
- */
 }
 
 // WaitForClose blocks until the Tube is done closing

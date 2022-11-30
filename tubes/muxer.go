@@ -102,6 +102,7 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 		},
 		sender: sender{
 			ackNo:  1,
+			frameNo: 1,
 			buffer: make([]byte, 0),
 			// closed defaults to false
 			// finSent defaults to false
@@ -119,7 +120,6 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 		tType:     tType,
 		log:       tubeLog,
 	}
-	r.sender.frameNo.Store(1)
 	r.recvWindow.init()
 	go r.initiate(req)
 	return r, nil

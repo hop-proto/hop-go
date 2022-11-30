@@ -23,7 +23,8 @@ type sender struct {
 	// +checklocks:l
 	ackNo uint64
 
-	frameNo atomic.Uint32
+	// +checklocks:l
+	frameNo uint32
 	// +checklocks:l
 	windowSize uint16
 
@@ -31,8 +32,12 @@ type sender struct {
 	// +checklocks:l
 	unacked uint16
 
-	finSent atomic.Bool
-	closed  atomic.Bool
+	// +checklocks:l
+	finSent bool
+	// +checklocks:l
+	finFrameNo uint32
+
+	closed atomic.Bool
 	// The buffer of unacknowledged tube frames that will be retransmitted if necessary.
 	// +checklocks:l
 	frames []*frame
@@ -83,7 +88,7 @@ func (s *sender) write(b []byte) (int, error) {
 	if !s.deadline.IsZero() && time.Now().After(s.deadline) {
 		return 0, os.ErrDeadlineExceeded
 	}
-	if s.closed.Load() {
+	if s.finSent || s.closed.Load() {
 		return 0, io.EOF
 	}
 	s.buffer = append(s.buffer, b...)
@@ -97,12 +102,12 @@ func (s *sender) write(b []byte) (int, error) {
 		}
 		pkt := frame{
 			dataLength: dataLength,
-			frameNo:    s.frameNo.Load(),
+			frameNo:    s.frameNo,
 			data:       s.buffer[:dataLength],
 		}
 
 		s.frameDataLengths[pkt.frameNo] = dataLength
-		s.frameNo.Add(1)
+		s.frameNo++
 		s.buffer = s.buffer[dataLength:]
 		s.frames = append(s.frames, &pkt)
 	}
@@ -157,9 +162,16 @@ func (s *sender) recvAck(ackNo uint32) error {
 }
 
 func (s *sender) sendEmptyPacket() *frame {
+	s.l.Lock()
+	defer s.l.Unlock()
+	return s.sendEmptyPacketLocked()
+}
+
+// +checklocks:s.l
+func (s *sender) sendEmptyPacketLocked() *frame {
 	pkt := &frame{
 		dataLength: 0,
-		frameNo:    s.frameNo.Load(),
+		frameNo:    s.frameNo,
 		data:       []byte{},
 		flags: frameFlags{
 			// This checks if the connection is in the timeWait state.
@@ -167,7 +179,7 @@ func (s *sender) sendEmptyPacket() *frame {
 			// is also in the timeWait state, they will endlessly send acknowledgements
 			// between each other. We don't need to set the FIN flag because we can
 			// only move into the timeWait state if our FIN has been ACKed.
-			FIN: s.finSent.Load() && !s.stopRetransmitCalled.Load(),
+			FIN: s.finSent && !s.stopRetransmitCalled.Load(),
 		},
 	}
 	s.sendQueue <- pkt
@@ -220,8 +232,8 @@ func (s *sender) retransmit() {
 		case <-s.RTOTicker.C:
 			s.l.Lock()
 			if len(s.frames) == 0 { // Keep Alive messages
-				s.log.WithField("frameno", s.frameNo.Load()).Trace("Keep alive sent")
-				s.sendEmptyPacket()
+				s.log.WithField("frameno", s.frameNo).Trace("Keep alive sent")
+				s.sendEmptyPacketLocked()
 			} else {
 				s.log.Trace("retransmitting")
 				s.fillWindow(true, 0)
@@ -272,14 +284,14 @@ func (s *sender) Close() error {
 func (s *sender) sendFin() error {
 	s.l.Lock()
 	defer s.l.Unlock()
-	if s.finSent.Load() {
+	if s.finSent {
 		return io.EOF
 	}
-	s.finSent.Store(true)
+	s.finSent = true
 
 	pkt := frame{
 		dataLength: 0,
-		frameNo:    s.frameNo.Load(),
+		frameNo:    s.frameNo,
 		data:       []byte{},
 		flags: frameFlags{
 			ACK:  true,
@@ -288,11 +300,12 @@ func (s *sender) sendFin() error {
 			RESP: false,
 		},
 	}
+	s.finFrameNo = pkt.frameNo
+	s.log.WithField("frameNo", pkt.frameNo).Debug("queueing FIN packet")
 
 	s.frameDataLengths[pkt.frameNo] = 0
-	s.frameNo.Add(1)
+	s.frameNo++
 	s.frames = append(s.frames, &pkt)
-	s.log.WithField("frameNo", pkt.frameNo).Debug("sending FIN packet")
 	s.fillWindow(false, len(s.frames)-1)
 	return nil
 }

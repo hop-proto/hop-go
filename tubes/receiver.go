@@ -46,7 +46,9 @@ func (r *receiver) getAck() uint32 {
 Processes window into buffer stream if the ordered fragments are ready (in order).
 Precondition: r.m mutex is held.
 */
+// +checklocks:r.m
 func (r *receiver) processIntoBuffer() {
+	oldLen := r.fragments.Len()
 	for r.fragments.Len() > 0 {
 		frag := heap.Pop(&(r.fragments)).(*pqItem)
 		
@@ -63,23 +65,23 @@ func (r *receiver) processIntoBuffer() {
 				heap.Push(&r.fragments, frag)
 				break
 			}
-		} else if frag.FIN {
-			log.Trace("processing packet")
-			r.windowStart++
-			r.ackNo++
-			r.closed.Store(true)
 		} else {
+			if frag.FIN {
+				r.closed.Store(true)
+			}
 			log.Trace("processing packet")
 			r.buffer.Write(frag.value)
 			r.windowStart++
 			r.ackNo++
 		}
 	}
-	select {
-	case r.dataReady.C <- struct{}{}:
-		break
-	default:
-		break
+	if oldLen > r.fragments.Len() {
+		select {
+		case r.dataReady.C <- struct{}{}:
+			break
+		default:
+			break
+		}
 	}
 }
 
