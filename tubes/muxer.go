@@ -144,7 +144,7 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 		recv:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
 		send:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
 		state:      atomic.Value{},
-		initiated:  make(chan struct{}, 1),
+		initiated:  make(chan struct{}),
 		req:        req,
 		log: m.log.WithFields(logrus.Fields{
 			"tube":     tubeID,

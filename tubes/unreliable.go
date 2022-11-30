@@ -53,40 +53,6 @@ var _ transport.MsgConn = &Unreliable{}
 // Unreliable tubes are tubes
 var _ Tube = &Unreliable{}
 
-/*
-func newUnreliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType TubeType, log *logrus.Entry) (*Unreliable, error) {
-	cid := []byte{0}
-	n, err := rand.Read(cid)
-	if err != nil || n != 1 {
-		return nil, err
-	}
-	u := makeUnreliableTube(underlying, netConn, sendQueue, tubeType, cid[0], log)
-	go u.initiate(true)
-	return u, nil
-}
-
-func newUnreliableTubeWithTubeID(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType TubeType, tubeID byte, log *logrus.Entry) *Unreliable {
-	u := makeUnreliableTube(underlying, netConn, sendQueue, tubeType, tubeID, log)
-	go u.initiate(false)
-	return u
-}
-
-func makeUnreliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType TubeType, tubeID byte, log *logrus.Entry) *Unreliable {
-	u := &Unreliable{
-		tType:      tType,
-		id:         tubeID,
-		sendQueue:  sendQueue,
-		localAddr:  netConn.LocalAddr(),
-		remoteAddr: netConn.RemoteAddr(),
-		recv:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
-		send:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
-		state:      atomic.Value{},
-		initiated:   make(chan struct{}),
-	}
-	return u
-}
-*/
-
 func (u *Unreliable) sender() {
 	for {
 		// TODO(hosono) this will busywait if the deadline expires
@@ -129,6 +95,7 @@ func (u *Unreliable) initiate() {
 	if u.req {
 		u.state.Store(created)
 	} else {
+		close(u.initiated)
 		u.state.Store(initiated)
 	}
 
@@ -156,18 +123,13 @@ func (u *Unreliable) initiate() {
 func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 	u.log.Debugf("receive initiate frame")
 
-	u.state.CompareAndSwap(created, initiated)
+	if u.state.CompareAndSwap(created, initiated) {
+		if !u.req {
+			p := u.makeInitFrame()
+			u.sendQueue <- p.toBytes()
+		}
 
-	if !u.req {
-		p := u.makeInitFrame()
-		u.sendQueue <- p.toBytes()
-	}
-
-	select {
-	case u.initiated <- struct{}{}:
-		break
-	default:
-		break
+		close(u.initiated)
 	}
 
 	return nil
@@ -195,6 +157,7 @@ func (u *Unreliable) ReadMsg(b []byte) (n int, err error) {
 
 // ReadMsgUDP implements the UDPLike interface. addr is always nil
 func (u *Unreliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
+	<-u.initiated
 	msg, err := u.recv.Recv()
 	if err != nil {
 		return
@@ -222,6 +185,7 @@ func (u *Unreliable) WriteMsg(b []byte) (err error) {
 // WriteMsgUDP implements implements the UDPLike interface
 // oob and addr are ignored
 func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
+	<-u.initiated
 	dataLength := uint16(len(b))
 	if uint16(len(b)) > maxFrameDataLength {
 		err = transport.ErrBufOverflow
@@ -249,11 +213,16 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 		return
 	}
 	n = len(b)
+	u.log.WithFields(logrus.Fields{
+		"frameNo": pkt.frameNo,
+		"dataLength": pkt.dataLength,
+	}).Trace("wrote packet")
 	return n, 0, err
 }
 
 // Close implements the net.Conn interface. Future io operations will return io.EOF
 func (u *Unreliable) Close() error {
+	<-u.initiated
 	if u.state.Swap(closed) == closed {
 		return io.EOF
 	}
@@ -301,11 +270,13 @@ func (u *Unreliable) SetDeadline(t time.Time) error {
 
 // SetReadDeadline implements net.Conn
 func (u *Unreliable) SetReadDeadline(t time.Time) error {
+	<-u.initiated
 	return u.recv.SetDeadline(t)
 }
 
 // SetWriteDeadline implements net.Conn
 func (u *Unreliable) SetWriteDeadline(t time.Time) error {
+	<-u.initiated
 	return u.send.SetDeadline(t)
 }
 

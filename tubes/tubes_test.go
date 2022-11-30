@@ -14,50 +14,24 @@ import (
 	"hop.computer/hop/transport"
 )
 
-type MsgConnUDP struct {
-	net.UDPConn
-}
-
-var _ transport.MsgConn = &MsgConnUDP{}
-
-func (c *MsgConnUDP) ReadMsg(b []byte) (n int, err error) {
-	n, _, _, _, err = c.ReadMsgUDP(b, nil)
-	return
-}
-
-func (c *MsgConnUDP) WriteMsg(b []byte) (err error) {
-	_, _, err = c.WriteMsgUDP(b, nil, nil)
-	return
-}
-
 // rel is true for reliable tubes and false for unreliable ones
-// fake is true for in memory reliable udp and false otherwise
-func makeConn(t *testing.T, rel bool, fake bool) (t1, t2 net.Conn, stop func(), r bool, err error) {
+func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err error) {
 	r = rel
-	var c1UDP, c2UDP net.Conn
 	var c1, c2 transport.MsgConn
-	if fake {
-		c1, c2 = transport.MakeReliableUDPConn(false)
-	} else {
-		c2Addr, err := net.ResolveUDPAddr("udp", ":7777")
-		assert.NilError(t, err)
+	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")
+	assert.NilError(t, err)
 
-		c1UDP, err = net.Dial("udp", "localhost:7777")
-		assert.NilError(t, err)
-		c1 = &MsgConnUDP{
-			*c1UDP.(*net.UDPConn),
-		}
+	c1UDP, err := net.Dial("udp", "localhost:7777")
+	assert.NilError(t, err)
+	c1 = transport.MakeUDPMsgConn(c1UDP.(*net.UDPConn))
 
-		c2UDP, err = net.DialUDP("udp", c2Addr, c1.LocalAddr().(*net.UDPAddr))
-		assert.NilError(t, err)
-		c2 = &MsgConnUDP{
-			*c2UDP.(*net.UDPConn),
-		}
-	}
+	c2UDP, err := net.DialUDP("udp", c2Addr, c1.LocalAddr().(*net.UDPAddr))
+	assert.NilError(t, err)
+	c2 = transport.MakeUDPMsgConn(c2UDP)
 
-	muxer1 := NewMuxer(c1, c1, 0, logrus.WithField("muxer", "m1"))
+	muxer1 := NewMuxer(c1, nil, 0, logrus.WithField("muxer", "m1"))
 	muxer1.log.WithField("addr", c1.LocalAddr()).Info("Created")
-	muxer2 := NewMuxer(c2, c2, 0, logrus.WithField("muxer", "m2"))
+	muxer2 := NewMuxer(c2, nil, 0, logrus.WithField("muxer", "m2"))
 	muxer2.log.WithField("addr", c2.LocalAddr()).Info("Created")
 
 	go func() {
@@ -119,19 +93,17 @@ func makeConn(t *testing.T, rel bool, fake bool) (t1, t2 net.Conn, stop func(), 
 		muxer2.Stop()
 		assert.Assert(t, muxer2.stopped.Load())
 
-		if c1UDP != nil {
-			c1UDP.Close()
-		}
-		if c2UDP != nil {
-			c2UDP.Close()
-		}
+		err = c1.Close()
+		assert.NilError(t, err)
+		err = c2.Close()
+		assert.NilError(t, err)
 	}
 
 	return t1, t2, stop, rel, err
 }
 
 func CloseTest(t *testing.T, rel bool) {
-	c1, c2, stop, _, err := makeConn(t, rel, false)
+	c1, c2, stop, _, err := makeConn(t, rel)
 	assert.NilError(t, err)
 	defer stop()
 
@@ -166,7 +138,7 @@ func TestReliable(t *testing.T) {
 	})
 
 	f := func() (c1, c2 net.Conn, stop func(), rel bool, err error) {
-		return makeConn(t, true, false)
+		return makeConn(t, true)
 	}
 
 	mp := nettest.MakePipe(f)
@@ -183,8 +155,10 @@ func TestUnreliable(t *testing.T) {
 	})
 
 	f := func() (c1, c2 net.Conn, stop func(), rel bool, err error) {
-		return makeConn(t, false, true)
+		return makeConn(t, false)
 	}
 	mp := nettest.MakePipe(f)
-	nettest.TestConn(t, mp)
+	t.Run("Nettest", func(t *testing.T) {
+		nettest.TestConn(t, mp)
+	})
 }
