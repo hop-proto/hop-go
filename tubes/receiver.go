@@ -20,19 +20,19 @@ type receiver struct {
 		wraparound.
 	*/
 	// +checklocks:m
-	ackNo       uint64
+	ackNo uint64
 	// +checklocks:m
 	windowStart uint64
 	// +checklocks:m
-	windowSize  uint16
-	closed      atomic.Bool
-	m           sync.Mutex
+	windowSize uint16
+	closed     atomic.Bool
+	m          sync.Mutex
 	// +checklocks:m
-	fragments   PriorityQueue
+	fragments PriorityQueue
 
 	dataReady *common.DeadlineChan[struct{}]
 	// +checklocks:m
-	buffer    *bytes.Buffer
+	buffer *bytes.Buffer
 
 	log *logrus.Entry
 }
@@ -64,11 +64,11 @@ func (r *receiver) processIntoBuffer() {
 	oldLen := r.fragments.Len()
 	for r.fragments.Len() > 0 {
 		frag := heap.Pop(&(r.fragments)).(*pqItem)
-		
+
 		log := r.log.WithFields(logrus.Fields{
-			"window start":  r.windowStart,
-			"frameNo": frag.priority,
-			"FIN": frag.FIN,
+			"window start": r.windowStart,
+			"frameNo":      frag.priority,
+			"FIN":          frag.FIN,
 		})
 
 		if r.windowStart != frag.priority {
@@ -111,7 +111,7 @@ func (r *receiver) read(buf []byte) (int, error) {
 	defer r.m.Unlock()
 
 	nbytes, _ := r.buffer.Read(buf)
-	if r.closed.Load() && r.buffer.Len() == 0{
+	if r.closed.Load() && r.buffer.Len() == 0 {
 		return nbytes, io.EOF
 	}
 	return nbytes, nil

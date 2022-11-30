@@ -65,8 +65,8 @@ type sender struct {
 	// +checklocks:l
 	deadline time.Time
 
-	endRetransmit   chan struct{}
-	retransmitEnded chan struct{}
+	endRetransmit        chan struct{}
+	retransmitEnded      chan struct{}
 	stopRetransmitCalled atomic.Bool
 
 	windowOpen chan struct{}
@@ -204,7 +204,7 @@ func (s *sender) fillWindow(rto bool, startIndex int) {
 	}
 
 	// Clamp value to avoid going out of bounds
-	if numFrames + startIndex > len(s.frames) {
+	if numFrames+startIndex > len(s.frames) {
 		numFrames = len(s.frames) - startIndex
 	}
 	if numFrames < 0 {
@@ -215,7 +215,7 @@ func (s *sender) fillWindow(rto bool, startIndex int) {
 		s.sendQueue <- s.frames[startIndex+i]
 		s.unacked++
 		s.log.WithFields(logrus.Fields{
-			"fin": s.frames[startIndex+i].flags.FIN,
+			"fin":     s.frames[startIndex+i].flags.FIN,
 			"frameNo": s.frames[startIndex+i].frameNo,
 		}).Trace("Putting packet on queue")
 	}

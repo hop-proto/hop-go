@@ -25,7 +25,7 @@ func (c *MsgConnUDP) ReadMsg(b []byte) (n int, err error) {
 }
 
 func (c *MsgConnUDP) WriteMsg(b []byte) (err error) {
-	_, _,  err = c.WriteMsgUDP(b, nil, nil)
+	_, _, err = c.WriteMsgUDP(b, nil, nil)
 	return
 }
 
@@ -157,7 +157,7 @@ func ReliableClose(t *testing.T, rel bool) {
 func TestReliable(t *testing.T) {
 	logrus.SetLevel(logrus.TraceLevel)
 
-	t.Run("Close", func (t *testing.T) {
+	t.Run("Close", func(t *testing.T) {
 		ReliableClose(t, true)
 	})
 

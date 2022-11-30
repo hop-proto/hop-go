@@ -83,13 +83,13 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 		"tubeType": tType,
 	})
 	r := &Reliable{
-		id:          tubeID,
-		localAddr:   m.underlying.LocalAddr(),
-		remoteAddr:  m.underlying.RemoteAddr(),
-		tubeState:   created,
-		initRecv:    make(chan struct{}),
-		initDone:    make(chan struct{}),
-		closed:      make(chan struct{}, 1),
+		id:         tubeID,
+		localAddr:  m.underlying.LocalAddr(),
+		remoteAddr: m.underlying.RemoteAddr(),
+		tubeState:  created,
+		initRecv:   make(chan struct{}),
+		initDone:   make(chan struct{}),
+		closed:     make(chan struct{}, 1),
 		recvWindow: receiver{
 			dataReady:   common.NewDeadlineChan[struct{}](1),
 			buffer:      new(bytes.Buffer),
@@ -99,9 +99,9 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 			log:         tubeLog.WithField("receiver", ""),
 		},
 		sender: sender{
-			ackNo:  1,
+			ackNo:   1,
 			frameNo: 1,
-			buffer: make([]byte, 0),
+			buffer:  make([]byte, 0),
 			// closed defaults to false
 			// finSent defaults to false
 			frameDataLengths: make(map[uint32]uint16),

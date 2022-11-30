@@ -29,32 +29,31 @@ type TubeType byte
 type state int32
 
 const (
-	created    state = iota
-	initiated  state = iota
+	created   state = iota
+	initiated state = iota
 
 	// These states are pulled from the TCP state machine.
-	closeWait  state = iota
-	lastAck    state = iota
-	finWait1   state = iota
-	finWait2   state = iota
-	closing    state = iota
-	timeWait   state = iota
-	closed     state = iota
-
+	closeWait state = iota
+	lastAck   state = iota
+	finWait1  state = iota
+	finWait2  state = iota
+	closing   state = iota
+	timeWait  state = iota
+	closed    state = iota
 )
 
 var errBadTubeState = errors.New("tube in bad state")
 
 // Reliable implements a reliable and receiveWindow tube on top
 type Reliable struct {
-	closed      chan struct{}
-	tType       TubeType
-	id          byte
-	localAddr   net.Addr
-	recvWindow  receiver
-	remoteAddr  net.Addr
-	sender      sender
-	sendQueue   chan []byte
+	closed     chan struct{}
+	tType      TubeType
+	id         byte
+	localAddr  net.Addr
+	recvWindow receiver
+	remoteAddr net.Addr
+	sender     sender
+	sendQueue  chan []byte
 	// TODO(hosono) probably we shouldn't just have one lock that manages everything
 	// +checklocks:l
 	tubeState   state
@@ -126,15 +125,15 @@ func (r *Reliable) receive(pkt *frame) error {
 	// Log the packet
 	r.log.WithFields(logrus.Fields{
 		"frameno": pkt.frameNo,
-		"ackno": pkt.ackNo,
-		"ack":   pkt.flags.ACK,
-		"fin":   pkt.flags.FIN,
+		"ackno":   pkt.ackNo,
+		"ack":     pkt.flags.ACK,
+		"fin":     pkt.flags.FIN,
 	}).Trace("receiving packet")
 
 	// created and closed tubes cannot handle incoming packets
 	if r.tubeState == created || r.tubeState == closed {
 		r.log.WithFields(logrus.Fields{
-			"fin": pkt.flags.FIN,
+			"fin":   pkt.flags.FIN,
 			"state": r.tubeState,
 		}).Errorf("receive for tube in bad state")
 
@@ -157,7 +156,7 @@ func (r *Reliable) receive(pkt *frame) error {
 	}
 
 	// Handle ACK of FIN frame
-	if pkt.flags.ACK && r.tubeState != initiated && r.sender.unAckedFramesRemaining() == 0{
+	if pkt.flags.ACK && r.tubeState != initiated && r.sender.unAckedFramesRemaining() == 0 {
 		switch r.tubeState {
 		case finWait1:
 			r.tubeState = finWait2
@@ -174,7 +173,7 @@ func (r *Reliable) receive(pkt *frame) error {
 	}
 
 	// Handle FIN frame
-	if pkt.flags.FIN && r.recvWindow.closed.Load(){
+	if pkt.flags.FIN && r.recvWindow.closed.Load() {
 		switch r.tubeState {
 		case initiated:
 			r.tubeState = closeWait
@@ -194,7 +193,7 @@ func (r *Reliable) receive(pkt *frame) error {
 	}
 
 	// TODO(hosono) is there a wrapping problem here?
-	if (r.recvWindow.getAck() - r.lastAckSent.Load()) >= windowSize / 2  && !pkt.flags.FIN && r.tubeState != closed {
+	if (r.recvWindow.getAck()-r.lastAckSent.Load()) >= windowSize/2 && !pkt.flags.FIN && r.tubeState != closed {
 		r.sender.sendEmptyPacket()
 	}
 
@@ -208,7 +207,7 @@ func (r *Reliable) enterTimeWaitState() {
 
 	//TODO(hosono) reset timer on new FINs
 	r.sender.stopRetransmit()
-	time.AfterFunc(3 * time.Second, func() {
+	time.AfterFunc(3*time.Second, func() {
 		r.l.Lock()
 		defer r.l.Unlock()
 		r.log.Warn("timer expired. going from timeWait to closed")
@@ -300,32 +299,32 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 // Reset immediately tears down the connection
 func (r *Reliable) Reset() (err error) {
 	// TODO(hosono) implement
-/*
- *    <-r.initDone
- *    r.l.Lock()
- *    defer r.l.Unlock()
- *
- *    if r.tubeState == closed {
- *        r.log.Warn("Resetting closed tube")
- *        return io.EOF
- *    } else {
- *        r.log.Warn("Resetting tube")
- *    }
- *
- *    r.tubeState = closed
- *
- *    r.sender.Reset()
- *    r.recvWindow.Close()
- *    close(r.sender.sendQueue)
- *    <-r.sendStopped
- *
- *    select {
- *    case r.reset <- struct{}{}:
- *        break
- *    default:
- *        break
- *    }
- */
+	/*
+	 *    <-r.initDone
+	 *    r.l.Lock()
+	 *    defer r.l.Unlock()
+	 *
+	 *    if r.tubeState == closed {
+	 *        r.log.Warn("Resetting closed tube")
+	 *        return io.EOF
+	 *    } else {
+	 *        r.log.Warn("Resetting tube")
+	 *    }
+	 *
+	 *    r.tubeState = closed
+	 *
+	 *    r.sender.Reset()
+	 *    r.recvWindow.Close()
+	 *    close(r.sender.sendQueue)
+	 *    <-r.sendStopped
+	 *
+	 *    select {
+	 *    case r.reset <- struct{}{}:
+	 *        break
+	 *    default:
+	 *        break
+	 *    }
+	 */
 
 	return
 }
