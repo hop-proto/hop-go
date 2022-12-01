@@ -27,17 +27,23 @@ import (
 // - check that connecting clients have appropriate authgrants for actions.
 // - act as a target: authorize/deny intent requests forwarded from principal
 
+type authgrant struct {
+	Data      authgrants.AuthGrantData // relevant data from IR
+	Principal *hopSession
+}
+
 // HopServer represents state/conns needed for a hop server
 type HopServer struct {
 	m sync.Mutex
 
 	// Target server state
 	// TODO(baumanl): potentially don't need entire Intent
-	authgrants map[string]map[keys.PublicKey][]authgrants.Intent
+	authgrants map[string]map[keys.PublicKey][]authgrant
 	agLock     sync.Mutex
 
 	// Delegate proxy server state
-	agproxy *Agproxy
+	agproxy    *Agproxy
+	principals map[*hopSession]*hopSession // principals[sess] is sess that is connected to principal
 
 	config *config.ServerConfig
 
@@ -53,7 +59,7 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, 
 	server := &HopServer{
 		m: sync.Mutex{},
 
-		authgrants: make(map[string]map[keys.PublicKey][]authgrants.Intent),
+		authgrants: make(map[string]map[keys.PublicKey][]authgrant),
 		agLock:     sync.Mutex{},
 
 		agproxy: &Agproxy{
@@ -62,6 +68,8 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, 
 			running:    false,
 			proxyLock:  sync.Mutex{},
 		},
+
+		principals: make(map[*hopSession]*hopSession),
 
 		config: config,
 
@@ -215,7 +223,7 @@ func (s *HopServer) authorizeKey(user string, publicKey keys.PublicKey) error {
 	return fmt.Errorf("key %s is not authorized for user %s", publicKey, user)
 }
 
-func (s *HopServer) authorizeKeyAuthGrant(user string, publicKey keys.PublicKey) ([]authgrants.Intent, error) {
+func (s *HopServer) authorizeKeyAuthGrant(user string, publicKey keys.PublicKey) ([]authgrant, error) {
 	if s.config.AllowAuthgrants != nil && *s.config.AllowAuthgrants {
 		s.agLock.Lock()
 		defer s.agLock.Unlock()
@@ -231,7 +239,7 @@ func (s *HopServer) authorizeKeyAuthGrant(user string, publicKey keys.PublicKey)
 			}
 		}
 	}
-	return []authgrants.Intent{}, fmt.Errorf("auth grants not enabled")
+	return []authgrant{}, fmt.Errorf("auth grants not enabled")
 }
 
 // VirtualHosts is mapping from host patterns to Certificates.
@@ -313,10 +321,14 @@ func (vhosts VirtualHosts) Match(name certs.Name) *VirtualHost {
 	return nil
 }
 
-func (s *HopServer) addAuthGrant(intent *authgrants.Intent) {
+func (s *HopServer) addAuthGrant(intent *authgrants.Intent, principalSess *hopSession) {
 	s.agLock.Lock()
 	user := intent.TargetUsername
-	s.authgrants[user] = make(map[keys.PublicKey][]authgrants.Intent)
-	s.authgrants[user][intent.DelegateCert.PublicKey] = append(s.authgrants[user][intent.DelegateCert.PublicKey], *intent)
+	s.authgrants[user] = make(map[keys.PublicKey][]authgrant)
+	ag := authgrant{
+		Data:      intent.GetData(),
+		Principal: principalSess,
+	}
+	s.authgrants[user][intent.DelegateCert.PublicKey] = append(s.authgrants[user][intent.DelegateCert.PublicKey], ag)
 	s.agLock.Unlock()
 }

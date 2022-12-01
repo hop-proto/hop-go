@@ -37,7 +37,7 @@ type hopSession struct {
 	user   string
 
 	usingAuthGrant    bool
-	authorizedActions []authgrants.Intent
+	authorizedActions []authgrant
 
 	// We use a channel (with size 1) to avoid reading window sizes before we've created the pty
 	pty chan *os.File
@@ -207,7 +207,7 @@ func (sess *hopSession) checkIntent(tube *tubes.Reliable) (authgrants.MessageDat
 	}
 
 	// add authorization grant to server mappings
-	sess.server.addAuthGrant(&intent)
+	sess.server.addAuthGrant(&intent, sess)
 
 	//add delegate key from cert to transport server authorized key pool
 	sess.server.keyStore.AddKey(intent.DelegateCert.PublicKey)
@@ -256,7 +256,8 @@ func getGroups(uid int) (groups []uint32) {
 
 // checks if the session has an auth grant to perform cmd
 func (sess *hopSession) checkCmd(cmd string) error {
-	for i, intent := range sess.authorizedActions {
+	for i, ag := range sess.authorizedActions {
+		intent := ag.Data
 		if intent.GrantType == authgrants.Command {
 			if intent.AssociatedData.CommandGrantData.Cmd == cmd {
 				sess.authorizedActions = append(sess.authorizedActions[:i], sess.authorizedActions[i+1:]...)
@@ -314,6 +315,11 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 		logrus.Infof("Executing: %v", cmd)
 		var f *os.File
 		var err error
+
+		// lock principals map so can be updated with pid after starting process
+		sess.server.agproxy.proxyLock.Lock()
+		defer sess.server.agproxy.proxyLock.Unlock()
+
 		if shell {
 			if size != nil {
 				f, err = pty.StartWithSize(c, size)
@@ -332,7 +338,19 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 			c.Stdin = tube
 			c.Stdout = tube
 			c.Stderr = tube
-			c.Start()
+			err = c.Start()
+			if err != nil {
+				logrus.Errorf("S: error running command %v", err)
+				codex.SendFailure(tube, err)
+			}
+		}
+
+		// update principals map.
+		pid := c.Process.Pid
+		if sess.usingAuthGrant {
+			sess.server.agproxy.principals[int32(pid)] = sess.server.principals[sess]
+		} else {
+			sess.server.agproxy.principals[int32(pid)] = sess
 		}
 
 		codex.SendSuccess(tube)
