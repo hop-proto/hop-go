@@ -41,7 +41,8 @@ type ServerConfig struct {
 	EnableCertificateValidation *bool
 	EnableAuthorizedKeys        *bool
 
-	AllowAuthgrants *bool // as an authgrant Target this server will/will not approve/accept authgrants
+	AllowAuthgrants     *bool // as an authgrant Target this server will approve authgrants and as an authgrant Delegate server will proxy ag intent requests
+	AgProxyListenSocket string
 }
 
 // HostConfigOptional contains a definition of a host pattern in a client

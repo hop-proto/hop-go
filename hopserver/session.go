@@ -365,3 +365,11 @@ func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
 func (sess *hopSession) startSizeTube(ch *tubes.Reliable) {
 	codex.HandleSize(ch, <-sess.pty)
 }
+
+func (sess *hopSession) newAuthGrantTube() (*tubes.Reliable, error) {
+	t, err := sess.tubeMuxer.CreateReliableTube(common.AuthGrantTube)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
