@@ -152,7 +152,7 @@ func (s *TestServer) StartHopServer(t *testing.T) {
 	} else {
 		logrus.Info("Setting up Hop Server with provided Transport server.")
 		// starts with external transport server
-		s.Server, err = hopserver.NewHopServerExt(s.Transport, s.Config)
+		s.Server, err = hopserver.NewHopServerExt(s.Transport, s.Config, nil)
 	}
 	assert.NilError(t, err)
 	logrus.Infof("Hop Server running on address: %s", s.Server.ListenAddress().String())
