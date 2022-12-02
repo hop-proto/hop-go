@@ -142,8 +142,13 @@ func (p *Agproxy) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn) {
 	defer principalConn.Close()
 	logrus.Infof("Agproxy: connected to principal")
 
+	// enable principal to proxy a connection through the server
+	principalSess.numActiveReqDelegates.Add(1)
+
 	proxyHelper(principalConn, c)
 
+	// disable principal's ability to proxy a connection through the server
+	principalSess.numActiveReqDelegates.Add(-1)
 }
 
 func proxyHelper(p net.Conn, c net.Conn) {

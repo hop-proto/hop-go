@@ -33,11 +33,11 @@ const (
 
 // TubeType constants
 const (
-	ExecTube      = 1 // Used for Shell or Command Execution
-	AuthGrantTube = 2 // Used for myriad Authorization Grant protocol steps
-	NetProxyTube  = 3 // Net Proxy should maybe be unreliable tube?
-	UserAuthTube  = 4
-	LocalPFTube   = 5
-	RemotePFTube  = 6
-	WinSizeTube   = 7 // Used for notifying server of window size changes
+	ExecTube           = 1 // Used for Shell or Command Execution
+	AuthGrantTube      = 2 // Used for myriad Authorization Grant protocol steps
+	PrincipalProxyTube = 3 // Net Proxy should maybe be unreliable tube?
+	UserAuthTube       = 4
+	LocalPFTube        = 5
+	RemotePFTube       = 6
+	WinSizeTube        = 7 // Used for notifying server of window size changes
 )

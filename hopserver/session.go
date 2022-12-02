@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/user"
 	"strconv"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -20,7 +21,6 @@ import (
 	"hop.computer/hop/codex"
 	"hop.computer/hop/common"
 	"hop.computer/hop/keys"
-	"hop.computer/hop/netproxy"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
 	"hop.computer/hop/userauth"
@@ -36,11 +36,12 @@ type hopSession struct {
 	server *HopServer
 	user   string
 
-	usingAuthGrant    bool
-	authorizedActions []authgrant
-
 	// We use a channel (with size 1) to avoid reading window sizes before we've created the pty
 	pty chan *os.File
+
+	usingAuthGrant        bool // true if client authenticated with authgrant
+	authorizedActions     []authgrant
+	numActiveReqDelegates atomic.Int32
 }
 
 func (sess *hopSession) checkAuthorization() bool {
@@ -123,7 +124,11 @@ func (sess *hopSession) start() {
 			logrus.Infof("S: ACCEPTED NEW TUBE (%v)", tube.Type())
 			r, ok := tube.(*tubes.Reliable)
 			if !ok {
-				// TODO(hosono) handle unreliable tubes
+				// TODO(hosono) handle unreliable tubes (general case)
+				r, ok := tube.(*tubes.Unreliable)
+				if ok && r.Type() == common.PrincipalProxyTube {
+					go sess.startPrincipalProxy(r)
+				}
 				continue
 			}
 			switch tube.Type() {
@@ -131,8 +136,6 @@ func (sess *hopSession) start() {
 				go sess.startCodex(r)
 			case common.AuthGrantTube:
 				go sess.handleAgc(r)
-			case common.NetProxyTube:
-				go sess.startNetProxy(r)
 			case common.RemotePFTube:
 				panic("unimplemented: remote pf")
 			case common.LocalPFTube:
@@ -255,28 +258,30 @@ func getGroups(uid int) (groups []uint32) {
 }
 
 // checks if the session has an auth grant to perform cmd
-func (sess *hopSession) checkCmd(cmd string) error {
+func (sess *hopSession) checkCmd(cmd string) (*hopSession, error) {
 	for i, ag := range sess.authorizedActions {
 		intent := ag.Data
-		if intent.GrantType == authgrants.Command {
+		if time.Now().Before(intent.ExpTime) && intent.GrantType == authgrants.Command {
 			if intent.AssociatedData.CommandGrantData.Cmd == cmd {
 				sess.authorizedActions = append(sess.authorizedActions[:i], sess.authorizedActions[i+1:]...)
-				return nil
+				return ag.Principal, nil
 			}
 		}
 	}
-	return fmt.Errorf("no auth grant for cmd: %s", cmd)
+	return nil, fmt.Errorf("no auth grant for cmd: %s", cmd)
 }
 
 func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 	cmd, termEnv, shell, size, _ := codex.GetCmd(tube)
+	principalSess := sess
 	// if using an authgrant, check that the cmd is authorized
 	if sess.usingAuthGrant {
-		err := sess.checkCmd(cmd)
+		psess, err := sess.checkCmd(cmd)
 		if err != nil {
 			codex.SendFailure(tube, err)
 			return
 		}
+		principalSess = psess
 	}
 
 	logrus.Info("CMD: ", cmd)
@@ -347,11 +352,7 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 
 		// update principals map.
 		pid := c.Process.Pid
-		if sess.usingAuthGrant {
-			sess.server.agproxy.principals[int32(pid)] = sess.server.principals[sess]
-		} else {
-			sess.server.agproxy.principals[int32(pid)] = sess
-		}
+		sess.server.agproxy.principals[int32(pid)] = principalSess
 
 		codex.SendSuccess(tube)
 		go func() {
@@ -375,9 +376,20 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 	}
 }
 
-func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
+func (sess *hopSession) startPrincipalProxy(t *tubes.Unreliable) {
 	// TODO(baumanl): add check for authgrant?
-	netproxy.Server(ch)
+	if sess.numActiveReqDelegates.Load() == 0 {
+		logrus.Info("Server: received unexpected request to start net proxy")
+		err := t.Close()
+		if err != nil {
+			logrus.Errorf("Server: error closing unexpected net proxy tube: %s", err)
+		}
+		return
+	}
+	// TODO(baumanl): implement principal <--> target proxy
+	// Need to know target and connect to it
+	// then just copy all messages from principal (unreliable tube) to target
+	// and vice versa
 }
 
 func (sess *hopSession) startSizeTube(ch *tubes.Reliable) {
@@ -385,9 +397,5 @@ func (sess *hopSession) startSizeTube(ch *tubes.Reliable) {
 }
 
 func (sess *hopSession) newAuthGrantTube() (*tubes.Reliable, error) {
-	t, err := sess.tubeMuxer.CreateReliableTube(common.AuthGrantTube)
-	if err != nil {
-		return nil, err
-	}
-	return t, nil
+	return sess.tubeMuxer.CreateReliableTube(common.AuthGrantTube)
 }

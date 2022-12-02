@@ -323,6 +323,7 @@ func (vhosts VirtualHosts) Match(name certs.Name) *VirtualHost {
 
 func (s *HopServer) addAuthGrant(intent *authgrants.Intent, principalSess *hopSession) {
 	s.agLock.Lock()
+	defer s.agLock.Unlock()
 	user := intent.TargetUsername
 	s.authgrants[user] = make(map[keys.PublicKey][]authgrant)
 	ag := authgrant{
@@ -330,5 +331,30 @@ func (s *HopServer) addAuthGrant(intent *authgrants.Intent, principalSess *hopSe
 		Principal: principalSess,
 	}
 	s.authgrants[user][intent.DelegateCert.PublicKey] = append(s.authgrants[user][intent.DelegateCert.PublicKey], ag)
-	s.agLock.Unlock()
 }
+
+// TODO(baumanl): how should expired authgrants be removed?
+// 1. how often or at what trigger
+// 2. when should key be removed from transport keyStore?
+// currently never...expired ones are just ignored
+
+// func (s *HopServer) agCleanup() {
+// 	s.agLock.Lock()
+// 	defer s.agLock.Unlock()
+// 	for _, ps := range s.authgrants {
+// 		for k, ags := range ps {
+// 			del := true
+// 			for _, ag := range ags {
+// 				if !ag.Data.ExpTime.Before(time.Now()) {
+// 					del = false
+// 					break
+// 				}
+// 			}
+// 			if del {
+// 				delete(ps, k)
+// 				s.keyStore.RemoveKey(k)
+// 			}
+
+// 		}
+// 	}
+// }
