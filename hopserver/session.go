@@ -127,7 +127,7 @@ func (sess *hopSession) start() {
 				// TODO(hosono) handle unreliable tubes (general case)
 				r, ok := tube.(*tubes.Unreliable)
 				if ok && r.Type() == common.PrincipalProxyTube {
-					go sess.startPrincipalProxy(r)
+					// add to map and signal waiting processes
 				}
 				continue
 			}
@@ -136,6 +136,8 @@ func (sess *hopSession) start() {
 				go sess.startCodex(r)
 			case common.AuthGrantTube:
 				go sess.handleAgc(r)
+			case common.PrincipalProxyTube:
+				go sess.startPrincipalProxy(r)
 			case common.RemotePFTube:
 				panic("unimplemented: remote pf")
 			case common.LocalPFTube:
@@ -376,20 +378,42 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 	}
 }
 
-func (sess *hopSession) startPrincipalProxy(t *tubes.Unreliable) {
+// manage principal to target proxying
+func (sess *hopSession) startPrincipalProxy(t *tubes.Reliable) {
+	defer t.Close()
+
 	// TODO(baumanl): add check for authgrant?
+
+	// make sure this is currently expected
 	if sess.numActiveReqDelegates.Load() == 0 {
 		logrus.Info("Server: received unexpected request to start net proxy")
-		err := t.Close()
-		if err != nil {
-			logrus.Errorf("Server: error closing unexpected net proxy tube: %s", err)
-		}
 		return
 	}
+
+	// receive target message
+	var targetInfo authgrants.TargetInfo
+	_, err := targetInfo.ReadFrom(t)
+	if err != nil {
+		authgrants.WriteFailure(t, "Server: unable to read target info")
+		return
+	}
+
+	// connect to target
+
+	// if success --> send conf
+	// else --> send error
+
+	// receive unreliable principal proxy tube id
+
+	// check (and keep checking on signal) for the unreliable tube with the id
+
+	// proxy shit
+
 	// TODO(baumanl): implement principal <--> target proxy
 	// Need to know target and connect to it
 	// then just copy all messages from principal (unreliable tube) to target
 	// and vice versa
+
 }
 
 func (sess *hopSession) startSizeTube(ch *tubes.Reliable) {
