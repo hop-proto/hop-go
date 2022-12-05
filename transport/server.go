@@ -434,11 +434,24 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		opts.PresentedIntermediate = &intermediate
 	}
 
+	// TODO(baumanl): enable more general cert verify callback?
+	// TODO(baumanl): if certVerify is nil then no verification happens --> okay default?
+
+	// skips all verification if certVerify nil or explicitly disabled
 	if hs.certVerify != nil && !hs.certVerify.InsecureSkipVerify {
+		// Certificate Verification
 		err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
-		if err != nil {
-			logrus.Errorf("server: failed to verify certificate: %s", err)
-			return pos, nil, err
+		if err != nil { // cert verifification failed
+			if hs.certVerify.AuthKeysAllowed { // authorized keys allowed
+				err2 := hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
+				if err2 != nil {
+					logrus.Errorf("server: failed to verify certificate: %s and key unauthorized: %s", err, err2)
+					return pos, nil, err2
+				}
+			} else {
+				logrus.Errorf("server: failed to verify certificate: %s", err)
+				return pos, nil, err
+			}
 		}
 	}
 

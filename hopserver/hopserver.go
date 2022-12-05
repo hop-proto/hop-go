@@ -12,6 +12,8 @@ import (
 	"github.com/sbinet/pstree"
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/authgrants"
+	"hop.computer/hop/authkeys"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/config"
 	"hop.computer/hop/core"
@@ -24,16 +26,21 @@ import (
 // Authgrants Hop server TODOs
 // - Listen for descendent clients and proxy their requests back to principal
 // - check that connecting clients have appropriate authgrants for actions.
+// - act as a target: authorize/deny intent requests forwarded from principal
 
 // HopServer represents state/conns needed for a hop server
 type HopServer struct {
 	m sync.Mutex
+	// TODO(baumanl): potentially don't need entire Intent
+	authgrants map[string]map[keys.PublicKey][]authgrants.Intent
+	agLock     sync.Mutex
 
 	config *config.ServerConfig
 
 	fsystem fs.FS
 
 	server   *transport.Server
+	keyStore *authkeys.AuthKeySet
 	authsock net.Listener //nolint TODO(hosono) add linting back
 }
 
@@ -41,6 +48,9 @@ type HopServer struct {
 func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig) (*HopServer, error) {
 	server := &HopServer{
 		m: sync.Mutex{},
+
+		authgrants: make(map[string]map[keys.PublicKey][]authgrants.Intent),
+		agLock:     sync.Mutex{},
 
 		config: config,
 
@@ -75,11 +85,36 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	}
 
 	tconf := transport.ServerConfig{
-		ClientVerify: &transport.VerifyConfig{
-			InsecureSkipVerify: true, // Do authorized keys instead
-		},
 		GetCertificate:   getCert,
 		HandshakeTimeout: sc.HandshakeTimeout,
+	}
+
+	// TODO(baumanl): serverConfig options should inform verify config settings
+	// 4 main options right now:
+	// 1. InsecureSkipVerify: no verification of client cert
+	// 2. Certificate Validation ONLY: fails immediately if invalid cert chain
+	// 3. Cert Validation or Authorized Keys: will check for auth key if invalid cert chain
+	// 4. Authorized keys only: cert validation explicitly disabled and auth keys explicitly enabled
+
+	// Explicitly setting sc.InsecureSkipVerify overrides everything else
+	if sc.InsecureSkipVerify != nil && *sc.InsecureSkipVerify {
+		tconf.ClientVerify = &transport.VerifyConfig{
+			InsecureSkipVerify: true,
+		}
+	} else {
+		// Cert validation enabled
+		if sc.EnableCertificateValidation == nil || *sc.EnableCertificateValidation {
+			tconf.ClientVerify = &transport.VerifyConfig{
+				Store: certs.Store{}, // TODO(baumanl): get the store from somewhere
+			}
+		}
+		// Authorized keys enabled
+		if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
+			// must be explicitly set to true
+			tconf.ClientVerify = &transport.VerifyConfig{
+				AuthKeys: authkeys.NewAuthKeySet(), // TODO(baumanl): load initial (stable trusted keys)
+			}
+		}
 	}
 
 	underlying, err := transport.NewServer(udpConn, tconf)
@@ -87,7 +122,14 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		logrus.Fatalf("unable to open transport server: %s", err)
 	}
 
-	return NewHopServerExt(underlying, sc)
+	server, err := NewHopServerExt(underlying, sc)
+	if err != nil {
+		return server, err
+	}
+	if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
+		server.keyStore = tconf.ClientVerify.AuthKeys
+	}
+	return server, err
 
 }
 
@@ -169,6 +211,25 @@ func (s *HopServer) authorizeKey(user string, publicKey keys.PublicKey) error {
 	return fmt.Errorf("key %s is not authorized for user %s", publicKey, user)
 }
 
+func (s *HopServer) authorizeKeyAuthGrant(user string, publicKey keys.PublicKey) ([]authgrants.Intent, error) {
+	if s.config.AllowAuthgrants != nil && *s.config.AllowAuthgrants {
+		s.agLock.Lock()
+		defer s.agLock.Unlock()
+		if _, ok := s.authgrants[user]; ok {
+			// user has some authgrants
+			if val, ok := s.authgrants[user][publicKey]; ok {
+				delete(s.authgrants[user], publicKey) // remove from server mapping
+				if len(s.authgrants[user]) == 0 {     // all authgrants have been removed for user
+					delete(s.authgrants, user)
+					s.keyStore.RemoveKey(publicKey)
+				}
+				return val, nil
+			}
+		}
+	}
+	return []authgrants.Intent{}, fmt.Errorf("auth grants not enabled")
+}
+
 // VirtualHosts is mapping from host patterns to Certificates.
 type VirtualHosts []VirtualHost
 
@@ -246,4 +307,12 @@ func (vhosts VirtualHosts) Match(name certs.Name) *VirtualHost {
 		}
 	}
 	return nil
+}
+
+func (s *HopServer) addAuthGrant(intent *authgrants.Intent) {
+	s.agLock.Lock()
+	user := intent.TargetUsername
+	s.authgrants[user] = make(map[keys.PublicKey][]authgrants.Intent)
+	s.authgrants[user][intent.DelegateCert.PublicKey] = append(s.authgrants[user][intent.DelegateCert.PublicKey], *intent)
+	s.agLock.Unlock()
 }

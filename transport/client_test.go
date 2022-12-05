@@ -8,6 +8,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 
+	"hop.computer/hop/authkeys"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
 )
@@ -173,6 +174,33 @@ func TestClientCertificates(t *testing.T) {
 		clientConfig := selfSignClientLeaf(t, certs.RawStringName("username"))
 		server := startServer(t, nil)
 		assertHandshake(t, clientConfig, server)
+	})
+
+	t.Run("self-signed expecting self-signed (authkeys)", func(t *testing.T) {
+		var names []certs.Name
+		clientConfig := selfSignClientLeaf(t, names...)
+		set := authkeys.NewAuthKeySet()
+		set.AddKey(clientConfig.Leaf.PublicKey)
+		verify := &VerifyConfig{
+			AuthKeys:           set,
+			AuthKeysAllowed:    true,
+			InsecureSkipVerify: false,
+		}
+		server := startServer(t, verify)
+		assertHandshake(t, clientConfig, server)
+	})
+
+	t.Run("self-signed with nonauthorized key", func(t *testing.T) {
+		var names []certs.Name
+		clientConfig := selfSignClientLeaf(t, names...)
+		set := authkeys.NewAuthKeySet()
+		verify := &VerifyConfig{
+			AuthKeys:           set,
+			AuthKeysAllowed:    true,
+			InsecureSkipVerify: false,
+		}
+		server := startServer(t, verify)
+		assertNoHandshake(t, clientConfig, server)
 	})
 
 }

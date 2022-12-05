@@ -3,6 +3,7 @@ package transport
 import (
 	"time"
 
+	"hop.computer/hop/authkeys"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
 )
@@ -12,7 +13,13 @@ type VerifyConfig struct {
 	// Store contains the trusted root certificates
 	Store certs.Store
 
-	// When InsecureSkipVerify is true, all chain building and verification is skipped.
+	// AuthKeys contains trusted keys
+	AuthKeys *authkeys.AuthKeySet
+
+	// Enable vs. Disable authenticating with authorized keys
+	AuthKeysAllowed bool
+
+	// When InsecureSkipVerify is true, all chain building and verification is skipped (authkeys can still happen if enabled)
 	InsecureSkipVerify bool
 
 	// Name is used for SNI and compared to the certificate when non-empty.
