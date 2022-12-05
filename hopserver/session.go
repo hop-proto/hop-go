@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/user"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -82,6 +83,12 @@ func (sess *hopSession) checkAuthorization() bool {
 	return true
 }
 
+type proxyTubeQueue struct {
+	tubes map[byte]*tubes.Unreliable
+	lock  sync.Mutex
+	cv    sync.Cond
+}
+
 // start() sets up a session's muxer and handles incoming tube requests.
 // calls close when it receives a signal from the code execution tube that it is finished
 // TODO(baumanl): change closing behavior for sessions without cmd/shell --> integrate port forwarding duration
@@ -114,6 +121,14 @@ func (sess *hopSession) start() {
 		}
 	}()
 
+	proxyLock := sync.Mutex{}
+
+	proxyQueue := &proxyTubeQueue{
+		tubes: make(map[byte]*tubes.Unreliable),
+		lock:  proxyLock,
+		cv:    *sync.NewCond(&proxyLock),
+	}
+
 	for {
 		select {
 		case <-sess.done:
@@ -128,6 +143,10 @@ func (sess *hopSession) start() {
 				r, ok := tube.(*tubes.Unreliable)
 				if ok && r.Type() == common.PrincipalProxyTube {
 					// add to map and signal waiting processes
+					proxyQueue.lock.Lock()
+					proxyQueue.tubes[r.GetID()] = r
+					proxyQueue.lock.Unlock()
+					proxyQueue.cv.Broadcast()
 				}
 				continue
 			}
@@ -137,7 +156,7 @@ func (sess *hopSession) start() {
 			case common.AuthGrantTube:
 				go sess.handleAgc(r)
 			case common.PrincipalProxyTube:
-				go sess.startPrincipalProxy(r)
+				go sess.startPrincipalProxy(r, proxyQueue)
 			case common.RemotePFTube:
 				panic("unimplemented: remote pf")
 			case common.LocalPFTube:
@@ -379,7 +398,7 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 }
 
 // manage principal to target proxying
-func (sess *hopSession) startPrincipalProxy(t *tubes.Reliable) {
+func (sess *hopSession) startPrincipalProxy(t *tubes.Reliable, pq *proxyTubeQueue) {
 	defer t.Close()
 
 	// TODO(baumanl): add check for authgrant?
@@ -399,21 +418,32 @@ func (sess *hopSession) startPrincipalProxy(t *tubes.Reliable) {
 	}
 
 	// connect to target
-
-	// if success --> send conf
-	// else --> send error
+	targetConn, err := targetInfo.ConnectToTarget()
+	if err != nil {
+		authgrants.WriteFailure(t, fmt.Sprint(err))
+		return
+	}
+	authgrants.WriteConfirmation(t)
+	defer targetConn.Close()
 
 	// receive unreliable principal proxy tube id
+	tubeID, err := authgrants.ReadUnreliableProxyID(t)
+	if err != nil {
+		logrus.Errorf("Server: error reading unreliable proxy id: %s", err)
+	}
 
 	// check (and keep checking on signal) for the unreliable tube with the id
+	pq.lock.Lock()
+	for _, ok := pq.tubes[tubeID]; !ok; {
+		pq.cv.Wait()
+	}
+
+	principalTube := pq.tubes[tubeID]
+	delete(pq.tubes, tubeID)
+	pq.lock.Unlock()
 
 	// proxy shit
-
-	// TODO(baumanl): implement principal <--> target proxy
-	// Need to know target and connect to it
-	// then just copy all messages from principal (unreliable tube) to target
-	// and vice versa
-
+	authgrants.UnreliableProxyHelper(principalTube, targetConn)
 }
 
 func (sess *hopSession) startSizeTube(ch *tubes.Reliable) {
