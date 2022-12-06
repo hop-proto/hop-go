@@ -85,7 +85,7 @@ func (sess *hopSession) checkAuthorization() bool {
 
 type proxyTubeQueue struct {
 	tubes map[byte]*tubes.Unreliable
-	lock  sync.Mutex
+	lock  *sync.Mutex
 	cv    sync.Cond
 }
 
@@ -125,7 +125,7 @@ func (sess *hopSession) start() {
 
 	proxyQueue := &proxyTubeQueue{
 		tubes: make(map[byte]*tubes.Unreliable),
-		lock:  proxyLock,
+		lock:  &proxyLock,
 		cv:    *sync.NewCond(&proxyLock),
 	}
 
