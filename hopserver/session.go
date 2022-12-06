@@ -255,8 +255,8 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 		var err error
 
 		// lock principals map so can be updated with pid after starting process
-		sess.server.agproxy.proxyLock.Lock()
-		defer sess.server.agproxy.proxyLock.Unlock()
+		sess.server.dpProxy.proxyLock.Lock()
+		defer sess.server.dpProxy.proxyLock.Unlock()
 
 		if shell {
 			if size != nil {
@@ -285,7 +285,7 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 
 		// update principals map.
 		pid := c.Process.Pid
-		sess.server.agproxy.principals[int32(pid)] = principalSess
+		sess.server.dpProxy.principals[int32(pid)] = principalSess
 
 		codex.SendSuccess(tube)
 		go func() {

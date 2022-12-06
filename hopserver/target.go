@@ -11,6 +11,11 @@ import (
 	"hop.computer/hop/tubes"
 )
 
+type authgrant struct {
+	Data      authgrants.AuthGrantData // relevant data from IR
+	Principal *hopSession
+}
+
 type authgrantMapSync struct {
 	authgrants map[string]map[keys.PublicKey][]authgrant
 	agLock     sync.Mutex

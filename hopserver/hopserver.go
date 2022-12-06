@@ -11,7 +11,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"hop.computer/hop/authgrants"
 	"hop.computer/hop/authkeys"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/config"
@@ -22,11 +21,6 @@ import (
 	"hop.computer/hop/tubes"
 )
 
-type authgrant struct {
-	Data      authgrants.AuthGrantData // relevant data from IR
-	Principal *hopSession
-}
-
 // HopServer represents state/conns needed for a hop server
 type HopServer struct {
 	m sync.Mutex
@@ -35,7 +29,7 @@ type HopServer struct {
 	agMap *authgrantMapSync
 
 	// Delegate proxy server state
-	agproxy    *dpproxy
+	dpProxy    *dpproxy
 	principals map[*hopSession]*hopSession // principals[sess] is sess that is connected to principal
 
 	config *config.ServerConfig
@@ -54,7 +48,7 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, 
 
 		agMap: newAuthgrantMapSync(),
 
-		agproxy: &dpproxy{
+		dpProxy: &dpproxy{
 			address:    config.AgProxyListenSocket,
 			principals: make(map[int32]*hopSession),
 			running:    false,
@@ -147,7 +141,7 @@ func (s *HopServer) Serve() {
 	logrus.Info("hop server starting")
 
 	// start agproxy
-	err := s.agproxy.start()
+	err := s.dpProxy.start()
 	if err != nil {
 		logrus.Error("issue starting agproxy server")
 	}
