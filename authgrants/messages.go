@@ -5,10 +5,10 @@ import (
 	"errors"
 	"io"
 	"math"
-	"strings"
 	"time"
 
 	"hop.computer/hop/certs"
+	"hop.computer/hop/common"
 )
 
 // Authgrant Message Types:
@@ -126,7 +126,7 @@ func (m *AgMessage) WriteTo(w io.Writer) (int64, error) {
 	case IntentConfirmation:
 		dataLen = 0
 	case IntentDenied:
-		dataLen, err = writeString(m.Data.Denial, w)
+		dataLen, err = common.WriteString(m.Data.Denial, w)
 	}
 	written += dataLen
 	if err != nil {
@@ -152,7 +152,7 @@ func (m *AgMessage) ReadFrom(r io.Reader) (int64, error) {
 	case IntentCommunication:
 		dataBytes, err = m.Data.Intent.ReadFrom(r)
 	case IntentDenied:
-		m.Data.Denial, dataBytes, err = readString(r)
+		m.Data.Denial, dataBytes, err = common.ReadString(r)
 	}
 
 	bytesRead += dataBytes
@@ -196,7 +196,7 @@ func (i *Intent) WriteTo(w io.Writer) (int64, error) {
 		return written, err
 	}
 	// write targetUsername
-	usernameLen, err := writeString(i.TargetUsername, w)
+	usernameLen, err := common.WriteString(i.TargetUsername, w)
 	written += usernameLen
 	if err != nil {
 		return written, err
@@ -277,7 +277,7 @@ func (i *Intent) ReadFrom(r io.Reader) (int64, error) {
 	}
 	bytesRead += n
 	// read targetUsername
-	username, usernameBytes, err := readString(r)
+	username, usernameBytes, err := common.ReadString(r)
 	if err != nil {
 		return bytesRead, err
 	}
@@ -309,50 +309,15 @@ func (i *Intent) ReadFrom(r io.Reader) (int64, error) {
 	return bytesRead, nil
 }
 
-// helper function to write a string preceded by its length.
-func writeString(s string, w io.Writer) (int64, error) {
-	var written int64
-	// write length of string as one byte
-	n, err := w.Write([]byte{byte(len(s))})
-	written += int64(n)
-	if err != nil {
-		return written, err
-	}
-	n, err = w.Write([]byte(s))
-	written += int64(n)
-	if err != nil {
-		return written, err
-	}
-	return written, nil
-}
-
-// helper function that reads a string
-func readString(r io.Reader) (string, int64, error) {
-	var bytesRead int64
-	// read len
-	var len byte
-	err := binary.Read(r, binary.BigEndian, &len)
-	if err != nil {
-		return "", bytesRead, err
-	}
-	bytesRead++
-	// read string
-	builder := strings.Builder{}
-	copied, err := io.CopyN(&builder, r, int64(len))
-	bytesRead += copied
-	return builder.String(), bytesRead, err
-
-}
-
 // WriteTo serializes command grant data  and implements the io.WriterTo interface
 func (d *CommandGrantData) WriteTo(w io.Writer) (int64, error) {
-	return writeString(d.Cmd, w)
+	return common.WriteString(d.Cmd, w)
 }
 
 // ReadFrom reads a serialized commandgrantdata block
 func (d *CommandGrantData) ReadFrom(r io.Reader) (int64, error) {
 	// read command
-	cmd, cmdBytes, err := readString(r)
+	cmd, cmdBytes, err := common.ReadString(r)
 	d.Cmd = cmd
 	return cmdBytes, err
 

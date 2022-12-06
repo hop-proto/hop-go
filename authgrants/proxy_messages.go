@@ -6,9 +6,8 @@ import (
 	"io"
 	"net"
 
-	"github.com/sirupsen/logrus"
-
 	"hop.computer/hop/certs"
+	"hop.computer/hop/common"
 )
 
 // TargetInfo is sent from principal indicating target
@@ -82,7 +81,7 @@ func WriteFailure(w io.Writer, errString string) error {
 		return err
 	}
 
-	_, err = writeString(errString, w)
+	_, err = common.WriteString(errString, w)
 	return err
 }
 
@@ -98,7 +97,7 @@ func ReadResponse(r io.Reader) (bool, string, error) {
 		return true, "", nil
 	}
 
-	reason, _, err := readString(r)
+	reason, _, err := common.ReadString(r)
 	return false, reason, err
 }
 
@@ -113,52 +112,4 @@ func ReadUnreliableProxyID(r io.Reader) (byte, error) {
 	var id byte
 	_, err := r.Read([]byte{id})
 	return id, err
-}
-
-// UDPLike interface standardizes Reliable channels and UDPConn.
-// Reliable channels implement this interface so they can be used as the underlying conn for Clients
-// TODO(baumanl): this is also defined in transport/client.go --> figure out
-// best organization
-type UDPLike interface {
-	net.Conn
-	WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error)
-	ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error)
-}
-
-// UnreliableProxyHelper proxies msgs from two udplike connections
-func UnreliableProxyHelper(a UDPLike, b UDPLike) {
-	go func() {
-		buf := make([]byte, 65535)
-		for {
-			n, _, _, _, err := a.ReadMsgUDP(buf, nil)
-			if err != nil {
-				logrus.Error(err)
-				continue
-				// TODO(baumanl): what should actually be done here
-			}
-			_, _, err = b.WriteMsgUDP(buf[:n], nil, nil)
-			if err != nil {
-				logrus.Error(err)
-				continue
-				// TODO(baumanl): what should we do
-			}
-		}
-	}()
-
-	buf := make([]byte, 65535)
-	for {
-		n, _, _, _, err := b.ReadMsgUDP(buf, nil)
-		if err != nil {
-			logrus.Error(err)
-			continue
-			// TODO(baumanl): what should actually be done here
-		}
-		_, _, err = a.WriteMsgUDP(buf[:n], nil, nil)
-		if err != nil {
-			logrus.Error(err)
-			continue
-			// TODO(baumanl): what should we do
-		}
-	}
-
 }

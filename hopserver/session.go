@@ -2,23 +2,19 @@ package hopserver
 
 import (
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"os/user"
 	"strconv"
-	"sync"
 	"sync/atomic"
 	"syscall"
-	"time"
 
 	"github.com/AstromechZA/etcpwdparse"
 	"github.com/creack/pty"
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/authgrants"
-	"hop.computer/hop/certs"
 	"hop.computer/hop/codex"
 	"hop.computer/hop/common"
 	"hop.computer/hop/keys"
@@ -83,12 +79,6 @@ func (sess *hopSession) checkAuthorization() bool {
 	return true
 }
 
-type proxyTubeQueue struct {
-	tubes map[byte]*tubes.Unreliable
-	lock  *sync.Mutex
-	cv    sync.Cond
-}
-
 // start() sets up a session's muxer and handles incoming tube requests.
 // calls close when it receives a signal from the code execution tube that it is finished
 // TODO(baumanl): change closing behavior for sessions without cmd/shell --> integrate port forwarding duration
@@ -121,13 +111,7 @@ func (sess *hopSession) start() {
 		}
 	}()
 
-	proxyLock := sync.Mutex{}
-
-	proxyQueue := &proxyTubeQueue{
-		tubes: make(map[byte]*tubes.Unreliable),
-		lock:  &proxyLock,
-		cv:    *sync.NewCond(&proxyLock),
-	}
+	proxyQueue := newPTProxyTubeQueue()
 
 	for {
 		select {
@@ -156,7 +140,7 @@ func (sess *hopSession) start() {
 			case common.AuthGrantTube:
 				go sess.handleAgc(r)
 			case common.PrincipalProxyTube:
-				go sess.startPrincipalProxy(r, proxyQueue)
+				go sess.startPTProxy(r, proxyQueue)
 			case common.RemotePFTube:
 				panic("unimplemented: remote pf")
 			case common.LocalPFTube:
@@ -164,7 +148,7 @@ func (sess *hopSession) start() {
 			case common.WinSizeTube:
 				go sess.startSizeTube(r)
 			default:
-				tube.Close() //Close unrecognized tube types
+				tube.Close() // Close unrecognized tube types
 			}
 		}
 
@@ -180,64 +164,6 @@ func (sess *hopSession) close() error {
 		return err
 	}
 	return err2
-}
-
-// checkIntent looks at details of Intent Request and ensures they follow its policies
-func (sess *hopSession) checkIntent(tube *tubes.Reliable) (authgrants.MessageData, bool) {
-	// read intent:
-	var ir authgrants.AgMessage
-	_, err := ir.ReadFrom(tube)
-	if err != nil {
-		return authgrants.MessageData{Denial: authgrants.MalformedIntentDen}, false
-	}
-	// check that msg type is correct
-	if ir.MsgType != authgrants.IntentCommunication {
-		return authgrants.MessageData{Denial: authgrants.UnexpectedMessageType}, false
-	}
-	intent := ir.Data.Intent
-
-	// check that requested time is valid
-	if intent.ExpTime.Before(time.Now()) {
-		return authgrants.MessageData{Denial: "invalid expiration time"}, false
-	}
-
-	// TODO(baumanl): check target SNI matches the current hostname of this server? necessary?
-
-	// check target username matches current username that client
-	// logged in as.
-	if sess.user != intent.TargetUsername {
-		return authgrants.MessageData{Denial: "Current user and requested user mismatch"}, false
-	}
-
-	// check that DelegateCert is well formatted
-	if err = certs.VerifyLeafFormat(&intent.DelegateCert, certs.VerifyOptions{}); err != nil {
-		return authgrants.MessageData{Denial: "Ill-formatted delegate certificate"}, false
-	}
-	// TODO(baumanl): add in finer grained policy checks/options? i.e. account level access control
-	// TODO(baumanl): enable fine grained checks based on config options
-	// pass the intent to handlers for each type of authgrant
-	switch intent.GrantType {
-	case authgrants.Shell:
-		// TODO(baumanl)
-	case authgrants.Command:
-		// TODO
-	case authgrants.LocalPF:
-		// TODO
-	case authgrants.RemotePF:
-		// TODO
-	default:
-		return authgrants.MessageData{Denial: authgrants.UnrecognizedGrantType}, false
-
-	}
-
-	// add authorization grant to server mappings
-	sess.server.addAuthGrant(&intent, sess)
-
-	//add delegate key from cert to transport server authorized key pool
-	sess.server.keyStore.AddKey(intent.DelegateCert.PublicKey)
-
-	// fine grained
-	return authgrants.MessageData{}, true
 }
 
 // handleAgc handles Intent Communications from principals and updates the outstanding authgrants maps appropriately
@@ -276,20 +202,6 @@ func getGroups(uid int) (groups []uint32) {
 		}
 	}
 	return
-}
-
-// checks if the session has an auth grant to perform cmd
-func (sess *hopSession) checkCmd(cmd string) (*hopSession, error) {
-	for i, ag := range sess.authorizedActions {
-		intent := ag.Data
-		if time.Now().Before(intent.ExpTime) && intent.GrantType == authgrants.Command {
-			if intent.AssociatedData.CommandGrantData.Cmd == cmd {
-				sess.authorizedActions = append(sess.authorizedActions[:i], sess.authorizedActions[i+1:]...)
-				return ag.Principal, nil
-			}
-		}
-	}
-	return nil, fmt.Errorf("no auth grant for cmd: %s", cmd)
 }
 
 func (sess *hopSession) startCodex(tube *tubes.Reliable) {
@@ -395,55 +307,6 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 		codex.SendFailure(tube, err)
 		return
 	}
-}
-
-// manage principal to target proxying
-func (sess *hopSession) startPrincipalProxy(t *tubes.Reliable, pq *proxyTubeQueue) {
-	defer t.Close()
-
-	// TODO(baumanl): add check for authgrant?
-
-	// make sure this is currently expected
-	if sess.numActiveReqDelegates.Load() == 0 {
-		logrus.Info("Server: received unexpected request to start net proxy")
-		return
-	}
-
-	// receive target message
-	var targetInfo authgrants.TargetInfo
-	_, err := targetInfo.ReadFrom(t)
-	if err != nil {
-		authgrants.WriteFailure(t, "Server: unable to read target info")
-		return
-	}
-
-	// connect to target
-	targetConn, err := targetInfo.ConnectToTarget()
-	if err != nil {
-		authgrants.WriteFailure(t, fmt.Sprint(err))
-		return
-	}
-	authgrants.WriteConfirmation(t)
-	defer targetConn.Close()
-
-	// receive unreliable principal proxy tube id
-	tubeID, err := authgrants.ReadUnreliableProxyID(t)
-	if err != nil {
-		logrus.Errorf("Server: error reading unreliable proxy id: %s", err)
-	}
-
-	// check (and keep checking on signal) for the unreliable tube with the id
-	pq.lock.Lock()
-	for _, ok := pq.tubes[tubeID]; !ok; {
-		pq.cv.Wait()
-	}
-
-	principalTube := pq.tubes[tubeID]
-	delete(pq.tubes, tubeID)
-	pq.lock.Unlock()
-
-	// proxy shit
-	authgrants.UnreliableProxyHelper(principalTube, targetConn)
 }
 
 func (sess *hopSession) startSizeTube(ch *tubes.Reliable) {

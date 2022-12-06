@@ -22,11 +22,6 @@ import (
 	"hop.computer/hop/tubes"
 )
 
-// Authgrants Hop server TODOs
-// - Listen for descendent clients and proxy their requests back to principal
-// - check that connecting clients have appropriate authgrants for actions.
-// - act as a target: authorize/deny intent requests forwarded from principal
-
 type authgrant struct {
 	Data      authgrants.AuthGrantData // relevant data from IR
 	Principal *hopSession
@@ -37,12 +32,10 @@ type HopServer struct {
 	m sync.Mutex
 
 	// Target server state
-	// TODO(baumanl): potentially don't need entire Intent
-	authgrants map[string]map[keys.PublicKey][]authgrant
-	agLock     sync.Mutex
+	agMap *authgrantMapSync
 
 	// Delegate proxy server state
-	agproxy    *Agproxy
+	agproxy    *dpproxy
 	principals map[*hopSession]*hopSession // principals[sess] is sess that is connected to principal
 
 	config *config.ServerConfig
@@ -59,10 +52,9 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, 
 	server := &HopServer{
 		m: sync.Mutex{},
 
-		authgrants: make(map[string]map[keys.PublicKey][]authgrant),
-		agLock:     sync.Mutex{},
+		agMap: newAuthgrantMapSync(),
 
-		agproxy: &Agproxy{
+		agproxy: &dpproxy{
 			address:    config.AgProxyListenSocket,
 			principals: make(map[int32]*hopSession),
 			running:    false,
@@ -155,7 +147,7 @@ func (s *HopServer) Serve() {
 	logrus.Info("hop server starting")
 
 	// start agproxy
-	err := s.agproxy.Start()
+	err := s.agproxy.start()
 	if err != nil {
 		logrus.Error("issue starting agproxy server")
 	}
@@ -221,25 +213,6 @@ func (s *HopServer) authorizeKey(user string, publicKey keys.PublicKey) error {
 		return nil
 	}
 	return fmt.Errorf("key %s is not authorized for user %s", publicKey, user)
-}
-
-func (s *HopServer) authorizeKeyAuthGrant(user string, publicKey keys.PublicKey) ([]authgrant, error) {
-	if s.config.AllowAuthgrants != nil && *s.config.AllowAuthgrants {
-		s.agLock.Lock()
-		defer s.agLock.Unlock()
-		if _, ok := s.authgrants[user]; ok {
-			// user has some authgrants
-			if val, ok := s.authgrants[user][publicKey]; ok {
-				delete(s.authgrants[user], publicKey) // remove from server mapping
-				if len(s.authgrants[user]) == 0 {     // all authgrants have been removed for user
-					delete(s.authgrants, user)
-					s.keyStore.RemoveKey(publicKey)
-				}
-				return val, nil
-			}
-		}
-	}
-	return []authgrant{}, fmt.Errorf("auth grants not enabled")
 }
 
 // VirtualHosts is mapping from host patterns to Certificates.
@@ -320,41 +293,3 @@ func (vhosts VirtualHosts) Match(name certs.Name) *VirtualHost {
 	}
 	return nil
 }
-
-func (s *HopServer) addAuthGrant(intent *authgrants.Intent, principalSess *hopSession) {
-	s.agLock.Lock()
-	defer s.agLock.Unlock()
-	user := intent.TargetUsername
-	s.authgrants[user] = make(map[keys.PublicKey][]authgrant)
-	ag := authgrant{
-		Data:      intent.GetData(),
-		Principal: principalSess,
-	}
-	s.authgrants[user][intent.DelegateCert.PublicKey] = append(s.authgrants[user][intent.DelegateCert.PublicKey], ag)
-}
-
-// TODO(baumanl): how should expired authgrants be removed?
-// 1. how often or at what trigger
-// 2. when should key be removed from transport keyStore?
-// currently never...expired ones are just ignored
-
-// func (s *HopServer) agCleanup() {
-// 	s.agLock.Lock()
-// 	defer s.agLock.Unlock()
-// 	for _, ps := range s.authgrants {
-// 		for k, ags := range ps {
-// 			del := true
-// 			for _, ag := range ags {
-// 				if !ag.Data.ExpTime.Before(time.Now()) {
-// 					del = false
-// 					break
-// 				}
-// 			}
-// 			if del {
-// 				delete(ps, k)
-// 				s.keyStore.RemoveKey(k)
-// 			}
-
-// 		}
-// 	}
-// }
