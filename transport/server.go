@@ -444,7 +444,7 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		if hs.certVerify.AuthKeysAllowed {
 			errAuthkeys = hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
 		}
-		if errAuthkeys != nil {
+		if !hs.certVerify.AuthKeysAllowed || errAuthkeys != nil {
 			// Certificate Verification
 			err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
 			if err != nil { // cert verifification failed
