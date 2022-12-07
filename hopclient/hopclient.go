@@ -24,12 +24,6 @@ import (
 	"hop.computer/hop/userauth"
 )
 
-// Authgrant TODOs for hopclient
-// Principal:
-// - accept and process delegate requests
-// Delegate:
-// - contact hopd and issue requests
-
 // HopClient holds state for client's perspective of session. It is not safe to
 // copy a HopClient.
 type HopClient struct { // nolint:maligned

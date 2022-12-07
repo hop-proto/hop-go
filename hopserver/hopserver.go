@@ -41,6 +41,9 @@ type HopServer struct {
 	authsock net.Listener //nolint TODO(hosono) add linting back
 }
 
+// TODO(baumanl): Think about how NewHopServerExt and NewHopServer and actual
+// initialization interact. See PR #91.
+
 // NewHopServerExt returns a Hop Server using the provided transport server.
 func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, ks *authkeys.SyncAuthKeySet) (*HopServer, error) {
 	server := &HopServer{

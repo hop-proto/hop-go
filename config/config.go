@@ -22,6 +22,8 @@ type ClientConfig struct {
 	Hosts  []HostConfigOptional
 }
 
+// TODO(baumanl): do the below boolean fields need to be *bool instead of bool?
+
 // ServerConfig represents a parsed server configuration.
 type ServerConfig struct {
 	Key          string

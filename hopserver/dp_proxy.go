@@ -16,6 +16,21 @@ import (
 /* DP Proxy: Server acts as a proxy between the Delegate client
  * and Principal client. */
 
+/* Delegate proxy server: a hop server that has an active hop session with
+ * a (remote) Principal hop client and a (local) Delegate hop client that was
+ * started from a process spawned from that active hop session. Two "proxying"
+ * actions actually occur:
+ * 1. Delegate hop client <--> Principal hop client (dp_proxy.go) (*)
+ * 2. Principal hop client <--> Target hop server (pt_proxy.go)
+ *
+ * Responsibilities [status] (1: Delegate <--> Principal proxy):
+ * - listen on a unix socket for Delegate hop clients [implemented]
+ * - maintain a mapping of Delegate hop clients to Principal hop client sessions [implemented]
+ * - proxy all authgrant messages between the Delegate and Principal [implemented]
+ * - ensure that processes connecting to unix socket are legitimate descendants
+ *   of the hop server [implemented for linux, TODO others]
+ */
+
 // dpproxy holds state used by server to proxy delegate requests to principals
 type dpproxy struct {
 	address    string
