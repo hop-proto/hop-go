@@ -1,9 +1,12 @@
 package hopserver
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -48,41 +51,40 @@ func newPTProxyTubeQueue() *ptProxyTubeQueue {
 	return proxyQueue
 }
 
-// unreliableProxyHelper proxies msgs from two udplike connections
-func unreliableProxyHelper(a transport.UDPLike, b transport.UDPLike) {
-	go func() {
-		buf := make([]byte, 65535)
-		for {
-			n, _, _, _, err := a.ReadMsgUDP(buf, nil)
-			if err != nil {
-				logrus.Error(err)
-				continue
-				// TODO(baumanl): what should actually be done here
-			}
-			_, _, err = b.WriteMsgUDP(buf[:n], nil, nil)
-			if err != nil {
-				logrus.Error(err)
-				continue
-				// TODO(baumanl): what should we do
-			}
-		}
-	}()
-
+func unreliableProxyOneSide(a transport.UDPLike, b transport.UDPLike) {
+	// TODO(baumanl): way to eliminate buffer? At least make it smaller?
 	buf := make([]byte, 65535)
 	for {
-		n, _, _, _, err := b.ReadMsgUDP(buf, nil)
+		// TODO(baumanl): calibrate timeouts
+		a.SetReadDeadline(time.Now().Add(time.Second))
+		n, _, _, _, err := a.ReadMsgUDP(buf, nil)
 		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				logrus.Errorf("pt proxy: read deadline exceeded: %s", err)
+				return
+			}
 			logrus.Error(err)
 			continue
-			// TODO(baumanl): what should actually be done here
 		}
-		_, _, err = a.WriteMsgUDP(buf[:n], nil, nil)
+		b.SetWriteDeadline(time.Now().Add(time.Second))
+		_, _, err = b.WriteMsgUDP(buf[:n], nil, nil)
 		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				logrus.Errorf("pt proxy: write deadline exceeded: %s", err)
+				return
+			}
 			logrus.Error(err)
 			continue
 			// TODO(baumanl): what should we do
 		}
 	}
+}
+
+// TODO(baumanl): make sure this closes down cleanly/consistently
+// unreliableProxyHelper proxies msgs from two udplike connections
+func unreliableProxyHelper(a transport.UDPLike, b transport.UDPLike) {
+	go unreliableProxyOneSide(a, b)
+	unreliableProxyOneSide(b, a)
 }
 
 // manage principal to target proxying (t is a reliable tube)
