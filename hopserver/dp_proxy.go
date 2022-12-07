@@ -31,33 +31,37 @@ import (
  *   of the hop server [implemented for linux, TODO others]
  */
 
+// GetPrincipal is a callback to return principal of sessID
+type GetPrincipal func(sessID) (*hopSession, bool)
+
 // dpproxy holds state used by server to proxy delegate requests to principals
 type dpproxy struct {
-	address    string
-	principals map[int32]*hopSession // TODO(baumanl): pointer to hopSession may not work how I want...
-	running    bool
-	listener   net.Listener
-	proxyLock  sync.Mutex
+	address      string
+	principals   map[int32]sessID
+	running      bool
+	listener     net.Listener
+	proxyLock    sync.Mutex
+	getPrincipal GetPrincipal
 }
 
-// start starts agproxy server
+// start starts DP Proxy server
 func (p *dpproxy) start() error {
 	p.proxyLock.Lock()
 	defer p.proxyLock.Unlock()
 
 	if p.running {
-		return fmt.Errorf("agproxy: start called when already running")
+		return fmt.Errorf("DP Proxy: start called when already running")
 	}
 
 	fileInfo, err := os.Stat(p.address)
 	if err == nil { // file exists
 		// IsDir is short for fileInfo.Mode().IsDir()
 		if fileInfo.IsDir() {
-			return fmt.Errorf("agproxy: unable to start agproxy at address %s: is a directory", p.address)
+			return fmt.Errorf("DP Proxy: unable to start DP Proxy at address %s: is a directory", p.address)
 		}
 		//make sure the socket does not already exist.
 		if err := os.RemoveAll(p.address); err != nil {
-			return fmt.Errorf("agproxy: error removing %s: %s", p.address, err)
+			return fmt.Errorf("DP Proxy: error removing %s: %s", p.address, err)
 		}
 	}
 
@@ -65,7 +69,7 @@ func (p *dpproxy) start() error {
 	sockconfig := &net.ListenConfig{Control: setListenerOptions}
 	authgrantServer, err := sockconfig.Listen(context.Background(), "unix", p.address)
 	if err != nil {
-		return fmt.Errorf("agproxy: unix socket listen error: %s", err)
+		return fmt.Errorf("DP Proxy: unix socket listen error: %s", err)
 	}
 
 	p.listener = authgrantServer
@@ -77,11 +81,11 @@ func (p *dpproxy) start() error {
 
 // serve accepts connections and starts proxying
 func (p *dpproxy) serve() {
-	logrus.Info("Agproxy: listening on unix socket: ", p.listener.Addr().String())
+	logrus.Info("DP Proxy: listening on unix socket: ", p.listener.Addr().String())
 	for {
 		c, err := p.listener.Accept()
 		if err != nil {
-			logrus.Error("Agproxy: accept error:", err)
+			logrus.Error("DP Proxy: accept error:", err)
 			continue
 		}
 		go p.checkAndProxy(c)
@@ -91,9 +95,14 @@ func (p *dpproxy) serve() {
 // checks that the connecting process is a hop session descendent and then proxies
 func (p *dpproxy) checkAndProxy(c net.Conn) {
 	// Verify that the client is a legit descendent and get principal sess
-	principalSess, e := p.checkCredentials(c)
+	principalID, e := p.checkCredentials(c)
 	if e != nil {
-		logrus.Errorf("Agproxy: error checking credentials: %v", e)
+		logrus.Errorf("DP Proxy: error checking credentials: %v", e)
+		return
+	}
+	principalSess, ok := p.getPrincipal(principalID)
+	if !ok {
+		logrus.Error("DP Proxy: principal session not found.")
 		return
 	}
 	p.proxyAuthGrantRequest(principalSess, c)
@@ -101,18 +110,18 @@ func (p *dpproxy) checkAndProxy(c net.Conn) {
 
 // verifies that client is a descendent of a process started by the principal
 // and returns its corresponding principal session
-func (p *dpproxy) checkCredentials(c net.Conn) (*hopSession, error) {
+func (p *dpproxy) checkCredentials(c net.Conn) (sessID, error) {
 	// cPID is PID of client process that connected to socket
 	cPID, err := readCreds(c)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	// aPID is the ancestor of cPID spawned by a hop session
 	var aPID int32 = -1
 	//get a picture of the entire system process tree
 	tree, err := pstree.New()
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 
 	p.proxyLock.Lock()
@@ -125,7 +134,7 @@ func (p *dpproxy) checkCredentials(c net.Conn) (*hopSession, error) {
 		}
 	}
 	if aPID == -1 {
-		return nil, errors.New("not a descendent process")
+		return 0, errors.New("not a descendent process")
 	}
 	return p.principals[aPID], nil
 }
@@ -145,17 +154,17 @@ func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
 func (p *dpproxy) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn) {
 	defer c.Close()
 	if principalSess.transportConn.IsClosed() {
-		logrus.Error("Agproxy: connection with principal is closed or closing")
+		logrus.Error("DP Proxy: connection with principal is closed or closing")
 		return
 	}
 	// connect to principal
 	principalConn, err := principalSess.newAuthGrantTube()
 	if err != nil {
-		logrus.Errorf("Agproxy: error connecting to principal: %v", err)
+		logrus.Errorf("DP Proxy: error connecting to principal: %v", err)
 		return
 	}
 	defer principalConn.Close()
-	logrus.Infof("Agproxy: connected to principal")
+	logrus.Infof("DP Proxy: connected to principal")
 
 	// enable principal to proxy a connection through the server
 	principalSess.numActiveReqDelegates.Add(1)
@@ -172,13 +181,13 @@ func proxyHelper(p net.Conn, c net.Conn) {
 	// proxy the bytes
 	go func() {
 		w, err := io.Copy(c, p)
-		logrus.Infof("Agproxy: wrote %v bytes to client from principal. err: %v", w, err)
+		logrus.Infof("DP Proxy: wrote %v bytes to client from principal. err: %v", w, err)
 		err = c.Close()
 		logrus.Debugf("c close: %v", err)
 		wg.Done()
 	}()
 	w, err := io.Copy(p, c)
-	logrus.Infof("Agproxy: wrote %v bytes to principal from client. err: %v", w, err)
+	logrus.Infof("DP Proxy: wrote %v bytes to principal from client. err: %v", w, err)
 	err = p.Close()
 	logrus.Debugf("p close: %v", err)
 	wg.Wait()

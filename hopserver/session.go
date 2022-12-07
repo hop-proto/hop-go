@@ -23,12 +23,16 @@ import (
 	"hop.computer/hop/userauth"
 )
 
+type sessID uint32
+
 type hopSession struct {
 	transportConn   *transport.Handle
 	tubeMuxer       *tubes.Muxer
 	tubeQueue       chan tubes.Tube
 	done            chan int
 	controlChannels []net.Conn
+
+	ID sessID
 
 	server *HopServer
 	user   string
@@ -37,7 +41,7 @@ type hopSession struct {
 	pty chan *os.File
 
 	usingAuthGrant        bool // true if client authenticated with authgrant
-	authorizedActions     []authgrant
+	authorizedActions     []authgrants.Authgrant
 	numActiveReqDelegates atomic.Int32
 }
 
@@ -206,15 +210,15 @@ func getGroups(uid int) (groups []uint32) {
 
 func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 	cmd, termEnv, shell, size, _ := codex.GetCmd(tube)
-	principalSess := sess
+	principalSess := sess.ID
 	// if using an authgrant, check that the cmd is authorized
 	if sess.usingAuthGrant {
-		psess, err := sess.checkCmd(cmd)
+		principalID, err := sess.checkCmd(cmd)
 		if err != nil {
 			codex.SendFailure(tube, err)
 			return
 		}
-		principalSess = psess
+		principalSess = principalID
 	}
 
 	logrus.Info("CMD: ", cmd)

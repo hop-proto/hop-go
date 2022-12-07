@@ -6,11 +6,13 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing/fstest"
 	"time"
 
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/authgrants"
 	"hop.computer/hop/authkeys"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/config"
@@ -26,11 +28,16 @@ type HopServer struct {
 	m sync.Mutex
 
 	// Target server state
-	agMap *authgrantMapSync
+	agMap *authgrants.AuthgrantMapSync
 
 	// Delegate proxy server state
 	dpProxy    *dpproxy
-	principals map[*hopSession]*hopSession // principals[sess] is sess that is connected to principal
+	principals map[sessID]sessID // principals[sess] is sess that is connected to principal
+
+	// Session management
+	sessions      map[sessID]*hopSession
+	sessionLock   sync.Mutex
+	nextSessionID atomic.Uint32
 
 	config *config.ServerConfig
 
@@ -49,16 +56,20 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, 
 	server := &HopServer{
 		m: sync.Mutex{},
 
-		agMap: newAuthgrantMapSync(),
+		agMap: authgrants.NewAuthgrantMapSync(),
 
 		dpProxy: &dpproxy{
 			address:    config.AgProxyListenSocket,
-			principals: make(map[int32]*hopSession),
+			principals: make(map[int32]sessID),
 			running:    false,
 			proxyLock:  sync.Mutex{},
 		},
 
-		principals: make(map[*hopSession]*hopSession),
+		principals: make(map[sessID]sessID),
+
+		sessions:      make(map[sessID]*hopSession),
+		sessionLock:   sync.Mutex{},
+		nextSessionID: atomic.Uint32{},
 
 		config: config,
 
@@ -143,10 +154,16 @@ func (s *HopServer) Serve() {
 	go s.server.Serve() // start transport layer server
 	logrus.Info("hop server starting")
 
-	// start agproxy
+	// start dpproxy
+	s.dpProxy.getPrincipal = func(si sessID) (*hopSession, bool) {
+		s.sessionLock.Lock()
+		defer s.sessionLock.Unlock()
+		sess, ok := s.sessions[si]
+		return sess, ok
+	}
 	err := s.dpProxy.start()
 	if err != nil {
-		logrus.Error("issue starting agproxy server")
+		logrus.Error("issue starting dpproxy server")
 	}
 
 	for {
@@ -171,7 +188,12 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 		controlChannels: []net.Conn{},
 		server:          s,
 		pty:             make(chan *os.File, 1),
+		ID:              sessID(s.nextSessionID.Load()),
 	}
+	s.nextSessionID.Add(1)
+	s.sessionLock.Lock()
+	s.sessions[sess.ID] = sess
+	s.sessionLock.Unlock()
 	sess.start()
 }
 

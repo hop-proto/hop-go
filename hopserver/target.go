@@ -2,7 +2,6 @@ package hopserver
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	"hop.computer/hop/authgrants"
@@ -24,47 +23,17 @@ import (
  *   authorized actions accordingly
  */
 
-// TODO(baumanl): would it be better to eliminate dependence on *hopSession
-// and move these data structures and some of the main functions
-// to the authgrant package? Could have a "session id" instead of a direct
-// pointer, may allow for easier testing?
+// type authgrant struct {
+// 	Data authgrants.AuthGrantData // relevant data from IR
+// 	// Principal *hopSession
+// 	principalID principalID
+// }
 
-type authgrant struct {
-	Data      authgrants.AuthGrantData // relevant data from IR
-	Principal *hopSession
-}
-
-type authgrantMapSync struct {
-	authgrants map[string]map[keys.PublicKey][]authgrant
-	agLock     sync.Mutex
-}
-
-func newAuthgrantMapSync() *authgrantMapSync {
-	return &authgrantMapSync{
-		authgrants: make(map[string]map[keys.PublicKey][]authgrant),
-		agLock:     sync.Mutex{},
-	}
-}
-
-func (s *HopServer) authorizeKeyAuthGrant(user string, publicKey keys.PublicKey) ([]authgrant, error) {
+func (s *HopServer) authorizeKeyAuthGrant(user string, publicKey keys.PublicKey) ([]authgrants.Authgrant, error) {
 	if s.config.AllowAuthgrants != nil && *s.config.AllowAuthgrants {
-		return s.agMap.getAuthgrants(user, publicKey)
+		return s.agMap.RemoveAuthgrants(user, publicKey)
 	}
-	return []authgrant{}, fmt.Errorf("auth grants not enabled")
-}
-
-func (m *authgrantMapSync) getAuthgrants(user string, key keys.PublicKey) ([]authgrant, error) {
-	m.agLock.Lock()
-	defer m.agLock.Unlock()
-
-	if ags, ok := m.authgrants[user]; ok { // if user has any authgrants
-		if val, ok := ags[key]; ok { // if key has an entry
-			delete(ags, key) // remove from server mapping
-			// TODO(baumanl): add check to remove from transport keyStore
-			return val, nil
-		}
-	}
-	return []authgrant{}, fmt.Errorf("no authgrant for user %s found for provided key", user)
+	return []authgrants.Authgrant{}, fmt.Errorf("auth grants not enabled")
 }
 
 // checkIntent looks at details of Intent Request and ensures they follow its policies
@@ -116,27 +85,13 @@ func (sess *hopSession) checkIntent(tube *tubes.Reliable) (authgrants.MessageDat
 	}
 
 	// add authorization grant to server mappings
-	sess.server.agMap.addAuthGrant(&intent, sess)
+	sess.server.agMap.AddAuthGrant(&intent, authgrants.PrincipalID(sess.ID))
 
 	//add delegate key from cert to transport server authorized key pool
 	sess.server.keyStore.AddKey(intent.DelegateCert.PublicKey)
 
 	// fine grained
 	return authgrants.MessageData{}, true
-}
-
-func (m *authgrantMapSync) addAuthGrant(intent *authgrants.Intent, principalSess *hopSession) {
-	m.agLock.Lock()
-	defer m.agLock.Unlock()
-	user := intent.TargetUsername
-	if _, ok := m.authgrants[user]; !ok {
-		m.authgrants[user] = make(map[keys.PublicKey][]authgrant)
-	}
-	ag := authgrant{
-		Data:      intent.GetData(),
-		Principal: principalSess,
-	}
-	m.authgrants[user][intent.DelegateCert.PublicKey] = append(m.authgrants[user][intent.DelegateCert.PublicKey], ag)
 }
 
 // TODO(baumanl): how should expired authgrants be removed?
@@ -166,16 +121,15 @@ func (m *authgrantMapSync) addAuthGrant(intent *authgrants.Intent, principalSess
 // }
 
 // checks if the session has an auth grant to perform cmd
-func (sess *hopSession) checkCmd(cmd string) (*hopSession, error) {
+func (sess *hopSession) checkCmd(cmd string) (sessID, error) {
 	for i, ag := range sess.authorizedActions {
-		intent := ag.Data
-		if time.Now().Before(intent.ExpTime) && intent.GrantType == authgrants.Command {
-			if intent.AssociatedData.CommandGrantData.Cmd == cmd {
+		if time.Now().Before(ag.ExpTime) && ag.GrantType == authgrants.Command {
+			if ag.AssociatedData.CommandGrantData.Cmd == cmd {
 				// remove from authorized actions and return
 				sess.authorizedActions = append(sess.authorizedActions[:i], sess.authorizedActions[i+1:]...)
-				return ag.Principal, nil
+				return sessID(ag.PrincipalID), nil
 			}
 		}
 	}
-	return nil, fmt.Errorf("no auth grant for cmd: %s", cmd)
+	return 0, fmt.Errorf("no auth grant for cmd: %s", cmd)
 }
