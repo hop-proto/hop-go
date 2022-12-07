@@ -11,6 +11,11 @@ import (
 	"hop.computer/hop/tubes"
 )
 
+// TODO(baumanl): would it be better to eliminate dependence on *hopSession
+// and move these data structures and some of the main functions
+// to the authgrant package? Could have a "session id" instead of a direct
+// pointer, may allow for easier testing?
+
 type authgrant struct {
 	Data      authgrants.AuthGrantData // relevant data from IR
 	Principal *hopSession
@@ -111,7 +116,9 @@ func (m *authgrantMapSync) addAuthGrant(intent *authgrants.Intent, principalSess
 	m.agLock.Lock()
 	defer m.agLock.Unlock()
 	user := intent.TargetUsername
-	m.authgrants[user] = make(map[keys.PublicKey][]authgrant)
+	if _, ok := m.authgrants[user]; !ok {
+		m.authgrants[user] = make(map[keys.PublicKey][]authgrant)
+	}
 	ag := authgrant{
 		Data:      intent.GetData(),
 		Principal: principalSess,
@@ -151,6 +158,7 @@ func (sess *hopSession) checkCmd(cmd string) (*hopSession, error) {
 		intent := ag.Data
 		if time.Now().Before(intent.ExpTime) && intent.GrantType == authgrants.Command {
 			if intent.AssociatedData.CommandGrantData.Cmd == cmd {
+				// remove from authorized actions and return
 				sess.authorizedActions = append(sess.authorizedActions[:i], sess.authorizedActions[i+1:]...)
 				return ag.Principal, nil
 			}
