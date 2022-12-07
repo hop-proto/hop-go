@@ -179,7 +179,7 @@ func TestClientCertificates(t *testing.T) {
 	t.Run("self-signed expecting self-signed (authkeys)", func(t *testing.T) {
 		var names []certs.Name
 		clientConfig := selfSignClientLeaf(t, names...)
-		set := authkeys.NewAuthKeySet()
+		set := authkeys.NewSyncAuthKeySet()
 		set.AddKey(clientConfig.Leaf.PublicKey)
 		verify := &VerifyConfig{
 			AuthKeys:           set,
@@ -193,7 +193,7 @@ func TestClientCertificates(t *testing.T) {
 	t.Run("self-signed with nonauthorized key", func(t *testing.T) {
 		var names []certs.Name
 		clientConfig := selfSignClientLeaf(t, names...)
-		set := authkeys.NewAuthKeySet()
+		set := authkeys.NewSyncAuthKeySet()
 		verify := &VerifyConfig{
 			AuthKeys:           set,
 			AuthKeysAllowed:    true,

@@ -37,12 +37,12 @@ type HopServer struct {
 	fsystem fs.FS
 
 	server   *transport.Server
-	keyStore *authkeys.AuthKeySet
+	keyStore *authkeys.SyncAuthKeySet
 	authsock net.Listener //nolint TODO(hosono) add linting back
 }
 
 // NewHopServerExt returns a Hop Server using the provided transport server.
-func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, ks *authkeys.AuthKeySet) (*HopServer, error) {
+func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, ks *authkeys.SyncAuthKeySet) (*HopServer, error) {
 	server := &HopServer{
 		m: sync.Mutex{},
 
@@ -121,7 +121,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
 			// must be explicitly set to true
 			tconf.ClientVerify = &transport.VerifyConfig{
-				AuthKeys: authkeys.NewAuthKeySet(), // TODO(baumanl): load initial (stable trusted keys)
+				AuthKeys: authkeys.NewSyncAuthKeySet(), // TODO(baumanl): load initial (stable trusted keys)
 			}
 		}
 	}
