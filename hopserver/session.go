@@ -34,6 +34,7 @@ type hopSession struct {
 
 	ID sessID
 
+	// TODO(baumanl): better solution than pointer to server?
 	server *HopServer
 	user   string
 
@@ -159,10 +160,17 @@ func (sess *hopSession) start() {
 	}
 }
 
+// TODO(baumanl): look closely at closing behavior
 func (sess *hopSession) close() error {
 	var err, err2 error
 
 	sess.tubeMuxer.Stop()
+
+	// remove from server session map
+	sess.server.sessionLock.Lock()
+	defer sess.server.sessionLock.Unlock()
+	delete(sess.server.sessions, sess.ID)
+
 	//err2 = sess.transportConn.Close() //(not implemented yet)
 	if err != nil {
 		return err
