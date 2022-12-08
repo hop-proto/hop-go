@@ -137,15 +137,8 @@ func (r *Reliable) receive(pkt *frame) error {
 			"state": r.tubeState,
 		}).Errorf("receive for tube in bad state")
 
-		// TODO(hosono) send RST frame if this packet is not a reset packet
-		//r.Reset()
-
 		return errBadTubeState
 	}
-
-	// TODO(hosono) RST connections with REQ or RESP bits
-
-	// TODO(hosono) handle RST frames
 
 	// Pass the frame to the receive window
 	err := r.recvWindow.receive(pkt)
@@ -294,39 +287,6 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 	_, e = io.ReadFull(r, data)
 	n = copy(b, data)
 	return n, 0, 0, nil, e
-}
-
-// Reset immediately tears down the connection
-func (r *Reliable) Reset() (err error) {
-	// TODO(hosono) implement
-	/*
-	 *    <-r.initDone
-	 *    r.l.Lock()
-	 *    defer r.l.Unlock()
-	 *
-	 *    if r.tubeState == closed {
-	 *        r.log.Warn("Resetting closed tube")
-	 *        return io.EOF
-	 *    } else {
-	 *        r.log.Warn("Resetting tube")
-	 *    }
-	 *
-	 *    r.tubeState = closed
-	 *
-	 *    r.sender.Reset()
-	 *    r.recvWindow.Close()
-	 *    close(r.sender.sendQueue)
-	 *    <-r.sendStopped
-	 *
-	 *    select {
-	 *    case r.reset <- struct{}{}:
-	 *        break
-	 *    default:
-	 *        break
-	 *    }
-	 */
-
-	return
 }
 
 // Close handles closing reliable tubes

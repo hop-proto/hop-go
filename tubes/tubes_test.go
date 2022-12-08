@@ -129,7 +129,6 @@ func CloseTest(t *testing.T, rel bool) {
 	assert.DeepEqual(t, n, 0)
 }
 
-// TODO(hosono) make reliable tubes pass these tests
 func TestReliable(t *testing.T) {
 	logrus.SetLevel(logrus.TraceLevel)
 
