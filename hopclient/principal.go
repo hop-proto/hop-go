@@ -2,6 +2,7 @@ package hopclient
 
 import (
 	"github.com/sirupsen/logrus"
+
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/common"
 	"hop.computer/hop/tubes"
