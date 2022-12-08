@@ -38,6 +38,9 @@ type Muxer struct {
 	underlying transport.MsgConn
 	timeout    time.Duration
 	log        *logrus.Entry
+
+	// This buffer is only used in m.readMsg 
+	readBuf []byte
 }
 
 // NewMuxer starts a new tube muxer
@@ -50,6 +53,7 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, log *logrus.Entr
 		underlying: msgConn,
 		timeout:    timeout,
 		log:        log,
+		readBuf:    make([]byte, 65535),
 	}
 }
 
@@ -168,8 +172,7 @@ func (m *Muxer) Accept() (Tube, error) {
 }
 
 func (m *Muxer) readMsg() (*frame, error) {
-	pkt := make([]byte, 65535) // TODO(hosono) avoid allocation
-	_, err := m.underlying.ReadMsg(pkt)
+	_, err := m.underlying.ReadMsg(m.readBuf)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +181,7 @@ func (m *Muxer) readMsg() (*frame, error) {
 	if m.timeout != 0 {
 		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
 	}
-	return fromBytes(pkt)
+	return fromBytes(m.readBuf)
 
 }
 

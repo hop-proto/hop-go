@@ -116,7 +116,7 @@ func fromBytes(b []byte) (*frame, error) {
 		tubeID:     b[0],
 		flags:      metaToFlags(b[1]),
 		dataLength: dataLength,
-		data:       b[12 : 12+dataLength],
+		data:       append([]byte(nil), b[12 : 12+dataLength]...),
 		ackNo:      binary.BigEndian.Uint32(b[4:8]),
 		frameNo:    binary.BigEndian.Uint32(b[8:12]),
 	}, nil
