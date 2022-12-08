@@ -3,6 +3,7 @@ package authgrants
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"time"
@@ -354,4 +355,38 @@ func (d *RemotePFGrantData) WriteTo(w io.Writer) (int64, error) {
 func (d *RemotePFGrantData) ReadFrom(r io.Reader) (int64, error) {
 	// read command
 	panic("unimplemented")
+}
+
+// ReadIntentRequest reads intent request and returns intent
+func ReadIntentRequest(r io.Reader) (Intent, error) {
+	var m AgMessage
+	_, err := m.ReadFrom(r)
+	if err != nil {
+		return m.Data.Intent, err
+	}
+	if m.MsgType != IntentRequest {
+		return m.Data.Intent, fmt.Errorf("expected msg type of Intent Request. Got %v", m.MsgType)
+	}
+	return m.Data.Intent, nil
+}
+
+// SendIntentDenied sends intent denied message with reason
+func SendIntentDenied(w io.Writer, reason string) error {
+	m := AgMessage{
+		MsgType: IntentDenied,
+		Data: MessageData{
+			Denial: reason,
+		},
+	}
+	_, err := m.WriteTo(w)
+	return err
+}
+
+// SendIntentConfirmation sends intent confirmation
+func SendIntentConfirmation(w io.Writer) error {
+	m := AgMessage{
+		MsgType: IntentConfirmation,
+	}
+	_, err := m.WriteTo(w)
+	return err
 }
