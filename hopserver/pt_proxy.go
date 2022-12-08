@@ -112,8 +112,11 @@ func (sess *hopSession) startPTProxy(t net.Conn, pq *ptProxyTubeQueue) {
 		authgrants.WriteFailure(t, fmt.Sprint(err))
 		return
 	}
-	authgrants.WriteConfirmation(t)
 	defer targetConn.Close()
+	err = authgrants.WriteConfirmation(t)
+	if err != nil {
+		return
+	}
 
 	// receive unreliable principal proxy tube id
 	tubeID, err := authgrants.ReadUnreliableProxyID(t)
@@ -130,6 +133,12 @@ func (sess *hopSession) startPTProxy(t net.Conn, pq *ptProxyTubeQueue) {
 	principalTube := pq.tubes[tubeID]
 	delete(pq.tubes, tubeID)
 	pq.lock.Unlock()
+
+	// send confirmation to principal
+	err = authgrants.WriteConfirmation(t)
+	if err != nil {
+		return
+	}
 
 	// proxy
 	unreliableProxyHelper(principalTube, targetConn)
