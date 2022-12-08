@@ -193,6 +193,7 @@ func (m *Muxer) sender() {
 }
 
 // Start allows a muxer to start listening and handling incoming tube requests and messages
+// TODO(hosono) refactor this because I can't read it
 func (m *Muxer) Start() (err error) {
 	go m.sender()
 	m.stopped.Store(false)
@@ -215,7 +216,6 @@ func (m *Muxer) Start() (err error) {
 	for !m.stopped.Load() {
 		frame, err := m.readMsg()
 		if err != nil {
-			// TODO(hosono) Are there any recoverable errors? (os.ErrDeadlineExceeded isn't)
 			return err
 		}
 		tube, ok := m.getTube(frame.tubeID)
@@ -229,7 +229,6 @@ func (m *Muxer) Start() (err error) {
 					return err
 				}
 				if initFrame.flags.REL {
-					// TODO(hosono) make these methods on the muxer
 					tube, _ = m.makeReliableTubeWithID(initFrame.tubeType, initFrame.tubeID, false)
 					// TODO(hosono) error handling
 					m.addTube(tube)
@@ -250,10 +249,7 @@ func (m *Muxer) Start() (err error) {
 				}
 				tube.receiveInitiatePkt(initFrame)
 			} else {
-				// m.log.Info("RECEIVING NORMAL FRAME")
-				// TODO(hosono) doing this in a gorouting messes up the nettests
-				// so it's probably time to fork the nettests and be done with it
-				tube.receive(frame)
+				go tube.receive(frame)
 			}
 		}
 
