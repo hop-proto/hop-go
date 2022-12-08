@@ -10,6 +10,7 @@ import (
 
 	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
+	"hop.computer/hop/core"
 )
 
 // Authgrant Message Types:
@@ -370,6 +371,19 @@ func ReadIntentRequest(r io.Reader) (Intent, error) {
 	return m.Data.Intent, nil
 }
 
+// ReadConfOrDenial reads an authgrant message and errors if it is not conf or denial
+func ReadConfOrDenial(r io.Reader) (AgMessage, error) {
+	var m AgMessage
+	_, err := m.ReadFrom(r)
+	if err != nil {
+		return m, err
+	}
+	if m.MsgType != IntentDenied && m.MsgType != IntentConfirmation {
+		return m, fmt.Errorf("received unexpected msg type")
+	}
+	return m, nil
+}
+
 // SendIntentDenied sends intent denied message with reason
 func SendIntentDenied(w io.Writer, reason string) error {
 	m := AgMessage{
@@ -389,4 +403,25 @@ func SendIntentConfirmation(w io.Writer) error {
 	}
 	_, err := m.WriteTo(w)
 	return err
+}
+
+// SendIntentCommunication sends intent communication messages
+func SendIntentCommunication(w io.Writer, i Intent) error {
+	m := AgMessage{
+		MsgType: IntentCommunication,
+		Data: MessageData{
+			Intent: i,
+		},
+	}
+	_, err := m.WriteTo(w)
+	return err
+}
+
+// TargetURL gives url of target of intent
+func (i Intent) TargetURL() *core.URL {
+	return &core.URL{
+		User: i.TargetUsername,
+		Host: string(i.TargetSNI.Label),
+		Port: fmt.Sprint(i.TargetPort),
+	}
 }

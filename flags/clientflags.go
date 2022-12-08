@@ -82,7 +82,7 @@ func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig, dc *conf
 func LoadClientConfigFromFlags(f *ClientFlags) (*config.HostConfig, error) {
 	// Get default client config if it exists
 	var dc *config.ClientConfig
-	if f.ConfigPath != "" {
+	if f.ConfigPath != "" { // this logic looks wrong...
 		var err error
 		dc, err = config.GetClient("")
 		if err != nil {
