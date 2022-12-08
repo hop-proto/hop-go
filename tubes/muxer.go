@@ -41,7 +41,7 @@ type Muxer struct {
 }
 
 // NewMuxer starts a new tube muxer
-func NewMuxer(msgConn transport.MsgConn, netConn net.Conn, timeout time.Duration, log *logrus.Entry) *Muxer {
+func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, log *logrus.Entry) *Muxer {
 	return &Muxer{
 		tubes:      make(map[byte]Tube),
 		tubeQueue:  make(chan Tube, 128),
