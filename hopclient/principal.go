@@ -29,7 +29,7 @@ type subClients map[*core.URL]*HopClient
 
 type principalClient struct {
 	// +checklocks:pLock
-	setupSubClient   setupSubClient
+	setupSubClient setupSubClient
 	// +checklocks:pLock
 	targetSubClients map[byte]subClients
 	pLock            sync.Mutex
