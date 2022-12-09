@@ -28,7 +28,9 @@ type setupSubClient func(authgrants.Intent) (*HopClient, error)
 type subClients map[*core.URL]*HopClient
 
 type principalClient struct {
+	// +checklocks:pLock
 	setupSubClient   setupSubClient
+	// +checklocks:pLock
 	targetSubClients map[byte]subClients
 	pLock            sync.Mutex
 }

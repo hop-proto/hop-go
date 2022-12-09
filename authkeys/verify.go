@@ -10,6 +10,7 @@ import (
 
 // SyncAuthKeySet is a set of trusted keys
 type SyncAuthKeySet struct {
+	// +checklocks:lock
 	keySet map[keys.PublicKey]bool
 	lock   sync.Mutex
 }

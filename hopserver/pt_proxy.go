@@ -34,6 +34,7 @@ import (
 // allows server to keep track of unreliable principal proxy
 // tubes before the reliable has received the tube id
 type ptProxyTubeQueue struct {
+	// +checklocks:lock
 	tubes map[byte]*tubes.Unreliable
 	lock  *sync.Mutex
 	cv    sync.Cond

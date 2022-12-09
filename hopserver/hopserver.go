@@ -35,6 +35,7 @@ type HopServer struct {
 	principals map[sessID]sessID // principals[sess] is sess that is connected to principal
 
 	// Session management
+	// +checklocks:sessionLock
 	sessions      map[sessID]*hopSession
 	sessionLock   sync.Mutex
 	nextSessionID atomic.Uint32
@@ -61,7 +62,7 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, 
 		dpProxy: &dpproxy{
 			address:    config.AgProxyListenSocket,
 			principals: make(map[int32]sessID),
-			running:    false,
+			running:    atomic.Bool{},
 			proxyLock:  sync.Mutex{},
 		},
 
