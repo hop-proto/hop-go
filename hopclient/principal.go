@@ -1,10 +1,7 @@
 package hopclient
 
 import (
-	"fmt"
-	"sync"
-
-	"github.com/sirupsen/logrus"
+	"io"
 
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/common"
@@ -19,117 +16,26 @@ import (
 //   Delegate clients to perform actions on the Target server.
 
 //   Responsibilities [status]:
-//   - receive Intent Requests from Delegate clients [TODO]
-//   - approve/deny Intent Requests [TODO]
-//   - communicate Intent to Target server [TODO]
+//   - receive Intent Requests from Delegate clients [implemented]
+//   - approve/deny Intent Requests [implemented]
+//   - communicate Intent to Target server [implemented]
 
-type setupSubClient func(authgrants.Intent) (*HopClient, error)
-
-type subClients map[*core.URL]*HopClient
-
-type principalClient struct {
-	// +checklocks:pLock
-	setupSubClient setupSubClient
-	// +checklocks:pLock
-	targetSubClients map[byte]subClients
-	pLock            sync.Mutex
+func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable) {
+	pi := authgrants.PrincipalInstance{
+		DelegateConn:    delTube,
+		CheckIntent:     placeholderCheckIntent,
+		SetUpTargetConn: c.setupTargetClient,
+	}
+	pi.Run()
+	// TODO(baumanl): add way to close without waiting for delegateconn to close?
 }
 
-func (p *principalClient) principal(t *tubes.Reliable) {
-	// TODO(baumanl): make sure this closes properly if t is closed
-	p.pLock.Lock()
-	if _, ok := p.targetSubClients[t.GetID()]; !ok {
-		p.targetSubClients[t.GetID()] = make(subClients)
-	}
-	p.pLock.Unlock()
-	for {
-		// TODO(baumanl): add deadlines when implemented on reliable tubes
-		err := p.handleIntentRequest(t)
-		if err != nil {
-			break
-		}
-	}
-	p.pLock.Lock()
-	delete(p.targetSubClients, t.GetID())
-	p.pLock.Unlock()
+func placeholderCheckIntent(i authgrants.Intent) error {
+	return nil
 }
 
-func (p *principalClient) handleIntentRequest(t *tubes.Reliable) error {
-	i, err := authgrants.ReadIntentRequest(t)
-	if err != nil {
-		logrus.Errorf("principal: error reading intent request: %s", err)
-		return err
-	}
-
-	// validate intent request
-	approved, err := p.checkIntentRequest(i)
-	if err != nil || !approved {
-		err = authgrants.SendIntentDenied(t, err.Error())
-		return err
-	}
-
-	targetClient, err := p.getTargetClient(t.GetID(), i)
-	if err != nil {
-		return err
-	}
-
-	// send intent communication to target server
-	approved, err = p.checkIntentRequestTarget(targetClient, i)
-	if err != nil || !approved {
-		err = authgrants.SendIntentDenied(t, err.Error())
-		return err
-	}
-	return authgrants.SendIntentConfirmation(t)
-}
-
-func (p *principalClient) checkIntentRequest(i authgrants.Intent) (bool, error) {
-	// TODO(baumanl): make this a customizable callback
-	// TODO(baumanl): implement some respectable default options
-	logrus.Infof("principal: approving intent request")
-	return true, nil // currently approves all intent requests
-}
-
-func (p *principalClient) checkIntentRequestTarget(targetClient *HopClient, i authgrants.Intent) (bool, error) {
-	// start authgrant tube
-	agt, err := targetClient.newAuthgrantTube()
-	if err != nil {
-		return false, err
-	}
-	defer agt.Close()
-
-	// send intent communication
-	err = authgrants.SendIntentCommunication(agt, i)
-	if err != nil {
-		return false, err
-	}
-
-	// await response from target
-	resp, err := authgrants.ReadConfOrDenial(agt)
-	if err != nil {
-		return false, err
-	}
-	if resp.MsgType == authgrants.IntentDenied {
-		return false, fmt.Errorf(resp.Data.Denial)
-	}
-
-	return true, nil
-}
-
-// get from map or establish new session
-func (p *principalClient) getTargetClient(agtID byte, i authgrants.Intent) (*HopClient, error) {
-	p.pLock.Lock()
-	defer p.pLock.Unlock()
-	if scs, ok := p.targetSubClients[agtID]; ok {
-		if tc, ok := scs[i.TargetURL()]; ok {
-			return tc, nil
-		}
-	}
-
-	return p.setupSubClient(i)
-}
-
-func (c *HopClient) setupTargetClient(i authgrants.Intent) (*HopClient, error) {
-	targetConn, err := c.setUpDelegateProxyToTarget(i)
+func (c *HopClient) setupTargetClient(targURL core.URL) (io.ReadWriter, error) {
+	targetConn, err := c.setUpDelegateProxyToTarget(targURL)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +44,7 @@ func (c *HopClient) setupTargetClient(i authgrants.Intent) (*HopClient, error) {
 	// load client config from default path
 	cflags := &flags.ClientFlags{
 		ConfigPath: "", // TODO(baumanl): keep track of the path used when the principal itself started?
-		Address:    i.TargetURL(),
+		Address:    &targURL,
 		Headless:   true,
 		UsePty:     false,
 	}
@@ -183,10 +89,10 @@ func (c *HopClient) setupTargetClient(i authgrants.Intent) (*HopClient, error) {
 	}
 	client.connected = true
 
-	return client, nil
+	return client.newAuthgrantTube()
 }
 
-func (c *HopClient) setUpDelegateProxyToTarget(i authgrants.Intent) (*tubes.Unreliable, error) {
+func (c *HopClient) setUpDelegateProxyToTarget(targURL core.URL) (*tubes.Unreliable, error) {
 
 	// open reliable principal proxy tube with delegate proxy
 	delegateProxyConn, err := c.newReliablePrincipalProxyTube()
@@ -196,7 +102,7 @@ func (c *HopClient) setUpDelegateProxyToTarget(i authgrants.Intent) (*tubes.Unre
 	defer delegateProxyConn.Close()
 
 	// send TargetInfo to delegate proxy
-	err = authgrants.WriteTargetInfo(i, delegateProxyConn)
+	err = authgrants.WriteTargetInfo(targURL, delegateProxyConn)
 	if err != nil {
 		return nil, err
 	}

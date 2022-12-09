@@ -371,6 +371,19 @@ func ReadIntentRequest(r io.Reader) (Intent, error) {
 	return m.Data.Intent, nil
 }
 
+// ReadIntentCommunication reads intent communication
+func ReadIntentCommunication(r io.Reader) (Intent, error) {
+	var m AgMessage
+	_, err := m.ReadFrom(r)
+	if err != nil {
+		return m.Data.Intent, err
+	}
+	if m.MsgType != IntentCommunication {
+		return m.Data.Intent, fmt.Errorf("expected msg type of Intent Communication. Got %v", m.MsgType)
+	}
+	return m.Data.Intent, nil
+}
+
 // ReadConfOrDenial reads an authgrant message and errors if it is not conf or denial
 func ReadConfOrDenial(r io.Reader) (AgMessage, error) {
 	var m AgMessage
@@ -418,8 +431,8 @@ func SendIntentCommunication(w io.Writer, i Intent) error {
 }
 
 // TargetURL gives url of target of intent
-func (i Intent) TargetURL() *core.URL {
-	return &core.URL{
+func (i Intent) TargetURL() core.URL {
+	return core.URL{
 		User: i.TargetUsername,
 		Host: string(i.TargetSNI.Label),
 		Port: fmt.Sprint(i.TargetPort),

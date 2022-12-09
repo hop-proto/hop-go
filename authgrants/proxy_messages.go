@@ -8,6 +8,7 @@ import (
 
 	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
+	"hop.computer/hop/core"
 )
 
 // TargetInfo is sent from principal indicating target
@@ -20,12 +21,8 @@ const confirmation = byte(1)
 const denial = byte(0)
 
 // WriteTargetInfo writes the relevant target info from given intent
-func WriteTargetInfo(i Intent, w io.Writer) error {
-	ti := TargetInfo{
-		TargetPort: i.TargetPort,
-		TargetSNI:  i.TargetSNI,
-	}
-	_, err := ti.WriteTo(w)
+func WriteTargetInfo(targURL core.URL, w io.Writer) error {
+	_, err := common.WriteString(targURL.String(), w)
 	return err
 }
 
