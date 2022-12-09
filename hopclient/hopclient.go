@@ -344,6 +344,17 @@ func (c *HopClient) startExecTube() error {
 
 // HandleTubes handles incoming tube requests to the client
 func (c *HopClient) HandleTubes() {
+
+	// setup principal
+	var principal principalClient
+	if c.hostconfig.IsPrincipal {
+		principal = principalClient{
+			setupSubClient:   c.setupTargetClient,
+			targetSubClients: make(map[byte]subClients),
+			pLock:            sync.Mutex{},
+		}
+	}
+
 	//TODO(baumanl): figure out responses to different tube types/what all should be allowed
 	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****
 	for {
@@ -355,7 +366,7 @@ func (c *HopClient) HandleTubes() {
 		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v. Reliable? %t", t.Type(), t.IsReliable())
 
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
-			go c.principal(r)
+			go principal.principal(r)
 		} else if t.Type() == common.RemotePFTube {
 			panic("unimplemented")
 		} else {

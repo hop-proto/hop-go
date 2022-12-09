@@ -2,11 +2,13 @@ package hopclient
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/common"
+	"hop.computer/hop/core"
 	"hop.computer/hop/flags"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
@@ -21,21 +23,36 @@ import (
 //   - approve/deny Intent Requests [TODO]
 //   - communicate Intent to Target server [TODO]
 
-// TODO(baumanl): implement Principal hop client
+type setupSubClient func(authgrants.Intent) (*HopClient, error)
 
-func (c *HopClient) principal(t *tubes.Reliable) {
+type subClients map[*core.URL]*HopClient
+
+type principalClient struct {
+	setupSubClient   setupSubClient
+	targetSubClients map[byte]subClients
+	pLock            sync.Mutex
+}
+
+func (p *principalClient) principal(t *tubes.Reliable) {
 	// TODO(baumanl): make sure this closes properly if t is closed
-	//
+	p.pLock.Lock()
+	if _, ok := p.targetSubClients[t.GetID()]; !ok {
+		p.targetSubClients[t.GetID()] = make(subClients)
+	}
+	p.pLock.Unlock()
 	for {
 		// TODO(baumanl): add deadlines when implemented on reliable tubes
-		err := c.handleIntentRequest(t)
+		err := p.handleIntentRequest(t)
 		if err != nil {
 			break
 		}
 	}
+	p.pLock.Lock()
+	delete(p.targetSubClients, t.GetID())
+	p.pLock.Unlock()
 }
 
-func (c *HopClient) handleIntentRequest(t *tubes.Reliable) error {
+func (p *principalClient) handleIntentRequest(t *tubes.Reliable) error {
 	i, err := authgrants.ReadIntentRequest(t)
 	if err != nil {
 		logrus.Errorf("principal: error reading intent request: %s", err)
@@ -43,14 +60,19 @@ func (c *HopClient) handleIntentRequest(t *tubes.Reliable) error {
 	}
 
 	// validate intent request
-	approved, err := c.checkIntentRequest(i)
+	approved, err := p.checkIntentRequest(i)
 	if err != nil || !approved {
 		err = authgrants.SendIntentDenied(t, err.Error())
 		return err
 	}
 
+	targetClient, err := p.getTargetClient(t.GetID(), i)
+	if err != nil {
+		return err
+	}
+
 	// send intent communication to target server
-	approved, err = c.checkIntentRequestTarget(i)
+	approved, err = p.checkIntentRequestTarget(targetClient, i)
 	if err != nil || !approved {
 		err = authgrants.SendIntentDenied(t, err.Error())
 		return err
@@ -58,32 +80,20 @@ func (c *HopClient) handleIntentRequest(t *tubes.Reliable) error {
 	return authgrants.SendIntentConfirmation(t)
 }
 
-func (c *HopClient) checkIntentRequest(i authgrants.Intent) (bool, error) {
+func (p *principalClient) checkIntentRequest(i authgrants.Intent) (bool, error) {
 	// TODO(baumanl): make this a customizable callback
 	// TODO(baumanl): implement some respectable default options
 	logrus.Infof("principal: approving intent request")
 	return true, nil // currently approves all intent requests
 }
 
-func (c *HopClient) checkIntentRequestTarget(i authgrants.Intent) (bool, error) {
-
-	targetConn, err := c.setUpDelegateProxyToTarget(i)
-	if err != nil {
-		return false, err
-	}
-
-	// establish hop session with target
-	targetClient, err := setupTargetClient(targetConn, i)
-	if err != nil {
-		return false, err
-	}
-	defer targetClient.Close()
-
+func (p *principalClient) checkIntentRequestTarget(targetClient *HopClient, i authgrants.Intent) (bool, error) {
 	// start authgrant tube
 	agt, err := targetClient.newAuthgrantTube()
 	if err != nil {
 		return false, err
 	}
+	defer agt.Close()
 
 	// send intent communication
 	err = authgrants.SendIntentCommunication(agt, i)
@@ -103,7 +113,24 @@ func (c *HopClient) checkIntentRequestTarget(i authgrants.Intent) (bool, error) 
 	return true, nil
 }
 
-func setupTargetClient(targetConn *tubes.Unreliable, i authgrants.Intent) (*HopClient, error) {
+// get from map or establish new session
+func (p *principalClient) getTargetClient(agtID byte, i authgrants.Intent) (*HopClient, error) {
+	p.pLock.Lock()
+	defer p.pLock.Unlock()
+	if scs, ok := p.targetSubClients[agtID]; ok {
+		if tc, ok := scs[i.TargetURL()]; ok {
+			return tc, nil
+		}
+	}
+
+	return p.setupSubClient(i)
+}
+
+func (c *HopClient) setupTargetClient(i authgrants.Intent) (*HopClient, error) {
+	targetConn, err := c.setUpDelegateProxyToTarget(i)
+	if err != nil {
+		return nil, err
+	}
 
 	// TODO(baumanl): think through best way to get the config for this
 	// load client config from default path
