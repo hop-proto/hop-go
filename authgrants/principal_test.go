@@ -3,7 +3,6 @@ package authgrants
 import (
 	"crypto/rand"
 	"fmt"
-	"io"
 	"net"
 	"testing"
 	"time"
@@ -98,15 +97,9 @@ func TestPrincipal(t *testing.T) {
 		return nil
 	}
 
-	setupTarg := func(u core.URL) (io.ReadWriter, error) {
+	setupTarg := func(u core.URL) (net.Conn, error) {
 		logrus.Infof("target setup: simulating connection to %s", u.String())
 		return tc, nil
-	}
-
-	pi := PrincipalInstance{
-		DelegateConn:    dc,
-		CheckIntent:     ciFunc,
-		SetUpTargetConn: setupTarg,
 	}
 
 	// Start "Delegate"
@@ -115,7 +108,25 @@ func TestPrincipal(t *testing.T) {
 	// Start "Target"
 	go fakeTarget(t, tcT)
 
-	pi.Run()
+	StartPrincipalInstance(dc, ciFunc, setupTarg)
+}
+
+func TestPrincipalNilCallback(t *testing.T) {
+	dc, dcD := net.Pipe() // delegate conn
+	tc, tcT := net.Pipe() // target conn
+
+	setupTarg := func(u core.URL) (net.Conn, error) {
+		logrus.Infof("target setup: simulating connection to %s", u.String())
+		return tc, nil
+	}
+
+	// Start "Delegate"
+	go fakeDelegate(t, dcD)
+
+	// Start "Target"
+	go fakeTarget(t, tcT)
+
+	StartPrincipalInstance(dc, nil, setupTarg)
 }
 
 func TestPrincipalCheckIntentFail(t *testing.T) {
@@ -127,15 +138,9 @@ func TestPrincipalCheckIntentFail(t *testing.T) {
 		return fmt.Errorf("not going to approve that")
 	}
 
-	setupTarg := func(u core.URL) (io.ReadWriter, error) {
+	setupTarg := func(u core.URL) (net.Conn, error) {
 		logrus.Infof("target setup: simulating connection to %s", u.String())
 		return tc, nil
-	}
-
-	pi := PrincipalInstance{
-		DelegateConn:    dc,
-		CheckIntent:     ciFunc,
-		SetUpTargetConn: setupTarg,
 	}
 
 	// Start "Delegate"
@@ -144,7 +149,7 @@ func TestPrincipalCheckIntentFail(t *testing.T) {
 	// Start "Target"
 	go fakeTarget(t, tcT)
 
-	pi.Run()
+	StartPrincipalInstance(dc, ciFunc, setupTarg)
 }
 
 func TestPrincipalCheckTargetFail(t *testing.T) {
@@ -156,15 +161,9 @@ func TestPrincipalCheckTargetFail(t *testing.T) {
 		return nil
 	}
 
-	setupTarg := func(u core.URL) (io.ReadWriter, error) {
+	setupTarg := func(u core.URL) (net.Conn, error) {
 		logrus.Infof("target setup: simulating connection to %s", u.String())
 		return tc, nil
-	}
-
-	pi := PrincipalInstance{
-		DelegateConn:    dc,
-		CheckIntent:     ciFunc,
-		SetUpTargetConn: setupTarg,
 	}
 
 	// Start "Delegate"
@@ -173,5 +172,5 @@ func TestPrincipalCheckTargetFail(t *testing.T) {
 	// Start "Target"
 	go fakeTargetDenial(t, tcT)
 
-	pi.Run()
+	StartPrincipalInstance(dc, ciFunc, setupTarg)
 }

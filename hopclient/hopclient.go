@@ -13,6 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/agent"
+	"hop.computer/hop/authgrants"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/codex"
 	"hop.computer/hop/common"
@@ -39,24 +40,23 @@ type HopClient struct { // nolint:maligned
 	TransportConn *transport.Client
 	ProxyConn     *tubes.Reliable
 
+	// +checklocks:checkIntentLock
+	checkIntent     func(authgrants.Intent) error // should only be set if principal
+	checkIntentLock sync.Mutex
+
 	TubeMuxer *tubes.Muxer
 	ExecTube  *codex.ExecTube
 
-	// address string // TODO(baumanl): what exactly is this? address string or real address or hop url??? does it need to be here or could it be in the config
-
-	// TODO(baumanl): does the hop client actually need all of the Hosts slice if
-	// it is just connecting to one? In general I think they won't be used, but
-	// could be useful for creating a config during authorization grant protocol
-	// config     *config.ClientConfig
 	hostconfig *config.HostConfig
 }
 
 // NewHopClient creates a new client object
 func NewHopClient(config *config.HostConfig) (*HopClient, error) {
 	client := &HopClient{
-		hostconfig: config,
-		wg:         sync.WaitGroup{},
-		Fsystem:    nil,
+		hostconfig:      config,
+		wg:              sync.WaitGroup{},
+		Fsystem:         nil,
+		checkIntentLock: sync.Mutex{},
 	}
 	logrus.Info("C: created client: ", client.hostconfig.Hostname)
 	return client, nil

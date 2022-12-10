@@ -1,7 +1,8 @@
 package hopclient
 
 import (
-	"io"
+	"fmt"
+	"net"
 
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/common"
@@ -20,21 +21,29 @@ import (
 //   - approve/deny Intent Requests [implemented]
 //   - communicate Intent to Target server [implemented]
 
-func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable) {
-	pi := authgrants.PrincipalInstance{
-		DelegateConn:    delTube,
-		CheckIntent:     placeholderCheckIntent,
-		SetUpTargetConn: c.setupTargetClient,
+// SetCheckIntentCallback can be used to set a custom approver for intent requests
+func (c *HopClient) SetCheckIntentCallback(f func(authgrants.Intent) error) error {
+	if c.hostconfig == nil {
+		return fmt.Errorf("can't set check intent callback without config loaded")
 	}
-	pi.Run()
-	// TODO(baumanl): add way to close without waiting for delegateconn to close?
-}
-
-func placeholderCheckIntent(i authgrants.Intent) error {
+	if !c.hostconfig.IsPrincipal {
+		return fmt.Errorf("can't set check intent callback for delegate client")
+	}
+	c.checkIntentLock.Lock()
+	c.checkIntent = f
+	c.checkIntentLock.Unlock()
 	return nil
 }
 
-func (c *HopClient) setupTargetClient(targURL core.URL) (io.ReadWriter, error) {
+func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable) {
+	c.checkIntentLock.Lock()
+	ci := c.checkIntent
+	c.checkIntentLock.Unlock()
+
+	authgrants.StartPrincipalInstance(delTube, ci, c.setupTargetClient)
+}
+
+func (c *HopClient) setupTargetClient(targURL core.URL) (net.Conn, error) {
 	targetConn, err := c.setUpDelegateProxyToTarget(targURL)
 	if err != nil {
 		return nil, err
