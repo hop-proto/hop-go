@@ -231,7 +231,7 @@ func (c *TestClient) StartClient(t *testing.T) {
 	if c.Authenticator != nil {
 		err = c.Client.DialExternalAuthenticator(c.Remote, c.Authenticator)
 	} else if c.AuthgrantConn != nil {
-		err = c.Client.DialExternalConn(c.AuthgrantConn)
+		err = c.Client.DialExternalConn()
 	} else {
 		err = c.Client.Dial()
 	}

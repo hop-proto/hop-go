@@ -68,7 +68,7 @@ func NewHopClient(config *config.HostConfig) (*HopClient, error) {
 // using information in it's config.
 func (c *HopClient) Dial() error {
 	// TODO(baumanl): Connect to the authgrant server
-	err := c.authenticatorSetup(nil) // TODO(baumanl): or should this be done in NewClient?
+	err := c.authenticatorSetup() // TODO(baumanl): or should this be done in NewClient?
 	if err != nil {
 		return err
 	}
@@ -81,14 +81,14 @@ func (c *HopClient) Dial() error {
 
 // DialExternalConn is the same as Dial but skips dialing the
 // authgrant server directly.
-func (c *HopClient) DialExternalConn(authGrantConn net.Conn) error {
+func (c *HopClient) DialExternalConn() error {
 	// If providing an authGrantConn this way the caller is responsible for
 	// ensuring that this client is actually allowed to be asking the principal
 	// for the authorization grant. (necessary for testing since the check on
 	// descendent processes may be broken.)
 
 	// create authenticator object provided a conn to hop key agent
-	err := c.authenticatorSetup(authGrantConn)
+	err := c.authenticatorSetup()
 	if err != nil {
 		return err
 	}
@@ -140,20 +140,19 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	return nil
 }
 
-func (c *HopClient) authenticatorSetup(authgrantConn net.Conn) error {
+func (c *HopClient) authenticatorSetup() error {
 	c.m.Lock()
 	defer c.m.Unlock()
-	return c.authenticatorSetupLocked(authgrantConn)
+	return c.authenticatorSetupLocked()
 }
 
 // Client creates an authenticator object from AG, agent, or in mem keys.
-func (c *HopClient) authenticatorSetupLocked(authgrantConn net.Conn) error {
+func (c *HopClient) authenticatorSetupLocked() error {
 	defer logrus.Info("C: authenticator setup complete")
-	hc := c.hostconfig
+	var authenticator core.Authenticator
+	var leaf *certs.Certificate
 
-	if authgrantConn != nil && hc.IsPrincipal {
-		return fmt.Errorf("client: called authenticator setup with non-nil authgrantConn for principal client")
-	}
+	hc := c.hostconfig
 
 	if !hc.IsPrincipal {
 		return c.getAuthorization()
@@ -171,9 +170,6 @@ func (c *HopClient) authenticatorSetupLocked(authgrantConn net.Conn) error {
 		return fmt.Errorf("no certificate provided and AutoSelfSign is not enabled for %q", hc.HostURL().Address())
 	}
 	keyPath := combinators.StringOr(hc.Key, config.DefaultKeyPath())
-	var authenticator core.Authenticator
-
-	var leaf *certs.Certificate
 	agentURL := combinators.StringOr(hc.AgentURL, common.DefaultAgentURL)
 
 	ac := agent.Client{
