@@ -3,20 +3,20 @@ package tubes
 // TODO(hosono) add these tests back
 
 import (
-	"io"
+	//"io"
 	//"math/rand"
-	"net"
+	//"net"
 	//"sync"
-	"testing"
+	//"testing"
 	//"time"
 
-	"github.com/sirupsen/logrus"
-	"gotest.tools/assert"
+	//"github.com/sirupsen/logrus"
+	//"gotest.tools/assert"
 	//"gotest.tools/assert/cmp"
 	//"hop.computer/hop/certs"
 	//"hop.computer/hop/keys"
-	"hop.computer/hop/common"
-	"hop.computer/hop/transport"
+	//"hop.computer/hop/common"
+	//"hop.computer/hop/transport"
 )
 
 // func newTestServerConfig(t *testing.T) *transport.ServerConfig {
@@ -327,70 +327,3 @@ import (
 // 	ms.Stop()
 // 	mc.Stop()
 // }
-
-func TestMuxer(t *testing.T) {
-	t.Skip()
-	logrus.SetLevel(logrus.TraceLevel)
-	var c1, c2 transport.MsgConn
-	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")
-	assert.NilError(t, err)
-
-	c1UDP, err := net.Dial("udp", "localhost:7777")
-	assert.NilError(t, err)
-	c1 = transport.MakeUDPMsgConn(c1UDP.(*net.UDPConn))
-
-	c2UDP, err := net.DialUDP("udp", c2Addr, c1.LocalAddr().(*net.UDPAddr))
-	assert.NilError(t, err)
-	c2 = transport.MakeUDPMsgConn(c2UDP)
-
-	muxer1 := NewMuxer(c1, 0, logrus.WithField("muxer", "m1"))
-	muxer1.log.WithField("addr", c1.LocalAddr()).Info("Created")
-	muxer2 := NewMuxer(c2, 0, logrus.WithField("muxer", "m2"))
-	muxer2.log.WithField("addr", c2.LocalAddr()).Info("Created")
-
-	go func() {
-		go func() {
-			e := muxer1.Start()
-			if e != nil {
-				logrus.Fatalf("muxer1 error: %v", e)
-			}
-		}()
-		tube, err := muxer1.Accept()
-		if err != nil {
-			logrus.Error("mux1: ", err)
-		}
-
-		buf := make([]byte, 8)
-		_, err = io.ReadFull(tube, buf)
-		if err != nil {
-			logrus.Error("mux1: ", err)
-		}
-		assert.Equal(t, string(buf), "username")
-		_, err = tube.Write([]byte("hi"))
-		if err != nil {
-			logrus.Error("mux1: ", err)
-		}
-		logrus.Info("mux1 done")
-		tube.Close()
-	}()
-
-	go func() {
-		e := muxer2.Start()
-		if e != nil {
-			logrus.Fatalf("muxer2 error: %v", e)
-		}
-	}()
-
-	t1, err := muxer2.CreateReliableTube(common.UserAuthTube)
-	if err != nil {
-		logrus.Error("mux2: ", err)
-	}
-	t1.Write([]byte("username"))
-
-	buf := make([]byte, 2)
-	_, err = io.ReadFull(t1, buf)
-	assert.NilError(t, err)
-	assert.Equal(t, string(buf), "hi")
-
-	t1.Close()
-}

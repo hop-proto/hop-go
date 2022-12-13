@@ -2,7 +2,7 @@ package tubes
 
 import (
 	"bytes"
-	"crypto/rand"
+	"errors"
 	"io"
 	"net"
 	"sync"
@@ -27,6 +27,7 @@ type Tube interface {
 
 // Muxer handles delivering and sending tube messages
 type Muxer struct {
+	idParity byte
 	// +checklocks:m
 	tubes map[byte]Tube
 	// Channels waiting for an Accept() call.
@@ -44,8 +45,15 @@ type Muxer struct {
 }
 
 // NewMuxer starts a new tube muxer
-func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, log *logrus.Entry) *Muxer {
+func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, is_server bool, log *logrus.Entry) *Muxer {
+	var idParity byte
+	if is_server {
+		idParity = 0
+	} else {
+		idParity = 1
+	}
 	return &Muxer{
+		idParity:   idParity,
 		tubes:      make(map[byte]Tube),
 		tubeQueue:  make(chan Tube, 128),
 		m:          sync.Mutex{},
@@ -70,17 +78,26 @@ func (m *Muxer) getTube(tubeID byte) (Tube, bool) {
 }
 
 // +checklocks:m.m
-func (m *Muxer) pickTubeID() byte {
-	cid := []byte{0}
-	rand.Read(cid)
-	return cid[0]
+func (m *Muxer) pickTubeID() (byte, error) {
+	for guess := m.idParity; guess+1 > guess; guess++ {
+		_, ok := m.tubes[guess]
+		if !ok {
+			m.log.WithField("tubeID", guess).Debug("picked new tube id")
+			return guess, nil
+		}
+	}
+	m.log.Info("out of tube IDs")
+	return 0, errors.New("out of tubes")
 }
 
 // CreateReliableTube starts a new reliable tube
 func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
 	m.m.Lock()
 	defer m.m.Unlock()
-	id := m.pickTubeID()
+	id, err := m.pickTubeID()
+	if err != nil {
+		return nil, err
+	}
 	tube, err := m.makeReliableTubeWithID(tType, id, true)
 	m.log.Infof("Created Tube: %v", tube.GetID())
 	return tube, err
@@ -137,11 +154,13 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 
 // CreateUnreliableTube starts a new unreliable tube
 func (m *Muxer) CreateUnreliableTube(tType TubeType) (*Unreliable, error) {
-	// TODO(hosono) we should pick tube IDs sequentially not randomly
 	m.m.Lock()
 	defer m.m.Unlock()
 
-	tubeID := m.pickTubeID()
+	tubeID, err := m.pickTubeID()
+	if err != nil {
+		return nil, err
+	}
 	tube := m.makeUnreliableTubeWithID(tType, tubeID, true)
 	m.log.Infof("Created Tube: %v", tube.GetID())
 	return tube, nil
