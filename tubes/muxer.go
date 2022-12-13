@@ -75,7 +75,6 @@ func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
 	cid := []byte{0}
 	rand.Read(cid)
 	tube, err := m.makeReliableTubeWithID(tType, cid[0], true)
-	m.addTube(tube)
 	m.log.Infof("Created Tube: %v", tube.GetID())
 	return tube, err
 }
@@ -122,6 +121,7 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 		tType:     tType,
 		log:       tubeLog,
 	}
+	m.addTube(r)
 	r.recvWindow.init()
 	go r.initiate(req)
 	return r, nil
@@ -231,7 +231,6 @@ func (m *Muxer) Start() (err error) {
 				if initFrame.flags.REL {
 					tube, _ = m.makeReliableTubeWithID(initFrame.tubeType, initFrame.tubeID, false)
 					// TODO(hosono) error handling
-					m.addTube(tube)
 					m.tubeQueue <- tube
 				} else {
 					m.makeUnreliableTubeWithID(initFrame.tubeType, initFrame.tubeID, false)
