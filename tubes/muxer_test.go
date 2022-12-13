@@ -2,22 +2,23 @@ package tubes
 
 // TODO(hosono) add these tests back
 
- import (
-	 "io"
-	 //"math/rand"
-	 "net"
-	 //"sync"
-	 "testing"
-	 //"time"
+import (
+	"io"
+	//"math/rand"
+	"net"
+	//"sync"
+	"testing"
+	//"time"
 
-	 "github.com/sirupsen/logrus"
-	 "gotest.tools/assert"
-	 //"gotest.tools/assert/cmp"
-	 //"hop.computer/hop/certs"
-	 //"hop.computer/hop/keys"
-	 "hop.computer/hop/common"
-	 "hop.computer/hop/transport"
- )
+	"github.com/sirupsen/logrus"
+	"gotest.tools/assert"
+
+	//"gotest.tools/assert/cmp"
+	//"hop.computer/hop/certs"
+	//"hop.computer/hop/keys"
+	"hop.computer/hop/common"
+	"hop.computer/hop/transport"
+)
 
 // func newTestServerConfig(t *testing.T) *transport.ServerConfig {
 // 	keyPair, err := keys.ReadDHKeyFromPEMFile("./testdata/leaf-key.pem")
@@ -354,20 +355,23 @@ func TestMuxer(t *testing.T) {
 				logrus.Fatalf("muxer1 error: %v", e)
 			}
 		}()
-		t, err := muxer1.Accept()
+		tube, err := muxer1.Accept()
 		if err != nil {
 			logrus.Error("mux1: ", err)
 		}
-		_, err = io.ReadAll(t)
+
+		buf := make([]byte, 8)
+		_, err = io.ReadFull(tube, buf)
 		if err != nil {
 			logrus.Error("mux1: ", err)
 		}
-		_, err = t.Write([]byte("hi"))
+		assert.Equal(t, string(buf), "username")
+		_, err = tube.Write([]byte("hi"))
 		if err != nil {
 			logrus.Error("mux1: ", err)
 		}
 		logrus.Info("mux1 done")
-		t.Close()
+		tube.Close()
 	}()
 
 	go func() {
@@ -382,7 +386,11 @@ func TestMuxer(t *testing.T) {
 		logrus.Error("mux2: ", err)
 	}
 	t1.Write([]byte("username"))
-	t1.Close()
 
-	io.ReadAll(t1)
+	buf := make([]byte, 2)
+	_, err = io.ReadFull(t1, buf)
+	assert.NilError(t, err)
+	assert.Equal(t, string(buf), "hi")
+
+	t1.Close()
 }
