@@ -57,6 +57,7 @@ type Reliable struct {
 	// TODO(hosono) probably we shouldn't just have one lock that manages everything
 	// +checklocks:l
 	tubeState   state
+	timeWaitTimer *time.Timer
 	lastAckSent atomic.Uint32
 	initRecv    chan struct{}
 	initDone    chan struct{}
@@ -178,6 +179,8 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.tubeState = timeWait
 			r.log.Warn("got FIN packet. going from finWait2 to timeWait")
 			r.enterTimeWaitState()
+		case timeWait:
+			r.timeWaitTimer.Reset(3*time.Second)	
 		}
 		if r.tubeState != closed {
 			r.log.Trace("sending ACK of FIN")
@@ -198,9 +201,8 @@ func (r *Reliable) enterTimeWaitState() {
 	// The linux kernel seems to wait 1 minute for connections on the loopback interface.
 	// Is that too long for a user to wait? We can't just hand this off to the kernel.
 
-	//TODO(hosono) reset timer on new FINs
 	r.sender.stopRetransmit()
-	time.AfterFunc(3*time.Second, func() {
+	r.timeWaitTimer = time.AfterFunc(3*time.Second, func() {
 		r.l.Lock()
 		defer r.l.Unlock()
 		r.log.Warn("timer expired. going from timeWait to closed")
