@@ -330,6 +330,7 @@ import (
 // }
 
 func TestMuxer(t *testing.T) {
+	t.Skip()
 	logrus.SetLevel(logrus.TraceLevel)
 	var c1, c2 transport.MsgConn
 	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")

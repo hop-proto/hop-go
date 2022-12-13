@@ -291,13 +291,18 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 
 // Close handles closing reliable tubes
 func (r *Reliable) Close() (err error) {
-	<-r.initDone
+	select {
+	case <-r.initDone:
+		break
+	default:
+		return errBadTubeState
+	}
 	r.l.Lock()
 	defer r.l.Unlock()
 
 	switch r.tubeState {
 	case created:
-		return errors.New("tube not initiated")
+		return errBadTubeState
 	case initiated:
 		r.tubeState = finWait1
 		r.log.Warn("call to close. going from initiated to finWait1")
@@ -312,6 +317,11 @@ func (r *Reliable) Close() (err error) {
 	r.SetDeadline(time.Now())
 
 	return r.sender.sendFin()
+}
+
+// WaitForInit blocks until the Tube is initiated
+func (r *Reliable) WaitForInit() {
+	<-r.initDone
 }
 
 // WaitForClose blocks until the Tube is done closing

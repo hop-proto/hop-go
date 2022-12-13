@@ -57,10 +57,9 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, log *logrus.Entr
 	}
 }
 
+// +checklocks:m.m
 func (m *Muxer) addTube(c Tube) {
-	m.m.Lock()
 	m.tubes[c.GetID()] = c
-	m.m.Unlock()
 }
 
 func (m *Muxer) getTube(tubeID byte) (Tube, bool) {
@@ -70,15 +69,24 @@ func (m *Muxer) getTube(tubeID byte) (Tube, bool) {
 	return c, ok
 }
 
-// CreateReliableTube starts a new reliable tube
-func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
+// +checklocks:m.m
+func (m *Muxer) pickTubeID() byte {
 	cid := []byte{0}
 	rand.Read(cid)
-	tube, err := m.makeReliableTubeWithID(tType, cid[0], true)
+	return cid[0]
+}
+
+// CreateReliableTube starts a new reliable tube
+func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
+	m.m.Lock()
+	defer m.m.Unlock()
+	id := m.pickTubeID()
+	tube, err := m.makeReliableTubeWithID(tType, id, true)
 	m.log.Infof("Created Tube: %v", tube.GetID())
 	return tube, err
 }
 
+// +checklocks:m.m
 func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*Reliable, error) {
 	tubeLog := m.log.WithFields(logrus.Fields{
 		"tube":     tubeID,
@@ -130,14 +138,17 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 // CreateUnreliableTube starts a new unreliable tube
 func (m *Muxer) CreateUnreliableTube(tType TubeType) (*Unreliable, error) {
 	// TODO(hosono) we should pick tube IDs sequentially not randomly
-	tubeID := []byte{0}
-	rand.Read(tubeID)
-	tube := m.makeUnreliableTubeWithID(tType, tubeID[0], true)
+	m.m.Lock()
+	defer m.m.Unlock()
+
+	tubeID := m.pickTubeID()
+	tube := m.makeUnreliableTubeWithID(tType, tubeID, true)
 	m.log.Infof("Created Tube: %v", tube.GetID())
 	return tube, nil
 }
 
 // req is true if the tube is a new request. False otherwise
+// +checklocks:m.m
 func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) *Unreliable {
 	tube := &Unreliable{
 		tType:      tType,
@@ -156,8 +167,8 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 			"tubeType": tType,
 		}),
 	}
-	go tube.initiate()
 	m.addTube(tube)
+	go tube.initiate()
 	if !req {
 		m.tubeQueue <- tube
 	}
@@ -229,11 +240,15 @@ func (m *Muxer) Start() (err error) {
 					return err
 				}
 				if initFrame.flags.REL {
+					m.m.Lock()
 					tube, _ = m.makeReliableTubeWithID(initFrame.tubeType, initFrame.tubeID, false)
 					// TODO(hosono) error handling
 					m.tubeQueue <- tube
+					m.m.Unlock()
 				} else {
+					m.m.Lock()
 					m.makeUnreliableTubeWithID(initFrame.tubeType, initFrame.tubeID, false)
+					m.m.Unlock()
 				}
 			}
 
@@ -271,7 +286,11 @@ func (m *Muxer) Stop() (err error) {
 		go func(v Tube) { //parallelized closing tubes because other side may close them in a different order
 			defer wg.Done()
 			m.log.Info("Closing tube: ", v.GetID())
-			v.Close() //TODO(baumanl): If a tube was already closed this returns an error that is ignored atm. Remove tube from map after closing?
+			err := v.Close() //TODO(baumanl): If a tube was already closed this returns an error that is ignored atm. Remove tube from map after closing?
+			if err != nil {
+				// Tried to close tube in bad state. Nothing to do
+				return
+			}
 			rel, ok := v.(*Reliable)
 			if ok {
 				rel.WaitForClose()

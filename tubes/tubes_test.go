@@ -1,6 +1,7 @@
 package tubes
 
 import (
+	"time"
 	"io"
 	"net"
 	"testing"
@@ -21,7 +22,7 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err
 	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")
 	assert.NilError(t, err)
 
-	c1UDP, err := net.Dial("udp", "localhost:7777")
+	c1UDP, err := net.Dial("udp", c2Addr.String())
 	assert.NilError(t, err)
 	c1 = transport.MakeUDPMsgConn(c1UDP.(*net.UDPConn))
 
@@ -97,6 +98,8 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err
 		assert.NilError(t, err)
 		err = c2.Close()
 		assert.NilError(t, err)
+
+		time.Sleep(time.Second)
 	}
 
 	return t1, t2, stop, rel, err
@@ -106,6 +109,13 @@ func CloseTest(t *testing.T, rel bool) {
 	c1, c2, stop, _, err := makeConn(t, rel)
 	assert.NilError(t, err)
 	defer stop()
+
+	if c1Rel, ok := c1.(*Reliable); ok {
+		c1Rel.WaitForInit()
+	}
+	if c2Rel, ok := c2.(*Reliable); ok {
+		c2Rel.WaitForInit()
+	}
 
 	c1.Close()
 	c2.Close()
@@ -129,7 +139,7 @@ func CloseTest(t *testing.T, rel bool) {
 	assert.DeepEqual(t, n, 0)
 }
 
-func TestReliable(t *testing.T) {
+func reliable(t *testing.T) {
 	logrus.SetLevel(logrus.TraceLevel)
 
 	t.Run("Close", func(t *testing.T) {
@@ -146,7 +156,7 @@ func TestReliable(t *testing.T) {
 	})
 }
 
-func TestUnreliable(t *testing.T) {
+func unreliable(t *testing.T) {
 	logrus.SetLevel(logrus.TraceLevel)
 
 	t.Run("Close", func(t *testing.T) {
@@ -160,4 +170,9 @@ func TestUnreliable(t *testing.T) {
 	t.Run("Nettest", func(t *testing.T) {
 		nettest.TestConn(t, mp)
 	})
+}
+
+func TestTubes(t *testing.T) {
+	t.Run("Reliable", reliable)
+	t.Run("Unreliable", unreliable)
 }
