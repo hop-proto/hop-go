@@ -1,10 +1,10 @@
 package tubes
 
 import (
-	"time"
 	"io"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/sirupsen/logrus"
 

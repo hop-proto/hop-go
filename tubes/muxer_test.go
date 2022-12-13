@@ -12,7 +12,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
-
 	//"gotest.tools/assert/cmp"
 	//"hop.computer/hop/certs"
 	//"hop.computer/hop/keys"

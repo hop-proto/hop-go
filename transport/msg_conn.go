@@ -27,7 +27,6 @@ var _ MsgConn = &Client{}
 // Handle implements MsgConn
 var _ MsgConn = &Handle{}
 
-
 // UDPMsgConn is a wrapper around net.UDPConn that implements MsgConn
 type UDPMsgConn struct {
 	net.UDPConn
@@ -35,17 +34,20 @@ type UDPMsgConn struct {
 
 var _ MsgConn = &UDPMsgConn{}
 
+// MakeUDPMsgConn converts a *net.UDPConn into a *UDPMsgConn
 func MakeUDPMsgConn(underlying *net.UDPConn) *UDPMsgConn {
 	return &UDPMsgConn{
 		*underlying,
 	}
 }
 
+// ReadMsg implements the MsgConn interface
 func (c *UDPMsgConn) ReadMsg(b []byte) (n int, err error) {
 	n, _, _, _, err = c.ReadMsgUDP(b, nil)
 	return
 }
 
+// WriteMsg implement the MsgConn interface
 func (c *UDPMsgConn) WriteMsg(b []byte) (err error) {
 	_, _, err = c.WriteMsgUDP(b, nil, nil)
 	return

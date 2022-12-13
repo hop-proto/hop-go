@@ -39,7 +39,7 @@ type Muxer struct {
 	timeout    time.Duration
 	log        *logrus.Entry
 
-	// This buffer is only used in m.readMsg 
+	// This buffer is only used in m.readMsg
 	readBuf []byte
 }
 

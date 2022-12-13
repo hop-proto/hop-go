@@ -214,7 +214,7 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 	}
 	n = len(b)
 	u.log.WithFields(logrus.Fields{
-		"frameNo": pkt.frameNo,
+		"frameNo":    pkt.frameNo,
 		"dataLength": pkt.dataLength,
 	}).Trace("wrote packet")
 	return n, 0, err
