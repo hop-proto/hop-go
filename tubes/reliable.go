@@ -54,7 +54,6 @@ type Reliable struct {
 	remoteAddr net.Addr
 	sender     sender
 	sendQueue  chan []byte
-	// TODO(hosono) probably we shouldn't just have one lock that manages everything
 	// +checklocks:l
 	tubeState   state
 	timeWaitTimer *time.Timer
@@ -188,7 +187,7 @@ func (r *Reliable) receive(pkt *frame) error {
 		}
 	}
 
-	// TODO(hosono) is there a wrapping problem here?
+	// Send preemptive ACKs to allow for better throughput for large transfers
 	if (r.recvWindow.getAck()-r.lastAckSent.Load()) >= windowSize/2 && !pkt.flags.FIN && r.tubeState != closed {
 		r.sender.sendEmptyPacket()
 	}
