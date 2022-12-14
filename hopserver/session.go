@@ -344,7 +344,7 @@ func (sess *hopSession) startPFControl(ch *tubes.Reliable) {
 	var c *exec.Cmd
 	if user, ok := cache.LookupUserByName(sess.user); ok {
 		//Default behavior is for command.Env to inherit parents environment unless given and explicit alternative.
-		//TODO(baumanl): These are minimal environment variables. SSH allows for more inheritance from client, but it gets complicated.
+		// TODO(drebelsky): don't require a separate binary
 		c = exec.Command("/app/remotePF")
 		c.Env = []string{}
 		c.Dir = user.Homedir()
@@ -355,7 +355,8 @@ func (sess *hopSession) startPFControl(ch *tubes.Reliable) {
 			Groups: []uint32{uint32(user.Gid())},
 		}
 	} else {
-		logrus.Panic("AAH")
+		// TODO(drebelsky): decide on what should happen here
+		logrus.Panic("Couldn't find user when starting startPFControl")
 	}
 	portforwarding.HandleServerControl(ch, sess.forwardTable, sess.tubeMuxer, c)
 }
