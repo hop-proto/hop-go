@@ -245,7 +245,7 @@ func HandleSize(tube *tubes.Reliable, ptyFile *os.File) {
 	}
 }
 
-// Server deals with serverside code exec channel details like pty size, copies ch -> pty and pty -> ch
+// Server deals with serverside code exec channe details like pty size, copies ch -> pty and pty -> ch
 func Server(tube *tubes.Reliable, f *os.File) {
 	defer tube.Close()
 	defer func() { _ = f.Close() }() // Best effort.

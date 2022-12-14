@@ -334,7 +334,30 @@ func (sess *hopSession) newAuthGrantTube() (*tubes.Reliable, error) {
 // TODO(drebelsky): authorize; also look at what the already existing things are doing
 // TODO(drebelsky): should this exist here or somewhere else?
 func (sess *hopSession) startPFControl(ch *tubes.Reliable) {
-	portforwarding.HandleServerControl(ch, sess.forwardTable, sess.tubeMuxer)
+	// TODO(drebelsky) unify with startCodex
+	cache, err := etcpwdparse.NewLoadedEtcPasswdCache() //Best way to do this? should I load this only once and then just reload on misses? What if /etc/passwd modified between accesses?
+	if err != nil {
+		err := errors.New("issue loading /etc/passwd")
+		logrus.Panic(err)
+		return
+	}
+	var c *exec.Cmd
+	if user, ok := cache.LookupUserByName(sess.user); ok {
+		//Default behavior is for command.Env to inherit parents environment unless given and explicit alternative.
+		//TODO(baumanl): These are minimal environment variables. SSH allows for more inheritance from client, but it gets complicated.
+		c = exec.Command("/app/remotePF")
+		c.Env = []string{}
+		c.Dir = user.Homedir()
+		c.SysProcAttr = &syscall.SysProcAttr{}
+		c.SysProcAttr.Credential = &syscall.Credential{
+			Uid:    uint32(user.Uid()),
+			Gid:    uint32(user.Gid()),
+			Groups: []uint32{uint32(user.Gid())},
+		}
+	} else {
+		logrus.Panic("AAH")
+	}
+	portforwarding.HandleServerControl(ch, sess.forwardTable, sess.tubeMuxer, c)
 }
 
 func (sess *hopSession) startPF(ch *tubes.Reliable) {

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 
@@ -135,10 +137,33 @@ func writeFlags(w io.Writer, start, notify bool) (err error) {
 	return err
 }
 
-func listen(local, remote *addr, table *FwdMapping, muxer *tubes.Muxer) bool {
-	ln, err := net.Listen(getNetwork(local.netType), local.addr)
-	if err != nil {
-		return false
+// TODO (pass conn as nil if we should do the listening ourselves)
+func listen(local, remote *addr, table *FwdMapping, muxer *tubes.Muxer, conn *net.UnixConn) bool {
+	var ln net.Listener
+	if conn != nil {
+		var msg []byte
+		msg = binary.BigEndian.AppendUint16(msg, uint16(len(getNetwork(local.netType))))
+		msg = append(msg, []byte(getNetwork(local.netType))...)
+		msg = binary.BigEndian.AppendUint16(msg, uint16(len(local.addr)))
+		msg = append(msg, []byte(local.addr)...)
+		_, err := conn.Write(msg)
+		if err != nil {
+			panic(err)
+		}
+		fl, err := Get(conn, 1, nil)
+		if err != nil {
+			panic(err)
+		}
+		ln, err = net.FileListener(fl[0])
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		var err error
+		ln, err = net.Listen(getNetwork(local.netType), local.addr)
+		if err != nil {
+			return false
+		}
 	}
 	done := make(chan int, 1)
 	table.om.Lock()
@@ -195,7 +220,26 @@ func listen(local, remote *addr, table *FwdMapping, muxer *tubes.Muxer) bool {
 }
 
 // HandleServerControl handles PFControl tubes for the server
-func HandleServerControl(ch *tubes.Reliable, table *FwdMapping, muxer *tubes.Muxer) {
+func HandleServerControl(ch *tubes.Reliable, table *FwdMapping, muxer *tubes.Muxer, child *exec.Cmd) {
+	// TODO(drebelsky): better name, decide security
+	ln, err := net.Listen("unix", "/tmp/sock")
+	if err != nil {
+		logrus.Panic(err)
+	}
+	stdin, err := child.StdinPipe()
+	stdout, err := child.StdoutPipe()
+	go func() {
+		io.Copy(os.Stdout, stdout)
+		_ = stdin
+	}()
+	err = child.Start()
+	if err != nil {
+		logrus.Panic(err)
+	}
+	conn, err := ln.Accept()
+	if err != nil {
+		logrus.Panic(err)
+	}
 	for {
 		start, notify, err := readFlags(ch)
 		if err != nil {
@@ -219,7 +263,7 @@ func HandleServerControl(ch *tubes.Reliable, table *FwdMapping, muxer *tubes.Mux
 			continue
 		}
 		if start {
-			if listen(local, remote, table, muxer) {
+			if listen(local, remote, table, muxer, conn.(*net.UnixConn)) {
 				ch.Write([]byte{success})
 			} else {
 				ch.Write([]byte{failure})
@@ -302,7 +346,7 @@ func InitiatePF(ch *tubes.Reliable, table *FwdMapping, local, remote []*Forward,
 		}
 	}
 	for _, fwd := range local {
-		if listen(&fwd.listen, &fwd.connect, table, muxer) {
+		if listen(&fwd.listen, &fwd.connect, table, muxer, nil) {
 			writeFlags(ch, true, true)
 			ch.Write(toBytes(&fwd.listen))
 			ch.Write(toBytes(&fwd.connect))
