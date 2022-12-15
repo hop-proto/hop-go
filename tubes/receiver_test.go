@@ -70,6 +70,9 @@ func TestUnwrap(t *testing.T) {
 	r := receiver{}
 	r.ackNo = 0
 
+	r.m.Lock()
+	defer r.m.Unlock()
+
 	var i uint64
 
 	logrus.WithField("ackNo", r.ackNo).Info("setting ackNo")

@@ -135,6 +135,7 @@ func frameInBounds(wS uint64, wE uint64, f uint64) bool {
 Utility function to add offsets so that we eliminate wraparounds.
 Precondition: must be holding frame number
 */
+// +checklocks:r.m
 func (r *receiver) unwrapFrameNo(frameNo uint32) uint64 {
 	// TODO(hosono) there's probably a much simpler way to do this, but this works
 	var mult uint64 = 1 << 32 // 2 ^ 32
