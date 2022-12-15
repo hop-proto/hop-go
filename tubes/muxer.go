@@ -392,6 +392,10 @@ func (m *Muxer) Stop() (err error) {
 
 	wg.Wait()
 	m.state.Store(muxerClosed)
+
+	// TODO(hosono) uncommenting this line fixes issue #44, but it causes failure in the testing environment
+	//m.underlying.Close()
+
 	close(m.stopped)
 	m.log.Info("Muxer.Stop() finished")
 	return nil
