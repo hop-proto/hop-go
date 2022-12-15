@@ -1,13 +1,15 @@
 package tubes
 
-// import (
-// 	"bytes"
-// 	"math/rand"
-// 	"sync"
-// 	"testing"
+import (
+	//"bytes"
+	//"math/rand"
+	//"sync"
+	"testing"
 
-// 	"gotest.tools/assert"
-// )
+	"gotest.tools/assert"
+
+	"github.com/sirupsen/logrus"
+)
 
 // func makePacket(frameNo uint32, b []byte) *frame {
 // 	pkt := frame{
@@ -63,3 +65,44 @@ package tubes
 // 	assert.Equal(t, string(testData), string(readData))
 
 // }
+
+func TestUnwrap(t *testing.T) {
+	r := receiver{}
+	r.ackNo = 0
+
+	var i uint64
+
+	logrus.WithField("ackNo", r.ackNo).Info("setting ackNo")
+	for i = 0; i < 1000; i++ {
+		guess := r.unwrapFrameNo(uint32(i))
+		assert.DeepEqual(t, guess, i)
+	}
+
+	r.ackNo = 1 << 31
+	logrus.WithField("ackNo", r.ackNo).Info("setting ackNo")
+	for i = r.ackNo - 500; i < r.ackNo+500; i++ {
+		guess := r.unwrapFrameNo(uint32(i))
+		assert.DeepEqual(t, guess, i)
+	}
+
+	r.ackNo = 1<<32 - 1
+	logrus.WithField("ackNo", r.ackNo).Info("setting ackNo")
+	for i = r.ackNo - 500; i < r.ackNo+500; i++ {
+		guess := r.unwrapFrameNo(uint32(i))
+		assert.DeepEqual(t, guess, i)
+	}
+
+	r.ackNo = 1 << 32
+	logrus.WithField("ackNo", r.ackNo).Info("setting ackNo")
+	for i = r.ackNo - 500; i < r.ackNo+500; i++ {
+		guess := r.unwrapFrameNo(uint32(i))
+		assert.DeepEqual(t, guess, i)
+	}
+
+	r.ackNo = 1<<32 + 1
+	logrus.WithField("ackNo", r.ackNo).Info("setting ackNo")
+	for i = r.ackNo - 500; i < r.ackNo+500; i++ {
+		guess := r.unwrapFrameNo(uint32(i))
+		assert.DeepEqual(t, guess, i)
+	}
+}

@@ -136,19 +136,41 @@ Utility function to add offsets so that we eliminate wraparounds.
 Precondition: must be holding frame number
 */
 func (r *receiver) unwrapFrameNo(frameNo uint32) uint64 {
-	// TODO(hosono) there's a bug in the implementation below. For now, don't unwrap
-	return uint64(frameNo)
-	/*
-	 *    // The previous, offsets are represented by the 32 least significant bytes of the window start.
-	 *    windowStart := r.windowStart
-	 *    newNo := uint64(frameNo) + windowStart - uint64(uint32(windowStart))
-	 *
-	 *    // Add an additional offset for the case in which seqNo has wrapped around again.
-	 *    if frameNo < uint32(windowStart) {
-	 *        newNo += 1 << 32
-	 *    }
-	 *    return newNo
-	 */
+	// TODO(hosono) there's probably a much simpler way to do this, but this works
+	var mult uint64 = 1 << 32 // 2 ^ 32
+	var lower uint64
+	var upper uint64
+
+	if r.ackNo == 0 {
+		lower = uint64(frameNo)
+		upper = mult + uint64(frameNo)
+	} else if r.ackNo%mult < 1<<31 {
+		lower = (r.ackNo/mult-1)*mult + uint64(frameNo)
+		upper = (r.ackNo/mult)*mult + uint64(frameNo)
+	} else {
+		lower = (r.ackNo/mult)*mult + uint64(frameNo)
+		upper = (r.ackNo/mult+1)*mult + uint64(frameNo)
+	}
+
+	var lowerDiff uint64
+	var upperDiff uint64
+
+	if lower < r.ackNo {
+		lowerDiff = r.ackNo - lower
+	} else {
+		lowerDiff = lower - r.ackNo
+	}
+
+	if upper < r.ackNo {
+		upperDiff = r.ackNo - upper
+	} else {
+		upperDiff = upper - r.ackNo
+	}
+
+	if upperDiff < lowerDiff {
+		return upper
+	}
+	return lower
 }
 
 /* Precondition: receive window lock is held. */
