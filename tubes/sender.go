@@ -114,7 +114,6 @@ func (s *sender) write(b []byte) (int, error) {
 
 	s.fillWindow(false, startFrame)
 
-	// TODO(hosono) are there weird edge cases with the timer? Do we need to stop it and restart it?
 	s.RTOTicker.Reset(s.RTO)
 	return len(b), nil
 }
@@ -249,7 +248,6 @@ func (s *sender) retransmit() {
 			stop = true
 		}
 	}
-	// TODO(hosono) prevent panic by making sure retransmit is only called once
 	close(s.retransmitEnded)
 }
 
