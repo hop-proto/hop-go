@@ -82,6 +82,12 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 // waits for tubes to close and then removes them so their IDs can be reused
 func (m *Muxer) reapTube(t Tube) {
 	t.WaitForClose()
+
+	// This prevents tubes IDs from being reused while the remote peer is in the timeWait state
+	if t.GetID()%2 == m.idParity {
+		time.Sleep(timeWaitTime)
+	}
+
 	m.m.Lock()
 	defer m.m.Unlock()
 	delete(m.tubes, t.GetID())

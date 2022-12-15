@@ -1,9 +1,11 @@
 package tubes
 
 import (
+	"io"
 	"net"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -126,8 +128,58 @@ func manyUnreliableTubes(t *testing.T) {
 	stop()
 }
 
+// this ensures that tubes can still be opened even if the remote host is in the timeWait state
+func reusingTubes(t *testing.T) {
+	m1, m2, stop := makeMuxers(t)
+
+	// Create a reliable tube
+	t1, err := m1.CreateReliableTube(common.ExecTube)
+	assert.NilError(t, err)
+	t2, err := m2.Accept()
+	assert.NilError(t, err)
+	t2Rel := t2.(*Reliable)
+
+	// Close it on both ends
+	t2.Close()
+	time.Sleep(100 * time.Millisecond)
+	t1.Close()
+	time.Sleep(100 * time.Millisecond)
+
+	t2Rel.l.Lock()
+	t2State := t2Rel.tubeState
+	t2Rel.l.Unlock()
+
+	assert.DeepEqual(t, t2State, timeWait)
+
+	// Attempt to open another tube with the same ID
+	t1, err = m1.CreateReliableTube(common.ExecTube)
+	assert.NilError(t, err)
+	t2, err = m2.Accept()
+	assert.NilError(t, err)
+	t2Rel = t2.(*Reliable)
+
+	// Attempt to send data on that tube
+	data := []byte("hello")
+	n, err := t1.Write(data)
+	assert.DeepEqual(t, n, len(data))
+	assert.NilError(t, err)
+	err = t1.Close()
+	assert.NilError(t, err)
+
+	buf, err := io.ReadAll(t2Rel)
+	assert.NilError(t, err)
+
+	assert.DeepEqual(t, buf, data)
+
+	err = t2Rel.Close()
+	assert.NilError(t, err)
+
+	stop()
+}
+
 func TestMuxer(t *testing.T) {
 	logrus.SetLevel(logrus.TraceLevel)
 	t.Run("ManyUnreliableTubes", manyUnreliableTubes)
 	t.Run("ManyReliableTubes", manyReliableTubes)
+	t.Run("ReuseTubes", reusingTubes)
 }
