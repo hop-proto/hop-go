@@ -37,6 +37,7 @@ type Tube interface {
 	Type() TubeType
 	GetID() byte
 	IsReliable() bool
+	WaitForClose()
 	getLog() *logrus.Entry
 }
 
@@ -85,9 +86,18 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 	}
 }
 
+// waits for tubes to close and then removes them so their IDs can be reused
+func (m *Muxer) reapTube(t Tube) {
+	t.WaitForClose()
+	m.m.Lock()
+	defer m.m.Unlock()
+	delete(m.tubes, t.GetID())
+}
+
 // +checklocks:m.m
 func (m *Muxer) addTube(c Tube) {
 	m.tubes[c.GetID()] = c
+	go m.reapTube(c)
 }
 
 func (m *Muxer) getTube(tubeID byte) (Tube, bool) {

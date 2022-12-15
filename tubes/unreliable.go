@@ -326,6 +326,11 @@ func (u *Unreliable) IsReliable() bool {
 	return false
 }
 
+// WaitForClose blocks until the tube is done closing
+func (u *Unreliable) WaitForClose() {
+	<-u.closed
+}
+
 func (u *Unreliable) getLog() *logrus.Entry {
 	return u.log
 }
