@@ -11,13 +11,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// The largest tube frame data length field.
-const maxFrameDataLength uint16 = 2000
-
-// The highest number of frames we will transmit per timeout period,
-// even if the window size is large enough.
-const maxFragTransPerRTO = 50
-
 type sender struct {
 	// The acknowledgement number sent from the other end of the connection.
 	// +checklocks:l

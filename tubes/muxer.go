@@ -370,7 +370,7 @@ func (m *Muxer) Stop() (err error) {
 	m.state.Store(muxerClosing)
 	m.m.Unlock()
 
-	time.AfterFunc(4*time.Second, func() {
+	time.AfterFunc(muxerTimeout, func() {
 		m.m.Lock()
 		for _, v := range m.tubes {
 			if t, ok := v.(*Reliable); ok {

@@ -12,16 +12,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// How David would approach this:
-//   1. Implement the message framing (seq no, ack no, all that stuff)
-//   2. Implement Read and Write assuming no buffering or out of order or anything like that, using the framing
-//   3. Buffering
-//   4. Concurrency controls (locks)
-
-const retransmitOffset = time.Millisecond * 500
-
-const windowSize = 128
-
 // TubeType represents identifier bytes of Tubes.
 type TubeType byte
 
@@ -175,7 +165,7 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.log.Warn("got FIN packet. going from finWait2 to timeWait")
 			r.enterTimeWaitState()
 		case timeWait:
-			r.timeWaitTimer.Reset(3 * time.Second)
+			r.timeWaitTimer.Reset(timeWaitTime)
 		}
 		if r.tubeState != closed {
 			r.log.Trace("sending ACK of FIN")
@@ -199,7 +189,7 @@ func (r *Reliable) enterTimeWaitState() {
 
 	r.tubeState = timeWait
 	r.sender.stopRetransmit()
-	r.timeWaitTimer = time.AfterFunc(3*time.Second, func() {
+	r.timeWaitTimer = time.AfterFunc(timeWaitTime, func() {
 		r.l.Lock()
 		defer r.l.Unlock()
 		r.log.Warn("timer expired. going from timeWait to closed")
