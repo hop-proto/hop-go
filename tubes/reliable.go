@@ -3,7 +3,6 @@ package tubes
 
 import (
 	"encoding/binary"
-	"errors"
 	"io"
 	"net"
 	"sync"
@@ -41,8 +40,6 @@ const (
 	timeWait  state = iota
 	closed    state = iota
 )
-
-var errBadTubeState = errors.New("tube in bad state")
 
 // Reliable implements a reliable and receiveWindow tube on top
 type Reliable struct {
@@ -139,7 +136,7 @@ func (r *Reliable) receive(pkt *frame) error {
 			"state": r.tubeState,
 		}).Errorf("receive for tube in bad state")
 
-		return errBadTubeState
+		return ErrBadTubeState
 	}
 
 	// Pass the frame to the receive window
@@ -243,7 +240,7 @@ func (r *Reliable) Read(b []byte) (n int, err error) {
 	r.l.Lock()
 	if r.tubeState == created {
 		r.l.Unlock()
-		return 0, errBadTubeState
+		return 0, ErrBadTubeState
 	}
 	r.l.Unlock()
 
@@ -257,7 +254,7 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 
 	switch r.tubeState {
 	case created:
-		return 0, errBadTubeState
+		return 0, ErrBadTubeState
 	case initiated, closeWait:
 		break
 	default:
@@ -308,7 +305,7 @@ func (r *Reliable) Close() (err error) {
 
 	switch r.tubeState {
 	case created:
-		return errBadTubeState
+		return ErrBadTubeState
 	case initiated:
 		r.tubeState = finWait1
 		r.log.Warn("call to close. going from initiated to finWait1")

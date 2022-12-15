@@ -39,9 +39,6 @@ type Unreliable struct {
 	log *logrus.Entry
 }
 
-// TODO(hosono) pick a value for this
-var maxBufferedPackets = 1000
-
 // Unreliable tubes implement net.Conn
 var _ net.Conn = &Unreliable{}
 

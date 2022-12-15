@@ -2,7 +2,6 @@ package tubes
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"net"
 	"sync"
@@ -14,12 +13,6 @@ import (
 	"hop.computer/hop/common"
 	"hop.computer/hop/transport"
 )
-
-// ErrOutOfTubes indicates that the muxer has no more tubeIDs to assign
-var ErrOutOfTubes = errors.New("out of tube IDs")
-
-// ErrMuxerStopping indiates a new tube cannot be created because Muxer.Stop() has been called
-var ErrMuxerStopping = errors.New("muxer is stopping")
 
 type muxerState int32
 
