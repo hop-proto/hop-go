@@ -332,7 +332,7 @@ import (
 // 	mc.Stop()
 // }
 
-func makeMuxers(t *testing.T) (m1, m2 *Muxer, stop func()){
+func makeMuxers(t *testing.T) (m1, m2 *Muxer, stop func()) {
 	var c1, c2 transport.MsgConn
 	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")
 	assert.NilError(t, err)
@@ -346,22 +346,22 @@ func makeMuxers(t *testing.T) (m1, m2 *Muxer, stop func()){
 	c2 = transport.MakeUDPMsgConn(c2UDP)
 
 	m1 = NewMuxer(c1, 0, false, logrus.WithField("muxer", "m1"))
-    m1.log.WithField("addr", c1.LocalAddr()).Info("Created")
-    m2 = NewMuxer(c2, 0, true, logrus.WithField("muxer", "m2"))
-    m2.log.WithField("addr", c2.LocalAddr()).Info("Created")
+	m1.log.WithField("addr", c1.LocalAddr()).Info("Created")
+	m2 = NewMuxer(c2, 0, true, logrus.WithField("muxer", "m2"))
+	m2.log.WithField("addr", c2.LocalAddr()).Info("Created")
 
-    go func() {
-        e := m1.Start()
-        if e != nil {
-            logrus.Fatalf("muxer1 error: %v", e)
-        }
-    }()
-    go func() {
-        e := m2.Start()
-        if e != nil {
-            logrus.Fatalf("muxer2 error: %v", e)
-        }
-    }()
+	go func() {
+		e := m1.Start()
+		if e != nil {
+			logrus.Fatalf("muxer1 error: %v", e)
+		}
+	}()
+	go func() {
+		e := m2.Start()
+		if e != nil {
+			logrus.Fatalf("muxer2 error: %v", e)
+		}
+	}()
 
 	stop = func() {
 		wg := sync.WaitGroup{}
@@ -381,9 +381,12 @@ func makeMuxers(t *testing.T) (m1, m2 *Muxer, stop func()){
 		c2UDP.Close()
 	}
 
-	return
+	return m1, m2, stop
 }
 
+// These two tests are flagged as duplicates by the linter,
+// but making them one generic test is much less readable
+//nolint:dupl
 func manyReliableTubes(t *testing.T) {
 	// Each muxer can create exactly 128 tubes.
 	// The server creates even numbered tubes. The client creates odd numbered tubes
@@ -412,6 +415,7 @@ func manyReliableTubes(t *testing.T) {
 	stop()
 }
 
+//nolint:dupl
 func manyUnreliableTubes(t *testing.T) {
 	// Each muxer can create exactly 128 tubes.
 	// The server creates even numbered tubes. The client creates odd numbered tubes

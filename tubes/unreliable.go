@@ -20,10 +20,10 @@ type Unreliable struct {
 	id        byte
 	sendQueue chan []byte
 
-	state     atomic.Value
-	initiated chan struct{}
+	state       atomic.Value
+	initiated   chan struct{}
 	senderEnded chan struct{}
-	closed chan struct{}
+	closed      chan struct{}
 
 	// true if this tube began the request. false otherwise
 	// TODO(hosono) can be replaced with parity of tubeID
@@ -70,7 +70,7 @@ func (u *Unreliable) sender() {
 	}
 
 	// flush the buffer after a call to Close
-	for b, err := u.send.Recv(); err == nil;  {
+	for b, err := u.send.Recv(); err == nil; {
 		u.sendQueue <- b
 	}
 

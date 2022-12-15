@@ -15,14 +15,18 @@ import (
 	"hop.computer/hop/transport"
 )
 
-var ErrOutOfTubes = errors.New("Out of tube IDs")
-var ErrMuxerStopping = errors.New("Muxer is stopping")
+// ErrOutOfTubes indicates that the muxer has no more tubeIDs to assign
+var ErrOutOfTubes = errors.New("out of tube IDs")
+
+// ErrMuxerStopping indiates a new tube cannot be created because Muxer.Stop() has been called
+var ErrMuxerStopping = errors.New("muxer is stopping")
 
 type muxerState int32
+
 const (
 	muxerRunning muxerState = iota
 	muxerClosing muxerState = iota
-	muxerClosed muxerState = iota
+	muxerClosed  muxerState = iota
 )
 
 // Tube interface is shared between Reliable and Unreliable Tubes
@@ -57,9 +61,9 @@ type Muxer struct {
 }
 
 // NewMuxer starts a new tube muxer
-func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, is_server bool, log *logrus.Entry) *Muxer {
+func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, log *logrus.Entry) *Muxer {
 	var idParity byte
-	if is_server {
+	if isServer {
 		idParity = 0
 	} else {
 		idParity = 1
@@ -73,7 +77,7 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, is_server bool, 
 		m:          sync.Mutex{},
 		sendQueue:  make(chan []byte),
 		state:      state,
-		stopped:     make(chan struct{}),
+		stopped:    make(chan struct{}),
 		underlying: msgConn,
 		timeout:    timeout,
 		log:        log,
@@ -95,8 +99,8 @@ func (m *Muxer) getTube(tubeID byte) (Tube, bool) {
 
 // +checklocks:m.m
 func (m *Muxer) pickTubeID() (byte, error) {
-	for guess_int := int(m.idParity); guess_int < 256; guess_int+=2 {
-		guess := byte(guess_int)
+	for guessInt := int(m.idParity); guessInt < 256; guessInt += 2 {
+		guess := byte(guessInt)
 		_, ok := m.tubes[guess]
 		if !ok {
 			m.log.WithField("tubeID", guess).Debug("picked new tube id")
@@ -203,18 +207,18 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 		return nil, ErrMuxerStopping
 	}
 	tube := &Unreliable{
-		tType:      tType,
-		id:         tubeID,
-		sendQueue:  m.sendQueue,
-		localAddr:  m.underlying.LocalAddr(),
-		remoteAddr: m.underlying.RemoteAddr(),
-		recv:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
-		send:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
-		state:      atomic.Value{},
-		initiated:  make(chan struct{}),
+		tType:       tType,
+		id:          tubeID,
+		sendQueue:   m.sendQueue,
+		localAddr:   m.underlying.LocalAddr(),
+		remoteAddr:  m.underlying.RemoteAddr(),
+		recv:        common.NewDeadlineChan[[]byte](maxBufferedPackets),
+		send:        common.NewDeadlineChan[[]byte](maxBufferedPackets),
+		state:       atomic.Value{},
+		initiated:   make(chan struct{}),
 		senderEnded: make(chan struct{}),
-		closed:		make(chan struct{}),
-		req:        req,
+		closed:      make(chan struct{}),
+		req:         req,
 		log: m.log.WithFields(logrus.Fields{
 			"tube":     tubeID,
 			"reliable": false,
@@ -269,7 +273,7 @@ func (m *Muxer) Start() (err error) {
 
 	defer func() {
 		// This case indicates that the muxer was stopped by m.Stop()
-		if m.state.Load() == muxerClosed{
+		if m.state.Load() == muxerClosed {
 			// TODO(hosono) should errors during Stop affect the return value of Start?
 			err = nil
 		} else if err != nil {
@@ -282,7 +286,7 @@ func (m *Muxer) Start() (err error) {
 	if m.timeout != 0 {
 		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
 	}
-	for m.state.Load() != muxerClosed{
+	for m.state.Load() != muxerClosed {
 		frame, err := m.readMsg()
 		if err != nil {
 			return err
@@ -291,7 +295,8 @@ func (m *Muxer) Start() (err error) {
 		tube, ok := m.getTube(frame.tubeID)
 		if !ok {
 			m.log.WithField("tube", frame.tubeID).Info("tube not found")
-			initFrame, err := fromInitiateBytes(frame.toBytes())
+			var initFrame *initiateFrame
+			initFrame, err = fromInitiateBytes(frame.toBytes())
 
 			if initFrame.flags.REQ {
 
@@ -308,7 +313,6 @@ func (m *Muxer) Start() (err error) {
 					m.m.Unlock()
 				}
 			}
-
 		}
 
 		// Checking for tube != nil doesn't work because nil has a type
@@ -336,7 +340,7 @@ func (m *Muxer) Stop() (err error) {
 	m.m.Lock()
 	m.log.Infof("Stopping muxer. %d tubes to close", len(m.tubes))
 
-	if m.state.Load() != muxerRunning{
+	if m.state.Load() != muxerRunning {
 		m.m.Unlock()
 		return io.EOF
 	}
@@ -355,9 +359,9 @@ func (m *Muxer) Stop() (err error) {
 			rel, ok := v.(*Reliable)
 			if ok {
 				select {
-				case <- rel.closed:
+				case <-rel.closed:
 					break
-				case <- stop:
+				case <-stop:
 					break
 				}
 			}
@@ -366,7 +370,7 @@ func (m *Muxer) Stop() (err error) {
 	m.state.Store(muxerClosing)
 	m.m.Unlock()
 
-	time.AfterFunc(4*time.Second, func(){
+	time.AfterFunc(4*time.Second, func() {
 		m.m.Lock()
 		for _, v := range m.tubes {
 			if t, ok := v.(*Reliable); ok {

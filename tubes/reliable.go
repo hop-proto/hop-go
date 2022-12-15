@@ -55,13 +55,13 @@ type Reliable struct {
 	sender     sender
 	sendQueue  chan []byte
 	// +checklocks:l
-	tubeState   state
+	tubeState     state
 	timeWaitTimer *time.Timer
-	lastAckSent atomic.Uint32
-	initRecv    chan struct{}
-	initDone    chan struct{}
-	l           sync.Mutex
-	log         *logrus.Entry
+	lastAckSent   atomic.Uint32
+	initRecv      chan struct{}
+	initDone      chan struct{}
+	l             sync.Mutex
+	log           *logrus.Entry
 }
 
 // Reliable implements net.Conn
@@ -178,7 +178,7 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.log.Warn("got FIN packet. going from finWait2 to timeWait")
 			r.enterTimeWaitState()
 		case timeWait:
-			r.timeWaitTimer.Reset(3*time.Second)	
+			r.timeWaitTimer.Reset(3 * time.Second)
 		}
 		if r.tubeState != closed {
 			r.log.Trace("sending ACK of FIN")
