@@ -357,13 +357,13 @@ func InitiatePF(ch *tubes.Reliable, table *FwdMapping, local, remote []*Forward,
 	}
 }
 
-//ErrInvalidPortForwardingArgs returned when client receives unsupported -L or -R options
+// ErrInvalidPortForwardingArgs returned when client receives unsupported -L or -R options
 var ErrInvalidPortForwardingArgs = errors.New("port forwarding currently only supported with port:host:hostport format")
 
 // ErrInvalidPFArgs is returned when there is a problem parsing portfowarding argument
 var ErrInvalidPFArgs = errors.New("error parsing portforwarding argument")
 
-//returns true if a forward slash exists
+// returns true if a forward slash exists
 func checkPath(arg string) bool {
 	return strings.Contains(arg, "/")
 }
@@ -395,7 +395,8 @@ F. (2) -R remote_socket:local_socket or 		-L local_socket:remote_socket 		--> li
 // o  "127.0.0.1" and "::1" indicate listening on the loopback
 // interfaces for IPv4 and IPv6, respectively.
 
-/*ParseForward takes in a PF argument and returns a newly populated *Forward
+/*
+ParseForward takes in a PF argument and returns a newly populated *Forward
 if Remote: listen is on the remote peer (hop server) and connect is contacted by the local peer
 if Local: listen is on the local peer (hop client) and connect is contacted by the remote peer
 [listenhost:]listenport|listenpath:connecthost:connectport|connectpath

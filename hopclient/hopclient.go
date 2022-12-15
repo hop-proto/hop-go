@@ -349,10 +349,10 @@ func (c *HopClient) HandleTubes() {
 		} else if t.Type() == common.RemotePFTube {
 			go c.handleRemote(t)
 		} else if t.Type() == common.PFTube {
-		  if r, ok := t.(*tubes.Reliable); ok {
-        go portforwarding.HandlePF(r, c.forwardingTable)
-      }
-      // TODO(drebelsky): handle non-reliable PFTubes
+			if r, ok := t.(*tubes.Reliable); ok {
+				go portforwarding.HandlePF(r, c.forwardingTable)
+			}
+			// TODO(drebelsky): handle non-reliable PFTubes
 		} else {
 			// Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
 			e := t.Close()

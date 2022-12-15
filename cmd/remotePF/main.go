@@ -52,7 +52,7 @@ func PutFD(via *net.UnixConn, fds []int) error {
 }
 
 func main() {
-  // TODO(drebelsky): better error handling
+	// TODO(drebelsky): better error handling
 	conno, err := net.Dial("unix", "/tmp/sock")
 	if err != nil {
 		panic(err)

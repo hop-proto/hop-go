@@ -31,9 +31,9 @@ type ClientFlags struct {
 	// TODO(dadrian): What are these args?
 	RemoteFwds []*portforwarding.Forward // CLI arguments related to remote port forwarding
 	LocalFwds  []*portforwarding.Forward // CLI arguments related to local port forwarding
-	Headless   bool     // if no cmd desired (just port forwarding)
-	UsePty     bool     // whether or not to request a remote PTY be allocated
-	Verbose    bool     // show verbose error messages
+	Headless   bool                      // if no cmd desired (just port forwarding)
+	UsePty     bool                      // whether or not to request a remote PTY be allocated
+	Verbose    bool                      // show verbose error messages
 }
 
 func mergeAddresses(f *ClientFlags, hc *config.HostConfigOptional) error {
