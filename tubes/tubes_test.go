@@ -4,7 +4,6 @@ import (
 	"io"
 	"net"
 	"testing"
-	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -89,17 +88,14 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err
 		}
 
 		muxer1.Stop()
-		assert.Assert(t, muxer1.stopped.Load())
+		assert.DeepEqual(t, muxer1.state.Load(), muxerClosed)
 
 		muxer2.Stop()
-		assert.Assert(t, muxer2.stopped.Load())
+		assert.DeepEqual(t, muxer2.state.Load(), muxerClosed)
 
-		err = c1.Close()
-		assert.NilError(t, err)
-		err = c2.Close()
-		assert.NilError(t, err)
+		c1.Close()
+		c2.Close()
 
-		time.Sleep(time.Second)
 	}
 
 	return t1, t2, stop, rel, err

@@ -22,6 +22,8 @@ type Unreliable struct {
 
 	state     atomic.Value
 	initiated chan struct{}
+	senderEnded chan struct{}
+	closed chan struct{}
 
 	// true if this tube began the request. false otherwise
 	// TODO(hosono) can be replaced with parity of tubeID
@@ -66,10 +68,13 @@ func (u *Unreliable) sender() {
 		}
 		u.sendQueue <- b
 	}
-	// TODO(hosono) this won't finish because this channel is not closed
-	for pkt := range u.send.C {
-		u.sendQueue <- pkt
+
+	// flush the buffer after a call to Close
+	for b, err := u.send.Recv(); err == nil;  {
+		u.sendQueue <- b
 	}
+
+	close(u.senderEnded)
 }
 
 func (u *Unreliable) makeInitFrame() initiateFrame {
@@ -112,6 +117,8 @@ func (u *Unreliable) initiate() {
 				break
 			case <-u.initiated:
 				break
+			case <-u.closed:
+				return
 			}
 		}
 		notInit = u.state.Load() == created
@@ -157,7 +164,12 @@ func (u *Unreliable) ReadMsg(b []byte) (n int, err error) {
 
 // ReadMsgUDP implements the UDPLike interface. addr is always nil
 func (u *Unreliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
-	<-u.initiated
+	select {
+	case <-u.initiated:
+		break
+	case <-u.closed:
+		break
+	}
 	msg, err := u.recv.Recv()
 	if err != nil {
 		return
@@ -185,7 +197,12 @@ func (u *Unreliable) WriteMsg(b []byte) (err error) {
 // WriteMsgUDP implements implements the UDPLike interface
 // oob and addr are ignored
 func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
-	<-u.initiated
+	select {
+	case <-u.initiated:
+		break
+	case <-u.closed:
+		break
+	}
 	dataLength := uint16(len(b))
 	if uint16(len(b)) > maxFrameDataLength {
 		err = transport.ErrBufOverflow
@@ -222,7 +239,6 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 
 // Close implements the net.Conn interface. Future io operations will return io.EOF
 func (u *Unreliable) Close() error {
-	<-u.initiated
 	if u.state.Swap(closed) == closed {
 		return io.EOF
 	}
@@ -248,6 +264,11 @@ func (u *Unreliable) Close() error {
 	u.send.Close()
 	u.recv.Close()
 
+	// wait for sender to end
+	<-u.senderEnded
+
+	close(u.closed)
+
 	return err
 }
 
@@ -270,13 +291,23 @@ func (u *Unreliable) SetDeadline(t time.Time) error {
 
 // SetReadDeadline implements net.Conn
 func (u *Unreliable) SetReadDeadline(t time.Time) error {
-	<-u.initiated
+	select {
+	case <-u.initiated:
+		break
+	case <-u.closed:
+		break
+	}
 	return u.recv.SetDeadline(t)
 }
 
 // SetWriteDeadline implements net.Conn
 func (u *Unreliable) SetWriteDeadline(t time.Time) error {
-	<-u.initiated
+	select {
+	case <-u.initiated:
+		break
+	case <-u.closed:
+		break
+	}
 	return u.send.SetDeadline(t)
 }
 
@@ -293,4 +324,8 @@ func (u *Unreliable) GetID() byte {
 // IsReliable returns whether the tube is reliable. Always false
 func (u *Unreliable) IsReliable() bool {
 	return false
+}
+
+func (u *Unreliable) getLog() *logrus.Entry {
+	return u.log
 }

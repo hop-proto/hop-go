@@ -122,6 +122,7 @@ func fromBytes(b []byte) (*frame, error) {
 	}, nil
 }
 
+// TODO(hosono) this function can't error, so it shouldn't return an error
 func fromInitiateBytes(b []byte) (*initiateFrame, error) {
 	dataLength := binary.BigEndian.Uint16(b[2:4])
 	return &initiateFrame{

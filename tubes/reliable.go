@@ -100,6 +100,8 @@ func (r *Reliable) initiate(req bool) {
 			r.l.Lock()
 			notInit = r.tubeState == created
 			r.l.Unlock()
+		case <-r.closed:
+			return
 		}
 	}
 	go r.send()
@@ -155,11 +157,9 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.tubeState = finWait2
 			r.log.Warn("got ACK of FIN packet. going from finWait1 to finWait2")
 		case closing:
-			r.tubeState = timeWait
 			r.log.Warn("got ACK of FIN packet. going from closing to timeWait")
 			r.enterTimeWaitState()
 		case lastAck:
-			r.tubeState = closed
 			r.log.Warn("got ACK of FIN packet. going from lastAck to closed")
 			r.enterClosedState()
 		}
@@ -175,7 +175,6 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.tubeState = closing
 			r.log.Warn("got FIN packet. going from finWait1 to closing")
 		case finWait2:
-			r.tubeState = timeWait
 			r.log.Warn("got FIN packet. going from finWait2 to timeWait")
 			r.enterTimeWaitState()
 		case timeWait:
@@ -195,11 +194,13 @@ func (r *Reliable) receive(pkt *frame) error {
 	return err
 }
 
+// +checklocks:r.l
 func (r *Reliable) enterTimeWaitState() {
 	// TODO(hosono) what should the wait time be?
 	// The linux kernel seems to wait 1 minute for connections on the loopback interface.
 	// Is that too long for a user to wait? We can't just hand this off to the kernel.
 
+	r.tubeState = timeWait
 	r.sender.stopRetransmit()
 	r.timeWaitTimer = time.AfterFunc(3*time.Second, func() {
 		r.l.Lock()
@@ -211,6 +212,9 @@ func (r *Reliable) enterTimeWaitState() {
 
 // +checklocks:r.l
 func (r *Reliable) enterClosedState() {
+	if r.tubeState == closed {
+		return
+	}
 	r.sender.Close()
 	r.recvWindow.Close()
 	r.tubeState = closed
@@ -295,9 +299,10 @@ func (r *Reliable) Close() (err error) {
 	select {
 	case <-r.initDone:
 		break
-	default:
-		return errBadTubeState
+	case <-r.closed:
+		break
 	}
+
 	r.l.Lock()
 	defer r.l.Unlock()
 
@@ -343,6 +348,10 @@ func (r *Reliable) GetID() byte {
 // IsReliable returns whether the tube is reliable. Always true
 func (r *Reliable) IsReliable() bool {
 	return true
+}
+
+func (r *Reliable) getLog() *logrus.Entry {
+	return r.log
 }
 
 // LocalAddr returns the local address for the tube

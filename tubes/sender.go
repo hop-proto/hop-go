@@ -265,6 +265,7 @@ func (s *sender) stopRetransmit() {
 }
 
 func (s *sender) Start() {
+	s.closed.Store(false)
 	go s.retransmit()
 }
 
