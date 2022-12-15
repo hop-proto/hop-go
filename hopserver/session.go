@@ -19,6 +19,8 @@ import (
 	"hop.computer/hop/codex"
 	"hop.computer/hop/common"
 	"hop.computer/hop/keys"
+	"hop.computer/hop/netproxy"
+	"hop.computer/hop/portforwarding"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
 	"hop.computer/hop/userauth"
@@ -152,9 +154,9 @@ func (sess *hopSession) start() {
 			case common.PrincipalProxyTube:
 				go sess.startPTProxy(r, proxyQueue)
 			case common.PFControlTube:
-				go sess.startPFControl(tube)
+				go sess.startPFControl(r)
 			case common.PFTube:
-				go sess.startPF(tube)
+				go sess.startPF(r)
 			case common.WinSizeTube:
 				go sess.startSizeTube(r)
 			default:

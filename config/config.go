@@ -64,10 +64,10 @@ type HostConfigOptional struct {
 	Hostname     *string
 	Intermediate *string
 	Key          *string
+	LocalFwds    []*portforwarding.Forward
 	Patterns     []string
 	Port         int
 	RemoteFwds   []*portforwarding.Forward
-	LocalFwds    []*portforwarding.Forward
 	User         *string
 	// something for principal vs. delegate
 	IsPrincipal *bool
@@ -91,8 +91,10 @@ type HostConfig struct {
 	Hostname     string
 	Intermediate string
 	Key          string
+	LocalFwds    []*portforwarding.Forward
 	Port         int
 	User         string
+	RemoteFwds   []*portforwarding.Forward
 	// something for principal vs. delegate
 	IsPrincipal bool
 	// something for remote port forward

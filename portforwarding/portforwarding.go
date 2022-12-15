@@ -180,7 +180,7 @@ func listen(local, remote *addr, table *FwdMapping, muxer *tubes.Muxer, conn *ne
 					continue
 				}
 			}
-			tube, err := muxer.CreateTube(common.PFTube)
+			tube, err := muxer.CreateReliableTube(common.PFTube)
 			if err != nil {
 				break
 			}

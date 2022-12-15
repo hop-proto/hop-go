@@ -244,11 +244,12 @@ func (c *HopClient) Start() error {
 	// TODO refactor
 	logrus.Error("Sending msgs")
 	ch, err := c.TubeMuxer.CreateTube(common.PFControlTube)
+	ch, err := c.TubeMuxer.CreateReliableTube(common.PFControlTube)
 	if err != nil {
 		logrus.Error(err)
 		return err
 	}
-	portforwarding.InitiatePF(ch, c.forwardingTable, c.config.LocalFwds, c.config.RemoteFwds, c.TubeMuxer)
+	portforwarding.InitiatePF(ch, c.forwardingTable, c.hostconfig.LocalFwds, c.hostconfig.RemoteFwds, c.TubeMuxer)
 
 	// handle incoming tubes
 	go c.HandleTubes()
@@ -348,7 +349,10 @@ func (c *HopClient) HandleTubes() {
 		} else if t.Type() == common.RemotePFTube {
 			go c.handleRemote(t)
 		} else if t.Type() == common.PFTube {
-			go portforwarding.HandlePF(t, c.forwardingTable)
+		  if r, ok := t.(*tubes.Reliable); ok {
+        go portforwarding.HandlePF(r, c.forwardingTable)
+      }
+      // TODO(drebelsky): handle non-reliable PFTubes
 		} else {
 			// Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
 			e := t.Close()
