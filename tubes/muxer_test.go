@@ -1,7 +1,5 @@
 package tubes
 
-// TODO(hosono) add these tests back
-
 import (
 	"net"
 	"sync"

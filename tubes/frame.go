@@ -122,8 +122,7 @@ func fromBytes(b []byte) (*frame, error) {
 	}, nil
 }
 
-// TODO(hosono) this function can't error, so it shouldn't return an error
-func fromInitiateBytes(b []byte) (*initiateFrame, error) {
+func fromInitiateBytes(b []byte) *initiateFrame {
 	dataLength := binary.BigEndian.Uint16(b[2:4])
 	return &initiateFrame{
 		tubeID:     b[0],
@@ -133,5 +132,5 @@ func fromInitiateBytes(b []byte) (*initiateFrame, error) {
 		tubeType:   TubeType(b[6]),
 		frameNo:    binary.BigEndian.Uint32(b[8:12]),
 		data:       b[12 : 12+dataLength],
-	}, nil
+	}
 }

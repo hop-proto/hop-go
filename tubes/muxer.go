@@ -277,14 +277,12 @@ func (m *Muxer) sender() {
 }
 
 // Start allows a muxer to start listening and handling incoming tube requests and messages
-// TODO(hosono) refactor this because I can't read it
 func (m *Muxer) Start() (err error) {
 	go m.sender()
 
 	defer func() {
 		// This case indicates that the muxer was stopped by m.Stop()
 		if m.state.Load() == muxerClosed {
-			// TODO(hosono) should errors during Stop affect the return value of Start?
 			err = nil
 		} else if err != nil {
 			m.log.Errorf("Muxer ended with error: %s", err)
@@ -305,8 +303,7 @@ func (m *Muxer) Start() (err error) {
 		tube, ok := m.getTube(frame.tubeID)
 		if !ok {
 			m.log.WithField("tube", frame.tubeID).Info("tube not found")
-			var initFrame *initiateFrame
-			initFrame, err = fromInitiateBytes(frame.toBytes())
+			initFrame := fromInitiateBytes(frame.toBytes())
 
 			if initFrame.flags.REQ {
 
@@ -329,7 +326,7 @@ func (m *Muxer) Start() (err error) {
 		// This means we have to check every possible type that tube could have
 		if err == nil && tube != nil && tube != (*Reliable)(nil) && tube != (*Unreliable)(nil) {
 			if frame.flags.REQ || frame.flags.RESP {
-				initFrame, err := fromInitiateBytes(frame.toBytes())
+				initFrame := fromInitiateBytes(frame.toBytes())
 				// m.log.Info("RECEIVING INITIATE FRAME ", initFrame.tubeID, " ", initFrame.frameNo, " ", frame.flags.REQ, " ", frame.flags.RESP)
 				if err != nil {
 					return err
@@ -361,7 +358,7 @@ func (m *Muxer) Stop() (err error) {
 		go func(v Tube) { //parallelized closing tubes because other side may close them in a different order
 			defer wg.Done()
 			m.log.Info("Closing tube: ", v.GetID())
-			err := v.Close() //TODO(baumanl): If a tube was already closed this returns an error that is ignored atm. Remove tube from map after closing?
+			err := v.Close()
 			if err != nil {
 				// Tried to close tube in bad state. Nothing to do
 				return
