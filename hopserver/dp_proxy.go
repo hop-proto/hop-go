@@ -2,34 +2,33 @@ package hopserver
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"sync"
 
-	"github.com/sbinet/pstree"
 	"github.com/sirupsen/logrus"
+
+	"golang.org/x/exp/maps"
 )
 
-/* DP Proxy: Server acts as a proxy between the Delegate client
- * and Principal client. */
+// DP Proxy: Server acts as a proxy between the Delegate client
+// and Principal client.
 
-/* Delegate proxy server: a hop server that has an active hop session with
- * a (remote) Principal hop client and a (local) Delegate hop client that was
- * started from a process spawned from that active hop session. Two "proxying"
- * actions actually occur:
- * 1. Delegate hop client <--> Principal hop client (dp_proxy.go) (*)
- * 2. Principal hop client <--> Target hop server (pt_proxy.go)
- *
- * Responsibilities [status] (1: Delegate <--> Principal proxy):
- * - listen on a unix socket for Delegate hop clients [implemented]
- * - maintain a mapping of Delegate hop clients to Principal hop client sessions [implemented]
- * - proxy all authgrant messages between the Delegate and Principal [implemented]
- * - ensure that processes connecting to unix socket are legitimate descendants
- *   of the hop server [implemented for linux, TODO others]
- */
+//  Delegate proxy server: a hop server that has an active hop session with
+//   a (remote) Principal hop client and a (local) Delegate hop client that was
+//   started from a process spawned from that active hop session. Two "proxying"
+//   actions actually occur:
+//   1. Delegate hop client <--> Principal hop client (dp_proxy.go) (*)
+//   2. Principal hop client <--> Target hop server (pt_proxy.go)
+
+//   Responsibilities [status] (1: Delegate <--> Principal proxy):
+//   - listen on a unix socket for Delegate hop clients [implemented]
+//   - maintain a mapping of Delegate hop clients to Principal hop client sessions [implemented]
+//   - proxy all authgrant messages between the Delegate and Principal [implemented]
+//    - ensure that processes connecting to unix socket are legitimate descendants
+//     of the hop server [implemented for linux, TODO others]
 
 // GetPrincipal is a callback to return principal of sessID
 type GetPrincipal func(sessID) (*hopSession, bool)
@@ -116,37 +115,14 @@ func (p *dpproxy) checkCredentials(c net.Conn) (sessID, error) {
 	if err != nil {
 		return 0, err
 	}
-	// aPID is the ancestor of cPID spawned by a hop session
-	var aPID int32 = -1
-	//get a picture of the entire system process tree
-	tree, err := pstree.New()
+	p.proxyLock.Lock()
+	defer p.proxyLock.Unlock()
+	aPID, err := getAncestor(maps.Keys(p.principals), cPID)
 	if err != nil {
 		return 0, err
 	}
 
-	p.proxyLock.Lock()
-	defer p.proxyLock.Unlock()
-	// check all of the PIDs of processes that the server started
-	for k := range p.principals {
-		if k == cPID || checkDescendents(tree, tree.Procs[int(k)], int(cPID)) {
-			aPID = k
-			break
-		}
-	}
-	if aPID == -1 {
-		return 0, errors.New("not a descendent process")
-	}
 	return p.principals[aPID], nil
-}
-
-// checks tree (starting at proc) to see if cPID is a descendent
-func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool {
-	for _, child := range proc.Children {
-		if child == cPID || checkDescendents(tree, tree.Procs[child], cPID) {
-			return true
-		}
-	}
-	return false
 }
 
 // proxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
