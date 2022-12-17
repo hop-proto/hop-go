@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// TODO(baumanl): make this better/make sure they work with updates to reliable tubes
 // WriteString writes a string preceded by its length (up to 256 bytes)
+// TODO(baumanl): make this better/make sure they work with updates to reliable tubes
 func WriteString(s string, w io.Writer) (int64, error) {
 	var written int64
 	// write length of string as one byte
@@ -24,8 +24,8 @@ func WriteString(s string, w io.Writer) (int64, error) {
 	return written, nil
 }
 
-// TODO(baumanl): make this better/make sure they work with updates to reliable tubes
 // ReadString reads a variable length string (up to 256 bytes)
+// TODO(baumanl): make this better/make sure they work with updates to reliable tubes
 func ReadString(r io.Reader) (string, int64, error) {
 	var bytesRead int64
 	// read len
