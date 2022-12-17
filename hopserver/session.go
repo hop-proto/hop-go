@@ -292,6 +292,7 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 			if err != nil {
 				logrus.Errorf("S: error running command %v", err)
 				codex.SendFailure(tube, err)
+				return
 			}
 		}
 
