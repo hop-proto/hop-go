@@ -14,7 +14,7 @@ type VerifyConfig struct {
 	Store certs.Store
 
 	// AuthKeys contains trusted keys
-	AuthKeys *authkeys.AuthKeySet
+	AuthKeys *authkeys.SyncAuthKeySet
 
 	// Enable vs. Disable authenticating with authorized keys
 	AuthKeysAllowed bool

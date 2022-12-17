@@ -27,11 +27,6 @@ build: ## compile
 build:
 	go build ./...
 
-.PHONY: install
-install: ## install rpf
-install:
-	go install ./cmd/remotePF
-
 .PHONY: test
 test: ## test
 test:

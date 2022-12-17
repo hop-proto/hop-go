@@ -24,15 +24,20 @@ const (
 	// DefaultListenPortString is the string version of the hop default listen
 	// port.
 	DefaultListenPortString = "77"
+
+	// DefaultAgProxyListenSocket is the string version of the default abstract
+	// unix socket address that hop servers listen on to forward delegate
+	// intent requests back to the principal
+	DefaultAgProxyListenSocket = "@hop_agproxy"
 )
 
 // TubeType constants
 const (
-	ExecTube      = 1 // Used for Shell or Command Execution
-	AuthGrantTube = 2 // Used for myriad Authorization Grant protocol steps
-	NetProxyTube  = 3 // Net Proxy should maybe be unreliable tube?
-	UserAuthTube  = 4
-	LocalPFTube   = 5
-	RemotePFTube  = 6
-	WinSizeTube   = 7 // Used for notifying server of window size changes
+	ExecTube           = 1 // Used for Shell or Command Execution
+	AuthGrantTube      = 2 // Used for myriad Authorization Grant protocol steps
+	PrincipalProxyTube = 3 // Net Proxy should maybe be unreliable tube?
+	UserAuthTube       = 4
+	LocalPFTube        = 5
+	RemotePFTube       = 6
+	WinSizeTube        = 7 // Used for notifying server of window size changes
 )

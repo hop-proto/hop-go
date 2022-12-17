@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sync"
 	"testing/fstest"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -23,12 +24,6 @@ import (
 	"hop.computer/hop/tubes"
 	"hop.computer/hop/userauth"
 )
-
-// Authgrant TODOs for hopclient
-// Principal:
-// - accept and process delegate requests
-// Delegate:
-// - contact hopd and issue requests
 
 // HopClient holds state for client's perspective of session. It is not safe to
 // copy a HopClient.
@@ -134,6 +129,7 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 			logrus.Fatal(err)
 		}
 	}()
+	time.Sleep(time.Second) // TODO(baumanl): hack to avoid muxer bug till tubes pr merged
 	err = c.userAuthorization()
 	if err != nil {
 		return err
@@ -314,7 +310,7 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 }
 
 func (c *HopClient) userAuthorization() error {
-	//*****PERFORM USER AUTHORIZATION******
+	//PERFORM USER AUTHORIZATION******
 	uaCh, _ := c.TubeMuxer.CreateReliableTube(common.UserAuthTube)
 	defer uaCh.Close()
 	logrus.Infof("requesting auth for %s", c.hostconfig.User)

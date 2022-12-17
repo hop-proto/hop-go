@@ -13,10 +13,11 @@ require (
 	github.com/mattn/go-isatty v0.0.14
 	github.com/sbinet/pstree v0.3.0
 	github.com/sirupsen/logrus v1.8.1
-	github.com/tockins/interact v0.0.0-20171114182912-f8fb5795b5d7
 	goji.io v2.0.2+incompatible
 	golang.org/x/crypto v0.0.0-20220427172511-eb4f295cb31f
-	golang.org/x/sys v0.0.0-20220422013727-9388b58f7150
+	golang.org/x/exp v0.0.0-20221215174704-0915cd710c24
+	golang.org/x/net v0.0.0-20220425223048-2871e0cb64e4
+	golang.org/x/sys v0.1.0
 	golang.org/x/term v0.0.0-20220411215600-e5f449aeb171
 	gotest.tools v2.2.0+incompatible
 )
@@ -39,7 +40,6 @@ require (
 	github.com/opencontainers/runc v1.1.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	go.opencensus.io v0.23.0 // indirect
-	golang.org/x/net v0.0.0-20220425223048-2871e0cb64e4 // indirect
 	google.golang.org/genproto v0.0.0-20220426171045-31bebdecfb46 // indirect
 	google.golang.org/grpc v1.46.0 // indirect
 	google.golang.org/protobuf v1.28.0 // indirect

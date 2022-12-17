@@ -2,12 +2,12 @@ package hopserver
 
 import (
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"os/user"
 	"strconv"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -16,15 +16,15 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/authgrants"
-	"hop.computer/hop/certs"
 	"hop.computer/hop/codex"
 	"hop.computer/hop/common"
 	"hop.computer/hop/keys"
-	"hop.computer/hop/netproxy"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
 	"hop.computer/hop/userauth"
 )
+
+type sessID uint32
 
 type hopSession struct {
 	transportConn   *transport.Handle
@@ -33,17 +33,22 @@ type hopSession struct {
 	done            chan int
 	controlChannels []net.Conn
 
+	ID sessID
+
+	// TODO(baumanl): better solution than pointer to server?
 	server *HopServer
 	user   string
 
-	usingAuthGrant    bool
-	authorizedActions []authgrants.Intent
-
 	// We use a channel (with size 1) to avoid reading window sizes before we've created the pty
 	pty chan *os.File
+
+	usingAuthGrant        bool // true if client authenticated with authgrant
+	authorizedActions     []authgrants.Authgrant
+	numActiveReqDelegates atomic.Int32
 }
 
 func (sess *hopSession) checkAuthorization() bool {
+	time.Sleep(time.Second * 3) // TODO(baumanl): hack to avoid muxer bug till tubes pr merged
 	t, _ := sess.tubeMuxer.Accept()
 	uaTube, ok := t.(*tubes.Reliable)
 	if !ok || uaTube.Type() != common.UserAuthTube {
@@ -94,6 +99,7 @@ func (sess *hopSession) start() {
 		}
 	}()
 	logrus.Info("S: STARTED CHANNEL MUXER")
+	time.Sleep(time.Second)
 
 	// User Authorization
 	if !sess.checkAuthorization() {
@@ -113,6 +119,8 @@ func (sess *hopSession) start() {
 		}
 	}()
 
+	proxyQueue := newPTProxyTubeQueue()
+
 	for {
 		select {
 		case <-sess.done:
@@ -123,7 +131,15 @@ func (sess *hopSession) start() {
 			logrus.Infof("S: ACCEPTED NEW TUBE (%v)", tube.Type())
 			r, ok := tube.(*tubes.Reliable)
 			if !ok {
-				// TODO(hosono) handle unreliable tubes
+				// TODO(hosono) handle unreliable tubes (general case)
+				r, ok := tube.(*tubes.Unreliable)
+				if ok && r.Type() == common.PrincipalProxyTube {
+					// add to map and signal waiting processes
+					proxyQueue.lock.Lock()
+					proxyQueue.tubes[r.GetID()] = r
+					proxyQueue.lock.Unlock()
+					proxyQueue.cv.Broadcast()
+				}
 				continue
 			}
 			switch tube.Type() {
@@ -131,8 +147,8 @@ func (sess *hopSession) start() {
 				go sess.startCodex(r)
 			case common.AuthGrantTube:
 				go sess.handleAgc(r)
-			case common.NetProxyTube:
-				go sess.startNetProxy(r)
+			case common.PrincipalProxyTube:
+				go sess.startPTProxy(r, proxyQueue)
 			case common.RemotePFTube:
 				panic("unimplemented: remote pf")
 			case common.LocalPFTube:
@@ -140,80 +156,29 @@ func (sess *hopSession) start() {
 			case common.WinSizeTube:
 				go sess.startSizeTube(r)
 			default:
-				tube.Close() //Close unrecognized tube types
+				tube.Close() // Close unrecognized tube types
 			}
 		}
 
 	}
 }
 
+// TODO(baumanl): look closely at closing behavior
 func (sess *hopSession) close() error {
 	var err, err2 error
 
 	sess.tubeMuxer.Stop()
+
+	// remove from server session map
+	sess.server.sessionLock.Lock()
+	defer sess.server.sessionLock.Unlock()
+	delete(sess.server.sessions, sess.ID)
+
 	//err2 = sess.transportConn.Close() //(not implemented yet)
 	if err != nil {
 		return err
 	}
 	return err2
-}
-
-// checkIntent looks at details of Intent Request and ensures they follow its policies
-func (sess *hopSession) checkIntent(tube *tubes.Reliable) (authgrants.MessageData, bool) {
-	// read intent:
-	var ir authgrants.AgMessage
-	_, err := ir.ReadFrom(tube)
-	if err != nil {
-		return authgrants.MessageData{Denial: authgrants.MalformedIntentDen}, false
-	}
-	// check that msg type is correct
-	if ir.MsgType != authgrants.IntentCommunication {
-		return authgrants.MessageData{Denial: authgrants.UnexpectedMessageType}, false
-	}
-	intent := ir.Data.Intent
-
-	// check that requested time is valid
-	if intent.ExpTime.Before(time.Now()) {
-		return authgrants.MessageData{Denial: "invalid expiration time"}, false
-	}
-
-	// TODO(baumanl): check target SNI matches the current hostname of this server? necessary?
-
-	// check target username matches current username that client
-	// logged in as.
-	if sess.user != intent.TargetUsername {
-		return authgrants.MessageData{Denial: "Current user and requested user mismatch"}, false
-	}
-
-	// check that DelegateCert is well formatted
-	if err = certs.VerifyLeafFormat(&intent.DelegateCert, certs.VerifyOptions{}); err != nil {
-		return authgrants.MessageData{Denial: "Ill-formatted delegate certificate"}, false
-	}
-	// TODO(baumanl): add in finer grained policy checks/options? i.e. account level access control
-	// TODO(baumanl): enable fine grained checks based on config options
-	// pass the intent to handlers for each type of authgrant
-	switch intent.GrantType {
-	case authgrants.Shell:
-		// TODO(baumanl)
-	case authgrants.Command:
-		// TODO
-	case authgrants.LocalPF:
-		// TODO
-	case authgrants.RemotePF:
-		// TODO
-	default:
-		return authgrants.MessageData{Denial: authgrants.UnrecognizedGrantType}, false
-
-	}
-
-	// add authorization grant to server mappings
-	sess.server.addAuthGrant(&intent)
-
-	//add delegate key from cert to transport server authorized key pool
-	sess.server.keyStore.AddKey(intent.DelegateCert.PublicKey)
-
-	// fine grained
-	return authgrants.MessageData{}, true
 }
 
 // handleAgc handles Intent Communications from principals and updates the outstanding authgrants maps appropriately
@@ -254,28 +219,17 @@ func getGroups(uid int) (groups []uint32) {
 	return
 }
 
-// checks if the session has an auth grant to perform cmd
-func (sess *hopSession) checkCmd(cmd string) error {
-	for i, intent := range sess.authorizedActions {
-		if intent.GrantType == authgrants.Command {
-			if intent.AssociatedData.CommandGrantData.Cmd == cmd {
-				sess.authorizedActions = append(sess.authorizedActions[:i], sess.authorizedActions[i+1:]...)
-				return nil
-			}
-		}
-	}
-	return fmt.Errorf("no auth grant for cmd: %s", cmd)
-}
-
 func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 	cmd, termEnv, shell, size, _ := codex.GetCmd(tube)
+	principalSess := sess.ID
 	// if using an authgrant, check that the cmd is authorized
 	if sess.usingAuthGrant {
-		err := sess.checkCmd(cmd)
+		principalID, err := sess.checkCmd(cmd)
 		if err != nil {
 			codex.SendFailure(tube, err)
 			return
 		}
+		principalSess = principalID
 	}
 
 	logrus.Info("CMD: ", cmd)
@@ -314,6 +268,11 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 		logrus.Infof("Executing: %v", cmd)
 		var f *os.File
 		var err error
+
+		// lock principals map so can be updated with pid after starting process
+		sess.server.dpProxy.proxyLock.Lock()
+		defer sess.server.dpProxy.proxyLock.Unlock()
+
 		if shell {
 			if size != nil {
 				f, err = pty.StartWithSize(c, size)
@@ -332,8 +291,17 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 			c.Stdin = tube
 			c.Stdout = tube
 			c.Stderr = tube
-			c.Start()
+			err = c.Start()
+			if err != nil {
+				logrus.Errorf("S: error running command %v", err)
+				codex.SendFailure(tube, err)
+				return
+			}
 		}
+
+		// update principals map.
+		pid := c.Process.Pid
+		sess.server.dpProxy.principals[int32(pid)] = principalSess
 
 		codex.SendSuccess(tube)
 		go func() {
@@ -357,11 +325,10 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 	}
 }
 
-func (sess *hopSession) startNetProxy(ch *tubes.Reliable) {
-	// TODO(baumanl): add check for authgrant?
-	netproxy.Server(ch)
-}
-
 func (sess *hopSession) startSizeTube(ch *tubes.Reliable) {
 	codex.HandleSize(ch, <-sess.pty)
+}
+
+func (sess *hopSession) newAuthGrantTube() (*tubes.Reliable, error) {
+	return sess.tubeMuxer.CreateReliableTube(common.AuthGrantTube)
 }

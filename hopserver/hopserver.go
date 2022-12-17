@@ -6,10 +6,10 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing/fstest"
 	"time"
 
-	"github.com/sbinet/pstree"
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/authgrants"
@@ -23,40 +23,63 @@ import (
 	"hop.computer/hop/tubes"
 )
 
-// Authgrants Hop server TODOs
-// - Listen for descendent clients and proxy their requests back to principal
-// - check that connecting clients have appropriate authgrants for actions.
-// - act as a target: authorize/deny intent requests forwarded from principal
-
 // HopServer represents state/conns needed for a hop server
 type HopServer struct {
 	m sync.Mutex
-	// TODO(baumanl): potentially don't need entire Intent
-	authgrants map[string]map[keys.PublicKey][]authgrants.Intent
-	agLock     sync.Mutex
+
+	// Target server state
+	agMap *authgrants.AuthgrantMapSync
+
+	// Delegate proxy server state
+	dpProxy    *dpproxy
+	principals map[sessID]sessID // principals[sess] is sess that is connected to principal
+
+	// Session management
+	sessions      map[sessID]*hopSession
+	sessionLock   sync.Mutex
+	nextSessionID atomic.Uint32
 
 	config *config.ServerConfig
 
 	fsystem fs.FS
 
 	server   *transport.Server
-	keyStore *authkeys.AuthKeySet
+	keyStore *authkeys.SyncAuthKeySet
 	authsock net.Listener //nolint TODO(hosono) add linting back
 }
 
+// TODO(baumanl): Think about how NewHopServerExt and NewHopServer and actual
+// initialization interact. See PR #91.
+
 // NewHopServerExt returns a Hop Server using the provided transport server.
-func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig) (*HopServer, error) {
+func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, ks *authkeys.SyncAuthKeySet) (*HopServer, error) {
 	server := &HopServer{
 		m: sync.Mutex{},
 
-		authgrants: make(map[string]map[keys.PublicKey][]authgrants.Intent),
-		agLock:     sync.Mutex{},
+		agMap: authgrants.NewAuthgrantMapSync(),
+
+		dpProxy: &dpproxy{
+			address:    config.AgProxyListenSocket,
+			principals: make(map[int32]sessID),
+			running:    false,
+			proxyLock:  sync.Mutex{},
+		},
+
+		principals: make(map[sessID]sessID),
+
+		sessions:      make(map[sessID]*hopSession),
+		sessionLock:   sync.Mutex{},
+		nextSessionID: atomic.Uint32{},
 
 		config: config,
 
 		server: underlying,
 
 		fsystem: os.DirFS("/"),
+	}
+
+	if config.EnableAuthorizedKeys != nil && *config.EnableAuthorizedKeys {
+		server.keyStore = ks
 	}
 	return server, nil
 }
@@ -89,7 +112,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		HandshakeTimeout: sc.HandshakeTimeout,
 	}
 
-	// TODO(baumanl): serverConfig options should inform verify config settings
+	// serverConfig options inform verify config settings
 	// 4 main options right now:
 	// 1. InsecureSkipVerify: no verification of client cert
 	// 2. Certificate Validation ONLY: fails immediately if invalid cert chain
@@ -112,7 +135,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
 			// must be explicitly set to true
 			tconf.ClientVerify = &transport.VerifyConfig{
-				AuthKeys: authkeys.NewAuthKeySet(), // TODO(baumanl): load initial (stable trusted keys)
+				AuthKeys: authkeys.NewSyncAuthKeySet(), // TODO(baumanl): load initial (stable trusted keys)
 			}
 		}
 	}
@@ -122,22 +145,27 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		logrus.Fatalf("unable to open transport server: %s", err)
 	}
 
-	server, err := NewHopServerExt(underlying, sc)
-	if err != nil {
-		return server, err
-	}
-	if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
-		server.keyStore = tconf.ClientVerify.AuthKeys
-	}
-	return server, err
-
+	return NewHopServerExt(underlying, sc, tconf.ClientVerify.AuthKeys)
 }
 
-// Serve listens for incoming hop connection requests and start corresponding authGrantServer on a Unix Domain socket
+// Serve listens for incoming hop connection requests and starts
+// corresponding agproxy on unix socket
 func (s *HopServer) Serve() {
-	go s.server.Serve() //start transport layer server
-
+	go s.server.Serve() // start transport layer server
 	logrus.Info("hop server starting")
+
+	// start dpproxy
+	s.dpProxy.getPrincipal = func(si sessID) (*hopSession, bool) {
+		s.sessionLock.Lock()
+		defer s.sessionLock.Unlock()
+		sess, ok := s.sessions[si]
+		return sess, ok
+	}
+	err := s.dpProxy.start()
+	if err != nil {
+		logrus.Error("issue starting dpproxy server")
+	}
+
 	for {
 		serverConn, err := s.server.AcceptTimeout(30 * time.Minute)
 		if err != nil {
@@ -160,23 +188,18 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 		controlChannels: []net.Conn{},
 		server:          s,
 		pty:             make(chan *os.File, 1),
+		ID:              sessID(s.nextSessionID.Load()),
 	}
+	s.nextSessionID.Add(1)
+	s.sessionLock.Lock()
+	s.sessions[sess.ID] = sess
+	s.sessionLock.Unlock()
 	sess.start()
 }
 
 // SetFSystem is a setter currently just used for testing (alt to exporting fsystem)
 func (s *HopServer) SetFSystem(fsystem fstest.MapFS) {
 	s.fsystem = fsystem
-}
-
-// checks tree (starting at proc) to see if cPID is a descendent
-func checkDescendents(tree *pstree.Tree, proc pstree.Process, cPID int) bool { // nolint TODO(hosono) add linting back
-	for _, child := range proc.Children {
-		if child == cPID || checkDescendents(tree, tree.Procs[child], cPID) {
-			return true
-		}
-	}
-	return false
 }
 
 // ListenAddress returns the underlying net.UDPAddr of the transport server.
@@ -209,25 +232,6 @@ func (s *HopServer) authorizeKey(user string, publicKey keys.PublicKey) error {
 		return nil
 	}
 	return fmt.Errorf("key %s is not authorized for user %s", publicKey, user)
-}
-
-func (s *HopServer) authorizeKeyAuthGrant(user string, publicKey keys.PublicKey) ([]authgrants.Intent, error) {
-	if s.config.AllowAuthgrants != nil && *s.config.AllowAuthgrants {
-		s.agLock.Lock()
-		defer s.agLock.Unlock()
-		if _, ok := s.authgrants[user]; ok {
-			// user has some authgrants
-			if val, ok := s.authgrants[user][publicKey]; ok {
-				delete(s.authgrants[user], publicKey) // remove from server mapping
-				if len(s.authgrants[user]) == 0 {     // all authgrants have been removed for user
-					delete(s.authgrants, user)
-					s.keyStore.RemoveKey(publicKey)
-				}
-				return val, nil
-			}
-		}
-	}
-	return []authgrants.Intent{}, fmt.Errorf("auth grants not enabled")
 }
 
 // VirtualHosts is mapping from host patterns to Certificates.
@@ -307,12 +311,4 @@ func (vhosts VirtualHosts) Match(name certs.Name) *VirtualHost {
 		}
 	}
 	return nil
-}
-
-func (s *HopServer) addAuthGrant(intent *authgrants.Intent) {
-	s.agLock.Lock()
-	user := intent.TargetUsername
-	s.authgrants[user] = make(map[keys.PublicKey][]authgrants.Intent)
-	s.authgrants[user][intent.DelegateCert.PublicKey] = append(s.authgrants[user][intent.DelegateCert.PublicKey], *intent)
-	s.agLock.Unlock()
 }

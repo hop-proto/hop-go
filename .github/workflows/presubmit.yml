@@ -25,8 +25,6 @@ jobs:
             ${{ runner.os }}-go-
       - name: build
         run: make build
-      - name: install
-        run: make install
       - name: lint
         uses: golangci/golangci-lint-action@v3
         with:

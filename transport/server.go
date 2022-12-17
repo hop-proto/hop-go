@@ -439,19 +439,21 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 
 	// skips all verification if certVerify nil or explicitly disabled
 	if hs.certVerify != nil && !hs.certVerify.InsecureSkipVerify {
-		// Certificate Verification
-		err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
-		if err != nil { // cert verifification failed
-			if hs.certVerify.AuthKeysAllowed { // authorized keys allowed
-				err2 := hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
-				if err2 != nil {
-					logrus.Errorf("server: failed to verify certificate: %s and key unauthorized: %s", err, err2)
-					return pos, nil, err2
-				}
-			} else {
-				logrus.Errorf("server: failed to verify certificate: %s", err)
+		// try authkeys first if enabled
+		var errAuthkeys error
+		if hs.certVerify.AuthKeysAllowed {
+			errAuthkeys = hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
+		}
+		if !hs.certVerify.AuthKeysAllowed || errAuthkeys != nil {
+			// Certificate Verification
+			err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
+			if err != nil { // cert verifification failed
+				logrus.Errorf("server: client authentication failed")
 				return pos, nil, err
 			}
+			logrus.Infof("server: client used certificate verification to authenticate")
+		} else {
+			logrus.Info("server: client used an authorized key to authenticate")
 		}
 	}
 

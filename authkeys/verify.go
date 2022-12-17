@@ -8,36 +8,36 @@ import (
 	"hop.computer/hop/keys"
 )
 
-// AuthKeySet is a set of trusted keys
-type AuthKeySet struct {
+// SyncAuthKeySet is a set of trusted keys
+type SyncAuthKeySet struct {
 	keySet map[keys.PublicKey]bool
 	lock   sync.Mutex
 }
 
-// NewAuthKeySet returns a new store
-func NewAuthKeySet() *AuthKeySet {
-	aks := new(AuthKeySet)
+// NewSyncAuthKeySet returns a new store
+func NewSyncAuthKeySet() *SyncAuthKeySet {
+	aks := new(SyncAuthKeySet)
 	aks.keySet = make(map[keys.PublicKey]bool)
 	aks.lock = sync.Mutex{}
 	return aks
 }
 
 // AddKey adds a key to set of trusted keys
-func (s *AuthKeySet) AddKey(pk keys.PublicKey) {
+func (s *SyncAuthKeySet) AddKey(pk keys.PublicKey) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.keySet[pk] = true
 }
 
 // RemoveKey deletes key from trusted set
-func (s *AuthKeySet) RemoveKey(pk keys.PublicKey) {
+func (s *SyncAuthKeySet) RemoveKey(pk keys.PublicKey) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	delete(s.keySet, pk)
 }
 
 // VerifyLeaf checks that the leaf cert is properly formatted and the static key is in the set of authorized Keys
-func (s *AuthKeySet) VerifyLeaf(leaf *certs.Certificate, opts certs.VerifyOptions) error {
+func (s *SyncAuthKeySet) VerifyLeaf(leaf *certs.Certificate, opts certs.VerifyOptions) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	err := certs.VerifyLeafFormat(leaf, opts)
