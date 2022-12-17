@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sync"
 	"testing/fstest"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -128,6 +129,7 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 			logrus.Fatal(err)
 		}
 	}()
+	time.Sleep(time.Second) // TODO(baumanl): hack to avoid muxer bug till tubes pr merged
 	err = c.userAuthorization()
 	if err != nil {
 		return err
