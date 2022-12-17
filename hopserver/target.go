@@ -10,18 +10,16 @@ import (
 	"hop.computer/hop/tubes"
 )
 
-/* Target server: a hop server that a delegate hop client
- * wishes to perform an action(s) on under the authority of a
- * principal hop client.
- *
- * Responsibilities [status]:
- * - receive and approve / deny "Intent Communication" messages from principals [implemented]
- * - maintain a mapping of current authgrants [implemented, removing expired still TODO]
- * - keep server authkey store up to date (add / remove) [adding implemented, removing TODO]
- * - conducting user authorization with authgrants
- * - checking all client actions if authorized using an authgrant and updating
- *   authorized actions accordingly
- */
+// Target server: a hop server that a delegate hop client
+// wishes to perform an action(s) on under the authority of a
+// principal hop client.
+// Responsibilities [status]:
+// - receive and approve / deny "Intent Communication" messages from principals [implemented]
+// - maintain a mapping of current authgrants [implemented, removing expired still TODO]
+// - keep server authkey store up to date (add / remove) [adding implemented, removing TODO]
+// - conducting user authorization with authgrants
+// - checking all client actions if authorized using an authgrant and updating
+//   authorized actions accordingly
 
 // type authgrant struct {
 // 	Data authgrants.AuthGrantData // relevant data from IR

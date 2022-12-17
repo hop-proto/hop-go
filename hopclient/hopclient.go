@@ -308,7 +308,7 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 }
 
 func (c *HopClient) userAuthorization() error {
-	//*****PERFORM USER AUTHORIZATION******
+	//PERFORM USER AUTHORIZATION******
 	uaCh, _ := c.TubeMuxer.CreateReliableTube(common.UserAuthTube)
 	defer uaCh.Close()
 	logrus.Infof("requesting auth for %s", c.hostconfig.User)
