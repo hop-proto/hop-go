@@ -2,10 +2,11 @@ package hopserver
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"syscall"
 
-	"github.com/sirupsen/logrus"
+	"github.com/mitchellh/go-ps"
 )
 
 func setListenerOptions(proto, addr string, c syscall.RawConn) error {
