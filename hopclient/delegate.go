@@ -7,6 +7,9 @@ import (
 
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/certs"
+	"hop.computer/hop/core"
+	"hop.computer/hop/keys"
+	"hop.computer/hop/transport"
 )
 
 //  Delegate client: a hop client that descends from a Delegate proxy server
@@ -16,6 +19,18 @@ import (
 //   Responsibilities [status]:
 //   - connect to Delegate proxy server unix socket [TODO]
 //   - create and send Intent Requests [TODO]
+
+func makeAuthenticatorWithGeneratedKeypair(targetURL core.URL) core.Authenticator {
+	keypair := keys.GenerateNewX25519KeyPair()
+	leaf := loadLeaf("", true, &keypair.Public, targetURL)
+	return core.InMemoryAuthenticator{
+		X25519KeyPair: keypair,
+		VerifyConfig: transport.VerifyConfig{
+			InsecureSkipVerify: true, // TODO(dadrian): Host-key verification
+		},
+		Leaf: leaf,
+	}
+}
 
 func (c *HopClient) getAuthorization() error {
 	// make authenticator
