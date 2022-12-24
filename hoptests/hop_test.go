@@ -191,6 +191,7 @@ func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
 		User:         username,
 		AutoSelfSign: true,
 		Key:          "home/" + username + "/.hop/id_hop.pem",
+		IsPrincipal:  true,
 	}
 
 	c.FileSystem = &fstest.MapFS{

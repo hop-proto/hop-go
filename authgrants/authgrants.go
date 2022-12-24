@@ -24,6 +24,7 @@ type Authgrant struct {
 
 // AuthgrantMapSync holds current authgrants
 type AuthgrantMapSync struct {
+	// +checklocks:agLock
 	agMap  map[string]map[keys.PublicKey][]Authgrant
 	agLock sync.Mutex
 }

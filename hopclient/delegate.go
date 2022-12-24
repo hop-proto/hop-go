@@ -9,3 +9,7 @@ package hopclient
 //   - create and send Intent Requests [TODO]
 
 // TODO(baumanl): implement delegate hop client
+
+func (c *HopClient) getAuthorization() error { //nolint TODO(hosono) add linting back
+	panic("unimplemented")
+}

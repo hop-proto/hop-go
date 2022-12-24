@@ -66,6 +66,7 @@ type HostConfigOptional struct {
 	Port         int
 	User         *string
 	// something for principal vs. delegate
+	IsPrincipal *bool
 	// something for remote port forward
 	// something for local port forward
 
@@ -89,6 +90,7 @@ type HostConfig struct {
 	Port         int
 	User         string
 	// something for principal vs. delegate
+	IsPrincipal bool
 	// something for remote port forward
 	// something for local port forward
 
@@ -148,6 +150,9 @@ func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
 	if other.User != nil {
 		hc.User = other.User
 	}
+	if other.IsPrincipal != nil {
+		hc.IsPrincipal = other.IsPrincipal
+	}
 	if other.UsePty != nil {
 		hc.UsePty = other.UsePty
 	}
@@ -199,6 +204,9 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	}
 	if hc.User != nil {
 		newHC.User = *hc.User
+	}
+	if hc.IsPrincipal != nil {
+		newHC.IsPrincipal = *hc.IsPrincipal
 	}
 	if hc.UsePty != nil {
 		newHC.UsePty = *hc.UsePty

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/sirupsen/logrus"
 
@@ -35,9 +36,11 @@ type GetPrincipal func(sessID) (*hopSession, bool)
 
 // dpproxy holds state used by server to proxy delegate requests to principals
 type dpproxy struct {
-	address      string
+	// +checklocks:proxyLock
+	address string
+	// +checklocks:proxyLock
 	principals   map[int32]sessID
-	running      bool
+	running      atomic.Bool
 	listener     net.Listener
 	proxyLock    sync.Mutex
 	getPrincipal GetPrincipal
@@ -45,12 +48,12 @@ type dpproxy struct {
 
 // start starts DP Proxy server
 func (p *dpproxy) start() error {
-	p.proxyLock.Lock()
-	defer p.proxyLock.Unlock()
-
-	if p.running {
+	if p.running.Load() {
 		return fmt.Errorf("DP Proxy: start called when already running")
 	}
+
+	p.proxyLock.Lock()
+	defer p.proxyLock.Unlock()
 
 	fileInfo, err := os.Stat(p.address)
 	if err == nil { // file exists
@@ -72,7 +75,7 @@ func (p *dpproxy) start() error {
 	}
 
 	p.listener = authgrantServer
-	p.running = true
+	p.running.Store(true)
 	go p.serve()
 
 	return nil

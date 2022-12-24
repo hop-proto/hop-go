@@ -8,6 +8,7 @@ import (
 
 	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
+	"hop.computer/hop/core"
 )
 
 // TargetInfo is sent from principal indicating target
@@ -18,6 +19,12 @@ type TargetInfo struct {
 
 const confirmation = byte(1)
 const denial = byte(0)
+
+// WriteTargetInfo writes the relevant target info from given intent
+func WriteTargetInfo(targURL core.URL, w io.Writer) error {
+	_, err := common.WriteString(targURL.String(), w)
+	return err
+}
 
 // WriteTo serializes an InitInfo message
 func (m *TargetInfo) WriteTo(w io.Writer) (int64, error) {
@@ -86,19 +93,22 @@ func WriteFailure(w io.Writer, errString string) error {
 }
 
 // ReadResponse reads either confirmation or Failure message
-func ReadResponse(r io.Reader) (bool, string, error) {
+func ReadResponse(r io.Reader) error {
 	var resp byte
 	_, err := r.Read([]byte{resp})
 	if err != nil {
-		return false, "", err
+		return err
 	}
 
 	if resp == confirmation {
-		return true, "", nil
+		return nil
 	}
 
 	reason, _, err := common.ReadString(r)
-	return false, reason, err
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf(reason)
 }
 
 // WriteUnreliableProxyID writes tube id of unreliable tube to proxy
