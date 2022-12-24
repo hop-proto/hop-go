@@ -79,25 +79,6 @@ func (c *HopClient) Dial() error {
 	return c.connectLocked(c.hostconfig.HostURL().Address(), c.authenticator)
 }
 
-// DialExternalConn is the same as Dial but skips dialing the
-// authgrant server directly.
-func (c *HopClient) DialExternalConn() error {
-	// If providing an authGrantConn this way the caller is responsible for
-	// ensuring that this client is actually allowed to be asking the principal
-	// for the authorization grant. (necessary for testing since the check on
-	// descendent processes may be broken.)
-
-	// create authenticator object provided a conn to hop key agent
-	err := c.authenticatorSetup()
-	if err != nil {
-		return err
-	}
-	c.m.Lock()
-	defer c.m.Unlock()
-	logrus.Info("calling connectLocked on :", c.hostconfig.HostURL().Address())
-	return c.connectLocked(c.hostconfig.HostURL().Address(), c.authenticator)
-}
-
 // DialExternalAuthenticator connects to an address with the provided authentication.
 func (c *HopClient) DialExternalAuthenticator(address string, authenticator core.Authenticator) error {
 	c.m.Lock()
