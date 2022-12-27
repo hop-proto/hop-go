@@ -101,6 +101,7 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err
 	return t1, t2, stop, rel, err
 }
 
+// CloseTest tests the closing behavior of tubes
 func CloseTest(t *testing.T, rel bool) {
 	c1, c2, stop, _, err := makeConn(t, rel)
 	assert.NilError(t, err)

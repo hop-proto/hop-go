@@ -181,7 +181,7 @@ func (u *Unreliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UD
 	n = copy(b, msg)
 	if n < len(msg) {
 		err = transport.ErrBufOverflow
-		// net.UDPConn discards buffer leftovers, so Unreliable Tubes do the same
+		// net.UDPConn discards buffer leftovers, so Unreliable Tubes does the same
 	}
 	return
 }

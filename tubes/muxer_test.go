@@ -15,6 +15,7 @@ import (
 	"hop.computer/hop/transport"
 )
 
+// makeMuxers creates two connected muxers running over UDP
 func makeMuxers(t *testing.T) (m1, m2 *Muxer, stop func()) {
 	var c1, c2 transport.MsgConn
 	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")

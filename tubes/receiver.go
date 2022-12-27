@@ -3,7 +3,6 @@ package tubes
 import (
 	"bytes"
 	"container/heap"
-	"errors"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -25,8 +24,9 @@ type receiver struct {
 	windowStart uint64
 	// +checklocks:m
 	windowSize uint16
-	closed     atomic.Bool
-	m          sync.Mutex
+
+	closed atomic.Bool
+	m      sync.Mutex
 	// +checklocks:m
 	fragments PriorityQueue
 
@@ -131,10 +131,8 @@ func frameInBounds(wS uint64, wE uint64, f uint64) bool {
 	return true
 }
 
-/*
-Utility function to add offsets so that we eliminate wraparounds.
-Precondition: must be holding frame number
-*/
+// unwrapFrameNo converts 32 bit frame numbers into 64 bit frame numbers.
+// It selects the frame number closest to the current ackNo.
 // +checklocks:r.m
 func (r *receiver) unwrapFrameNo(frameNo uint32) uint64 {
 	// TODO(hosono) there's probably a much simpler way to do this, but this works
@@ -174,22 +172,26 @@ func (r *receiver) unwrapFrameNo(frameNo uint32) uint64 {
 	return lower
 }
 
-/* Precondition: receive window lock is held. */
+// receive processes a single incoming packet
 func (r *receiver) receive(p *frame) error {
 	r.m.Lock()
 	defer r.m.Unlock()
+
+	if r.closed.Load() {
+		return io.EOF
+	}
+
 	windowStart := r.windowStart
 	windowEnd := r.windowStart + uint64(uint32(r.windowSize))
 
 	frameNo := r.unwrapFrameNo(p.frameNo)
-	//r.log.Debugf("receive frame frameNo: %d, ackNo: %d, fin: %t, recv ack no: %d, data: %x", frameNo, p.ackNo, p.flags.FIN, r.ackNo, p.data)
 	if !frameInBounds(windowStart, windowEnd, frameNo) {
 		r.log.WithFields(logrus.Fields{
 			"frameNo":     frameNo,
 			"windowStart": windowStart,
 			"windowEnd":   windowEnd,
 		}).Debugf("out of bounds frame")
-		return errors.New("received dataframe out of receive window bounds")
+		return errFrameOutOfBounds
 	}
 
 	r.log.WithFields(logrus.Fields{
@@ -211,6 +213,7 @@ func (r *receiver) receive(p *frame) error {
 	return nil
 }
 
+// Close causes future reads to return io.EOF
 func (r *receiver) Close() {
 	r.closed.Store(true)
 	r.dataReady.Close()

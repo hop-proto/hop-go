@@ -39,18 +39,23 @@ type sender struct {
 	// to update the buffer when frames are acknowledged.
 	// +checklocks:l
 	frameDataLengths map[uint32]uint16
+
 	// The current buffer of unacknowledged bytes from the sender.
 	// A byte slice works well here because:
 	// 	(1) we need to accommodate resending fragments of potentially varying window sizes
 	// 	based on the receiving end, so being able to arbitrarily index from the front is important.
 	//	(2) the append() function when write() is called will periodically clean up the unused
 	//	memory in the front of the slice by reallocating the buffer array.
+	// TODO(hosono) ideally, we would have a maximum buffer size beyond with reads would block
 	// +checklocks:l
 	buffer []byte
+
 	// The lock controls all fields of the sender.
 	l sync.Mutex
+
 	// Retransmission TimeOut.
 	RTOTicker *time.Ticker
+
 	// +checklocks:l
 	RTO time.Duration
 
@@ -58,15 +63,22 @@ type sender struct {
 	// +checklocks:l
 	deadline time.Time
 
-	endRetransmit        chan struct{}
-	retransmitEnded      chan struct{}
+	// signals the retransmit goroutine to stop
+	endRetransmit chan struct{}
+
+	// indicates that the retransmit goroutine has stopped
+	retransmitEnded chan struct{}
+
+	// ensures that stopRetransmit is called only once
 	stopRetransmitCalled atomic.Bool
 
+	// signals that more data be sent
 	windowOpen chan struct{}
 
 	// +checklocks:l
 	sendQueue chan *frame
 
+	// logging context
 	log *logrus.Entry
 }
 
@@ -247,6 +259,7 @@ func (s *sender) retransmit() {
 	close(s.retransmitEnded)
 }
 
+// stopRetransmit signals the retransmit goroutine to stop
 func (s *sender) stopRetransmit() {
 	if !s.stopRetransmitCalled.CompareAndSwap(false, true) {
 		return
@@ -255,15 +268,13 @@ func (s *sender) stopRetransmit() {
 	<-s.retransmitEnded
 }
 
+// Start begins the retransmit loop
 func (s *sender) Start() {
 	s.closed.Store(false)
 	go s.retransmit()
 }
 
-func (s *sender) Reset() {
-	s.stopRetransmit()
-}
-
+// Close stops the sender and causes future writes to return io.EOF
 func (s *sender) Close() error {
 	if s.closed.CompareAndSwap(false, true) {
 		s.stopRetransmit()
