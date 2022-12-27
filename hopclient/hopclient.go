@@ -120,8 +120,7 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	// authgrant procedure.
 	// c.address = address
 	c.authenticator = authenticator
-	// TODO(hosono) add logging context to client
-	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.hostconfig.DataTimeout, false, logrus.WithField("TODO", "add logger to client"))
+	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.hostconfig.DataTimeout, false, logrus.WithField("muxer", "client"))
 	go func() {
 		err := c.TubeMuxer.Start()
 		if c.ExecTube != nil {
