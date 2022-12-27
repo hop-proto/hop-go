@@ -211,6 +211,17 @@ func (r *Reliable) enterClosedState() {
 func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 	r.l.Lock()
 	defer r.l.Unlock()
+
+	// Log the packet
+	r.log.WithFields(logrus.Fields{
+		"frameno": pkt.frameNo,
+		"req":     pkt.flags.REQ,
+		"resp":    pkt.flags.RESP,
+		"rel":     pkt.flags.REL,
+		"ack":     pkt.flags.ACK,
+		"fin":     pkt.flags.FIN,
+	}).Debug("receiving initiate packet")
+
 	if r.tubeState == created {
 		r.recvWindow.m.Lock()
 		r.recvWindow.ackNo = 1
