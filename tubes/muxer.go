@@ -380,10 +380,12 @@ func (m *Muxer) Stop() (err error) {
 		m.m.Lock()
 		for _, v := range m.tubes {
 			if t, ok := v.(*Reliable); ok {
-				t.l.Lock()
-				defer t.l.Unlock()
-				t.getLog().Error("Timed out. Forcing close")
-				t.enterClosedState()
+				go func() {
+					t.l.Lock()
+					defer t.l.Unlock()
+					t.getLog().Error("Timed out. Forcing close")
+					t.enterClosedState()
+				}()
 			}
 		}
 		close(stop)

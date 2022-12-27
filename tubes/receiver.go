@@ -213,5 +213,5 @@ func (r *receiver) receive(p *frame) error {
 
 func (r *receiver) Close() {
 	r.closed.Store(true)
-	r.dataReady.Cancel(io.EOF)
+	r.dataReady.Close()
 }

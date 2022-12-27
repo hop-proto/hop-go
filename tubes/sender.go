@@ -64,6 +64,7 @@ type sender struct {
 
 	windowOpen chan struct{}
 
+	// +checklocks:l
 	sendQueue chan *frame
 
 	log *logrus.Entry
@@ -153,14 +154,17 @@ func (s *sender) recvAck(ackNo uint32) error {
 	return nil
 }
 
-func (s *sender) sendEmptyPacket() *frame {
+func (s *sender) sendEmptyPacket() {
 	s.l.Lock()
 	defer s.l.Unlock()
-	return s.sendEmptyPacketLocked()
+	s.sendEmptyPacketLocked()
 }
 
 // +checklocks:s.l
-func (s *sender) sendEmptyPacketLocked() *frame {
+func (s *sender) sendEmptyPacketLocked() {
+	if s.closed.Load() {
+		return
+	}
 	pkt := &frame{
 		dataLength: 0,
 		frameNo:    s.frameNo,
@@ -175,7 +179,6 @@ func (s *sender) sendEmptyPacketLocked() *frame {
 		},
 	}
 	s.sendQueue <- pkt
-	return pkt
 }
 
 // rto is true if the window is filled due to a retransmission timeout and false otherwise
@@ -264,7 +267,11 @@ func (s *sender) Reset() {
 func (s *sender) Close() error {
 	if s.closed.CompareAndSwap(false, true) {
 		s.stopRetransmit()
+
+		s.l.Lock()
+		defer s.l.Unlock()
 		close(s.sendQueue)
+
 		return nil
 	}
 	return io.EOF
