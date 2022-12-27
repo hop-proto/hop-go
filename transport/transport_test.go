@@ -24,22 +24,14 @@ func TestTransportAEAD(t *testing.T) {
 	assert.Check(t, cmp.Equal(sanse.Overhead(), TagLen))
 }
 
-// fakeUDP is true to use the in memory ReliableUDP connection and false to use
-// UDP on the loopback interface
-func makeConn(t *testing.T, fakeUDP bool) (*Client, *Handle, *Server, func(), error) {
+func makeConn(t *testing.T) (*Client, *Handle, *Server, func(), error) {
 	logrus.SetLevel(logrus.DebugLevel)
 
-	var serverUDP UDPLike
-	var clientUDP UDPLike
-	if fakeUDP {
-		serverUDP, clientUDP = MakeReliableUDPConn(false)
-	} else {
-		serverPkt, err := net.ListenPacket("udp", "localhost:7777")
-		assert.NilError(t, err)
-		serverUDP = serverPkt.(*net.UDPConn)
-		clientUDP, err = net.DialUDP("udp", nil, serverUDP.LocalAddr().(*net.UDPAddr))
-		assert.NilError(t, err)
-	}
+	serverPkt, err := net.ListenPacket("udp", "localhost:0")
+	assert.NilError(t, err)
+	serverUDP := serverPkt.(*net.UDPConn)
+	clientUDP, err := net.DialUDP("udp", nil, serverUDP.LocalAddr().(*net.UDPAddr))
+	assert.NilError(t, err)
 
 	// Create new server
 	serverConfig, verifyConfig := newTestServerConfig(t)
@@ -83,6 +75,8 @@ func makeConn(t *testing.T, fakeUDP bool) (*Client, *Handle, *Server, func(), er
 			clientConn.Close()
 		}()
 		serverConn.Close()
+		serverUDP.Close()
+		clientUDP.Close()
 	}
 
 	return clientConn, handle, serverConn, stop, nil
@@ -120,7 +114,7 @@ func checkEOFReads(t *testing.T, client *Client, handle *Handle) {
 
 // Tests that closing the client connection causes server reads to error
 func clientClose(t *testing.T) {
-	client, handle, _, stop, err := makeConn(t, false)
+	client, handle, _, stop, err := makeConn(t)
 	assert.NilError(t, err)
 
 	err = client.Close()
@@ -134,7 +128,7 @@ func clientClose(t *testing.T) {
 
 // Tests that closing the handle causes client reads to error
 func handleClose(t *testing.T) {
-	client, handle, _, stop, err := makeConn(t, false)
+	client, handle, _, stop, err := makeConn(t)
 	assert.NilError(t, err)
 
 	done := make(chan struct{})
@@ -158,7 +152,7 @@ func handleClose(t *testing.T) {
 }
 
 func bothClose(t *testing.T) {
-	client, handle, _, stop, err := makeConn(t, false)
+	client, handle, _, stop, err := makeConn(t)
 	assert.NilError(t, err)
 
 	wg := sync.WaitGroup{}
@@ -187,7 +181,7 @@ func bothClose(t *testing.T) {
 }
 
 func allClose(t *testing.T) {
-	client, handle, server, stop, err := makeConn(t, false)
+	client, handle, server, stop, err := makeConn(t)
 	assert.NilError(t, err)
 
 	wg := sync.WaitGroup{}
@@ -223,7 +217,7 @@ func allClose(t *testing.T) {
 
 // Tests that closing the server causes the handle and clients to close
 func serverClose(t *testing.T) {
-	client, handle, server, stop, err := makeConn(t, false)
+	client, handle, server, stop, err := makeConn(t)
 	assert.NilError(t, err)
 
 	done := make(chan struct{})
@@ -262,29 +256,15 @@ func serverClose(t *testing.T) {
 	stop()
 }
 
-func makeReliableUDPPipe() (net.Conn, net.Conn, func(), error) {
-	c1, c2 := MakeReliableUDPConn(true)
-	stop := func() {
-		c1.Close()
-		c2.Close()
-	}
-	return c1, c2, stop, nil
-}
-
-func TestReliableUDP(t *testing.T) {
-	mp := nettest.MakePipe(makeReliableUDPPipe)
-	nettest.TestConn(t, mp)
-}
-
 // Wrapper around the client nettests
 func TestTransportConn(t *testing.T) {
 	makePipe1 := func() (net.Conn, net.Conn, func(), error) {
-		c1, c2, _, stop, err := makeConn(t, true)
+		c1, c2, _, stop, err := makeConn(t)
 		return c1, c2, stop, err
 	}
 
 	makePipe2 := func() (net.Conn, net.Conn, func(), error) {
-		c1, c2, _, stop, err := makeConn(t, true)
+		c1, c2, _, stop, err := makeConn(t)
 		return c2, c1, stop, err
 	}
 
