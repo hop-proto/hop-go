@@ -245,13 +245,10 @@ func (s *sender) retransmit() {
 }
 
 func (s *sender) stopRetransmit() {
-	s.stopRetransmitCalled.Store(true)
-	select {
-	case s.endRetransmit <- struct{}{}:
-		break
-	default:
-		break
+	if !s.stopRetransmitCalled.CompareAndSwap(false, true) {
+		return
 	}
+	close(s.endRetransmit)
 	<-s.retransmitEnded
 }
 
