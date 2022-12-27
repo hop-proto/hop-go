@@ -32,8 +32,10 @@ const windowSize = 128
 // maximum bytes per frame
 const maxFrameDataLength uint16 = 2000
 
+// TODO(hosono) choose this time
 // amount of time to linger in the timeWait state when closing
 const timeWaitTime = 3 * time.Second
 
+// TODO(hosono) choose this time
 // amount of time to wait for all all tubes to close when muxer is stopping
 const muxerTimeout = 2 * timeWaitTime
