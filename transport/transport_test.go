@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"golang.org/x/net/nettest"
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
 
 	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
 	"hop.computer/hop/kravatte"
+	"hop.computer/hop/nettest"
 )
 
 func TestTransportAEAD(t *testing.T) {
@@ -24,7 +24,7 @@ func TestTransportAEAD(t *testing.T) {
 	assert.Check(t, cmp.Equal(sanse.Overhead(), TagLen))
 }
 
-func makeConn(t *testing.T) (*Client, *Handle, *Server, func(), error) {
+func makeConn(t *testing.T) (*Client, *Handle, *Server, func(), bool, error) {
 	logrus.SetLevel(logrus.DebugLevel)
 
 	serverPkt, err := net.ListenPacket("udp", "localhost:0")
@@ -79,7 +79,7 @@ func makeConn(t *testing.T) (*Client, *Handle, *Server, func(), error) {
 		clientUDP.Close()
 	}
 
-	return clientConn, handle, serverConn, stop, nil
+	return clientConn, handle, serverConn, stop, false, nil
 }
 
 func TestClose(t *testing.T) {
@@ -114,7 +114,7 @@ func checkEOFReads(t *testing.T, client *Client, handle *Handle) {
 
 // Tests that closing the client connection causes server reads to error
 func clientClose(t *testing.T) {
-	client, handle, _, stop, err := makeConn(t)
+	client, handle, _, stop, _, err := makeConn(t)
 	assert.NilError(t, err)
 
 	err = client.Close()
@@ -128,7 +128,7 @@ func clientClose(t *testing.T) {
 
 // Tests that closing the handle causes client reads to error
 func handleClose(t *testing.T) {
-	client, handle, _, stop, err := makeConn(t)
+	client, handle, _, stop, _, err := makeConn(t)
 	assert.NilError(t, err)
 
 	done := make(chan struct{})
@@ -152,7 +152,7 @@ func handleClose(t *testing.T) {
 }
 
 func bothClose(t *testing.T) {
-	client, handle, _, stop, err := makeConn(t)
+	client, handle, _, stop, _, err := makeConn(t)
 	assert.NilError(t, err)
 
 	wg := sync.WaitGroup{}
@@ -181,7 +181,7 @@ func bothClose(t *testing.T) {
 }
 
 func allClose(t *testing.T) {
-	client, handle, server, stop, err := makeConn(t)
+	client, handle, server, stop, _, err := makeConn(t)
 	assert.NilError(t, err)
 
 	wg := sync.WaitGroup{}
@@ -217,7 +217,7 @@ func allClose(t *testing.T) {
 
 // Tests that closing the server causes the handle and clients to close
 func serverClose(t *testing.T) {
-	client, handle, server, stop, err := makeConn(t)
+	client, handle, server, stop, _, err := makeConn(t)
 	assert.NilError(t, err)
 
 	done := make(chan struct{})
@@ -258,14 +258,14 @@ func serverClose(t *testing.T) {
 
 // Wrapper around the client nettests
 func TestTransportConn(t *testing.T) {
-	makePipe1 := func() (net.Conn, net.Conn, func(), error) {
-		c1, c2, _, stop, err := makeConn(t)
-		return c1, c2, stop, err
+	makePipe1 := func() (net.Conn, net.Conn, func(), bool, error) {
+		c1, c2, _, stop, rel, err := makeConn(t)
+		return c1, c2, stop, rel, err
 	}
 
-	makePipe2 := func() (net.Conn, net.Conn, func(), error) {
-		c1, c2, _, stop, err := makeConn(t)
-		return c2, c1, stop, err
+	makePipe2 := func() (net.Conn, net.Conn, func(), bool, error) {
+		c1, c2, _, stop, rel, err := makeConn(t)
+		return c2, c1, stop, rel, err
 	}
 
 	t.Run("ClientServerConn", func(t *testing.T) {
