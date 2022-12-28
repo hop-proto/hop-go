@@ -243,7 +243,8 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 
 // Close implements the net.Conn interface. Future io operations will return io.EOF
 func (u *Unreliable) Close() error {
-	if u.state.Swap(closed) == closed {
+	oldState := u.state.Swap(closed)
+	if oldState == closed {
 		return io.EOF
 	}
 
@@ -268,8 +269,10 @@ func (u *Unreliable) Close() error {
 	u.send.Close()
 	u.recv.Close()
 
-	// wait for sender to end
-	<-u.senderEnded
+	if oldState == initiated {
+		// wait for sender to end
+		<-u.senderEnded
+	}
 
 	close(u.closed)
 
