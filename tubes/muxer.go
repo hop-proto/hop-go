@@ -284,7 +284,7 @@ func (m *Muxer) Start() (err error) {
 
 	defer func() {
 		// This case indicates that the muxer was stopped by m.Stop()
-		if m.state.Load() == muxerClosed || errors.Is(err, syscall.ECONNREFUSED){
+		if m.state.Load() == muxerClosed || errors.Is(err, syscall.ECONNREFUSED) {
 			err = nil
 		} else if err != nil {
 			m.log.Errorf("Muxer ended with error: %s", err)
