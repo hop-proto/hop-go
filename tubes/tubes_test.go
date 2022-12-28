@@ -3,6 +3,7 @@ package tubes
 import (
 	"io"
 	"net"
+	"sync"
 	"testing"
 
 	"github.com/sirupsen/logrus"
@@ -76,22 +77,26 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err
 	}
 
 	stop = func() {
-		t1.Close()
-		t2.Close()
 
-		if r1, ok := t1.(*Reliable); ok {
-			r1.WaitForClose()
-		}
+		wg := sync.WaitGroup{}
+		wg.Add(2)
 
-		if r2, ok := t2.(*Reliable); ok {
-			r2.WaitForClose()
-		}
+		go func() {
+			t1.Close()
+			t1.(Tube).WaitForClose()
+			muxer1.Stop()
+			assert.DeepEqual(t, muxer1.state.Load(), muxerClosed)
+			wg.Done()
+		}()
+		go func() {
+			t2.Close()
+			t2.(Tube).WaitForClose()
+			muxer2.Stop()
+			assert.DeepEqual(t, muxer2.state.Load(), muxerClosed)
+			wg.Done()
+		}()
 
-		muxer1.Stop()
-		assert.DeepEqual(t, muxer1.state.Load(), muxerClosed)
-
-		muxer2.Stop()
-		assert.DeepEqual(t, muxer2.state.Load(), muxerClosed)
+		wg.Wait()
 
 		c1.Close()
 		c2.Close()

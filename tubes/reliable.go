@@ -310,10 +310,10 @@ func (r *Reliable) Close() (err error) {
 		return ErrBadTubeState
 	case initiated:
 		r.tubeState = finWait1
-		r.log.Warn("call to close. going from initiated to finWait1")
+		r.log.Debug("call to close. going from initiated to finWait1")
 	case closeWait:
 		r.tubeState = lastAck
-		r.log.Warn("call to close. going from closeWait to lastAck")
+		r.log.Debug("call to close. going from closeWait to lastAck")
 	default:
 		// In this case, Close() has already been called
 		return io.EOF
