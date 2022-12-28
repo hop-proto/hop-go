@@ -2,10 +2,12 @@ package tubes
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -282,7 +284,7 @@ func (m *Muxer) Start() (err error) {
 
 	defer func() {
 		// This case indicates that the muxer was stopped by m.Stop()
-		if m.state.Load() == muxerClosed {
+		if m.state.Load() == muxerClosed || errors.Is(err, syscall.ECONNREFUSED){
 			err = nil
 		} else if err != nil {
 			m.log.Errorf("Muxer ended with error: %s", err)
@@ -383,8 +385,7 @@ func (m *Muxer) Stop() (err error) {
 	wg.Wait()
 	m.state.Store(muxerClosed)
 
-	// TODO(hosono) uncommenting this line fixes issue #44, but it causes failure in the testing environment
-	//m.underlying.Close()
+	m.underlying.Close()
 
 	close(m.stopped)
 	m.log.Info("Muxer.Stop() finished")
