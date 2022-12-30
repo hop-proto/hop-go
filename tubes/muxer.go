@@ -85,10 +85,12 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 func (m *Muxer) reapTube(t Tube) {
 	t.WaitForClose()
 
-	// This prevents tubes IDs from being reused while the remote peer is in the timeWait state
+	// This prevents tubes IDs from being reused while the remote peer is in the timeWait state.
 	if t.GetID()%2 == m.idParity {
 		time.Sleep(timeWaitTime)
 	}
+
+	t.getLog().Debug("reaping tube")
 
 	m.m.Lock()
 	defer m.m.Unlock()
@@ -268,13 +270,8 @@ func (m *Muxer) readMsg() (*frame, error) {
 }
 
 func (m *Muxer) sender() {
-	for m.state.Load() != muxerClosed {
-		select {
-		case rawBytes := <-m.sendQueue:
-			m.underlying.WriteMsg(rawBytes)
-		case <-m.stopped:
-			return
-		}
+	for rawBytes := range m.sendQueue {
+		m.underlying.WriteMsg(rawBytes)
 	}
 }
 
@@ -356,8 +353,9 @@ func (m *Muxer) Stop() (err error) {
 			defer wg.Done()
 			m.log.Info("Closing tube: ", v.GetID())
 			err := v.Close()
-			if err != nil {
+			if err != nil && err != io.EOF {
 				// Tried to close tube in bad state. Nothing to do
+				m.log.Errorf("tube %d closed with error: %s", v.GetID(), err)
 				return
 			}
 			v.WaitForClose()
@@ -387,6 +385,7 @@ func (m *Muxer) Stop() (err error) {
 
 	m.underlying.Close()
 
+	close(m.sendQueue)
 	close(m.stopped)
 	m.log.Info("Muxer.Stop() finished")
 	return nil

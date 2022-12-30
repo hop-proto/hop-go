@@ -5,6 +5,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -107,7 +108,7 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err
 }
 
 // CloseTest tests the closing behavior of tubes
-func CloseTest(t *testing.T, rel bool) {
+func CloseTest(t *testing.T, rel bool, wait bool) {
 	c1, c2, stop, _, err := makeConn(t, rel)
 	assert.NilError(t, err)
 	defer stop()
@@ -120,6 +121,9 @@ func CloseTest(t *testing.T, rel bool) {
 	}
 
 	c1.Close()
+	if wait {
+		time.Sleep(100 * time.Millisecond)
+	}
 	c2.Close()
 
 	if c1Rel, ok := c1.(*Reliable); ok {
@@ -145,7 +149,8 @@ func reliable(t *testing.T) {
 	logrus.SetLevel(logrus.TraceLevel)
 
 	t.Run("Close", func(t *testing.T) {
-		CloseTest(t, true)
+		CloseTest(t, true, true)
+		CloseTest(t, true, false)
 	})
 
 	f := func() (c1, c2 net.Conn, stop func(), rel bool, err error) {
@@ -162,7 +167,8 @@ func unreliable(t *testing.T) {
 	logrus.SetLevel(logrus.TraceLevel)
 
 	t.Run("Close", func(t *testing.T) {
-		CloseTest(t, false)
+		CloseTest(t, false, true)
+		CloseTest(t, false, false)
 	})
 
 	f := func() (c1, c2 net.Conn, stop func(), rel bool, err error) {

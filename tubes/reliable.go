@@ -106,6 +106,7 @@ func (r *Reliable) send() {
 		pkt.flags.REL = true
 		r.sendQueue <- pkt.toBytes()
 	}
+	r.log.Debug("send ended")
 }
 
 // receive is called by the muxer for each new packet
@@ -307,6 +308,7 @@ func (r *Reliable) Close() (err error) {
 
 	switch r.tubeState {
 	case created:
+		r.log.WithField("state", r.tubeState).Warn("tried to close tube in bad state")
 		return ErrBadTubeState
 	case initiated:
 		r.tubeState = finWait1

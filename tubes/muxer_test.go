@@ -63,6 +63,9 @@ func makeMuxers(t *testing.T) (m1, m2 *Muxer, stop func()) {
 
 		c1UDP.Close()
 		c2UDP.Close()
+
+		// This makes sure that lingering goroutines do not panic
+		time.Sleep(timeWaitTime + time.Second)
 	}
 
 	return m1, m2, stop
@@ -136,6 +139,7 @@ func reusingTubes(t *testing.T) {
 	// Create a reliable tube
 	t1, err := m1.CreateReliableTube(common.ExecTube)
 	assert.NilError(t, err)
+	assert.DeepEqual(t, t1.GetID(), byte(1))
 	t2, err := m2.Accept()
 	assert.NilError(t, err)
 	t2Rel := t2.(*Reliable)
@@ -151,10 +155,12 @@ func reusingTubes(t *testing.T) {
 	t2Rel.l.Unlock()
 
 	assert.DeepEqual(t, t2State, timeWait)
+	time.Sleep(timeWaitTime + time.Second)
 
 	// Attempt to open another tube with the same ID
 	t1, err = m1.CreateReliableTube(common.ExecTube)
 	assert.NilError(t, err)
+	assert.DeepEqual(t, t1.GetID(), byte(1))
 	t2, err = m2.Accept()
 	assert.NilError(t, err)
 	t2Rel = t2.(*Reliable)
