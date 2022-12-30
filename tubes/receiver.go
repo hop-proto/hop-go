@@ -194,12 +194,6 @@ func (r *receiver) receive(p *frame) error {
 		return errFrameOutOfBounds
 	}
 
-	r.log.WithFields(logrus.Fields{
-		"frameNo":     frameNo,
-		"windowStart": windowStart,
-		"windowEnd":   windowEnd,
-	}).Tracef("got in bounds frame.")
-
 	if (p.dataLength > 0 || p.flags.FIN) && (frameNo >= r.windowStart) {
 		heap.Push(&r.fragments, &pqItem{
 			value:    p.data,

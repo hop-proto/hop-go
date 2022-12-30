@@ -128,15 +128,11 @@ func (s *sender) recvAck(ackNo uint32) error {
 	s.l.Lock()
 	defer s.l.Unlock()
 
+	oldAckNo := s.ackNo
 	newAckNo := uint64(ackNo)
 	if newAckNo < s.ackNo && (newAckNo+(1<<32)-s.ackNo <= uint64(s.windowSize)) { // wrap around
 		newAckNo = newAckNo + (1 << 32)
 	}
-
-	s.log.WithFields(logrus.Fields{
-		"orig ackno": s.ackNo,
-		"new ackno":  newAckNo,
-	}).Tracef("received ack")
 
 	windowOpen := s.ackNo < newAckNo
 
@@ -151,6 +147,11 @@ func (s *sender) recvAck(ackNo uint32) error {
 		s.unacked--
 		s.frames = s.frames[1:]
 	}
+
+	s.log.WithFields(logrus.Fields{
+		"old ackNo": oldAckNo,
+		"new ackNo": newAckNo,
+	}).Trace("updated ackNo")
 
 	// Only fill the window if new space has really opened up
 	if windowOpen {
@@ -221,10 +222,6 @@ func (s *sender) fillWindow(rto bool, startIndex int) {
 	for i := 0; i < numFrames; i++ {
 		s.sendQueue <- s.frames[startIndex+i]
 		s.unacked++
-		s.log.WithFields(logrus.Fields{
-			"fin":     s.frames[startIndex+i].flags.FIN,
-			"frameNo": s.frames[startIndex+i].frameNo,
-		}).Trace("Putting packet on queue")
 	}
 
 	s.log.WithFields(logrus.Fields{
@@ -239,10 +236,7 @@ func (s *sender) retransmit() {
 		case <-s.RTOTicker.C:
 			s.l.Lock()
 			if len(s.frames) == 0 { // Keep Alive messages
-				s.log.WithFields(logrus.Fields{
-					"frameno": s.frameNo,
-					"fin":     s.finSent && !s.stopRetransmitCalled.Load(),
-				}).Trace("Keep alive sent")
+				s.log.Trace("Keep alive sent")
 				s.sendEmptyPacketLocked()
 			} else {
 				s.log.Trace("retransmitting")

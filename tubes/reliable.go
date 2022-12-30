@@ -105,6 +105,14 @@ func (r *Reliable) send() {
 		pkt.flags.ACK = true
 		pkt.flags.REL = true
 		r.sendQueue <- pkt.toBytes()
+
+		r.log.WithFields(logrus.Fields{
+			"frameno": pkt.frameNo,
+			"ackno":   pkt.ackNo,
+			"ack":     pkt.flags.ACK,
+			"fin":     pkt.flags.FIN,
+			"dataLen": pkt.dataLength,
+		}).Trace("sent packet")
 	}
 	r.log.Debug("send ended")
 }
@@ -120,6 +128,7 @@ func (r *Reliable) receive(pkt *frame) error {
 		"ackno":   pkt.ackNo,
 		"ack":     pkt.flags.ACK,
 		"fin":     pkt.flags.FIN,
+		"dataLen": pkt.dataLength,
 	}).Trace("receiving packet")
 
 	// created and closed tubes cannot handle incoming packets
