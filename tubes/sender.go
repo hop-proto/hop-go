@@ -239,7 +239,10 @@ func (s *sender) retransmit() {
 		case <-s.RTOTicker.C:
 			s.l.Lock()
 			if len(s.frames) == 0 { // Keep Alive messages
-				s.log.WithField("frameno", s.frameNo).Trace("Keep alive sent")
+				s.log.WithFields(logrus.Fields{
+					"frameno": s.frameNo,
+					"fin":     s.finSent && !s.stopRetransmitCalled.Load(),
+				}).Trace("Keep alive sent")
 				s.sendEmptyPacketLocked()
 			} else {
 				s.log.Trace("retransmitting")
