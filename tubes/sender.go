@@ -188,7 +188,7 @@ func (s *sender) sendEmptyPacketLocked() {
 			// is also in the timeWait state, they will endlessly send acknowledgements
 			// between each other. We don't need to set the FIN flag because we can
 			// only move into the timeWait state if our FIN has been ACKed.
-			FIN: s.finSent && s.frameNo >= s.finFrameNo &&  !s.stopRetransmitCalled.Load(),
+			FIN: s.finSent && s.frameNo >= s.finFrameNo && !s.stopRetransmitCalled.Load(),
 		},
 	}
 	s.sendQueue <- pkt
