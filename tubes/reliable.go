@@ -47,6 +47,7 @@ type Reliable struct {
 	closed        chan struct{}
 	initRecv      chan struct{}
 	initDone      chan struct{}
+	sendDone      chan struct{}
 	l             sync.Mutex
 	log           *logrus.Entry
 }
@@ -82,6 +83,7 @@ func (r *Reliable) initiate(req bool) {
 		r.sendQueue <- p.toBytes()
 		select {
 		case <-ticker.C:
+			r.log.Info("init rto exceeded")
 			continue
 		case <-r.initRecv:
 			r.l.Lock()
@@ -114,6 +116,7 @@ func (r *Reliable) send() {
 		}).Trace("sent packet")
 	}
 	r.log.Debug("send ended")
+	close(r.sendDone)
 }
 
 // receive is called by the muxer for each new packet
@@ -213,8 +216,11 @@ func (r *Reliable) enterClosedState() {
 	}
 	r.sender.Close()
 	r.recvWindow.Close()
-	r.tubeState = closed
+	if r.tubeState != created {
+		<-r.sendDone
+	}
 	close(r.closed)
+	r.tubeState = closed
 }
 
 func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {

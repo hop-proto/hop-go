@@ -108,7 +108,7 @@ func (u *Unreliable) initiate(req bool) {
 
 		select {
 		case <-ticker.C:
-			u.log.Warn("init rto exceeded")
+			u.log.Info("init rto exceeded")
 		case <-u.initiated:
 		case <-u.closed:
 			return
