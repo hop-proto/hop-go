@@ -222,10 +222,6 @@ func (s *sender) fillWindow(rto bool, startIndex int) {
 	for i := 0; i < numFrames; i++ {
 		s.sendQueue <- s.frames[startIndex+i]
 		s.unacked++
-		s.log.WithFields(logrus.Fields{
-			"fin":     s.frames[startIndex+i].flags.FIN,
-			"frameNo": s.frames[startIndex+i].frameNo,
-		}).Trace("Putting packet on queue")
 	}
 
 	s.log.WithFields(logrus.Fields{
@@ -240,7 +236,10 @@ func (s *sender) retransmit() {
 		case <-s.RTOTicker.C:
 			s.l.Lock()
 			if len(s.frames) == 0 { // Keep Alive messages
-				s.log.Trace("Keep alive sent")
+				s.log.WithFields(logrus.Fields{
+					"frameno": s.frameNo,
+					"fin":     s.finSent && !s.stopRetransmitCalled.Load(),
+				}).Trace("Keep alive sent")
 				s.sendEmptyPacketLocked()
 			} else {
 				s.log.Trace("retransmitting")
