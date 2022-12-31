@@ -188,7 +188,7 @@ func (s *sender) sendEmptyPacketLocked() {
 			// is also in the timeWait state, they will endlessly send acknowledgements
 			// between each other. We don't need to set the FIN flag because we can
 			// only move into the timeWait state if our FIN has been ACKed.
-			FIN: s.finSent && !s.stopRetransmitCalled.Load(),
+			FIN: s.finSent && s.frameNo >= s.finFrameNo &&  !s.stopRetransmitCalled.Load(),
 		},
 	}
 	s.sendQueue <- pkt
@@ -236,10 +236,7 @@ func (s *sender) retransmit() {
 		case <-s.RTOTicker.C:
 			s.l.Lock()
 			if len(s.frames) == 0 { // Keep Alive messages
-				s.log.WithFields(logrus.Fields{
-					"frameno": s.frameNo,
-					"fin":     s.finSent && !s.stopRetransmitCalled.Load(),
-				}).Trace("Keep alive sent")
+				s.log.Trace("Keep alive sent")
 				s.sendEmptyPacketLocked()
 			} else {
 				s.log.Trace("retransmitting")
