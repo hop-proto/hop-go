@@ -176,6 +176,7 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.log.Debug("got FIN packet. going from finWait2 to timeWait")
 			r.enterTimeWaitState()
 		case timeWait:
+			r.log.Debug("got FIN packet. reseting timeWait timer")
 			r.timeWaitTimer.Reset(timeWaitTime)
 		}
 		if r.tubeState != closed {
