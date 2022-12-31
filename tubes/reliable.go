@@ -59,12 +59,12 @@ var _ Tube = &Reliable{}
 
 // req: whether the tube is requesting to initiate a tube (true), or whether is respondding to an initiation request (false).
 func (r *Reliable) initiate(req bool) {
-	tubeType := r.tType
+	defer close(r.initDone)
 	notInit := true
 
 	p := initiateFrame{
 		tubeID:     r.id,
-		tubeType:   tubeType,
+		tubeType:   r.tType,
 		data:       []byte{},
 		dataLength: 0,
 		frameNo:    0,
@@ -93,7 +93,6 @@ func (r *Reliable) initiate(req bool) {
 	}
 	go r.send()
 	r.sender.Start()
-	close(r.initDone)
 }
 
 // send continuously reads packet from the sends and hands them to the muxer
@@ -344,6 +343,7 @@ func (r *Reliable) WaitForInit() {
 // WaitForClose blocks until the Tube is done closing
 func (r *Reliable) WaitForClose() {
 	<-r.closed
+	<-r.initDone
 }
 
 // Type returns tube type

@@ -20,13 +20,11 @@ type Unreliable struct {
 	id        byte
 	sendQueue chan []byte
 
-	state       atomic.Value
-	initiated   chan struct{}
-	senderEnded chan struct{}
-	closed      chan struct{}
-
-	// true if this tube began the request. false otherwise
-	req bool
+	state        atomic.Value
+	initiated    chan struct{}
+	initiateDone chan struct{}
+	senderDone   chan struct{}
+	closed       chan struct{}
 
 	recv *common.DeadlineChan[[]byte]
 	send *common.DeadlineChan[[]byte]
@@ -70,10 +68,10 @@ func (u *Unreliable) sender() {
 		u.sendQueue <- b
 	}
 
-	close(u.senderEnded)
+	close(u.senderDone)
 }
 
-func (u *Unreliable) makeInitFrame() initiateFrame {
+func (u *Unreliable) makeInitFrame(req bool) initiateFrame {
 	return initiateFrame{
 		tubeID:     u.id,
 		tubeType:   u.tType,
@@ -84,16 +82,18 @@ func (u *Unreliable) makeInitFrame() initiateFrame {
 		flags: frameFlags{
 			ACK:  true,
 			FIN:  false,
-			REQ:  u.req,
-			RESP: !u.req,
+			REQ:  req,
+			RESP: !req,
 			REL:  false,
 		},
 	}
 }
 
 // req: whether the tube is requesting to initiate a tube (true), or whether is responding to an initiation request (false)
-func (u *Unreliable) initiate() {
-	if u.req {
+func (u *Unreliable) initiate(req bool) {
+	defer close(u.initiateDone)
+
+	if req {
 		u.state.Store(created)
 	} else {
 		close(u.initiated)
@@ -101,21 +101,17 @@ func (u *Unreliable) initiate() {
 	}
 
 	notInit := true
+	ticker := time.NewTicker(retransmitOffset)
 	for notInit {
-		p := u.makeInitFrame()
+		p := u.makeInitFrame(req)
 		u.sendQueue <- p.toBytes()
 
-		if u.req {
-			timer := time.NewTimer(retransmitOffset)
-			select {
-			case <-timer.C:
-				u.log.Warn("init rto exceeded")
-				break
-			case <-u.initiated:
-				break
-			case <-u.closed:
-				return
-			}
+		select {
+		case <-ticker.C:
+			u.log.Warn("init rto exceeded")
+		case <-u.initiated:
+		case <-u.closed:
+			return
 		}
 		notInit = u.state.Load() == created
 	}
@@ -135,11 +131,6 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 	}).Debug("receiving initiate packet")
 
 	if u.state.CompareAndSwap(created, initiated) {
-		if !u.req {
-			p := u.makeInitFrame()
-			u.sendQueue <- p.toBytes()
-		}
-
 		close(u.initiated)
 	}
 
@@ -271,7 +262,7 @@ func (u *Unreliable) Close() error {
 
 	if oldState == initiated {
 		// wait for sender to end
-		<-u.senderEnded
+		<-u.senderDone
 	}
 
 	close(u.closed)
@@ -336,6 +327,7 @@ func (u *Unreliable) IsReliable() bool {
 // WaitForClose blocks until the tube is done closing
 func (u *Unreliable) WaitForClose() {
 	<-u.closed
+	<-u.initiateDone
 }
 
 func (u *Unreliable) getLog() *logrus.Entry {

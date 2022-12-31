@@ -27,6 +27,7 @@ const (
 // Tube interface is shared between Reliable and Unreliable Tubes
 type Tube interface {
 	net.Conn
+	initiate(req bool)
 	receiveInitiatePkt(*initiateFrame) error
 	receive(*frame) error
 	Type() TubeType
@@ -221,18 +222,18 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 		return nil, ErrMuxerStopping
 	}
 	tube := &Unreliable{
-		tType:       tType,
-		id:          tubeID,
-		sendQueue:   m.sendQueue,
-		localAddr:   m.underlying.LocalAddr(),
-		remoteAddr:  m.underlying.RemoteAddr(),
-		recv:        common.NewDeadlineChan[[]byte](maxBufferedPackets),
-		send:        common.NewDeadlineChan[[]byte](maxBufferedPackets),
-		state:       atomic.Value{},
-		initiated:   make(chan struct{}),
-		senderEnded: make(chan struct{}),
-		closed:      make(chan struct{}),
-		req:         req,
+		tType:        tType,
+		id:           tubeID,
+		sendQueue:    m.sendQueue,
+		localAddr:    m.underlying.LocalAddr(),
+		remoteAddr:   m.underlying.RemoteAddr(),
+		recv:         common.NewDeadlineChan[[]byte](maxBufferedPackets),
+		send:         common.NewDeadlineChan[[]byte](maxBufferedPackets),
+		state:        atomic.Value{},
+		initiated:    make(chan struct{}),
+		initiateDone: make(chan struct{}),
+		senderDone:   make(chan struct{}),
+		closed:       make(chan struct{}),
 		log: m.log.WithFields(logrus.Fields{
 			"tube":     tubeID,
 			"reliable": false,
@@ -240,7 +241,7 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 		}),
 	}
 	m.addTube(tube)
-	go tube.initiate()
+	go tube.initiate(req)
 	if !req {
 		tube.getLog().WithField("tube", tube.GetID()).Debug("added tube to queue")
 		m.tubeQueue <- tube
