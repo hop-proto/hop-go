@@ -128,15 +128,11 @@ func (s *sender) recvAck(ackNo uint32) error {
 	s.l.Lock()
 	defer s.l.Unlock()
 
+	oldAckNo := s.ackNo
 	newAckNo := uint64(ackNo)
 	if newAckNo < s.ackNo && (newAckNo+(1<<32)-s.ackNo <= uint64(s.windowSize)) { // wrap around
 		newAckNo = newAckNo + (1 << 32)
 	}
-
-	s.log.WithFields(logrus.Fields{
-		"orig ackno": s.ackNo,
-		"new ackno":  newAckNo,
-	}).Tracef("received ack")
 
 	windowOpen := s.ackNo < newAckNo
 
@@ -151,6 +147,11 @@ func (s *sender) recvAck(ackNo uint32) error {
 		s.unacked--
 		s.frames = s.frames[1:]
 	}
+
+	s.log.WithFields(logrus.Fields{
+		"old ackNo": oldAckNo,
+		"new ackNo": newAckNo,
+	}).Trace("updated ackNo")
 
 	// Only fill the window if new space has really opened up
 	if windowOpen {
