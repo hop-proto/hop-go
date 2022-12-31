@@ -68,7 +68,7 @@ func (r *receiver) processIntoBuffer() {
 		log := r.log.WithFields(logrus.Fields{
 			"window start": r.windowStart,
 			"frameNo":      frag.priority,
-			"FIN":          frag.FIN,
+			"fin":          frag.FIN,
 		})
 
 		if r.windowStart != frag.priority {
@@ -178,28 +178,30 @@ func (r *receiver) receive(p *frame) error {
 	defer r.m.Unlock()
 
 	if r.closed.Load() {
+		r.log.Trace("receiver closed. not processing packet")
 		return io.EOF
 	}
 
 	windowStart := r.windowStart
 	windowEnd := r.windowStart + uint64(uint32(r.windowSize))
-
 	frameNo := r.unwrapFrameNo(p.frameNo)
-	if !frameInBounds(windowStart, windowEnd, frameNo) {
-		r.log.WithFields(logrus.Fields{
-			"frameNo":     frameNo,
-			"windowStart": windowStart,
-			"windowEnd":   windowEnd,
-		}).Debugf("out of bounds frame")
-		return errFrameOutOfBounds
-	}
 
-	if (p.dataLength > 0 || p.flags.FIN) && (frameNo >= r.windowStart) {
+	log := r.log.WithFields(logrus.Fields{
+		"frameNo":     frameNo,
+		"windowStart": windowStart,
+		"windowEnd":   windowEnd,
+	})
+
+	if (p.dataLength > 0 || p.flags.FIN) && frameInBounds(windowStart, windowEnd, frameNo) {
 		heap.Push(&r.fragments, &pqItem{
 			value:    p.data,
 			priority: frameNo,
 			FIN:      p.flags.FIN,
 		})
+		log.Trace("in bounds frame")
+	} else {
+		log.Debug("out of bounds frame")
+		return errFrameOutOfBounds
 	}
 
 	r.processIntoBuffer()

@@ -182,14 +182,6 @@ func (s *sender) sendEmptyPacketLocked() {
 		dataLength: 0,
 		frameNo:    s.frameNo,
 		data:       []byte{},
-		flags: frameFlags{
-			// This checks if the connection is in the timeWait state.
-			// If it is, we must not set the FIN flag because if the remote connection
-			// is also in the timeWait state, they will endlessly send acknowledgements
-			// between each other. We don't need to set the FIN flag because we can
-			// only move into the timeWait state if our FIN has been ACKed.
-			FIN: s.finSent && s.frameNo >= s.finFrameNo && !s.stopRetransmitCalled.Load(),
-		},
 	}
 	s.sendQueue <- pkt
 }
