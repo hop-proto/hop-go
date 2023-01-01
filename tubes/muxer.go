@@ -94,12 +94,11 @@ func (m *Muxer) reapTube(t Tube) {
 		select {
 		case <-m.stopped:
 			t.getLog().Debug("reaper stopped")
-			return
 		case <-timer.C:
 		}
 	}
 
-	t.getLog().Debug("reaping tube")
+	t.getLog().Trace("reaping tube")
 
 	m.m.Lock()
 	defer m.m.Unlock()
@@ -390,6 +389,9 @@ func (m *Muxer) Stop() (err error) {
 
 	// If tubes do not correctly close after some time, assume they never will and force them to close.
 	time.AfterFunc(muxerTimeout, func() {
+		if m.state.Load() == muxerClosed {
+			return
+		}
 		m.m.Lock()
 		for _, v := range m.tubes {
 			if t, ok := v.(*Reliable); ok {
