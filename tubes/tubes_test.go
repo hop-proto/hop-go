@@ -159,7 +159,7 @@ func reliable(t *testing.T) {
 		CloseTest(t, true, false)
 	})
 
-	f := func() (c1, c2 net.Conn, stop func(), rel bool, err error) {
+	f := func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
 		return makeConn(t, true)
 	}
 
@@ -177,7 +177,7 @@ func unreliable(t *testing.T) {
 		CloseTest(t, false, false)
 	})
 
-	f := func() (c1, c2 net.Conn, stop func(), rel bool, err error) {
+	f := func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
 		return makeConn(t, false)
 	}
 	mp := nettest.MakePipe(f)

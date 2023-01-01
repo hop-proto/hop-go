@@ -27,7 +27,7 @@ func TestTestConn(t *testing.T) {
 				t.Skipf("%s not supported on %s/%s", tt.network, runtime.GOOS, runtime.GOARCH)
 			}
 
-			mp := func() (c1, c2 net.Conn, stop func(), rel bool, err error) {
+			mp := func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
 				ln, err := NewLocalListener(tt.network)
 				if err != nil {
 					return nil, nil, nil, false, err

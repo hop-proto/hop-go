@@ -258,12 +258,12 @@ func serverClose(t *testing.T) {
 
 // Wrapper around the client nettests
 func TestTransportConn(t *testing.T) {
-	makePipe1 := func() (net.Conn, net.Conn, func(), bool, error) {
+	makePipe1 := func(t *testing.T) (net.Conn, net.Conn, func(), bool, error) {
 		c1, c2, _, stop, rel, err := makeConn(t)
 		return c1, c2, stop, rel, err
 	}
 
-	makePipe2 := func() (net.Conn, net.Conn, func(), bool, error) {
+	makePipe2 := func(t *testing.T) (net.Conn, net.Conn, func(), bool, error) {
 		c1, c2, _, stop, rel, err := makeConn(t)
 		return c2, c1, stop, rel, err
 	}

@@ -25,7 +25,7 @@ import (
 // net.Listener (if there is one), and should not be nil.
 // rel indicates that this is a reliable connection. If rel is false,'
 // then the BasicIO test will be skipped
-type MakePipe func() (c1, c2 net.Conn, stop func(), rel bool, err error)
+type MakePipe func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error)
 
 // TestConn tests that a net.Conn implementation properly satisfies the interface.
 // The tests should not produce any false positives, but may experience
@@ -50,7 +50,7 @@ type connTester func(t *testing.T, c1, c2 net.Conn)
 
 func timeoutWrapper(t *testing.T, mp MakePipe, f connTester) {
 	t.Helper()
-	c1, c2, stop, rel, err := mp()
+	c1, c2, stop, rel, err := mp(t)
 	if err != nil {
 		t.Fatalf("unable to make pipe: %v", err)
 	}
