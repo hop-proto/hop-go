@@ -138,13 +138,13 @@ func (r *Reliable) receive(pkt *frame) error {
 		r.log.WithFields(logrus.Fields{
 			"fin":   pkt.flags.FIN,
 			"state": r.tubeState,
-		}).Warn("receive for tube in bad state")
+		}).Info("receive for tube in bad state")
 
 		return ErrBadTubeState
 	}
 
 	// Pass the frame to the receive window
-	err := r.recvWindow.receive(pkt)
+	finProcessed, err := r.recvWindow.receive(pkt)
 
 	// Pass the frame to the sender
 	if pkt.flags.ACK {
@@ -167,7 +167,7 @@ func (r *Reliable) receive(pkt *frame) error {
 	}
 
 	// Handle FIN frame
-	if pkt.flags.FIN && r.recvWindow.closed.Load() {
+	if (pkt.flags.FIN && r.recvWindow.closed.Load()) || finProcessed {
 		switch r.tubeState {
 		case initiated:
 			r.tubeState = closeWait
@@ -186,11 +186,6 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.log.Trace("sending ACK of FIN")
 			r.sender.sendEmptyPacket()
 		}
-	} else {
-		r.log.WithFields(logrus.Fields{
-			"fin":               pkt.flags.FIN,
-			"recvWindow closed": r.recvWindow.closed.Load(),
-		}).Debug("not processing as fin")
 	}
 
 	// Send preemptive ACKs to allow for better throughput for large transfers

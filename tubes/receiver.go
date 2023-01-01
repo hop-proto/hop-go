@@ -58,9 +58,11 @@ func (r *receiver) getWindowSize() uint16 {
 /*
 Processes window into buffer stream if the ordered fragments are ready (in order).
 Precondition: r.m mutex is held.
+Returns true if it processed a FIN packet
 */
 // +checklocks:r.m
-func (r *receiver) processIntoBuffer() {
+func (r *receiver) processIntoBuffer() bool {
+	fin := false
 	oldLen := r.fragments.Len()
 	for r.fragments.Len() > 0 {
 		frag := heap.Pop(&(r.fragments)).(*pqItem)
@@ -81,8 +83,9 @@ func (r *receiver) processIntoBuffer() {
 		} else {
 			if frag.FIN {
 				r.closed.Store(true)
+				fin = true
 			}
-			log.WithField("closed", r.closed.Load()).Trace("processing packet")
+			log.Trace("processing packet")
 			r.buffer.Write(frag.value)
 			r.windowStart++
 			r.ackNo++
@@ -96,6 +99,7 @@ func (r *receiver) processIntoBuffer() {
 			break
 		}
 	}
+	return fin
 }
 
 func (r *receiver) read(buf []byte) (int, error) {
@@ -173,13 +177,13 @@ func (r *receiver) unwrapFrameNo(frameNo uint32) uint64 {
 }
 
 // receive processes a single incoming packet
-func (r *receiver) receive(p *frame) error {
+func (r *receiver) receive(p *frame) (bool, error) {
 	r.m.Lock()
 	defer r.m.Unlock()
 
 	if r.closed.Load() {
 		r.log.Trace("receiver closed. not processing packet into buffer")
-		return io.EOF
+		return false, io.EOF
 	}
 
 	windowStart := r.windowStart
@@ -201,12 +205,11 @@ func (r *receiver) receive(p *frame) error {
 		log.Trace("in bounds frame")
 	} else {
 		log.Debug("out of bounds frame")
-		return errFrameOutOfBounds
+		return false, errFrameOutOfBounds
 	}
 
-	r.processIntoBuffer()
-
-	return nil
+	fin := r.processIntoBuffer()
+	return fin, nil
 }
 
 // Close causes future reads to return io.EOF
