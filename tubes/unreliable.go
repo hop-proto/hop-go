@@ -64,8 +64,15 @@ func (u *Unreliable) sender() {
 	}
 
 	// flush the buffer after a call to Close
+loop:
 	for b, err := u.send.Recv(); err == nil; {
-		u.sendQueue <- b
+		select {
+		case u.sendQueue <- b:
+		default:
+			// TODO(hosono) we shouldn't need this, but it sometimes gets stuck here
+			u.log.Debug("could not send packet on send queue")
+			break loop
+		}
 	}
 
 	close(u.senderDone)

@@ -48,6 +48,7 @@ type Muxer struct {
 	// All hop tubes write raw bytes for a tube packet to this golang chan.
 	sendQueue  chan []byte
 	state      atomic.Value
+	senderDone chan struct{}
 	stopped    chan struct{}
 	underlying transport.MsgConn
 	timeout    time.Duration
@@ -74,6 +75,7 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 		m:          sync.Mutex{},
 		sendQueue:  make(chan []byte),
 		state:      state,
+		senderDone: make(chan struct{}),
 		stopped:    make(chan struct{}),
 		underlying: msgConn,
 		timeout:    timeout,
@@ -88,7 +90,13 @@ func (m *Muxer) reapTube(t Tube) {
 
 	// This prevents tubes IDs from being reused while the remote peer is in the timeWait state.
 	if t.GetID()%2 == m.idParity {
-		time.Sleep(timeWaitTime)
+		timer := time.NewTimer(timeWaitTime)
+		select {
+		case <-m.stopped:
+			t.getLog().Debug("reaper stopped")
+			return
+		case <-timer.C:
+		}
 	}
 
 	t.getLog().Debug("reaping tube")
@@ -130,6 +138,7 @@ func (m *Muxer) pickTubeID() (byte, error) {
 func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
 	m.m.Lock()
 	defer m.m.Unlock()
+
 	id, err := m.pickTubeID()
 	if err != nil {
 		return nil, err
@@ -272,9 +281,22 @@ func (m *Muxer) readMsg() (*frame, error) {
 }
 
 func (m *Muxer) sender() {
+	defer close(m.senderDone)
+
 	for rawBytes := range m.sendQueue {
-		m.underlying.WriteMsg(rawBytes)
+		err := m.underlying.WriteMsg(rawBytes)
+		if err != nil {
+			m.log.Warnf("error in muxer sender. stopping muxer: %s", err)
+			go m.Stop()
+			break
+		}
 	}
+
+	// if we broke out of the loop, consume all packets so tubes can still close
+	for range m.sendQueue {
+	}
+
+	m.log.Debug("muxer sender stopped")
 }
 
 // Start allows a muxer to start listening and handling incoming tube requests and messages
@@ -382,13 +404,16 @@ func (m *Muxer) Stop() (err error) {
 		m.m.Unlock()
 	})
 
+	// Wait for all tubes to close
 	wg.Wait()
 	m.state.Store(muxerClosed)
 
-	m.underlying.Close()
-
 	close(m.sendQueue)
 	close(m.stopped)
+	<-m.senderDone
+
+	m.underlying.Close()
+
 	m.log.Info("Muxer.Stop() finished")
 	return nil
 }

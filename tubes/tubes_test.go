@@ -31,9 +31,15 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err
 	assert.NilError(t, err)
 	c2 = transport.MakeUDPMsgConn(c2UDP)
 
-	muxer1 := NewMuxer(c1, 0, false, logrus.WithField("muxer", "m1"))
+	muxer1 := NewMuxer(c1, 0, false, logrus.WithFields(logrus.Fields{
+		"muxer": "m1",
+		"test":  t.Name(),
+	}))
 	muxer1.log.WithField("addr", c1.LocalAddr()).Info("Created")
-	muxer2 := NewMuxer(c2, 0, true, logrus.WithField("muxer", "m2"))
+	muxer2 := NewMuxer(c2, 0, true, logrus.WithFields(logrus.Fields{
+		"muxer": "m2",
+		"test":  t.Name(),
+	}))
 	muxer2.log.WithField("addr", c2.LocalAddr()).Info("Created")
 
 	go func() {
