@@ -186,6 +186,11 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.log.Trace("sending ACK of FIN")
 			r.sender.sendEmptyPacket()
 		}
+	} else {
+		r.log.WithFields(logrus.Fields{
+			"fin": pkt.flags.FIN,
+			"recvWindow closed": r.recvWindow.closed.Load(),
+		}).Debug("not processing as fin")
 	}
 
 	// Send preemptive ACKs to allow for better throughput for large transfers

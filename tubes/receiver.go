@@ -73,7 +73,7 @@ func (r *receiver) processIntoBuffer() {
 
 		if r.windowStart != frag.priority {
 			// This packet cannot be added to the buffer yet.
-			log.Trace("cannot process packet yet")
+			log.Trace("cannot process packet into buffer yet")
 			if frag.priority > r.windowStart {
 				heap.Push(&r.fragments, frag)
 				break
@@ -82,7 +82,7 @@ func (r *receiver) processIntoBuffer() {
 			if frag.FIN {
 				r.closed.Store(true)
 			}
-			log.Trace("processing packet")
+			log.WithField("closed", r.closed.Load()).Trace("processing packet")
 			r.buffer.Write(frag.value)
 			r.windowStart++
 			r.ackNo++
@@ -178,7 +178,7 @@ func (r *receiver) receive(p *frame) error {
 	defer r.m.Unlock()
 
 	if r.closed.Load() {
-		r.log.Trace("receiver closed. not processing packet")
+		r.log.Trace("receiver closed. not processing packet into buffer")
 		return io.EOF
 	}
 
