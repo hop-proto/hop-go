@@ -188,7 +188,7 @@ func (r *Reliable) receive(pkt *frame) error {
 		}
 	} else {
 		r.log.WithFields(logrus.Fields{
-			"fin": pkt.flags.FIN,
+			"fin":               pkt.flags.FIN,
 			"recvWindow closed": r.recvWindow.closed.Load(),
 		}).Debug("not processing as fin")
 	}
