@@ -286,6 +286,7 @@ func (m *Muxer) sender() {
 		err := m.underlying.WriteMsg(rawBytes)
 		if err != nil {
 			m.log.Warnf("error in muxer sender. stopping muxer: %s", err)
+			// TODO(hosono) is it ok to stop the muxer here? Are the recoverable errors?
 			go m.Stop()
 			break
 		}
