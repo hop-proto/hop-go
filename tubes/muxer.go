@@ -250,6 +250,7 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 		}),
 	}
 	m.addTube(tube)
+	tube.state.Store(created)
 	go tube.initiate(req)
 	if !req {
 		tube.getLog().WithField("tube", tube.GetID()).Debug("added tube to queue")

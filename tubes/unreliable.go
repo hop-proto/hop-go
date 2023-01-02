@@ -93,13 +93,6 @@ func (u *Unreliable) makeInitFrame(req bool) initiateFrame {
 func (u *Unreliable) initiate(req bool) {
 	defer close(u.initiateDone)
 
-	if req {
-		u.state.Store(created)
-	} else {
-		close(u.initiated)
-		u.state.Store(initiated)
-	}
-
 	notInit := true
 	ticker := time.NewTicker(retransmitOffset)
 	for notInit {
