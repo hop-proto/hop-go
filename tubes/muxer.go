@@ -365,8 +365,10 @@ func (m *Muxer) Stop() (err error) {
 	m.m.Lock()
 	m.log.WithField("numTubes", len(m.tubes)).Info("Stopping muxer")
 
+	// Muxer.Stop() has already been called. Wait for it to finish
 	if m.state.Load() != muxerRunning {
 		m.m.Unlock()
+		<-m.stopped
 		return io.EOF
 	}
 

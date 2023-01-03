@@ -89,18 +89,18 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err
 		wg.Add(2)
 
 		go func() {
+			defer wg.Done()
 			t1.Close()
 			t1.(Tube).WaitForClose()
 			muxer1.Stop()
 			assert.DeepEqual(t, muxer1.state.Load(), muxerClosed)
-			wg.Done()
 		}()
 		go func() {
+			defer wg.Done()
 			t2.Close()
 			t2.(Tube).WaitForClose()
 			muxer2.Stop()
 			assert.DeepEqual(t, muxer2.state.Load(), muxerClosed)
-			wg.Done()
 		}()
 
 		wg.Wait()

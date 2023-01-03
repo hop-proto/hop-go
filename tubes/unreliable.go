@@ -4,7 +4,6 @@ package tubes
 import (
 	"io"
 	"net"
-	"os"
 	"sync/atomic"
 	"time"
 
@@ -50,24 +49,11 @@ var _ transport.MsgConn = &Unreliable{}
 var _ Tube = &Unreliable{}
 
 func (u *Unreliable) sender() {
-	for {
-		// TODO(hosono) this will busywait if the deadline expires
-		b, err := u.send.Recv()
-		if err != nil {
-			if err == os.ErrDeadlineExceeded {
-				continue
-			} else if err == io.EOF {
-				break
-			}
-		}
+	for b := range u.send.C {
 		u.sendQueue <- b
 	}
 
-	// flush the buffer after a call to Close
-	for b, err := u.send.Recv(); err == nil; {
-		u.sendQueue <- b
-	}
-
+	u.log.Debug("sender ended")
 	close(u.senderDone)
 }
 
@@ -253,8 +239,9 @@ func (u *Unreliable) Close() error {
 	u.send.Close()
 	u.recv.Close()
 
+	close(u.send.C)
+
 	if oldState == initiated {
-		// wait for sender to end
 		<-u.senderDone
 	}
 
