@@ -47,7 +47,8 @@ func defaultRejectAll(i Intent) error {
 	return fmt.Errorf("default checkIntent func rejects all intent requests")
 }
 
-// Run reads intent requests from the DelegateConn until it closes
+// Run reads intent requests from the DelegateConn until it closes or error
+// reading intent request or sending conf/denial message to delegate
 func (p *principalInstance) run() {
 	// TODO(baumanl): add way to close without waiting for delegateconn to close?
 	for {
@@ -66,30 +67,25 @@ func (p *principalInstance) handleIntentRequest() error {
 		logrus.Errorf("principal: error reading ir: %s", err)
 		return err
 	}
-	err = p.doIntentRequestChecks(i)
-	if err != nil {
-		SendIntentDenied(p.delegateConn, err.Error())
-		return err
-	}
-	return nil
+	return p.doIntentRequestChecks(i)
 }
 
-// if err == nil --> confirm; if err != nil --> deny
+// returns error if issue sending conf or denial
 func (p *principalInstance) doIntentRequestChecks(i Intent) error {
 	targURL := i.TargetURL()
 	if p.targetConnected && p.targetInfo != targURL {
-		return fmt.Errorf("received intent request for different target")
+		return SendIntentDenied(p.delegateConn, "received intent request for different target")
 	}
 
 	err := p.checkIntent(i)
 	if err != nil {
-		return err
+		return SendIntentDenied(p.delegateConn, err.Error())
 	}
 
 	if !p.targetConnected {
 		tc, err := p.setUpTargetConn(targURL)
 		if err != nil {
-			return fmt.Errorf("target setup failed: %s", err)
+			return SendIntentDenied(p.delegateConn, fmt.Sprintf("target setup failed: %s", err))
 		}
 		p.targetConn = tc
 		p.targetInfo = targURL
@@ -98,12 +94,12 @@ func (p *principalInstance) doIntentRequestChecks(i Intent) error {
 
 	err = SendIntentCommunication(p.targetConn, i)
 	if err != nil {
-		return fmt.Errorf("error sending intent comm: %s", err)
+		return SendIntentDenied(p.delegateConn, fmt.Sprintf("error sending intent comm: %s", err))
 	}
 
 	resp, err := ReadConfOrDenial(p.targetConn)
 	if err != nil {
-		return fmt.Errorf("error reading target response: %s", err)
+		return SendIntentDenied(p.delegateConn, fmt.Sprintf("error reading target response: %s", err))
 	}
 	if resp.MsgType == IntentDenied {
 		return SendIntentDenied(p.delegateConn, resp.Data.Denial)
