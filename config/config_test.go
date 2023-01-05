@@ -13,9 +13,11 @@ func TestLoadClientConfig(t *testing.T) {
 	cert := "/path/to/cert.pem"
 	hostname := "example.localhost"
 	autoSelfSign := false
+	isPrincipal := true
 	expected := &ClientConfig{
 		Global: HostConfigOptional{
-			CAFiles: []string{"/path/to/ca.pem", "/path/to/other.pem"},
+			CAFiles:     []string{"/path/to/ca.pem", "/path/to/other.pem"},
+			IsPrincipal: &isPrincipal,
 		},
 		Hosts: []HostConfigOptional{{
 			Patterns:     []string{"example.localhost"},
