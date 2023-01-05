@@ -439,13 +439,16 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 
 	// skips all verification if certVerify nil or explicitly disabled
 	if hs.certVerify != nil && !hs.certVerify.InsecureSkipVerify {
+		logrus.Debug("server: beginning client authentication")
 		// try authkeys first if enabled
 		var errAuthkeys error
 		if hs.certVerify.AuthKeysAllowed {
+			logrus.Debug("server: authkeys are allowed. attempting to validate self-signed cert")
 			errAuthkeys = hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
 		}
 		if !hs.certVerify.AuthKeysAllowed || errAuthkeys != nil {
 			// Certificate Verification
+			logrus.Debug("server: attempting cert validation")
 			err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
 			if err != nil { // cert verifification failed
 				logrus.Errorf("server: client authentication failed")

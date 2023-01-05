@@ -135,6 +135,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 	hc := c.hostconfig
 
 	if !hc.IsPrincipal {
+		logrus.Info("not a principal --> inititaing auth grant protocol")
 		return c.getAuthorization()
 	}
 

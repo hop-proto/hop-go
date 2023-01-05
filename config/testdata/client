@@ -2,6 +2,7 @@
 
 [Global]
 CAFiles = ["/path/to/ca.pem", "/path/to/other.pem"]
+IsPrincipal = true
 
 [[Hosts]]
 Patterns = ["example.localhost"]

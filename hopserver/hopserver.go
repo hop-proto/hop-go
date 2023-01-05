@@ -134,10 +134,12 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		}
 		// Authorized keys enabled
 		if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
+			logrus.Debug("authorized keys are enabled")
 			// must be explicitly set to true
 			tconf.ClientVerify = &transport.VerifyConfig{
 				AuthKeys: authkeys.NewSyncAuthKeySet(), // TODO(baumanl): load initial (stable trusted keys)
 			}
+			tconf.ClientVerify.AuthKeysAllowed = true
 		}
 	}
 
