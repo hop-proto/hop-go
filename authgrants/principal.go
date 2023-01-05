@@ -26,7 +26,7 @@ type principalInstance struct {
 // StartPrincipalInstance creates and runs a new principal instance. errors if su is nil.
 func StartPrincipalInstance(dc net.Conn, ci checkIntentFunc, su setUpTargetConnFunc) error {
 	if su == nil {
-		return fmt.Errorf("must provide non-nil set up target function")
+		return fmt.Errorf("principal: must provide non-nil set up target function")
 	}
 
 	pi := principalInstance{
@@ -34,6 +34,12 @@ func StartPrincipalInstance(dc net.Conn, ci checkIntentFunc, su setUpTargetConnF
 		checkIntent:     ci,
 		setUpTargetConn: su,
 	}
+	defer func() {
+		pi.delegateConn.Close()
+		if pi.targetConnected {
+			pi.targetConn.Close()
+		}
+	}()
 
 	if ci == nil {
 		pi.checkIntent = defaultRejectAll
@@ -54,7 +60,7 @@ func (p *principalInstance) run() {
 	for {
 		err := p.handleIntentRequest()
 		if err != nil {
-			logrus.Errorf("error handling intent request. Quitting.")
+			logrus.Errorf("principal: error handling intent request. Quitting.")
 			return
 		}
 	}
@@ -74,7 +80,7 @@ func (p *principalInstance) handleIntentRequest() error {
 func (p *principalInstance) doIntentRequestChecks(i Intent) error {
 	targURL := i.TargetURL()
 	if p.targetConnected && p.targetInfo != targURL {
-		return SendIntentDenied(p.delegateConn, "received intent request for different target")
+		return SendIntentDenied(p.delegateConn, "principal: received intent request for different target")
 	}
 
 	err := p.checkIntent(i)
@@ -85,7 +91,7 @@ func (p *principalInstance) doIntentRequestChecks(i Intent) error {
 	if !p.targetConnected {
 		tc, err := p.setUpTargetConn(targURL)
 		if err != nil {
-			return SendIntentDenied(p.delegateConn, fmt.Sprintf("target setup failed: %s", err))
+			return SendIntentDenied(p.delegateConn, fmt.Sprintf("principal: target setup failed: %s", err))
 		}
 		p.targetConn = tc
 		p.targetInfo = targURL
@@ -94,12 +100,12 @@ func (p *principalInstance) doIntentRequestChecks(i Intent) error {
 
 	err = SendIntentCommunication(p.targetConn, i)
 	if err != nil {
-		return SendIntentDenied(p.delegateConn, fmt.Sprintf("error sending intent comm: %s", err))
+		return SendIntentDenied(p.delegateConn, fmt.Sprintf("principal: error sending intent comm: %s", err))
 	}
 
 	resp, err := ReadConfOrDenial(p.targetConn)
 	if err != nil {
-		return SendIntentDenied(p.delegateConn, fmt.Sprintf("error reading target response: %s", err))
+		return SendIntentDenied(p.delegateConn, fmt.Sprintf("principal: error reading target response: %s", err))
 	}
 	if resp.MsgType == IntentDenied {
 		return SendIntentDenied(p.delegateConn, resp.Data.Denial)

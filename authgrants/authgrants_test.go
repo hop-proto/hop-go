@@ -1,67 +1,68 @@
 package authgrants
 
 import (
-	"bytes"
-	"crypto/rand"
+	"fmt"
+	"net"
+	"sync"
 	"testing"
 
+	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 
-	"hop.computer/hop/certs"
+	"hop.computer/hop/core"
 )
 
-func TestAgMessageDenialEncodeDecode(t *testing.T) {
-	b := &bytes.Buffer{}
-	msg := AgMessage{
-		MsgType: IntentDenied,
-		Data:    MessageData{Denial: "I say so"},
+func TestFlow(t *testing.T) {
+	pc, pcP := net.Pipe() // principal conn (delegate, principal)
+	tc, tcT := net.Pipe() // target conn (delegate, target)
+
+	ir1 := getTestCmdIntentRequest(t, "cmd1")
+	ir2 := getTestCmdIntentRequest(t, "cmd2")
+	ir3 := getTestCmdIntentRequest(t, "cmd3")
+
+	ciFuncPrincipal := func(Intent) error {
+		logrus.Info("principal: checking intent")
+		return nil
 	}
 
-	recMsg := new(AgMessage)
-	n, err := msg.WriteTo(b)
-	assert.NilError(t, err)
-	m, err := recMsg.ReadFrom(b)
-	assert.NilError(t, err)
-	assert.Equal(t, n, m)
+	ciFuncTarget := func(i Intent) error {
+		logrus.Info("target: checking intent")
+		if i.AssociatedData.CommandGrantData.Cmd == "cmd2" {
+			return fmt.Errorf("no auth grants for cmd2")
+		}
+		return nil
+	}
 
-}
+	setupTarg := func(u core.URL) (net.Conn, error) {
+		logrus.Infof("simulating connection to %s", u.String())
+		return tc, nil
+	}
 
-// copied cert stuff from certificate_test.go
-type keypair struct {
-	public, private [certs.KeyLen]byte
-}
+	correctApprovals := []string{"cmd1", "cmd3"}
+	approved := []string{}
 
-func fakeSignature() [certs.SignatureLen]byte {
-	var out [certs.SignatureLen]byte
-	rand.Read(out[:])
-	return out
-}
+	addag := func(i *Intent) error {
+		logrus.Infof("target: adding ag for %s", i.TargetUsername)
+		approved = append(approved, i.AssociatedData.CommandGrantData.Cmd)
+		return nil
+	}
 
-func TestAgMessageIntentEncodeDecode(t *testing.T) {
-	b := &bytes.Buffer{}
-	var testKeyPair keypair
-	rand.Read(testKeyPair.public[:])
-	rand.Read(testKeyPair.private[:])
-	msg := getTestIntentRequest(t)
+	wg := sync.WaitGroup{}
+	wg.Add(2)
 
-	recMsg := new(AgMessage)
-	n, err := msg.WriteTo(b)
+	go func() {
+		StartTargetInstance(tcT, ciFuncTarget, addag)
+		wg.Done()
+	}()
+
+	go func() {
+		StartPrincipalInstance(pcP, ciFuncPrincipal, setupTarg)
+		wg.Done()
+	}()
+
+	err := StartDelegateInstance(pc, []Intent{ir1.Data.Intent, ir2.Data.Intent, ir3.Data.Intent})
 	assert.NilError(t, err)
-	m, err := recMsg.ReadFrom(b)
-	assert.NilError(t, err)
-	assert.Equal(t, n, m)
-	assert.Equal(t, msg.MsgType, recMsg.MsgType)
-	assert.Equal(t, msg.Data.Denial, recMsg.Data.Denial)
-	assert.Equal(t, msg.Data.Intent.GrantType, recMsg.Data.Intent.GrantType)
-	assert.Equal(t, msg.Data.Intent.Reserved, recMsg.Data.Intent.Reserved)
-	assert.Equal(t, msg.Data.Intent.TargetPort, recMsg.Data.Intent.TargetPort)
-	assert.DeepEqual(t, msg.Data.Intent.StartTime, recMsg.Data.Intent.StartTime)
-	assert.DeepEqual(t, msg.Data.Intent.ExpTime, recMsg.Data.Intent.ExpTime)
-	assert.DeepEqual(t, msg.Data.Intent.TargetSNI, recMsg.Data.Intent.TargetSNI)
-	assert.Equal(t, msg.Data.Intent.TargetUsername, recMsg.Data.Intent.TargetUsername)
-	buf, err := msg.Data.Intent.DelegateCert.Marshal()
-	assert.NilError(t, err)
-	recBuf, err := recMsg.Data.Intent.DelegateCert.Marshal()
-	assert.NilError(t, err)
-	assert.DeepEqual(t, buf, recBuf)
+
+	wg.Wait()
+	assert.DeepEqual(t, correctApprovals, approved)
 }
