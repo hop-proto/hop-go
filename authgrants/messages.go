@@ -39,10 +39,10 @@ const TargetDenial = "Authgrants not enabled on target server."
 const MalformedIntentDen = "Malformed intent request"
 
 // UnexpectedMessageType reason msg for when the expected intent msg is not a communication message
-const UnexpectedMessageType = "Unexpected message type"
+const UnexpectedMessageType = "unexpected message type"
 
 // UnrecognizedGrantType reason msg for when the grant type is not known by the target
-const UnrecognizedGrantType = "Unrecognized grant type"
+const UnrecognizedGrantType = "unrecognized grant type"
 
 // AgMessage Type || Data
 type AgMessage struct {

@@ -14,7 +14,7 @@ func TestDelegate(t *testing.T) {
 	pc, pcP := net.Pipe() // principal conn
 	tc, tcT := net.Pipe() // target conn
 
-	ir1 := getTestIntentRequest(t)
+	ir1 := getTestCmdIntentRequest(t, "test cmd")
 
 	ciFunc := func(Intent) error {
 		logrus.Info("principal: checking intent")
@@ -39,9 +39,9 @@ func TestDelegateMultipleIRs(t *testing.T) {
 	pc, pcP := net.Pipe() // principal conn
 	tc, tcT := net.Pipe() // target conn
 
-	ir1 := getTestIntentRequest(t)
-	ir2 := getTestIntentRequest(t)
-	ir3 := getTestIntentRequest(t)
+	ir1 := getTestCmdIntentRequest(t, "cmd1")
+	ir2 := getTestCmdIntentRequest(t, "cmd2")
+	ir3 := getTestCmdIntentRequest(t, "cmd3")
 
 	ciFunc := func(Intent) error {
 		logrus.Info("principal: checking intent")

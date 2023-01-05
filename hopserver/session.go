@@ -183,19 +183,15 @@ func (sess *hopSession) close() error {
 
 // handleAgc handles Intent Communications from principals and updates the outstanding authgrants maps appropriately
 func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
+	defer tube.Close()
 	// TODO(baumanl): add check for authgrant?
-	var msg authgrants.AgMessage
+
 	// Check server config (coarse grained enable/disable)
 	if sess.server.config.AllowAuthgrants == nil || !*sess.server.config.AllowAuthgrants { // AuthGrants not enabled
-		data := authgrants.MessageData{Denial: authgrants.TargetDenial}
-		msg = authgrants.NewAuthGrantMessage(authgrants.IntentDenied, data)
-	} else if data, ok := sess.checkIntent(tube); !ok { // AuthGrants enabled, but failed check
-		msg = authgrants.NewAuthGrantMessage(authgrants.IntentDenied, data)
-	} else { // AuthGrants enabled and passed check
-		msg = authgrants.NewAuthGrantMessage(authgrants.IntentConfirmation, data)
+		authgrants.SendIntentDenied(tube, authgrants.TargetDenial)
+	} else {
+		authgrants.StartTargetInstance(tube, sess.checkIntent, sess.addAuthGrant)
 	}
-	msg.WriteTo(tube)
-	tube.Close()
 }
 
 func getGroups(uid int) (groups []uint32) {
