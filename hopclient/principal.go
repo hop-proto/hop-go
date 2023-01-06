@@ -93,7 +93,6 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (net.Conn, error) {
 		return nil, err
 	}
 
-	// TODO(hosono) is this a client or a server?
 	client.TubeMuxer = tubes.NewMuxer(client.TransportConn, client.hostconfig.DataTimeout, false, logrus.WithField("muxer", "TODO: add logging context"))
 	err = client.userAuthorization()
 	if err != nil {

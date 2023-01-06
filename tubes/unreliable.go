@@ -19,6 +19,10 @@ type Unreliable struct {
 	id        byte
 	sendQueue chan []byte
 
+	// Unreliable tubes can be in three states:
+	// created: Indicates the tube has been created and is waiting for the remote peer send back an initiate frame
+	// initiated: Indicates the tube is ready to read and write data
+	// closed: Indicates the tube is done reading and writing data
 	state        atomic.Value
 	initiated    chan struct{}
 	initiateDone chan struct{}

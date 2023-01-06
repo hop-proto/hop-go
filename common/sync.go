@@ -126,7 +126,7 @@ func NewDeadline(t time.Time) *Deadline {
 type DeadlineChan[T any] struct {
 	deadline *Deadline
 	closed   atomic.Bool
-	m        *sync.Mutex
+	m        sync.Mutex
 	C        chan T
 }
 
@@ -226,7 +226,7 @@ func (d *DeadlineChan[T]) Close() error {
 func NewDeadlineChan[T any](size int) *DeadlineChan[T] {
 	return &DeadlineChan[T]{
 		deadline: NewDeadline(time.Time{}),
-		m:        &sync.Mutex{},
+		m:        sync.Mutex{},
 		C:        make(chan T, size),
 	}
 }
