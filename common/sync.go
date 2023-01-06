@@ -126,6 +126,7 @@ func NewDeadline(t time.Time) *Deadline {
 type DeadlineChan[T any] struct {
 	deadline *Deadline
 	closed   atomic.Bool
+	m        sync.Mutex
 	C        chan T
 }
 
@@ -166,6 +167,9 @@ func (d *DeadlineChan[T]) Recv() (b T, err error) {
 // If the deadline is exceeded, Cancel is called, or Close is called,
 // err will not be nil.
 func (d *DeadlineChan[T]) Send(b T) (err error) {
+	d.m.Lock()
+	defer d.m.Unlock()
+
 	if d.closed.Load() {
 		return io.EOF
 	}
@@ -207,6 +211,9 @@ func (d *DeadlineChan[T]) Cancel(err error) error {
 // Close cancels pending calls to Send and Recv. Those calls will return
 // io.EOF rather than os.ErrDeadlineExceeded even after the deadline has expired
 func (d *DeadlineChan[T]) Close() error {
+	d.m.Lock()
+	defer d.m.Unlock()
+
 	if d.closed.Load() {
 		return io.EOF
 	}
@@ -219,6 +226,7 @@ func (d *DeadlineChan[T]) Close() error {
 func NewDeadlineChan[T any](size int) *DeadlineChan[T] {
 	return &DeadlineChan[T]{
 		deadline: NewDeadline(time.Time{}),
+		m:        sync.Mutex{},
 		C:        make(chan T, size),
 	}
 }

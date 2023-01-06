@@ -2,55 +2,54 @@
 package tubes
 
 import (
-	"bytes"
-	"crypto/rand"
 	"encoding/binary"
-	"errors"
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sirupsen/logrus"
-
-	"hop.computer/hop/transport"
 )
-
-// How David would approach this:
-//   1. Implement the message framing (seq no, ack no, all that stuff)
-//   2. Implement Read and Write assuming no buffering or out of order or anything like that, using the framing
-//   3. Buffering
-//   4. Concurrency controls (locks)
-
-const retransmitOffset = time.Millisecond * 500
-
-const windowSize = 128
-
-type state int
 
 // TubeType represents identifier bytes of Tubes.
 type TubeType byte
 
+type state int32
+
 const (
-	created    state = iota
-	initiated  state = iota
-	closeStart state = iota
-	closed     state = iota
+	created   state = iota
+	initiated state = iota
+
+	// These states are pulled from the TCP state machine.
+	closeWait state = iota
+	lastAck   state = iota
+	finWait1  state = iota
+	finWait2  state = iota
+	closing   state = iota
+	timeWait  state = iota
+	closed    state = iota
 )
 
-// Reliable implements a reliable and receiveWindow tube on top
+// Reliable implements a reliable byte stream
 type Reliable struct {
-	closedCond sync.Cond
 	tType      TubeType
 	id         byte
 	localAddr  net.Addr
-	m          sync.Mutex
-	recvWindow receiver
 	remoteAddr net.Addr
 	sender     sender
+	recvWindow receiver
 	sendQueue  chan []byte
-	// +checklocks:m
-	tubeState state
+	// +checklocks:l
+	tubeState     state
+	timeWaitTimer *time.Timer
+	lastAckSent   atomic.Uint32
+	closed        chan struct{}
+	initRecv      chan struct{}
+	initDone      chan struct{}
+	sendDone      chan struct{}
+	l             sync.Mutex
+	log           *logrus.Entry
 }
 
 // Reliable implements net.Conn
@@ -59,161 +58,234 @@ var _ net.Conn = &Reliable{}
 // Reliable tubes are tubes
 var _ Tube = &Reliable{}
 
-func (r *Reliable) getState() state {
-	r.m.Lock()
-	defer r.m.Unlock()
-	return r.tubeState
-}
-
-func (r *Reliable) send() {
-	for r.getState() == initiated || r.getState() == closeStart {
-		pkt := <-r.sender.sendQueue
-		pkt.tubeID = r.id
-		pkt.ackNo = r.recvWindow.getAck()
-		pkt.flags.ACK = true
-		pkt.flags.REL = true
-		logrus.Debug("sending pkt ", pkt.frameNo, pkt.ackNo, pkt.flags.FIN, pkt.flags.ACK)
-		r.sendQueue <- pkt.toBytes()
-	}
-}
-
-func newReliableTubeWithTubeID(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType TubeType, tubeID byte) *Reliable {
-	r := makeReliableTube(underlying, netConn, sendQueue, tubeType, tubeID)
-	go r.initiate(false)
-	return r
-}
-
-func makeReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType TubeType, tubeID byte) *Reliable {
-	r := &Reliable{
-		id:        tubeID,
-		tubeState: created,
-		// TODO (dadrian): uncomment this when transport.Handle and transport.Client implement Local,RemoteAddr()
-		// localAddr:  netConn.LocalAddr(),
-		// remoteAddr: netConn.RemoteAddr(),
-		m: sync.Mutex{},
-		closedCond: sync.Cond{
-			L: &sync.Mutex{},
-		},
-		recvWindow: receiver{
-			buffer: new(bytes.Buffer),
-			bufferCond: sync.Cond{
-				L: &sync.Mutex{},
-			},
-			fragments:   make(PriorityQueue, 0),
-			windowSize:  windowSize,
-			windowStart: 1,
-		},
-		sender: sender{
-			ackNo:            1,
-			buffer:           make([]byte, 0),
-			closed:           false,
-			finSent:          false,
-			frameDataLengths: make(map[uint32]uint16),
-			frameNo:          1,
-			RTO:              retransmitOffset,
-			sendQueue:        make(chan *frame),
-			windowSize:       windowSize,
-			ret:              make(chan int),
-		},
-		sendQueue: sendQueue,
-		tType:     tType,
-	}
-	r.recvWindow.closedCond = &r.closedCond
-	r.recvWindow.init()
-	return r
-}
-
-func newReliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType TubeType) (*Reliable, error) {
-	cid := []byte{0}
-	n, err := rand.Read(cid)
-	if err != nil || n != 1 {
-		return nil, err
-	}
-	r := makeReliableTube(underlying, netConn, sendQueue, tType, cid[0])
-	go r.initiate(true)
-	return r, nil
-}
-
-/* req: whether the tube is requesting to initiate a tube (true), or whether is respondding to an initiation request (false).*/
+// req: whether the tube is requesting to initiate a tube (true), or whether is respondding to an initiation request (false).
 func (r *Reliable) initiate(req bool) {
-	tubeType := r.tType
+	defer close(r.initDone)
 	notInit := true
 
-	for notInit {
-		p := initiateFrame{
-			tubeID:     r.id,
-			tubeType:   tubeType,
-			data:       []byte{},
-			dataLength: 0,
-			frameNo:    0,
-			windowSize: r.recvWindow.windowSize,
-			flags: frameFlags{
-				ACK:  true,
-				FIN:  false,
-				REQ:  req,
-				RESP: !req,
-				REL:  true,
-			},
-		}
-		r.sendQueue <- p.toBytes()
-		r.m.Lock()
-		notInit = r.tubeState == created
-		r.m.Unlock()
-		timer := time.NewTimer(retransmitOffset)
-		<-timer.C
+	p := initiateFrame{
+		tubeID:     r.id,
+		tubeType:   r.tType,
+		data:       []byte{},
+		dataLength: 0,
+		frameNo:    0,
+		windowSize: r.recvWindow.getWindowSize(),
+		flags: frameFlags{
+			REQ:  req,
+			RESP: !req,
+			REL:  true,
+			ACK:  true,
+			FIN:  false,
+		},
 	}
-	go r.sender.retransmit()
+	ticker := time.NewTicker(retransmitOffset)
+	for notInit {
+		r.sendQueue <- p.toBytes()
+		select {
+		case <-ticker.C:
+			r.log.Info("init rto exceeded")
+			continue
+		case <-r.initRecv:
+			r.l.Lock()
+			notInit = r.tubeState == created
+			r.l.Unlock()
+		case <-r.closed:
+			return
+		}
+	}
 	go r.send()
+	r.sender.Start()
 }
 
-func (r *Reliable) receive(pkt *frame) error {
-	r.m.Lock()
-	defer r.m.Unlock()
-	if r.tubeState != initiated {
-		//logrus.Error("receiving non-initiate tube frames when not initiated")
-		return errors.New("receiving non-initiate tube frames when not initiated")
+// send continuously reads packet from the sends and hands them to the muxer
+func (r *Reliable) send() {
+	for pkt := range r.sender.sendQueue {
+		pkt.tubeID = r.id
+		pkt.ackNo = r.recvWindow.getAck()
+		r.lastAckSent.Store(pkt.ackNo)
+		pkt.flags.ACK = true
+		pkt.flags.REL = true
+		r.sendQueue <- pkt.toBytes()
+
+		r.log.WithFields(logrus.Fields{
+			"frameno": pkt.frameNo,
+			"ackno":   pkt.ackNo,
+			"ack":     pkt.flags.ACK,
+			"fin":     pkt.flags.FIN,
+			"dataLen": pkt.dataLength,
+		}).Trace("sent packet")
 	}
-	r.closedCond.L.Lock()
+	r.log.Debug("send ended")
+	close(r.sendDone)
+}
+
+// receive is called by the muxer for each new packet
+func (r *Reliable) receive(pkt *frame) error {
+	r.l.Lock()
+	defer r.l.Unlock()
+
+	// Log the packet
+	r.log.WithFields(logrus.Fields{
+		"frameno": pkt.frameNo,
+		"ackno":   pkt.ackNo,
+		"ack":     pkt.flags.ACK,
+		"fin":     pkt.flags.FIN,
+		"dataLen": pkt.dataLength,
+	}).Trace("receiving packet")
+
+	// created and closed tubes cannot handle incoming packets
+	if r.tubeState == created || r.tubeState == closed {
+		r.log.WithFields(logrus.Fields{
+			"fin":   pkt.flags.FIN,
+			"state": r.tubeState,
+		}).Info("receive for tube in bad state")
+
+		return ErrBadTubeState
+	}
+
+	// Pass the frame to the receive window
+	finProcessed, err := r.recvWindow.receive(pkt)
+
+	// Pass the frame to the sender
 	if pkt.flags.ACK {
 		r.sender.recvAck(pkt.ackNo)
 	}
-	r.closedCond.Signal()
-	r.closedCond.L.Unlock()
-	err := r.recvWindow.receive(pkt)
+
+	// Handle ACK of FIN frame
+	if pkt.flags.ACK && r.tubeState != initiated && r.sender.unAckedFramesRemaining() == 0 {
+		switch r.tubeState {
+		case finWait1:
+			r.tubeState = finWait2
+			r.log.Debug("got ACK of FIN packet. going from finWait1 to finWait2")
+		case closing:
+			r.log.Debug("got ACK of FIN packet. going from closing to timeWait")
+			r.enterTimeWaitState()
+		case lastAck:
+			r.log.Debug("got ACK of FIN packet. going from lastAck to closed")
+			r.enterClosedState()
+		}
+	}
+
+	// Handle FIN frame
+	if (pkt.flags.FIN && r.recvWindow.closed.Load()) || finProcessed {
+		switch r.tubeState {
+		case initiated:
+			r.tubeState = closeWait
+			r.log.Debug("got FIN packet. going from initiated to closeWait")
+		case finWait1:
+			r.tubeState = closing
+			r.log.Debug("got FIN packet. going from finWait1 to closing")
+		case finWait2:
+			r.log.Debug("got FIN packet. going from finWait2 to timeWait")
+			r.enterTimeWaitState()
+		case timeWait:
+			r.log.Debug("got FIN packet. reseting timeWait timer")
+			r.timeWaitTimer.Reset(timeWaitTime)
+		}
+		if r.tubeState != closed {
+			r.log.Trace("sending ACK of FIN")
+			r.sender.sendEmptyPacket()
+		}
+	}
+
+	// Send preemptive ACKs to allow for better throughput for large transfers
+	if (r.recvWindow.getAck()-r.lastAckSent.Load()) >= windowSize/2 &&
+		!pkt.flags.FIN && r.tubeState != closed {
+		r.sender.sendEmptyPacket()
+	}
 
 	return err
 }
 
+// +checklocks:r.l
+func (r *Reliable) enterTimeWaitState() {
+	r.tubeState = timeWait
+	r.sender.stopRetransmit()
+	r.timeWaitTimer = time.AfterFunc(timeWaitTime, func() {
+		r.l.Lock()
+		defer r.l.Unlock()
+		r.log.Debug("timer expired. going from timeWait to closed")
+		r.enterClosedState()
+	})
+}
+
+// +checklocks:r.l
+func (r *Reliable) enterClosedState() {
+	if r.tubeState == closed {
+		return
+	}
+	r.sender.Close()
+	r.recvWindow.Close()
+	if r.tubeState != created {
+		<-r.sendDone
+	}
+	close(r.closed)
+	r.tubeState = closed
+}
+
 func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
-	r.m.Lock()
-	defer r.m.Unlock()
+	r.l.Lock()
+	defer r.l.Unlock()
+
+	// Log the packet
+	r.log.WithFields(logrus.Fields{
+		"frameno": pkt.frameNo,
+		"req":     pkt.flags.REQ,
+		"resp":    pkt.flags.RESP,
+		"rel":     pkt.flags.REL,
+		"ack":     pkt.flags.ACK,
+		"fin":     pkt.flags.FIN,
+	}).Debug("receiving initiate packet")
 
 	if r.tubeState == created {
 		r.recvWindow.m.Lock()
 		r.recvWindow.ackNo = 1
 		r.recvWindow.m.Unlock()
-		//logrus.Debug("INITIATED! ", pkt.flags.REQ, " ", pkt.flags.RESP)
+		r.log.Debug("INITIATED!")
 		r.tubeState = initiated
 		r.sender.recvAck(1)
+		close(r.initRecv)
 	}
 
 	return nil
 }
 
+// Read satisfies the net.Conn interface
 func (r *Reliable) Read(b []byte) (n int, err error) {
-	// This part gets hard if you want this call to block until data is available.
-	//
-	// David recommends not making that work until everything else works.
+	<-r.initDone
+
+	r.l.Lock()
+	if r.tubeState == created {
+		r.l.Unlock()
+		return 0, ErrBadTubeState
+	}
+	r.l.Unlock()
+
 	return r.recvWindow.read(b)
 }
 
+// Write satisfies the net.Conn interface
 func (r *Reliable) Write(b []byte) (n int, err error) {
-	// Except with buffering and framing and concurrency control
+	<-r.initDone
+	r.l.Lock()
+	defer r.l.Unlock()
+
+	switch r.tubeState {
+	case created:
+		return 0, ErrBadTubeState
+	case initiated, closeWait:
+		break
+	default:
+		return 0, io.EOF
+	}
+
 	return r.sender.write(b)
 }
 
-// WriteMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
+// WriteMsgUDP implements the UDPLike interface.
+// While Reliable tubes do implement the UDPLike interface, Unreliable tubes are a better drop in replacement for UDP.
 func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
+	// This function can skip checking r.tubeState because r.Write() will do that
 	length := len(b)
 	h := make([]byte, 2)
 	binary.BigEndian.PutUint16(h, uint16(length))
@@ -221,8 +293,10 @@ func (r *Reliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, e
 	return length, 0, e
 }
 
-// ReadMsgUDP implements the "UDPLike" interface for transport layer NPC. Trying to make tubes have the same funcs as net.UDPConn
+// ReadMsgUDP implements the UDPLike interface.
+// While Reliable tubes do implement the UDPLike interface, Unreliable tubes are a better drop in replacement for UDP.
 func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
+	// This function can skip checking r.tubeState because r.Read() will do that
 	h := make([]byte, 2)
 	_, e := io.ReadFull(r, h)
 	if e != nil {
@@ -236,50 +310,47 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 }
 
 // Close handles closing reliable tubes
-func (r *Reliable) Close() error {
-	r.m.Lock()
-	name := r.id
-	if r.tubeState == closed {
-		r.m.Unlock()
-		return errors.New("tube already closed")
+func (r *Reliable) Close() (err error) {
+	select {
+	case <-r.initDone:
+		break
+	case <-r.closed:
+		break
 	}
-	r.m.Unlock()
-	err := r.sender.sendFin()
-	if err != nil {
-		return err
+
+	r.l.Lock()
+	defer r.l.Unlock()
+
+	switch r.tubeState {
+	case created:
+		r.log.WithField("state", r.tubeState).Warn("tried to close tube in bad state")
+		return ErrBadTubeState
+	case initiated:
+		r.tubeState = finWait1
+		r.log.Debug("call to close. going from initiated to finWait1")
+	case closeWait:
+		r.tubeState = lastAck
+		r.log.Debug("call to close. going from closeWait to lastAck")
+	default:
+		// In this case, Close() has already been called
+		return io.EOF
 	}
-	logrus.Debug("Starting close of ", r.id)
 
-	time.Sleep(time.Second)
-	// Wait until the other end of the connection has received the FIN packet from the other side.
-	start := time.Now()
-	go func() {
-		timer := time.NewTimer(time.Second * 5)
-		<-timer.C
-		r.closedCond.L.Lock()
-		r.closedCond.Signal()
-		r.closedCond.L.Unlock()
-	}()
-	r.closedCond.L.Lock()
-	for {
-		t := time.Now()
-		elapsed := t.Sub(start)
-		logrus.Debug("waiting: ", r.sender.unsentFramesRemaining(), r.recvWindow.closed, elapsed.Seconds())
+	// Cancel all pending read and write operations
+	r.SetDeadline(time.Now())
 
-		if elapsed.Seconds() > 5 || (!r.sender.unsentFramesRemaining() && r.recvWindow.closed) {
-			logrus.Debug("Breaking out! ", r.id)
-			break
-		}
-		r.closedCond.Wait()
-	}
-	r.closedCond.L.Unlock()
-	r.sender.close()
-	logrus.Debugf("closed tube: %v", name)
-	r.m.Lock()
-	r.tubeState = closed
-	r.m.Unlock()
+	return r.sender.sendFin()
+}
 
-	return nil
+// WaitForInit blocks until the Tube is initiated
+func (r *Reliable) WaitForInit() {
+	<-r.initDone
+}
+
+// WaitForClose blocks until the Tube is done closing
+func (r *Reliable) WaitForClose() {
+	<-r.closed
+	<-r.initDone
 }
 
 // Type returns tube type
@@ -297,30 +368,43 @@ func (r *Reliable) IsReliable() bool {
 	return true
 }
 
-// LocalAddr returns tube local address
+// getLog returns the logging context for the tube
+func (r *Reliable) getLog() *logrus.Entry {
+	return r.log
+}
+
+// LocalAddr returns the local address for the tube
 func (r *Reliable) LocalAddr() net.Addr {
 	return r.localAddr
 }
 
-// RemoteAddr returns r.remoteAddr
+// RemoteAddr returns the remote address for the tube
 func (r *Reliable) RemoteAddr() net.Addr {
 	return r.remoteAddr
 }
 
-// SetDeadline (not implemented)
+// SetDeadline implements the net.Conn interface.
+// All read and write operations past the deadline will return an error.
 func (r *Reliable) SetDeadline(t time.Time) error {
-	// TODO
-	panic("implement me")
+	<-r.initDone
+	r.SetReadDeadline(t)
+	r.SetWriteDeadline(t)
+	return nil
 }
 
-// SetReadDeadline (not implemented)
+// SetReadDeadline implements the net.Conn interface.
+// All read operations past the deadline will return an error.
 func (r *Reliable) SetReadDeadline(t time.Time) error {
-	// TODO
-	panic("implement me")
+	<-r.initDone
+	return r.recvWindow.dataReady.SetDeadline(t)
 }
 
-// SetWriteDeadline (not implemented)
+// SetWriteDeadline implements the net.Conn interface.
+// All write operations past the deadline will return an error.
 func (r *Reliable) SetWriteDeadline(t time.Time) error {
-	// TODO
-	panic("implement me")
+	<-r.initDone
+	r.sender.l.Lock()
+	defer r.sender.l.Unlock()
+	r.sender.deadline = t
+	return nil
 }

@@ -1,36 +1,59 @@
 package tubes
 
 import (
+	"io"
 	"net"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
 	"gotest.tools/assert"
 
 	"hop.computer/hop/common"
+	"hop.computer/hop/nettest"
 	"hop.computer/hop/transport"
-
-	"golang.org/x/net/nettest"
 )
 
 // rel is true for reliable tubes and false for unreliable ones
-func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), err error) {
-	c1, c2 := transport.MakeReliableUDPConn(false)
+func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err error) {
+	r = rel
+	var c1, c2 transport.MsgConn
+	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")
+	assert.NilError(t, err)
 
-	muxer1 := NewMuxer(c1, c1, 0, logrus.WithField("muxer", "m1"))
-	muxer2 := NewMuxer(c2, c2, 0, logrus.WithField("muxer", "m2"))
+	c1UDP, err := net.Dial("udp", c2Addr.String())
+	assert.NilError(t, err)
+	c1 = transport.MakeUDPMsgConn(c1UDP.(*net.UDPConn))
+
+	c2UDP, err := net.DialUDP("udp", c2Addr, c1.LocalAddr().(*net.UDPAddr))
+	assert.NilError(t, err)
+	c2 = transport.MakeUDPMsgConn(c2UDP)
+
+	muxer1 := NewMuxer(c1, 0, false, logrus.WithFields(logrus.Fields{
+		"muxer": "m1",
+		"test":  t.Name(),
+	}))
+	muxer1.log.WithField("addr", c1.LocalAddr()).Info("Created")
+	muxer2 := NewMuxer(c2, 0, true, logrus.WithFields(logrus.Fields{
+		"muxer": "m2",
+		"test":  t.Name(),
+	}))
+	muxer2.log.WithField("addr", c2.LocalAddr()).Info("Created")
 
 	go func() {
 		e := muxer1.Start()
 		if e != nil {
-			logrus.Fatalf("muxer1 error: %v", err)
+			logrus.Errorf("muxer1 error: %v", e)
+			t.Fail()
 		}
 	}()
 	go func() {
 		e := muxer2.Start()
 		if e != nil {
-			logrus.Fatalf("muxer2 error: %v", err)
+			logrus.Errorf("muxer2 error: %v", e)
+			t.Fail()
 		}
 	}()
 
@@ -63,70 +86,109 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), err error) 
 	}
 
 	stop = func() {
-		t1.Close()
-		t2.Close()
-		muxer1.Stop()
-		muxer2.Stop()
+
+		wg := sync.WaitGroup{}
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			t1.Close()
+			t1.(Tube).WaitForClose()
+			muxer1.Stop()
+			assert.DeepEqual(t, muxer1.state.Load(), muxerStopped)
+		}()
+		go func() {
+			defer wg.Done()
+			t2.Close()
+			t2.(Tube).WaitForClose()
+			muxer2.Stop()
+			assert.DeepEqual(t, muxer2.state.Load(), muxerStopped)
+		}()
+
+		wg.Wait()
+
+		c1.Close()
+		c2.Close()
+
 	}
 
-	return t1, t2, stop, err
+	return t1, t2, stop, rel, err
 }
 
-// TODO(hosono) make reliable tubes pass these tests
-func DontTestReliable(t *testing.T) {
-	logrus.SetLevel(logrus.DebugLevel)
+// CloseTest tests the closing behavior of tubes
+func CloseTest(t *testing.T, rel bool, wait bool) {
+	c1, c2, stop, _, err := makeConn(t, rel)
+	assert.NilError(t, err)
+	defer stop()
 
-	f := func() (c1, c2 net.Conn, stop func(), err error) {
+	if c1Rel, ok := c1.(*Reliable); ok {
+		c1Rel.WaitForInit()
+	}
+	if c2Rel, ok := c2.(*Reliable); ok {
+		c2Rel.WaitForInit()
+	}
+
+	c1.Close()
+	if wait {
+		time.Sleep(100 * time.Millisecond)
+	}
+	c2.Close()
+
+	if c1Rel, ok := c1.(*Reliable); ok {
+		c1Rel.WaitForClose()
+		c1Rel.l.Lock()
+		assert.DeepEqual(t, c1Rel.tubeState, closed)
+		c1Rel.l.Unlock()
+	}
+
+	if c2Rel, ok := c1.(*Reliable); ok {
+		c2Rel.WaitForClose()
+		c2Rel.l.Lock()
+		assert.DeepEqual(t, c2Rel.tubeState, closed)
+		c2Rel.l.Unlock()
+	}
+
+	n, err := c1.Write([]byte("hello world"))
+	assert.ErrorType(t, err, io.EOF)
+	assert.DeepEqual(t, n, 0)
+}
+
+func reliable(t *testing.T) {
+	logrus.SetLevel(logrus.TraceLevel)
+
+	t.Run("Close", func(t *testing.T) {
+		CloseTest(t, true, true)
+		CloseTest(t, true, false)
+	})
+
+	f := func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
 		return makeConn(t, true)
 	}
 
 	mp := nettest.MakePipe(f)
-	nettest.TestConn(t, mp)
+	t.Run("Nettest", func(t *testing.T) {
+		nettest.TestConn(t, mp)
+	})
 }
 
-func CheckUnreliable(t *testing.T) {
-	c1, c2, stop, err := makeConn(t, false)
-	assert.NilError(t, err)
+func unreliable(t *testing.T) {
+	logrus.SetLevel(logrus.TraceLevel)
 
-	c1.Write([]byte("hello"))
+	t.Run("Close", func(t *testing.T) {
+		CloseTest(t, false, true)
+		CloseTest(t, false, false)
+	})
 
-	buf := make([]byte, 5)
-	_, err = c2.Read(buf)
-	assert.NilError(t, err)
-
-	assert.DeepEqual(t, buf, []byte("hello"))
-
-	stop()
-}
-
-func UnreliableCount(t *testing.T) {
-	c1, c2, stop, err := makeConn(t, false)
-	assert.NilError(t, err)
-
-	for i := 0; i < 8; i++ {
-		c1.Write([]byte{byte(i)})
-	}
-
-	buf := make([]byte, 16)
-	for i := 0; i < 8; i++ {
-		n, err := c2.Read(buf)
-		assert.NilError(t, err)
-		assert.DeepEqual(t, n, 1)
-		assert.DeepEqual(t, buf[:n], []byte{byte(i)})
-	}
-
-	stop()
-}
-
-func TestUnreliable(t *testing.T) {
-	logrus.SetLevel(logrus.DebugLevel)
-
-	t.Run("CheckUnreliable", CheckUnreliable)
-	t.Run("Count", UnreliableCount)
-
-	f := func() (c1, c2 net.Conn, stop func(), err error) {
+	f := func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
 		return makeConn(t, false)
 	}
 	mp := nettest.MakePipe(f)
-	nettest.TestConn(t, mp)
+	t.Run("Nettest", func(t *testing.T) {
+		nettest.TestConn(t, mp)
+	})
+}
+
+func TestTubes(t *testing.T) {
+	t.Run("Reliable", reliable)
+	t.Run("Unreliable", unreliable)
 }

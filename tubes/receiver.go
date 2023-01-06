@@ -3,11 +3,13 @@ package tubes
 import (
 	"bytes"
 	"container/heap"
-	"errors"
 	"io"
 	"sync"
+	"sync/atomic"
 
 	"github.com/sirupsen/logrus"
+
+	"hop.computer/hop/common"
 )
 
 type receiver struct {
@@ -16,19 +18,28 @@ type receiver struct {
 		and not have to update our priority queue orderings in the case of a
 		wraparound.
 	*/
-	ackNo       uint64
+	// +checklocks:m
+	ackNo uint64
+	// +checklocks:m
 	windowStart uint64
-	windowSize  uint16
-	closed      bool
-	closedCond  *sync.Cond
-	bufferCond  sync.Cond
-	m           sync.Mutex
-	fragments   PriorityQueue
+	// +checklocks:m
+	windowSize uint16
 
+	closed atomic.Bool
+	m      sync.Mutex
+	// +checklocks:m
+	fragments PriorityQueue
+
+	dataReady *common.DeadlineChan[struct{}]
+	// +checklocks:m
 	buffer *bytes.Buffer
+
+	log *logrus.Entry
 }
 
 func (r *receiver) init() {
+	r.m.Lock()
+	defer r.m.Unlock()
 	heap.Init(&r.fragments)
 }
 
@@ -38,52 +49,73 @@ func (r *receiver) getAck() uint32 {
 	return uint32(r.ackNo)
 }
 
+func (r *receiver) getWindowSize() uint16 {
+	r.m.Lock()
+	defer r.m.Unlock()
+	return r.windowSize
+}
+
 /*
 Processes window into buffer stream if the ordered fragments are ready (in order).
 Precondition: r.m mutex is held.
+Returns true if it processed a FIN packet
 */
-func (r *receiver) processIntoBuffer() {
+// +checklocks:r.m
+func (r *receiver) processIntoBuffer() bool {
+	fin := false
+	oldLen := r.fragments.Len()
 	for r.fragments.Len() > 0 {
 		frag := heap.Pop(&(r.fragments)).(*pqItem)
 
+		log := r.log.WithFields(logrus.Fields{
+			"window start": r.windowStart,
+			"frameNo":      frag.priority,
+			"fin":          frag.FIN,
+		})
+
 		if r.windowStart != frag.priority {
 			// This packet cannot be added to the buffer yet.
-			logrus.Debug("WINDOW START: ", r.windowStart, " FRAG PRIORITY: ", frag.priority)
+			log.Trace("cannot process packet into buffer yet")
 			if frag.priority > r.windowStart {
 				heap.Push(&r.fragments, frag)
 				break
 			}
-		} else if frag.FIN {
-			r.windowStart++
-			r.ackNo++
-			r.closedCond.L.Lock()
-			logrus.Debug("RECEIVING FIN PACKET")
-			r.closed = true
-			r.closedCond.Signal()
-			r.closedCond.L.Unlock()
-			break
 		} else {
+			if frag.FIN {
+				r.closed.Store(true)
+				fin = true
+			}
+			log.Trace("processing packet")
 			r.buffer.Write(frag.value)
 			r.windowStart++
 			r.ackNo++
 		}
 	}
-	r.bufferCond.Signal()
+	if oldLen > r.fragments.Len() {
+		select {
+		case r.dataReady.C <- struct{}{}:
+			break
+		default:
+			break
+		}
+	}
+	return fin
 }
 
 func (r *receiver) read(buf []byte) (int, error) {
-	r.bufferCond.L.Lock()
 	r.m.Lock()
-	if r.buffer.Len() == 0 && !r.closed {
+	if r.buffer.Len() == 0 && !r.closed.Load() {
 		r.m.Unlock()
-		r.bufferCond.Wait()
+		_, err := r.dataReady.Recv()
+		if err != nil {
+			return 0, err
+		}
 		r.m.Lock()
 	}
 	defer r.m.Unlock()
-	defer r.bufferCond.L.Unlock()
 
 	nbytes, _ := r.buffer.Read(buf)
-	if r.closed {
+	if r.closed.Load() && r.buffer.Len() == 0 {
 		return nbytes, io.EOF
 	}
 	return nbytes, nil
@@ -103,45 +135,85 @@ func frameInBounds(wS uint64, wE uint64, f uint64) bool {
 	return true
 }
 
-/*
-Utility function to add offsets so that we eliminate wraparounds.
-Precondition: must be holding frame number
-*/
+// unwrapFrameNo converts 32 bit frame numbers into 64 bit frame numbers.
+// It selects the frame number closest to the current ackNo.
+// +checklocks:r.m
 func (r *receiver) unwrapFrameNo(frameNo uint32) uint64 {
-	// The previous, offsets are represented by the 32 least significant bytes of the window start.
-	windowStart := r.windowStart
-	newNo := uint64(frameNo) + windowStart - uint64(uint32(windowStart))
+	// TODO(hosono) there's probably a much simpler way to do this, but this works
+	var mult uint64 = 1 << 32 // 2 ^ 32
+	var lower uint64
+	var upper uint64
 
-	// Add an additional offset for the case in which seqNo has wrapped around again.
-	if frameNo < uint32(windowStart) {
-		newNo += 1 << 32
+	if r.ackNo == 0 {
+		lower = uint64(frameNo)
+		upper = mult + uint64(frameNo)
+	} else if r.ackNo%mult < 1<<31 {
+		lower = (r.ackNo/mult-1)*mult + uint64(frameNo)
+		upper = (r.ackNo/mult)*mult + uint64(frameNo)
+	} else {
+		lower = (r.ackNo/mult)*mult + uint64(frameNo)
+		upper = (r.ackNo/mult+1)*mult + uint64(frameNo)
 	}
-	return newNo
+
+	var lowerDiff uint64
+	var upperDiff uint64
+
+	if lower < r.ackNo {
+		lowerDiff = r.ackNo - lower
+	} else {
+		lowerDiff = lower - r.ackNo
+	}
+
+	if upper < r.ackNo {
+		upperDiff = r.ackNo - upper
+	} else {
+		upperDiff = upper - r.ackNo
+	}
+
+	if upperDiff < lowerDiff {
+		return upper
+	}
+	return lower
 }
 
-/* Precondition: receive window lock is held. */
-func (r *receiver) receive(p *frame) error {
+// receive processes a single incoming packet
+func (r *receiver) receive(p *frame) (bool, error) {
 	r.m.Lock()
 	defer r.m.Unlock()
-	windowStart := r.windowStart
-	windowEnd := r.windowStart + uint64(uint32(r.windowSize))
 
-	frameNo := r.unwrapFrameNo(p.frameNo)
-	logrus.Debug("receive frame frameNo: ", frameNo, " ackNo: ", p.ackNo, " data: ", string(p.data), " FIN? ", p.flags.FIN, " recv ack no? ", r.ackNo)
-	if !frameInBounds(windowStart, windowEnd, frameNo) {
-		logrus.Debug("received dataframe out of receive window bounds")
-		return errors.New("received dataframe out of receive window bounds")
+	if r.closed.Load() {
+		r.log.Trace("receiver closed. not processing packet into buffer")
+		return false, io.EOF
 	}
 
-	if (p.dataLength > 0 || p.flags.FIN) && (frameNo >= r.windowStart) {
+	windowStart := r.windowStart
+	windowEnd := r.windowStart + uint64(uint32(r.windowSize))
+	frameNo := r.unwrapFrameNo(p.frameNo)
+
+	log := r.log.WithFields(logrus.Fields{
+		"frameNo":     frameNo,
+		"windowStart": windowStart,
+		"windowEnd":   windowEnd,
+	})
+
+	if (p.dataLength > 0 || p.flags.FIN) && frameInBounds(windowStart, windowEnd, frameNo) {
 		heap.Push(&r.fragments, &pqItem{
 			value:    p.data,
 			priority: frameNo,
 			FIN:      p.flags.FIN,
 		})
+		log.Trace("in bounds frame")
+	} else {
+		log.Debug("out of bounds frame")
+		return false, errFrameOutOfBounds
 	}
 
-	r.processIntoBuffer()
+	fin := r.processIntoBuffer()
+	return fin, nil
+}
 
-	return nil
+// Close causes future reads to return io.EOF
+func (r *receiver) Close() {
+	r.closed.Store(true)
+	r.dataReady.Close()
 }

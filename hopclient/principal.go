@@ -10,6 +10,8 @@ import (
 	"hop.computer/hop/flags"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
+
+	"github.com/sirupsen/logrus"
 )
 
 //  Principal client: a hop client that is authorized on both the Delegate
@@ -91,7 +93,7 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (net.Conn, error) {
 		return nil, err
 	}
 
-	client.TubeMuxer = tubes.NewMuxer(client.TransportConn, client.TransportConn, client.hostconfig.DataTimeout, nil)
+	client.TubeMuxer = tubes.NewMuxer(client.TransportConn, client.hostconfig.DataTimeout, false, logrus.WithField("muxer", "TODO: add logging context"))
 	err = client.userAuthorization()
 	if err != nil {
 		return nil, err

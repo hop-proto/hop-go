@@ -4,7 +4,6 @@ package tubes
 import (
 	"io"
 	"net"
-	"os"
 	"sync/atomic"
 	"time"
 
@@ -20,12 +19,15 @@ type Unreliable struct {
 	id        byte
 	sendQueue chan []byte
 
-	state     atomic.Value
-	initiated chan struct{}
-
-	// true if this tube began the request. false otherwise
-	// TODO(hosono) can be replaced with parity of tubeID
-	req bool
+	// Unreliable tubes can be in three states:
+	// created: Indicates the tube has been created and is waiting for the remote peer send back an initiate frame
+	// initiated: Indicates the tube is ready to read and write data
+	// closed: Indicates the tube is done reading and writing data
+	state        atomic.Value
+	initiated    chan struct{}
+	initiateDone chan struct{}
+	senderDone   chan struct{}
+	closed       chan struct{}
 
 	recv *common.DeadlineChan[[]byte]
 	send *common.DeadlineChan[[]byte]
@@ -37,9 +39,6 @@ type Unreliable struct {
 
 	log *logrus.Entry
 }
-
-// TODO(hosono) pick a value for this
-var maxBufferedPackets = 1000
 
 // Unreliable tubes implement net.Conn
 var _ net.Conn = &Unreliable{}
@@ -53,60 +52,16 @@ var _ transport.MsgConn = &Unreliable{}
 // Unreliable tubes are tubes
 var _ Tube = &Unreliable{}
 
-/*
-func newUnreliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType TubeType, log *logrus.Entry) (*Unreliable, error) {
-	cid := []byte{0}
-	n, err := rand.Read(cid)
-	if err != nil || n != 1 {
-		return nil, err
-	}
-	u := makeUnreliableTube(underlying, netConn, sendQueue, tubeType, cid[0], log)
-	go u.initiate(true)
-	return u, nil
-}
-
-func newUnreliableTubeWithTubeID(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tubeType TubeType, tubeID byte, log *logrus.Entry) *Unreliable {
-	u := makeUnreliableTube(underlying, netConn, sendQueue, tubeType, tubeID, log)
-	go u.initiate(false)
-	return u
-}
-
-func makeUnreliableTube(underlying transport.MsgConn, netConn net.Conn, sendQueue chan []byte, tType TubeType, tubeID byte, log *logrus.Entry) *Unreliable {
-	u := &Unreliable{
-		tType:      tType,
-		id:         tubeID,
-		sendQueue:  sendQueue,
-		localAddr:  netConn.LocalAddr(),
-		remoteAddr: netConn.RemoteAddr(),
-		recv:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
-		send:       common.NewDeadlineChan[[]byte](maxBufferedPackets),
-		state:      atomic.Value{},
-		initiated:   make(chan struct{}),
-	}
-	return u
-}
-*/
-
 func (u *Unreliable) sender() {
-	for {
-		// TODO(hosono) this will busywait if the deadline expires
-		b, err := u.send.Recv()
-		if err != nil {
-			if err == os.ErrDeadlineExceeded {
-				continue
-			} else if err == io.EOF {
-				break
-			}
-		}
+	for b := range u.send.C {
 		u.sendQueue <- b
 	}
-	// TODO(hosono) this won't finish because this channel is not closed
-	for pkt := range u.send.C {
-		u.sendQueue <- pkt
-	}
+
+	u.log.Debug("sender ended")
+	close(u.senderDone)
 }
 
-func (u *Unreliable) makeInitFrame() initiateFrame {
+func (u *Unreliable) makeInitFrame(req bool) initiateFrame {
 	return initiateFrame{
 		tubeID:     u.id,
 		tubeType:   u.tType,
@@ -117,35 +72,29 @@ func (u *Unreliable) makeInitFrame() initiateFrame {
 		flags: frameFlags{
 			ACK:  true,
 			FIN:  false,
-			REQ:  u.req,
-			RESP: !u.req,
+			REQ:  req,
+			RESP: !req,
 			REL:  false,
 		},
 	}
 }
 
 // req: whether the tube is requesting to initiate a tube (true), or whether is responding to an initiation request (false)
-func (u *Unreliable) initiate() {
-	if u.req {
-		u.state.Store(created)
-	} else {
-		u.state.Store(initiated)
-	}
+func (u *Unreliable) initiate(req bool) {
+	defer close(u.initiateDone)
 
 	notInit := true
+	ticker := time.NewTicker(retransmitOffset)
 	for notInit {
-		p := u.makeInitFrame()
+		p := u.makeInitFrame(req)
 		u.sendQueue <- p.toBytes()
 
-		if u.req {
-			timer := time.NewTimer(retransmitOffset)
-			select {
-			case <-timer.C:
-				u.log.Warn("init rto exceeded")
-				break
-			case <-u.initiated:
-				break
-			}
+		select {
+		case <-ticker.C:
+			u.log.Info("init rto exceeded")
+		case <-u.initiated:
+		case <-u.closed:
+			return
 		}
 		notInit = u.state.Load() == created
 	}
@@ -154,20 +103,18 @@ func (u *Unreliable) initiate() {
 }
 
 func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
-	u.log.Debugf("receive initiate frame")
+	// Log the packet
+	u.log.WithFields(logrus.Fields{
+		"frameno": pkt.frameNo,
+		"req":     pkt.flags.REQ,
+		"resp":    pkt.flags.RESP,
+		"rel":     pkt.flags.REL,
+		"ack":     pkt.flags.ACK,
+		"fin":     pkt.flags.FIN,
+	}).Debug("receiving initiate packet")
 
-	u.state.CompareAndSwap(created, initiated)
-
-	if !u.req {
-		p := u.makeInitFrame()
-		u.sendQueue <- p.toBytes()
-	}
-
-	select {
-	case u.initiated <- struct{}{}:
-		break
-	default:
-		break
+	if u.state.CompareAndSwap(created, initiated) {
+		close(u.initiated)
 	}
 
 	return nil
@@ -195,6 +142,12 @@ func (u *Unreliable) ReadMsg(b []byte) (n int, err error) {
 
 // ReadMsgUDP implements the UDPLike interface. addr is always nil
 func (u *Unreliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
+	select {
+	case <-u.initiated:
+		break
+	case <-u.closed:
+		break
+	}
 	msg, err := u.recv.Recv()
 	if err != nil {
 		return
@@ -202,7 +155,7 @@ func (u *Unreliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UD
 	n = copy(b, msg)
 	if n < len(msg) {
 		err = transport.ErrBufOverflow
-		// TODO(hosono) save buffer leftovers?
+		// net.UDPConn discards buffer leftovers, so Unreliable Tubes does the same
 	}
 	return
 }
@@ -222,6 +175,12 @@ func (u *Unreliable) WriteMsg(b []byte) (err error) {
 // WriteMsgUDP implements implements the UDPLike interface
 // oob and addr are ignored
 func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
+	select {
+	case <-u.initiated:
+		break
+	case <-u.closed:
+		break
+	}
 	dataLength := uint16(len(b))
 	if uint16(len(b)) > maxFrameDataLength {
 		err = transport.ErrBufOverflow
@@ -249,12 +208,17 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 		return
 	}
 	n = len(b)
+	u.log.WithFields(logrus.Fields{
+		"frameNo":    pkt.frameNo,
+		"dataLength": pkt.dataLength,
+	}).Trace("wrote packet")
 	return n, 0, err
 }
 
 // Close implements the net.Conn interface. Future io operations will return io.EOF
 func (u *Unreliable) Close() error {
-	if u.state.Swap(closed) == closed {
+	oldState := u.state.Swap(closed)
+	if oldState == closed {
 		return io.EOF
 	}
 
@@ -279,6 +243,14 @@ func (u *Unreliable) Close() error {
 	u.send.Close()
 	u.recv.Close()
 
+	close(u.send.C)
+
+	if oldState == initiated {
+		<-u.senderDone
+	}
+
+	close(u.closed)
+
 	return err
 }
 
@@ -301,11 +273,23 @@ func (u *Unreliable) SetDeadline(t time.Time) error {
 
 // SetReadDeadline implements net.Conn
 func (u *Unreliable) SetReadDeadline(t time.Time) error {
+	select {
+	case <-u.initiated:
+		break
+	case <-u.closed:
+		break
+	}
 	return u.recv.SetDeadline(t)
 }
 
 // SetWriteDeadline implements net.Conn
 func (u *Unreliable) SetWriteDeadline(t time.Time) error {
+	select {
+	case <-u.initiated:
+		break
+	case <-u.closed:
+		break
+	}
 	return u.send.SetDeadline(t)
 }
 
@@ -322,4 +306,14 @@ func (u *Unreliable) GetID() byte {
 // IsReliable returns whether the tube is reliable. Always false
 func (u *Unreliable) IsReliable() bool {
 	return false
+}
+
+// WaitForClose blocks until the tube is done closing
+func (u *Unreliable) WaitForClose() {
+	<-u.closed
+	<-u.initiateDone
+}
+
+func (u *Unreliable) getLog() *logrus.Entry {
+	return u.log
 }

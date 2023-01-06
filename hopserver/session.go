@@ -174,7 +174,7 @@ func (sess *hopSession) close() error {
 	defer sess.server.sessionLock.Unlock()
 	delete(sess.server.sessions, sess.ID)
 
-	//err2 = sess.transportConn.Close() //(not implemented yet)
+	err2 = sess.transportConn.Close()
 	if err != nil {
 		return err
 	}
