@@ -8,7 +8,6 @@ import (
 
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
-
 	"hop.computer/hop/snp"
 )
 
