@@ -397,8 +397,8 @@ func ReadConfOrDenial(r io.Reader) (AgMessage, error) {
 	return m, nil
 }
 
-// SendIntentDenied sends intent denied message with reason
-func SendIntentDenied(w io.Writer, reason string) error {
+// WriteIntentDenied writes intent denied message with reason
+func WriteIntentDenied(w io.Writer, reason string) error {
 	m := AgMessage{
 		MsgType: IntentDenied,
 		Data: MessageData{
@@ -409,8 +409,8 @@ func SendIntentDenied(w io.Writer, reason string) error {
 	return err
 }
 
-// SendIntentConfirmation sends intent confirmation
-func SendIntentConfirmation(w io.Writer) error {
+// WriteIntentConfirmation writes intent confirmation
+func WriteIntentConfirmation(w io.Writer) error {
 	m := AgMessage{
 		MsgType: IntentConfirmation,
 	}
@@ -418,8 +418,8 @@ func SendIntentConfirmation(w io.Writer) error {
 	return err
 }
 
-// SendIntentCommunication sends intent communication messages
-func SendIntentCommunication(w io.Writer, i Intent) error {
+// WriteIntentCommunication writes intent communication messages
+func WriteIntentCommunication(w io.Writer, i Intent) error {
 	m := AgMessage{
 		MsgType: IntentCommunication,
 		Data: MessageData{
@@ -430,8 +430,8 @@ func SendIntentCommunication(w io.Writer, i Intent) error {
 	return err
 }
 
-// SendIntentRequest sends intent request message
-func SendIntentRequest(w io.Writer, i Intent) error {
+// WriteIntentRequest writes intent request message
+func WriteIntentRequest(w io.Writer, i Intent) error {
 	m := AgMessage{
 		MsgType: IntentRequest,
 		Data: MessageData{

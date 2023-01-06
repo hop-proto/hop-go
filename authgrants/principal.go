@@ -80,35 +80,35 @@ func (p *principalInstance) handleIntentRequest() error {
 func (p *principalInstance) doIntentRequestChecks(i Intent) error {
 	targURL := i.TargetURL()
 	if p.targetConnected && p.targetInfo != targURL {
-		return SendIntentDenied(p.delegateConn, "principal: received intent request for different target")
+		return WriteIntentDenied(p.delegateConn, "principal: received intent request for different target")
 	}
 
 	err := p.checkIntent(i)
 	if err != nil {
-		return SendIntentDenied(p.delegateConn, err.Error())
+		return WriteIntentDenied(p.delegateConn, err.Error())
 	}
 
 	if !p.targetConnected {
 		tc, err := p.setUpTargetConn(targURL)
 		if err != nil {
-			return SendIntentDenied(p.delegateConn, fmt.Sprintf("principal: target setup failed: %s", err))
+			return WriteIntentDenied(p.delegateConn, fmt.Sprintf("principal: target setup failed: %s", err))
 		}
 		p.targetConn = tc
 		p.targetInfo = targURL
 		p.targetConnected = true
 	}
 
-	err = SendIntentCommunication(p.targetConn, i)
+	err = WriteIntentCommunication(p.targetConn, i)
 	if err != nil {
-		return SendIntentDenied(p.delegateConn, fmt.Sprintf("principal: error sending intent comm: %s", err))
+		return WriteIntentDenied(p.delegateConn, fmt.Sprintf("principal: error sending intent comm: %s", err))
 	}
 
 	resp, err := ReadConfOrDenial(p.targetConn)
 	if err != nil {
-		return SendIntentDenied(p.delegateConn, fmt.Sprintf("principal: error reading target response: %s", err))
+		return WriteIntentDenied(p.delegateConn, fmt.Sprintf("principal: error reading target response: %s", err))
 	}
 	if resp.MsgType == IntentDenied {
-		return SendIntentDenied(p.delegateConn, resp.Data.Denial)
+		return WriteIntentDenied(p.delegateConn, resp.Data.Denial)
 	}
-	return SendIntentConfirmation(p.delegateConn)
+	return WriteIntentConfirmation(p.delegateConn)
 }

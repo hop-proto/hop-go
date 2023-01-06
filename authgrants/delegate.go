@@ -45,7 +45,7 @@ func (d *delegateInstance) run() error {
 
 	oneApproved := false
 	for _, ir := range d.intentRequests {
-		err := SendIntentRequest(d.principalConn, ir)
+		err := WriteIntentRequest(d.principalConn, ir)
 		if err != nil {
 			logrus.Error("delegate: error sending intent request")
 			continue
