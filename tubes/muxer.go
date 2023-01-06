@@ -18,10 +18,14 @@ import (
 
 type muxerState int32
 
+// a Muxer can be in one of three states
+// muxerRunning indicates the muxer is able to create and accept new tubes
+// muxerStopping indicates that Stop() has been called and the muxer is waiting on its Tubes to close. In this state, the muxer cannot create or accept new tubes.
+// muxerStopped indicates that all tubes have been closed. In this state, the muxer cannot create or accept tubes.
 const (
-	muxerRunning muxerState = iota
-	muxerClosing muxerState = iota
-	muxerClosed  muxerState = iota
+	muxerRunning  muxerState = iota
+	muxerStopping muxerState = iota
+	muxerStopped  muxerState = iota
 )
 
 // Tube interface is shared between Reliable and Unreliable Tubes
@@ -89,7 +93,7 @@ func (m *Muxer) reapTube(t Tube) {
 	t.WaitForClose()
 
 	// This prevents tubes IDs from being reused while the remote peer is in the timeWait state.
-	if t.GetID()%2 == m.idParity {
+	if _, ok := t.(*Reliable); ok && t.GetID()%2 == m.idParity {
 		timer := time.NewTimer(timeWaitTime)
 		select {
 		case <-m.stopped:
@@ -306,7 +310,7 @@ func (m *Muxer) Start() (err error) {
 
 	defer func() {
 		// This case indicates that the muxer was stopped by m.Stop()
-		if m.state.Load() == muxerClosed || errors.Is(err, syscall.ECONNREFUSED) {
+		if m.state.Load() == muxerStopped || errors.Is(err, syscall.ECONNREFUSED) {
 			err = nil
 		} else if err != nil {
 			m.log.Errorf("Muxer ended with error: %s", err)
@@ -318,7 +322,7 @@ func (m *Muxer) Start() (err error) {
 	if m.timeout != 0 {
 		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
 	}
-	for m.state.Load() != muxerClosed {
+	for m.state.Load() != muxerStopped {
 		frame, err := m.readMsg()
 		if err != nil {
 			return err
@@ -388,12 +392,12 @@ func (m *Muxer) Stop() (err error) {
 			v.WaitForClose()
 		}(v)
 	}
-	m.state.Store(muxerClosing)
+	m.state.Store(muxerStopping)
 	m.m.Unlock()
 
 	// If tubes do not correctly close after some time, assume they never will and force them to close.
 	time.AfterFunc(muxerTimeout, func() {
-		if m.state.Load() == muxerClosed {
+		if m.state.Load() == muxerStopped {
 			return
 		}
 		m.m.Lock()
@@ -412,7 +416,7 @@ func (m *Muxer) Stop() (err error) {
 
 	// Wait for all tubes to close
 	wg.Wait()
-	m.state.Store(muxerClosed)
+	m.state.Store(muxerStopped)
 
 	close(m.sendQueue)
 	close(m.stopped)

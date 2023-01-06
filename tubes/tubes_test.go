@@ -45,13 +45,15 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err
 	go func() {
 		e := muxer1.Start()
 		if e != nil {
-			logrus.Fatalf("muxer1 error: %v", e)
+			logrus.Errorf("muxer1 error: %v", e)
+			t.Fail()
 		}
 	}()
 	go func() {
 		e := muxer2.Start()
 		if e != nil {
-			logrus.Fatalf("muxer2 error: %v", e)
+			logrus.Errorf("muxer2 error: %v", e)
+			t.Fail()
 		}
 	}()
 
@@ -93,14 +95,14 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err
 			t1.Close()
 			t1.(Tube).WaitForClose()
 			muxer1.Stop()
-			assert.DeepEqual(t, muxer1.state.Load(), muxerClosed)
+			assert.DeepEqual(t, muxer1.state.Load(), muxerStopped)
 		}()
 		go func() {
 			defer wg.Done()
 			t2.Close()
 			t2.(Tube).WaitForClose()
 			muxer2.Stop()
-			assert.DeepEqual(t, muxer2.state.Load(), muxerClosed)
+			assert.DeepEqual(t, muxer2.state.Load(), muxerStopped)
 		}()
 
 		wg.Wait()
