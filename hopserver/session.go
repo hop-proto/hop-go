@@ -188,7 +188,7 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 
 	// Check server config (coarse grained enable/disable)
 	if sess.server.config.AllowAuthgrants == nil || !*sess.server.config.AllowAuthgrants { // AuthGrants not enabled
-		authgrants.SendIntentDenied(tube, authgrants.TargetDenial)
+		authgrants.WriteIntentDenied(tube, authgrants.TargetDenial)
 	} else {
 		authgrants.StartTargetInstance(tube, sess.checkIntent, sess.addAuthGrant)
 	}

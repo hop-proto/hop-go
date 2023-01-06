@@ -54,11 +54,11 @@ func (t *targetInstance) handleIntentCommunication() error {
 	}
 	err = t.checkIntent(i)
 	if err != nil {
-		return SendIntentDenied(t.principalConn, err.Error())
+		return WriteIntentDenied(t.principalConn, err.Error())
 	}
 	err = t.addAuthGrant(&i)
 	if err != nil {
-		return SendIntentDenied(t.principalConn, err.Error())
+		return WriteIntentDenied(t.principalConn, err.Error())
 	}
-	return SendIntentConfirmation(t.principalConn)
+	return WriteIntentConfirmation(t.principalConn)
 }

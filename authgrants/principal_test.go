@@ -76,7 +76,7 @@ func fakeTarget(t *testing.T, c net.Conn) {
 	_, err := ReadIntentCommunication(c)
 	assert.NilError(t, err)
 	logrus.Info("target: got intent comm")
-	err = SendIntentConfirmation(c)
+	err = WriteIntentConfirmation(c)
 	assert.NilError(t, err)
 }
 
@@ -87,7 +87,7 @@ func fakeTargetLoop(t *testing.T, c net.Conn) {
 			break
 		}
 		logrus.Info("target: got intent comm")
-		err = SendIntentConfirmation(c)
+		err = WriteIntentConfirmation(c)
 		assert.NilError(t, err)
 	}
 	logrus.Info("fake target: stopped looping")
@@ -97,7 +97,7 @@ func fakeTargetDenial(t *testing.T, c net.Conn) {
 	_, err := ReadIntentCommunication(c)
 	assert.NilError(t, err)
 	logrus.Info("target: got intent comm")
-	err = SendIntentDenied(c, "target says so")
+	err = WriteIntentDenied(c, "target says so")
 	assert.NilError(t, err)
 }
 
