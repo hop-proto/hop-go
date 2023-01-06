@@ -70,7 +70,7 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (net.Conn, error) {
 	// TODO(baumanl): necessary to do all of authenticator setup again?
 	// or could c.authenticator (principal's authenticator) sometimes be used
 	// instead?
-	err = client.authenticatorSetup(nil)
+	err = client.authenticatorSetup()
 	if err != nil {
 		return nil, err
 	}

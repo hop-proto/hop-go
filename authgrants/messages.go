@@ -430,6 +430,18 @@ func SendIntentCommunication(w io.Writer, i Intent) error {
 	return err
 }
 
+// SendIntentRequest sends intent request message
+func SendIntentRequest(w io.Writer, i Intent) error {
+	m := AgMessage{
+		MsgType: IntentRequest,
+		Data: MessageData{
+			Intent: i,
+		},
+	}
+	_, err := m.WriteTo(w)
+	return err
+}
+
 // TargetURL gives url of target of intent
 func (i Intent) TargetURL() core.URL {
 	return core.URL{

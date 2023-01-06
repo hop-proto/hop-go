@@ -230,8 +230,6 @@ func (c *TestClient) StartClient(t *testing.T) {
 	assert.NilError(t, err)
 	if c.Authenticator != nil {
 		err = c.Client.DialExternalAuthenticator(c.Remote, c.Authenticator)
-	} else if c.AuthgrantConn != nil {
-		err = c.Client.DialExternalConn(c.AuthgrantConn)
 	} else {
 		err = c.Client.Dial()
 	}
