@@ -7,6 +7,8 @@ COPY id_server.pub /etc/hopd/id_hop.pub
 COPY id_server.cert /etc/hopd/id_hop.cert
 COPY ./server_dev_config /etc/hopd/config
 
+COPY root.pem /etc/hopd/root.pem
+
 COPY id_client.pub /root/.hop/authorized_keys
 
 WORKDIR /app

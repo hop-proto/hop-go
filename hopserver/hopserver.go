@@ -131,6 +131,15 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 			tconf.ClientVerify = &transport.VerifyConfig{
 				Store: certs.Store{}, // TODO(baumanl): get the store from somewhere
 			}
+			for _, s := range sc.TrustedRoots {
+				cert, err := certs.ReadCertificatePEMFile(s)
+				if err != nil {
+					logrus.Errorf("server: error loading root cert at %s: %s", s, err)
+					continue
+				}
+				tconf.ClientVerify.Store.AddCertificate(cert)
+			}
+
 		}
 		// Authorized keys enabled
 		if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
