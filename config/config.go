@@ -38,7 +38,7 @@ type ServerConfig struct {
 	HandshakeTimeout time.Duration
 	DataTimeout      time.Duration
 
-	TrustedRoots []string
+	Store []string
 
 	// transport layer client validation options
 	InsecureSkipVerify          *bool

@@ -111,6 +111,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	tconf := transport.ServerConfig{
 		GetCertificate:   getCert,
 		HandshakeTimeout: sc.HandshakeTimeout,
+		ClientVerify:     &transport.VerifyConfig{},
 	}
 
 	// serverConfig options inform verify config settings
@@ -122,21 +123,19 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 
 	// Explicitly setting sc.InsecureSkipVerify overrides everything else
 	if sc.InsecureSkipVerify != nil && *sc.InsecureSkipVerify {
-		tconf.ClientVerify = &transport.VerifyConfig{
-			InsecureSkipVerify: true,
-		}
+		tconf.ClientVerify.InsecureSkipVerify = true
+
 	} else {
 		// Cert validation enabled
 		if sc.EnableCertificateValidation == nil || *sc.EnableCertificateValidation {
-			tconf.ClientVerify = &transport.VerifyConfig{
-				Store: certs.Store{}, // TODO(baumanl): get the store from somewhere
-			}
-			for _, s := range sc.TrustedRoots {
+			tconf.ClientVerify.Store = certs.Store{}
+			for _, s := range sc.Store {
 				cert, err := certs.ReadCertificatePEMFile(s)
 				if err != nil {
-					logrus.Errorf("server: error loading root cert at %s: %s", s, err)
+					logrus.Errorf("server: error loading cert at %s: %s", s, err)
 					continue
 				}
+				logrus.Debugf("server: loaded cert with fingerprint: %x", cert.Fingerprint)
 				tconf.ClientVerify.Store.AddCertificate(cert)
 			}
 
@@ -145,9 +144,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
 			logrus.Debug("authorized keys are enabled")
 			// must be explicitly set to true
-			tconf.ClientVerify = &transport.VerifyConfig{
-				AuthKeys: authkeys.NewSyncAuthKeySet(), // TODO(baumanl): load initial (stable trusted keys)
-			}
+			tconf.ClientVerify.AuthKeys = authkeys.NewSyncAuthKeySet() // TODO(baumanl): load initial (stable trusted keys)
 			tconf.ClientVerify.AuthKeysAllowed = true
 		}
 	}
