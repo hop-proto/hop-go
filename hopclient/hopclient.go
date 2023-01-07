@@ -158,6 +158,21 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		HTTPClient: http.DefaultClient,
 	}
 
+	verifyConfig := transport.VerifyConfig{
+		Store: certs.Store{},
+	}
+
+	// enable host key verification
+	for _, file := range c.hostconfig.CAFiles {
+		cert, err := certs.ReadCertificatePEMFile(file)
+		if err != nil {
+			logrus.Errorf("client: error loading cert at %s: %s", file, err)
+			continue
+		}
+		verifyConfig.Store.AddCertificate(cert)
+		logrus.Debugf("client: loaded cert with fingerprint: %x", cert.Fingerprint)
+	}
+
 	// Connect to the agent
 	aconn, _ := net.Dial("tcp", agentURL)
 
@@ -173,11 +188,9 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		copy(public[:], bc.Public[:]) // TODO(baumanl): resolve public key type awkwardness
 		leaf = loadLeaf(leafFile, autoSelfSign, &public, hc.HostURL())
 		authenticator = core.AgentAuthenticator{
-			BoundClient: bc,
-			VerifyConfig: transport.VerifyConfig{
-				InsecureSkipVerify: true, // TODO
-			},
-			Leaf: leaf,
+			BoundClient:  bc,
+			VerifyConfig: verifyConfig,
+			Leaf:         leaf,
 		}
 		logrus.Info("leaf: ", leaf)
 	} else {
@@ -192,12 +205,11 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		logrus.Infof("no agent running")
 		authenticator = core.InMemoryAuthenticator{
 			X25519KeyPair: keypair,
-			VerifyConfig: transport.VerifyConfig{
-				InsecureSkipVerify: true, // TODO(dadrian): Host-key verification
-			},
-			Leaf: leaf,
+			VerifyConfig:  verifyConfig,
+			Leaf:          leaf,
 		}
 	}
+
 	c.authenticator = authenticator
 	return nil
 }
@@ -264,13 +276,10 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 		Leaf:      authenticator.GetLeaf(),
 	}
 	var err error
-	// if !c.Proxied {
 	var dialer net.Dialer
 	dialer.Timeout = c.hostconfig.HandshakeTimeout
 	c.TransportConn, err = transport.DialWithDialer(&dialer, "udp", address, transportConfig)
-	// } else {
-	// 	c.TransportConn, err = transport.DialNP("netproxy", address, c.ProxyConn, transportConfig)
-	// }
+
 	if err != nil {
 		logrus.Errorf("C: error dialing server: %v", err)
 		return err

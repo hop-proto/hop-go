@@ -1,5 +1,6 @@
 [Global]
 AutoSelfSign = true
+CAFiles = ["containers/root.cert", "containers/intermediate.cert"]
 
 
 [[Hosts]]

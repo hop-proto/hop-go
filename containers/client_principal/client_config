@@ -1,0 +1,10 @@
+[Global]
+AutoSelfSign = true
+CAFiles = ["containers/CA_b/root.cert", "containers/CA_b/intermediate.cert"]
+
+
+[[Hosts]]
+Patterns = ["127.0.0.1"]
+Key = "containers/client_principal/id_client.pem"
+Certificate = "containers/client_principal/id_client.cert"
+IsPrincipal = true

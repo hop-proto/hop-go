@@ -2,6 +2,8 @@ ListenAddress = ":77"
 
 Key = "/etc/hopd/id_hop.pem"
 Certificate = "/etc/hopd/id_hop.cert"
+EnableCertificateValidation = false
 EnableAuthorizedKeys = true
+Users = ["root"]
 
-Store = ["/etc/hopd/root.cert", "/etc/hopd/intermediate.cert"]
+CAFiles = ["/etc/hopd/root.cert", "/etc/hopd/intermediate.cert"]

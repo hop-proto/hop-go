@@ -38,12 +38,14 @@ type ServerConfig struct {
 	HandshakeTimeout time.Duration
 	DataTimeout      time.Duration
 
-	Store []string
+	CAFiles []string
 
 	// transport layer client validation options
 	InsecureSkipVerify          *bool
 	EnableCertificateValidation *bool
 	EnableAuthorizedKeys        *bool
+	// TODO(baumanl): authorized keys locations for all users? users have a .hop/config? which lists location of authorized_keys?
+	Users []string
 
 	AllowAuthgrants     *bool // as an authgrant Target this server will approve authgrants and as an authgrant Delegate server will proxy ag intent requests
 	AgProxyListenSocket string
@@ -267,7 +269,7 @@ func locateHopClientConfigDirectory() {
 		clientDirectory = ""
 		return
 	}
-	clientDirectory = filepath.Join(home, common.UserConfigDirtory)
+	clientDirectory = filepath.Join(home, common.UserConfigDirectory)
 }
 
 // UserDirectory returns the path to Hop configuration directory for the current user.
@@ -282,7 +284,7 @@ func UserDirectoryFor(username string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(u.HomeDir, common.UserConfigDirtory), nil
+	return filepath.Join(u.HomeDir, common.UserConfigDirectory), nil
 }
 
 // DefaultKeyPath returns UserDirectory()/id_hop.pem.

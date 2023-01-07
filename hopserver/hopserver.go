@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"net"
 	"os"
+	"os/user"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing/fstest"
@@ -15,6 +17,7 @@ import (
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/authkeys"
 	"hop.computer/hop/certs"
+	"hop.computer/hop/common"
 	"hop.computer/hop/config"
 	"hop.computer/hop/core"
 	"hop.computer/hop/keys"
@@ -129,7 +132,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		// Cert validation enabled
 		if sc.EnableCertificateValidation == nil || *sc.EnableCertificateValidation {
 			tconf.ClientVerify.Store = certs.Store{}
-			for _, s := range sc.Store {
+			for _, s := range sc.CAFiles {
 				cert, err := certs.ReadCertificatePEMFile(s)
 				if err != nil {
 					logrus.Errorf("server: error loading cert at %s: %s", s, err)
@@ -144,7 +147,26 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
 			logrus.Debug("authorized keys are enabled")
 			// must be explicitly set to true
-			tconf.ClientVerify.AuthKeys = authkeys.NewSyncAuthKeySet() // TODO(baumanl): load initial (stable trusted keys)
+			tconf.ClientVerify.AuthKeys = authkeys.NewSyncAuthKeySet()
+			// TODO(baumanl): decompose this
+			for _, name := range sc.Users {
+				user, err := user.Lookup(name)
+				if err != nil {
+					logrus.Errorf("server: error looking up user %s: %s", name, err)
+					continue
+				}
+				authKeysPath := filepath.Join(user.HomeDir, common.UserConfigDirectory, common.AuthorizedKeysFile)
+				authKeys, err := core.ParseAuthorizedKeysFile(authKeysPath)
+				if err != nil {
+					logrus.Errorf("server: error parsing authorized keys file %s: %s", authKeysPath, err)
+					continue
+				}
+				for _, key := range authKeys {
+					logrus.Debugf("server: added key %s to authkeys set", key.String())
+					tconf.ClientVerify.AuthKeys.AddKey(key)
+				}
+			}
+
 			tconf.ClientVerify.AuthKeysAllowed = true
 		}
 	}
@@ -280,6 +302,7 @@ func transportCert(keyPath, certPath, intermediatePath string) (*transport.Certi
 // configmap[string]transport.Certificate{}.
 func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fallbackCert *certs.Certificate) (VirtualHosts, error) {
 	out := make([]VirtualHost, 0, len(c.Names)+1)
+	logrus.Debugf("server: len(c.Names): %v", len(c.Names))
 	for _, block := range c.Names {
 		// TODO(dadrian)[2022-12-26]: If certs are shared, we'll re-parse all
 		// these. We could use some kind of content-addressable store to cache

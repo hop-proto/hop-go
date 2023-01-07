@@ -1,3 +1,4 @@
 .PHONY: serve-dev
 serve-dev:
-	go run . server
+	go run . server_a
+
