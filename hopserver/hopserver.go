@@ -57,13 +57,18 @@ type HopServer struct {
 
 // NewHopServerExt returns a Hop Server using the provided transport server.
 func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, ks *authkeys.SyncAuthKeySet) (*HopServer, error) {
+	agproxyUnixSocket := common.DefaultAgProxyListenSocket
+	if config.AgProxyListenSocket != nil {
+		agproxyUnixSocket = *config.AgProxyListenSocket
+	}
+
 	server := &HopServer{
 		m: sync.Mutex{},
 
 		agMap: authgrants.NewAuthgrantMapSync(),
 
 		dpProxy: &dpproxy{
-			address:    config.AgProxyListenSocket,
+			address:    agproxyUnixSocket,
 			principals: make(map[int32]sessID),
 			running:    atomic.Bool{},
 			proxyLock:  sync.Mutex{},

@@ -343,7 +343,7 @@ func (c *HopClient) HandleTubes() {
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
 			go c.newPrincipalInstanceSetup(r)
 		} else if t.Type() == common.RemotePFTube {
-			panic("unimplemented")
+			panic("client RemotePFTubes: unimplemented")
 		} else {
 			//Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
 			e := t.Close()

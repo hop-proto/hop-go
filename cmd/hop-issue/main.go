@@ -152,7 +152,7 @@ func main() {
 		}
 		output.Write(pemBytes)
 	default:
-		panic("unimplemented")
+		panic("unimplemented certificate type")
 	}
 	output.Close()
 }

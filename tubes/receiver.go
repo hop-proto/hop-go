@@ -204,7 +204,7 @@ func (r *receiver) receive(p *frame) (bool, error) {
 		})
 		log.Trace("in bounds frame")
 	} else {
-		log.Debug("out of bounds frame")
+		// log.Debug("out of bounds frame")  // baumanl: commenting out because annoying me at the moment and I don't want to deal with all the log issues atm
 		return false, errFrameOutOfBounds
 	}
 

@@ -1,8 +1,7 @@
-ListenAddress = ":88"
+ListenAddress = ":77"
 
 Key = "/etc/hopd/id_hop.pem"
 Certificate = "/etc/hopd/id_hop.cert"
-EnableCertificateValidation = false
 EnableAuthorizedKeys = true
 Users = ["root"]
 

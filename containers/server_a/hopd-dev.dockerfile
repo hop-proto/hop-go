@@ -12,5 +12,8 @@ COPY CA_a/intermediate.cert /etc/hopd/intermediate.cert
 
 COPY client_principal/id_client.pub /root/.hop/authorized_keys
 
+COPY client_delegate/client_config /root/.hop/config
+COPY client_delegate/hop /root/hop
+
 WORKDIR /app
 CMD ./containers/hopd-wrapper.sh

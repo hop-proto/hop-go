@@ -7,6 +7,7 @@ import (
 
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/certs"
+	"hop.computer/hop/common"
 	"hop.computer/hop/core"
 	"hop.computer/hop/keys"
 	"hop.computer/hop/transport"
@@ -68,7 +69,7 @@ func (c *HopClient) getAuthorization() error {
 	// connect to delegate proxy --> target
 	val, ok := os.LookupEnv("DP_PROXY")
 	if !ok {
-		val = "default" // change to default
+		val = common.DefaultAgProxyListenSocket // change to default
 	}
 	pconn, err := net.Dial("unix", val) // TODO(baumanl): config option for
 	if err != nil {

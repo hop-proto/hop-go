@@ -33,5 +33,9 @@ test:
 	go test -race ./... -timeout 180s
 
 .PHONY: serve-dev
-serve-dev: ## launch a container running the server with code mounted in
+serve-dev: ## launch a container running the server_a with code mounted in
 	make -C hack serve-dev
+
+.PHONY: target
+target: ## launch a container running the server_b with code mounted in
+	make -C hack target
