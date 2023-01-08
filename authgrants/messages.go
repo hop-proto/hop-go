@@ -327,35 +327,34 @@ func (d *CommandGrantData) ReadFrom(r io.Reader) (int64, error) {
 
 // WriteTo writes serialized shell grant data
 func (d *ShellGrantData) WriteTo(w io.Writer) (int64, error) {
-	panic("unimplemented")
+	return 0, nil
 }
 
 // ReadFrom reads a serialized commandgrantdata block
 func (d *ShellGrantData) ReadFrom(r io.Reader) (int64, error) {
-	// read command
-	panic("unimplemented")
+	return 0, nil
 }
 
 // WriteTo writes serialized local pf grant data
 func (d *LocalPFGrantData) WriteTo(w io.Writer) (int64, error) {
-	panic("unimplemented")
+	panic("LocalPFGrantData WriteTo: unimplemented")
 }
 
 // ReadFrom reads a serialized commandgrantdata block
 func (d *LocalPFGrantData) ReadFrom(r io.Reader) (int64, error) {
 	// read command
-	panic("unimplemented")
+	panic("LocalPFGrantData ReadFrom: unimplemented")
 }
 
 // WriteTo writes serialized remote pf grant data
 func (d *RemotePFGrantData) WriteTo(w io.Writer) (int64, error) {
-	panic("unimplemented")
+	panic("RemotePFGrantData WriteTo: unimplemented")
 }
 
 // ReadFrom reads a serialized commandgrantdata block
 func (d *RemotePFGrantData) ReadFrom(r io.Reader) (int64, error) {
 	// read command
-	panic("unimplemented")
+	panic("RemotePFGrantData ReadFrom: unimplemented")
 }
 
 // ReadIntentRequest reads intent request and returns intent
