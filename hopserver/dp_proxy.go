@@ -52,6 +52,7 @@ func (p *dpproxy) start() error {
 		return fmt.Errorf("DP Proxy: start called when already running")
 	}
 
+	logrus.Debug("dp_proxy: trying to acquire proxyLock")
 	p.proxyLock.Lock()
 	defer p.proxyLock.Unlock()
 
@@ -96,6 +97,7 @@ func (p *dpproxy) serve() {
 
 // checks that the connecting process is a hop session descendent and then proxies
 func (p *dpproxy) checkAndProxy(c net.Conn) {
+	logrus.Debug("dp_proxy: just accepted a new connection")
 	// Verify that the client is a legit descendent and get principal sess
 	principalID, e := p.checkCredentials(c)
 	if e != nil {
@@ -107,6 +109,7 @@ func (p *dpproxy) checkAndProxy(c net.Conn) {
 		logrus.Error("DP Proxy: principal session not found.")
 		return
 	}
+	logrus.Debug("DP proxy: found the principal session")
 	p.proxyAuthGrantRequest(principalSess, c)
 }
 
@@ -155,6 +158,7 @@ func (p *dpproxy) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn) {
 }
 
 func proxyHelper(p net.Conn, c net.Conn) {
+	logrus.Debug("dp proxy: started proxyHelper")
 	var wg sync.WaitGroup
 	wg.Add(1)
 	// proxy the bytes

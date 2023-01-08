@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
@@ -73,8 +74,8 @@ func (c *HopClient) getAuthorization() error {
 	}
 	pconn, err := net.Dial("unix", val) // TODO(baumanl): config option for
 	if err != nil {
+		logrus.Errorf("delegate: error dialing ag proxy socket: %s", err)
 		return err
 	}
-	authgrants.StartDelegateInstance(pconn, irs)
-	return nil
+	return authgrants.StartDelegateInstance(pconn, irs)
 }

@@ -46,6 +46,7 @@ func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable) {
 }
 
 func (c *HopClient) setupTargetClient(targURL core.URL) (net.Conn, error) {
+	logrus.Info("inside setupTargetClient")
 	targetConn, err := c.setUpDelegateProxyToTarget(targURL)
 	if err != nil {
 		return nil, err
@@ -104,12 +105,12 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (net.Conn, error) {
 }
 
 func (c *HopClient) setUpDelegateProxyToTarget(targURL core.URL) (*tubes.Unreliable, error) {
-
 	// open reliable principal proxy tube with delegate proxy
 	delegateProxyConn, err := c.newReliablePrincipalProxyTube()
 	if err != nil {
 		return nil, err
 	}
+	logrus.Info("principal: made a reliable delProxyConn with del proxy")
 	defer delegateProxyConn.Close()
 
 	// send TargetInfo to delegate proxy
@@ -117,13 +118,15 @@ func (c *HopClient) setUpDelegateProxyToTarget(targURL core.URL) (*tubes.Unrelia
 	if err != nil {
 		return nil, err
 	}
+	logrus.Info("principal: wrote target info")
 
 	// read response (whether delegate proxy successfully connected to target)
 	err = authgrants.ReadResponse(delegateProxyConn)
 	if err != nil {
+		logrus.Error("principal: error reading response")
 		return nil, err
 	}
-
+	logrus.Info("principal: del proxy successfully connected to target!")
 	// open unreliable tube with delegate proxy
 	unreliableDelProxyConn, err := c.newUnreliablePrincipalProxyTube()
 	if err != nil {
