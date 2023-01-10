@@ -35,18 +35,19 @@ import (
 // tubes before the reliable has received the tube id
 type ptProxyTubeQueue struct {
 	// +checklocks:lock
-	tubes map[byte]*tubes.Unreliable
+	tubes *map[byte]*tubes.Unreliable
 	lock  *sync.Mutex
-	cv    sync.Cond
+	cv    *sync.Cond
 }
 
 // newPTProxyTubeQueue creates a synchronized set of unreliable principal proxy tubes
 func newPTProxyTubeQueue() *ptProxyTubeQueue {
 	proxyLock := sync.Mutex{}
+	tubes := make(map[byte]*tubes.Unreliable)
 	proxyQueue := &ptProxyTubeQueue{
-		tubes: make(map[byte]*tubes.Unreliable), // tube ID --> tube
+		tubes: &tubes, // tube ID --> tube
 		lock:  &proxyLock,
-		cv:    *sync.NewCond(&proxyLock),
+		cv:    sync.NewCond(&proxyLock),
 	}
 	return proxyQueue
 }
@@ -56,7 +57,7 @@ func unreliableProxyOneSide(a transport.UDPLike, b transport.UDPLike) {
 	buf := make([]byte, 65535)
 	for {
 		// TODO(baumanl): calibrate timeouts
-		a.SetReadDeadline(time.Now().Add(time.Second))
+		a.SetReadDeadline(time.Now().Add(time.Second * 30))
 		n, _, _, _, err := a.ReadMsgUDP(buf, nil)
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
@@ -66,7 +67,7 @@ func unreliableProxyOneSide(a transport.UDPLike, b transport.UDPLike) {
 			logrus.Error(err)
 			continue
 		}
-		b.SetWriteDeadline(time.Now().Add(time.Second))
+		b.SetWriteDeadline(time.Now().Add(time.Second * 30))
 		_, _, err = b.WriteMsgUDP(buf[:n], nil, nil)
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
@@ -133,17 +134,22 @@ func (sess *hopSession) startPTProxy(t net.Conn, pq *ptProxyTubeQueue) {
 		logrus.Errorf("Server: error reading unreliable proxy id: %s", err)
 	}
 	logrus.Infof("pt_proxy: got unreliable proxy ID: %v", tubeID)
+
+	test := func(m *map[byte]*tubes.Unreliable, b byte) bool {
+		_, ok := (*m)[b]
+		return ok
+	}
 	// check (and keep checking on signal) for the unreliable tube with the id
 	pq.lock.Lock()
 	logrus.Info("pt_proxy: acquired pq.lock for the first time")
-	for _, ok := pq.tubes[tubeID]; !ok; {
+	for !test(pq.tubes, tubeID) {
 		logrus.Info("tube not here yet. waiting...")
 		pq.cv.Wait()
 	}
 
-	principalTube := pq.tubes[tubeID]
+	principalTube := (*pq.tubes)[tubeID]
 	logrus.Info("pt_proxy: got the unreliable tube")
-	delete(pq.tubes, tubeID)
+	delete(*pq.tubes, tubeID)
 	pq.lock.Unlock()
 
 	// send confirmation to principal

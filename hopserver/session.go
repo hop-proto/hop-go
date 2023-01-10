@@ -136,10 +136,11 @@ func (sess *hopSession) start() {
 				if ok && r.Type() == common.PrincipalProxyTube {
 					// add to map and signal waiting processes
 					proxyQueue.lock.Lock()
-					proxyQueue.tubes[r.GetID()] = r
-					proxyQueue.cv.Broadcast()
+					logrus.Info("session.go acquired pq.lock")
+					(*proxyQueue.tubes)[r.GetID()] = r
 					proxyQueue.lock.Unlock()
-					logrus.Infof("session muxer broadcasting that unreliable tube is here")
+					proxyQueue.cv.Broadcast()
+					logrus.Infof("session muxer broadcasting that unreliable tube is here: %x", r.GetID())
 				}
 				continue
 			}

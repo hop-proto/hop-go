@@ -65,6 +65,15 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (net.Conn, error) {
 		return nil, err
 	}
 
+	// TODO(baumanl): fix this config mess
+	hc.IsPrincipal = true
+	hc.AutoSelfSign = c.hostconfig.AutoSelfSign
+	hc.Key = c.hostconfig.Key
+	hc.Certificate = c.hostconfig.Certificate
+	hc.CAFiles = c.hostconfig.CAFiles
+	hc.Intermediate = c.hostconfig.Intermediate
+	hc.AgentURL = c.hostconfig.AgentURL
+
 	client, err := NewHopClient(hc)
 	if err != nil {
 		return nil, err
@@ -95,6 +104,13 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (net.Conn, error) {
 	}
 
 	client.TubeMuxer = tubes.NewMuxer(client.TransportConn, client.hostconfig.DataTimeout, false, logrus.WithField("muxer", "TODO: add logging context"))
+	go func() {
+		err := client.TubeMuxer.Start()
+		if err != nil {
+			logrus.Error("principal: starting muxer error: ", err)
+		}
+	}()
+
 	err = client.userAuthorization()
 	if err != nil {
 		return nil, err
@@ -144,6 +160,7 @@ func (c *HopClient) setUpDelegateProxyToTarget(targURL core.URL) (*tubes.Unrelia
 	if err != nil {
 		return nil, err
 	}
+	logrus.Info("principal: got unreliable proxy conn")
 	return unreliableDelProxyConn, nil
 }
 

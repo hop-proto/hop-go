@@ -56,6 +56,7 @@ func runContainer(ctx context.Context, c *client.Client, hostport string) error 
 			},
 		},
 		PortBindings: nat.PortMap{"77/udp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: hostport}}},
+		AutoRemove:   true,
 	}
 	res, err := c.ContainerCreate(ctx, &containerConfig, &hostConfig, nil, nil, "")
 	if err != nil {
