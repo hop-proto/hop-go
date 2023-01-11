@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"net"
 	"os"
+	"os/user"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing/fstest"
@@ -15,6 +17,7 @@ import (
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/authkeys"
 	"hop.computer/hop/certs"
+	"hop.computer/hop/common"
 	"hop.computer/hop/config"
 	"hop.computer/hop/core"
 	"hop.computer/hop/keys"
@@ -54,13 +57,17 @@ type HopServer struct {
 
 // NewHopServerExt returns a Hop Server using the provided transport server.
 func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, ks *authkeys.SyncAuthKeySet) (*HopServer, error) {
+	agproxyUnixSocket := common.DefaultAgProxyListenSocket
+	if config.AgProxyListenSocket != nil {
+		agproxyUnixSocket = *config.AgProxyListenSocket
+	}
 	server := &HopServer{
 		m: sync.Mutex{},
 
 		agMap: authgrants.NewAuthgrantMapSync(),
 
 		dpProxy: &dpproxy{
-			address:    config.AgProxyListenSocket,
+			address:    agproxyUnixSocket,
 			principals: make(map[int32]sessID),
 			running:    atomic.Bool{},
 			proxyLock:  sync.Mutex{},
@@ -111,6 +118,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	tconf := transport.ServerConfig{
 		GetCertificate:   getCert,
 		HandshakeTimeout: sc.HandshakeTimeout,
+		ClientVerify:     &transport.VerifyConfig{},
 	}
 
 	// serverConfig options inform verify config settings
@@ -122,22 +130,35 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 
 	// Explicitly setting sc.InsecureSkipVerify overrides everything else
 	if sc.InsecureSkipVerify != nil && *sc.InsecureSkipVerify {
-		tconf.ClientVerify = &transport.VerifyConfig{
-			InsecureSkipVerify: true,
-		}
+		tconf.ClientVerify.InsecureSkipVerify = true
 	} else {
 		// Cert validation enabled
 		if sc.EnableCertificateValidation == nil || *sc.EnableCertificateValidation {
-			tconf.ClientVerify = &transport.VerifyConfig{
-				Store: certs.Store{}, // TODO(baumanl): get the store from somewhere
-			}
+			tconf.ClientVerify.Store = certs.Store{} // TODO(baumanl): load certificates into store from config
 		}
 		// Authorized keys enabled
-		if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
-			// must be explicitly set to true
-			tconf.ClientVerify = &transport.VerifyConfig{
-				AuthKeys: authkeys.NewSyncAuthKeySet(), // TODO(baumanl): load initial (stable trusted keys)
+		if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys { // must be explicitly set to true
+			logrus.Debug("hopserver: authorized keys are enabled")
+			tconf.ClientVerify.AuthKeys = authkeys.NewSyncAuthKeySet()
+			for _, name := range sc.Users {
+				user, err := user.Lookup(name)
+				if err != nil {
+					logrus.Errorf("server: error looking up user %s: %s", name, err)
+					continue
+				}
+				authKeysPath := filepath.Join(user.HomeDir, common.UserConfigDirectory, common.AuthorizedKeysFile)
+				authKeys, err := core.ParseAuthorizedKeysFile(authKeysPath)
+				if err != nil {
+					logrus.Errorf("server: error parsing authorized keys file %s: %s", authKeysPath, err)
+					continue
+				}
+				for _, key := range authKeys {
+					logrus.Debugf("server: added key %s to authkeys set", key.String())
+					tconf.ClientVerify.AuthKeys.AddKey(key)
+				}
 			}
+
+			tconf.ClientVerify.AuthKeysAllowed = true
 		}
 	}
 
