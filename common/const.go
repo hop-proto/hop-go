@@ -1,9 +1,9 @@
 package common
 
 const (
-	// UserConfigDirtory is the dirname of the directory holding the user
+	// UserConfigDirectory is the dirname of the directory holding the user
 	// configuration for the Hop client.
-	UserConfigDirtory = ".hop"
+	UserConfigDirectory = ".hop"
 
 	// AuthorizedKeysFile is the name of the file that holds authorized public
 	// keys for a user. It is stored inside the ConfigDirectory.

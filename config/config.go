@@ -265,7 +265,7 @@ func locateHopClientConfigDirectory() {
 		clientDirectory = ""
 		return
 	}
-	clientDirectory = filepath.Join(home, common.UserConfigDirtory)
+	clientDirectory = filepath.Join(home, common.UserConfigDirectory)
 }
 
 // UserDirectory returns the path to Hop configuration directory for the current user.
@@ -280,7 +280,7 @@ func UserDirectoryFor(username string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(u.HomeDir, common.UserConfigDirtory), nil
+	return filepath.Join(u.HomeDir, common.UserConfigDirectory), nil
 }
 
 // DefaultKeyPath returns UserDirectory()/id_hop.pem.
