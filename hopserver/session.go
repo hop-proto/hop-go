@@ -139,6 +139,7 @@ func (sess *hopSession) start() {
 					proxyQueue.tubes[r.GetID()] = r
 					proxyQueue.lock.Unlock()
 					proxyQueue.cv.Broadcast()
+					logrus.Infof("session muxer broadcasted that unreliable tube is here: %x", r.GetID())
 				}
 				continue
 			}
@@ -220,7 +221,7 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 	principalSess := sess.ID
 	// if using an authgrant, check that the cmd is authorized
 	if sess.usingAuthGrant {
-		principalID, err := sess.checkCmd(cmd)
+		principalID, err := sess.checkCmd(cmd, shell)
 		if err != nil {
 			codex.SendFailure(tube, err)
 			return
