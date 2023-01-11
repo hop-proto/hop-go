@@ -15,7 +15,7 @@ import (
 	"hop.computer/hop/core"
 )
 
-func getTestIntentRequest(t *testing.T) AgMessage {
+func getTestCmdIntentRequest(t *testing.T, cmd string) AgMessage {
 	startTime := time.Now().Unix()
 	expTime := time.Now().Add(time.Hour).Unix()
 	var testKeyPair keypair
@@ -50,7 +50,7 @@ func getTestIntentRequest(t *testing.T) AgMessage {
 					Signature: fakeSignature(),
 				},
 				AssociatedData: GrantData{CommandGrantData: CommandGrantData{
-					Cmd: "echo hello world",
+					Cmd: cmd,
 				}},
 			},
 		},
@@ -59,7 +59,7 @@ func getTestIntentRequest(t *testing.T) AgMessage {
 }
 
 func fakeDelegate(t *testing.T, c net.Conn) {
-	msg := getTestIntentRequest(t)
+	msg := getTestCmdIntentRequest(t, "echo hello world")
 	_, err := msg.WriteTo(c)
 	assert.NilError(t, err)
 	resp, err := ReadConfOrDenial(c)
@@ -76,7 +76,7 @@ func fakeTarget(t *testing.T, c net.Conn) {
 	_, err := ReadIntentCommunication(c)
 	assert.NilError(t, err)
 	logrus.Info("target: got intent comm")
-	err = SendIntentConfirmation(c)
+	err = WriteIntentConfirmation(c)
 	assert.NilError(t, err)
 }
 
@@ -87,7 +87,7 @@ func fakeTargetLoop(t *testing.T, c net.Conn) {
 			break
 		}
 		logrus.Info("target: got intent comm")
-		err = SendIntentConfirmation(c)
+		err = WriteIntentConfirmation(c)
 		assert.NilError(t, err)
 	}
 	logrus.Info("fake target: stopped looping")
@@ -97,7 +97,7 @@ func fakeTargetDenial(t *testing.T, c net.Conn) {
 	_, err := ReadIntentCommunication(c)
 	assert.NilError(t, err)
 	logrus.Info("target: got intent comm")
-	err = SendIntentDenied(c, "target says so")
+	err = WriteIntentDenied(c, "target says so")
 	assert.NilError(t, err)
 }
 
