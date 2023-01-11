@@ -156,6 +156,10 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		HTTPClient: http.DefaultClient,
 	}
 
+	verifyConfig := transport.VerifyConfig{
+		InsecureSkipVerify: true, // TODO(baumanl): enable host key verification
+	}
+
 	// Connect to the agent
 	aconn, _ := net.Dial("tcp", agentURL)
 
@@ -171,11 +175,9 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		copy(public[:], bc.Public[:]) // TODO(baumanl): resolve public key type awkwardness
 		leaf = loadLeaf(leafFile, autoSelfSign, &public, hc.HostURL())
 		authenticator = core.AgentAuthenticator{
-			BoundClient: bc,
-			VerifyConfig: transport.VerifyConfig{
-				InsecureSkipVerify: true, // TODO
-			},
-			Leaf: leaf,
+			BoundClient:  bc,
+			VerifyConfig: verifyConfig,
+			Leaf:         leaf,
 		}
 		logrus.Info("leaf: ", leaf)
 	} else {
@@ -190,10 +192,8 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		logrus.Infof("no agent running")
 		authenticator = core.InMemoryAuthenticator{
 			X25519KeyPair: keypair,
-			VerifyConfig: transport.VerifyConfig{
-				InsecureSkipVerify: true, // TODO(dadrian): Host-key verification
-			},
-			Leaf: leaf,
+			VerifyConfig:  verifyConfig,
+			Leaf:          leaf,
 		}
 	}
 	c.authenticator = authenticator
@@ -262,13 +262,10 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 		Leaf:      authenticator.GetLeaf(),
 	}
 	var err error
-	// if !c.Proxied {
 	var dialer net.Dialer
 	dialer.Timeout = c.hostconfig.HandshakeTimeout
 	c.TransportConn, err = transport.DialWithDialer(&dialer, "udp", address, transportConfig)
-	// } else {
-	// 	c.TransportConn, err = transport.DialNP("netproxy", address, c.ProxyConn, transportConfig)
-	// }
+
 	if err != nil {
 		logrus.Errorf("C: error dialing server: %v", err)
 		return err
@@ -286,7 +283,10 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 
 func (c *HopClient) userAuthorization() error {
 	//PERFORM USER AUTHORIZATION******
-	uaCh, _ := c.TubeMuxer.CreateReliableTube(common.UserAuthTube)
+	uaCh, err := c.TubeMuxer.CreateReliableTube(common.UserAuthTube)
+	if err != nil {
+		logrus.Errorf("error creating userAuthTube")
+	}
 	defer uaCh.Close()
 	logrus.Infof("requesting auth for %s", c.hostconfig.User)
 	if ok := userauth.RequestAuthorization(uaCh, c.hostconfig.User); !ok {
@@ -332,7 +332,7 @@ func (c *HopClient) HandleTubes() {
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
 			go c.newPrincipalInstanceSetup(r)
 		} else if t.Type() == common.RemotePFTube {
-			panic("unimplemented")
+			panic("client RemotePFTubes: unimplemented")
 		} else {
 			//Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
 			e := t.Close()
