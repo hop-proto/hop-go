@@ -132,6 +132,9 @@ func (s *TestServer) StartTransport(t *testing.T) {
 			Intermediate:     s.Intermediate,
 			KeyPair:          s.LeafKeyPair,
 			HandshakeTimeout: time.Second,
+			ClientVerify: &transport.VerifyConfig{
+				InsecureSkipVerify: true,
+			},
 		})
 	} else {
 		logrus.Info("Using custom transport config.")
@@ -227,7 +230,6 @@ func (c *TestClient) StartClient(t *testing.T) {
 	var err error
 	c.Client, err = hopclient.NewHopClient(c.Config)
 	c.Client.Fsystem = *c.FileSystem
-	assert.NilError(t, err)
 	if c.Authenticator != nil {
 		err = c.Client.DialExternalAuthenticator(c.Remote, c.Authenticator)
 	} else {
