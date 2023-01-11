@@ -375,9 +375,12 @@ func (hc *HostConfig) HostURL() core.URL {
 // HostURL extracts the Hostname, Port, and User from the HostConfig into an
 // core.URL.
 func (hc *HostConfigOptional) HostURL() core.URL {
-	u := core.URL{
-		Host: *hc.Hostname,
-		User: *hc.User,
+	u := core.URL{}
+	if hc.Hostname != nil {
+		u.Host = *hc.Hostname
+	}
+	if hc.User != nil {
+		u.User = *hc.User
 	}
 	if hc.Port != 0 {
 		u.Port = strconv.Itoa(hc.Port)
