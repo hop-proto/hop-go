@@ -3,6 +3,7 @@ package hopserver
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"sync"
@@ -56,21 +57,29 @@ func unreliableProxyOneSide(a transport.UDPLike, b transport.UDPLike) {
 	buf := make([]byte, 65535)
 	for {
 		// TODO(baumanl): calibrate timeouts
-		a.SetReadDeadline(time.Now().Add(time.Second))
+		a.SetReadDeadline(time.Now().Add(time.Second * 30))
 		n, _, _, _, err := a.ReadMsgUDP(buf, nil)
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
 				logrus.Errorf("pt proxy: read deadline exceeded: %s", err)
 				return
 			}
+			if errors.Is(err, io.EOF) {
+				logrus.Error("pt_proxy: encountered EOF reading msg udp, returning: ", err)
+				return
+			}
 			logrus.Error(err)
 			continue
 		}
-		b.SetWriteDeadline(time.Now().Add(time.Second))
+		b.SetWriteDeadline(time.Now().Add(time.Second * 30))
 		_, _, err = b.WriteMsgUDP(buf[:n], nil, nil)
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
 				logrus.Errorf("pt proxy: write deadline exceeded: %s", err)
+				return
+			}
+			if errors.Is(err, io.EOF) {
+				logrus.Error("pt_proxy: encountered EOF writing msg udp, returning: ", err)
 				return
 			}
 			logrus.Error(err)
