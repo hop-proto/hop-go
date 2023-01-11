@@ -3,11 +3,11 @@ package hopclient
 import (
 	"fmt"
 	"net"
+	"strconv"
 
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/common"
 	"hop.computer/hop/core"
-	"hop.computer/hop/flags"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
 
@@ -54,25 +54,31 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (net.Conn, error) {
 
 	// TODO(baumanl): think through best way to get the config for this
 	// load client config from default path
-	cflags := &flags.ClientFlags{
-		ConfigPath: "", // TODO(baumanl): keep track of the path used when the principal itself started?
-		Address:    &targURL,
-		Headless:   true,
-		UsePty:     false,
-	}
-	hc, err := flags.LoadClientConfigFromFlags(cflags)
-	if err != nil {
-		return nil, err
-	}
+	// cflags := &flags.ClientFlags{
+	// 	ConfigPath: "", // TODO(baumanl): keep track of the path used when the principal itself started?
+	// 	Address:    &targURL,
+	// 	Headless:   true,
+	// 	UsePty:     false,
+	// }
+	// hc, err := flags.LoadClientConfigFromFlags(cflags)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	hc := c.hostconfig
+	hc.Hostname = targURL.Host
+	hc.Port, _ = strconv.Atoi(targURL.Port)
+	hc.User = targURL.User
+	hc.Headless = true
+	hc.UsePty = false
 
 	// TODO(baumanl): fix this config mess
-	hc.IsPrincipal = true
-	hc.AutoSelfSign = c.hostconfig.AutoSelfSign
-	hc.Key = c.hostconfig.Key
-	hc.Certificate = c.hostconfig.Certificate
-	hc.CAFiles = c.hostconfig.CAFiles
-	hc.Intermediate = c.hostconfig.Intermediate
-	hc.AgentURL = c.hostconfig.AgentURL
+	// hc.IsPrincipal = true
+	// hc.AutoSelfSign = c.hostconfig.AutoSelfSign
+	// hc.Key = c.hostconfig.Key
+	// hc.Certificate = c.hostconfig.Certificate
+	// hc.CAFiles = c.hostconfig.CAFiles
+	// hc.Intermediate = c.hostconfig.Intermediate
+	// hc.AgentURL = c.hostconfig.AgentURL
 
 	client, err := NewHopClient(hc)
 	if err != nil {
@@ -82,10 +88,11 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (net.Conn, error) {
 	// TODO(baumanl): necessary to do all of authenticator setup again?
 	// or could c.authenticator (principal's authenticator) sometimes be used
 	// instead?
-	err = client.authenticatorSetup()
-	if err != nil {
-		return nil, err
-	}
+	// err = client.authenticatorSetup()
+	// if err != nil {
+	// 	return nil, err
+	// }
+	client.authenticator = c.authenticator
 
 	transportConfig := transport.ClientConfig{
 		Exchanger: client.authenticator,
@@ -107,7 +114,7 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (net.Conn, error) {
 	go func() {
 		err := client.TubeMuxer.Start()
 		if err != nil {
-			logrus.Error("principal: starting muxer error: ", err)
+			logrus.Error("principal: muxer has stopped with err: ", err)
 		}
 	}()
 
@@ -146,18 +153,23 @@ func (c *HopClient) setUpDelegateProxyToTarget(targURL core.URL) (*tubes.Unrelia
 	// open unreliable tube with delegate proxy
 	unreliableDelProxyConn, err := c.newUnreliablePrincipalProxyTube()
 	if err != nil {
+		logrus.Error("principal: error starting unreliable proxy tube")
 		return nil, err
 	}
+	logrus.Info("principal: successfully started unreliable proxy tube")
 
 	// send tubeID
 	err = authgrants.WriteUnreliableProxyID(delegateProxyConn, unreliableDelProxyConn.GetID())
 	if err != nil {
+		logrus.Error("principal: error writing unreliable proxy id")
 		return nil, err
 	}
+	logrus.Info("principal: successfully wrote unreliable proxy id")
 
 	// await confirmation that delegate proxy ready to proxy with unreliable tube
 	err = authgrants.ReadResponse(delegateProxyConn)
 	if err != nil {
+		logrus.Error("principal: error reading response from del proxy")
 		return nil, err
 	}
 	logrus.Info("principal: got unreliable proxy conn")

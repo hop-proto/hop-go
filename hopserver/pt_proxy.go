@@ -3,6 +3,7 @@ package hopserver
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"sync"
@@ -64,7 +65,10 @@ func unreliableProxyOneSide(a transport.UDPLike, b transport.UDPLike) {
 				logrus.Errorf("pt proxy: read deadline exceeded: %s", err)
 				return
 			}
-			logrus.Error(err)
+			if errors.Is(err, io.EOF) {
+				logrus.Error("pt_proxy: encountered EOF reading msg udp, returning: ", err)
+				return
+			}
 			continue
 		}
 		b.SetWriteDeadline(time.Now().Add(time.Second * 30))
@@ -74,7 +78,10 @@ func unreliableProxyOneSide(a transport.UDPLike, b transport.UDPLike) {
 				logrus.Errorf("pt proxy: write deadline exceeded: %s", err)
 				return
 			}
-			logrus.Error(err)
+			if errors.Is(err, io.EOF) {
+				logrus.Error("pt_proxy: encountered EOF writing msg udp, returning: ", err)
+				return
+			}
 			continue
 			// TODO(baumanl): what should we do
 		}
@@ -90,8 +97,6 @@ func unreliableProxyHelper(a transport.UDPLike, b transport.UDPLike) {
 
 // manage principal to target proxying (t is a reliable tube)
 func (sess *hopSession) startPTProxy(t net.Conn, pq *ptProxyTubeQueue) {
-	defer t.Close()
-
 	// TODO(baumanl): add check for authgrant?
 
 	// make sure this is currently expected
@@ -158,9 +163,23 @@ func (sess *hopSession) startPTProxy(t net.Conn, pq *ptProxyTubeQueue) {
 		logrus.Errorf("pt_proxy: error writing confirmation to principal: %s", err)
 		return
 	}
+	// t.Close() // bug to have this called right after write? (for now leave open till done proxying)
 
 	logrus.Info("pt_proxy: wrote conf to principal; starting unreliable proxy")
 
 	// proxy
 	unreliableProxyHelper(principalTube, targetConn)
+
+	err = principalTube.Close()
+	if err != nil {
+		logrus.Error("pt_proxy: error closing unreliable principal tube: ", err)
+	}
+	err = targetConn.Close()
+	if err != nil {
+		logrus.Error("pt_proxy: error closing target conn udp conn: ", err)
+	}
+	err = t.Close()
+	if err != nil {
+		logrus.Error("pt_proxy: error closing reliable principal conn: ", err)
+	}
 }

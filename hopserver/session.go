@@ -95,7 +95,7 @@ func (sess *hopSession) start() {
 		err := sess.tubeMuxer.Start()
 		sess.done <- 1
 		if err != nil {
-			logrus.Error(err)
+			logrus.Error("start loop: ", err)
 		}
 	}()
 	logrus.Info("S: STARTED CHANNEL MUXER")
@@ -222,7 +222,7 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 	principalSess := sess.ID
 	// if using an authgrant, check that the cmd is authorized
 	if sess.usingAuthGrant {
-		principalID, err := sess.checkCmd(cmd)
+		principalID, err := sess.checkCmd(cmd, shell)
 		if err != nil {
 			codex.SendFailure(tube, err)
 			return

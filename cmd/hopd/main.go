@@ -25,6 +25,14 @@ func main() {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
 
+	// logrus.SetOutput(io.Discard)
+	file, err := os.CreateTemp("/tmp", "hopd.log")
+	if err != nil {
+		logrus.Error("unable to create log file")
+	} else {
+		logrus.SetOutput(file)
+	}
+
 	sc, err := flags.LoadServerConfigFromFlags(f)
 	if err != nil {
 		if perr, ok := err.(toml.ParseError); ok {

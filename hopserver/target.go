@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
@@ -101,12 +102,20 @@ func (sess *hopSession) checkIntent(intent authgrants.Intent) error {
 // 	}
 // }
 
+// TODO(baumanl): rewrite this/think about best way to generalize to all grant types
 // checks if the session has an auth grant to perform cmd
-func (sess *hopSession) checkCmd(cmd string) (sessID, error) {
+func (sess *hopSession) checkCmd(cmd string, shell bool) (sessID, error) {
+	logrus.Info("target: received request to perform: ", cmd)
 	for i, ag := range sess.authorizedActions {
-		if time.Now().Before(ag.ExpTime) && ag.GrantType == authgrants.Command {
-			if ag.AssociatedData.CommandGrantData.Cmd == cmd {
-				// remove from authorized actions and return
+		if time.Now().Before(ag.ExpTime) {
+			if !shell && ag.GrantType == authgrants.Command {
+				if ag.AssociatedData.CommandGrantData.Cmd == cmd {
+					// remove from authorized actions and return
+					sess.authorizedActions = append(sess.authorizedActions[:i], sess.authorizedActions[i+1:]...)
+					return sessID(ag.PrincipalID), nil
+				}
+			}
+			if shell && ag.GrantType == authgrants.Shell {
 				sess.authorizedActions = append(sess.authorizedActions[:i], sess.authorizedActions[i+1:]...)
 				return sessID(ag.PrincipalID), nil
 			}

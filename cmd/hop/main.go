@@ -22,6 +22,15 @@ func main() {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
 
+	// logrus.SetOutput(io.Discard)
+	file, err := os.CreateTemp("/tmp", "hop.log")
+	if err != nil {
+		logrus.Error("unable to create log file")
+	} else {
+		logrus.SetOutput(file)
+
+	}
+
 	// hc will be result of merging config file settings and flags
 	hc, err := flags.LoadClientConfigFromFlags(f)
 	if err != nil {
