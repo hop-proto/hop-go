@@ -23,6 +23,17 @@ func main() {
 
 	if f.Verbose {
 		logrus.SetLevel(logrus.DebugLevel)
+	} else {
+		// TODO(baumanl): better options for enabling logging to file/level
+		// default log at info level to file --> otherwise things get really
+		// confusing when running authgrant protocol and all processes are trying
+		// to log to std err.
+		file, err := os.CreateTemp("/tmp", "hopd.log")
+		if err != nil {
+			logrus.Error("unable to create log file")
+		} else {
+			logrus.SetOutput(file)
+		}
 	}
 
 	sc, err := flags.LoadServerConfigFromFlags(f)
