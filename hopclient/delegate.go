@@ -5,8 +5,11 @@ import (
 	"os"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/certs"
+	"hop.computer/hop/common"
 	"hop.computer/hop/core"
 	"hop.computer/hop/keys"
 	"hop.computer/hop/transport"
@@ -65,15 +68,16 @@ func (c *HopClient) getAuthorization() error {
 	}
 	// TODO(baumanl): add other intent request types
 
+	// TODO(baumanl): think more about environment variable/test it
 	// connect to delegate proxy --> target
 	val, ok := os.LookupEnv("DP_PROXY")
 	if !ok {
-		val = "default" // change to default
+		val = common.DefaultAgProxyListenSocket // change to default
 	}
 	pconn, err := net.Dial("unix", val) // TODO(baumanl): config option for
 	if err != nil {
+		logrus.Errorf("delegate: error dialing ag proxy socket: %s", err)
 		return err
 	}
-	authgrants.StartDelegateInstance(pconn, irs)
-	return nil
+	return authgrants.StartDelegateInstance(pconn, irs)
 }
