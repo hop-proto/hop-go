@@ -58,7 +58,7 @@ var _ net.Conn = &Reliable{}
 // Reliable tubes are tubes
 var _ Tube = &Reliable{}
 
-// req: whether the tube is requesting to initiate a tube (true), or whether is respondding to an initiation request (false).
+// req: whether the tube is requesting to initiate a tube (true), or whether is responding to an initiation request (false).
 func (r *Reliable) initiate(req bool) {
 	defer close(r.initDone)
 	notInit := true
@@ -120,7 +120,7 @@ func (r *Reliable) send() {
 }
 
 // receive is called by the muxer for each new packet
-func (r *Reliable) receive(pkt *frame) error {
+func (r *Reliable) receive(pkt *dataFrame) error {
 	r.l.Lock()
 	defer r.l.Unlock()
 

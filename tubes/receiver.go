@@ -177,7 +177,7 @@ func (r *receiver) unwrapFrameNo(frameNo uint32) uint64 {
 }
 
 // receive processes a single incoming packet
-func (r *receiver) receive(p *frame) (bool, error) {
+func (r *receiver) receive(p *dataFrame) (bool, error) {
 	r.m.Lock()
 	defer r.m.Unlock()
 

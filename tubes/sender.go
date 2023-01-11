@@ -33,7 +33,7 @@ type sender struct {
 	closed atomic.Bool
 	// The buffer of unacknowledged tube frames that will be retransmitted if necessary.
 	// +checklocks:l
-	frames []*frame
+	frames []*dataFrame
 
 	// Different frames can have different data lengths -- we need to know how
 	// to update the buffer when frames are acknowledged.
@@ -76,7 +76,7 @@ type sender struct {
 	windowOpen chan struct{}
 
 	// +checklocks:l
-	sendQueue chan *frame
+	sendQueue chan *dataFrame
 
 	// logging context
 	log *logrus.Entry
@@ -106,7 +106,7 @@ func (s *sender) write(b []byte) (int, error) {
 		if uint16(len(s.buffer)) < dataLength {
 			dataLength = uint16(len(s.buffer))
 		}
-		pkt := frame{
+		pkt := dataFrame{
 			dataLength: dataLength,
 			frameNo:    s.frameNo,
 			data:       s.buffer[:dataLength],
@@ -178,7 +178,7 @@ func (s *sender) sendEmptyPacketLocked() {
 	if s.closed.Load() {
 		return
 	}
-	pkt := &frame{
+	pkt := &dataFrame{
 		dataLength: 0,
 		frameNo:    s.frameNo,
 		data:       []byte{},
@@ -285,7 +285,7 @@ func (s *sender) sendFin() error {
 	}
 	s.finSent = true
 
-	pkt := frame{
+	pkt := dataFrame{
 		dataLength: 0,
 		frameNo:    s.frameNo,
 		data:       []byte{},
