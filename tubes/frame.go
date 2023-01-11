@@ -18,11 +18,11 @@ type dataFrame struct {
 type initiateFrame struct {
 	tubeID     byte
 	flags      frameFlags
-	frameNo    uint32
-	tubeType   TubeType
-	data       []byte
 	dataLength uint16
 	windowSize uint16
+	tubeType   TubeType
+	frameNo    uint32
+	data       []byte
 }
 
 type frameFlags struct {
@@ -38,8 +38,8 @@ type frameFlags struct {
 	FIN bool
 }
 
-var _ frame = dataFrame{}
-var _ frame = initiateFrame{}
+var _ frame = &dataFrame{}
+var _ frame = &initiateFrame{}
 
 // The bit index for each of these flags.
 const (

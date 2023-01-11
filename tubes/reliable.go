@@ -100,20 +100,28 @@ func (r *Reliable) initiate(req bool) {
 // send continuously reads packet from the sends and hands them to the muxer
 func (r *Reliable) send() {
 	for pkt := range r.sender.sendQueue {
-		pkt.tubeID = r.id
-		pkt.ackNo = r.recvWindow.getAck()
-		r.lastAckSent.Store(pkt.ackNo)
-		pkt.flags.ACK = true
-		pkt.flags.REL = true
-		r.sendQueue <- pkt.toBytes()
+		switch pkt := pkt.(type) {
+		case *initiateFrame:
+			// TODO(hosono) handle this case
+		case *dataFrame:
+			pkt.tubeID = r.id
+			pkt.ackNo = r.recvWindow.getAck()
+			r.lastAckSent.Store(pkt.ackNo)
+			pkt.flags.ACK = true
+			pkt.flags.REL = true
+			r.sendQueue <- pkt.toBytes()
 
-		r.log.WithFields(logrus.Fields{
-			"frameno": pkt.frameNo,
-			"ackno":   pkt.ackNo,
-			"ack":     pkt.flags.ACK,
-			"fin":     pkt.flags.FIN,
-			"dataLen": pkt.dataLength,
-		}).Trace("sent packet")
+			r.log.WithFields(logrus.Fields{
+				"frameno": pkt.frameNo,
+				"ackno":   pkt.ackNo,
+				"ack":     pkt.flags.ACK,
+				"fin":     pkt.flags.FIN,
+				"dataLen": pkt.dataLength,
+			}).Trace("sent packet")
+		default:
+			// This should never happen since only dataFrame and initateFrame implement this interface
+			r.log.Panic("tried to send frame that was neither a dataFrame nor an initiateFrame")
+		}
 	}
 	r.log.Debug("send ended")
 	close(r.sendDone)

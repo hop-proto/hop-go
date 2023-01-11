@@ -76,7 +76,7 @@ type sender struct {
 	windowOpen chan struct{}
 
 	// +checklocks:l
-	sendQueue chan *dataFrame
+	sendQueue chan frame
 
 	// logging context
 	log *logrus.Entry

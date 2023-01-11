@@ -192,7 +192,7 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 			windowSize:       windowSize,
 			endRetransmit:    make(chan struct{}, 1),
 			windowOpen:       make(chan struct{}, 1),
-			sendQueue:        make(chan *dataFrame),
+			sendQueue:        make(chan frame),
 			retransmitEnded:  make(chan struct{}, 1),
 			log:              tubeLog.WithField("sender", ""),
 		},
