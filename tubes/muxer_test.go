@@ -16,18 +16,28 @@ import (
 )
 
 // makeMuxers creates two connected muxers running over UDP
-func makeMuxers(t *testing.T) (m1, m2 *Muxer, stop func()) {
+// bad indicates whether to use a UDPMsgConn or a BadUDPMsgConn
+// for the underlying connection. BadUDPMsgConn drops half its packets
+func makeMuxers(bad bool, t *testing.T) (m1, m2 *Muxer, stop func()) {
 	var c1, c2 transport.MsgConn
 	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")
 	assert.NilError(t, err)
 
 	c1UDP, err := net.Dial("udp", c2Addr.String())
 	assert.NilError(t, err)
-	c1 = transport.MakeUDPMsgConn(c1UDP.(*net.UDPConn))
+	if bad {
+		c1 = transport.MakeBadUDPMsgConn(c1UDP.(*net.UDPConn))
+	} else {
+		c1 = transport.MakeUDPMsgConn(c1UDP.(*net.UDPConn))
+	}
 
 	c2UDP, err := net.DialUDP("udp", c2Addr, c1.LocalAddr().(*net.UDPAddr))
 	assert.NilError(t, err)
-	c2 = transport.MakeUDPMsgConn(c2UDP)
+	if bad {
+		c2 = transport.MakeBadUDPMsgConn(c2UDP)
+	} else {
+		c2 = transport.MakeUDPMsgConn(c2UDP)
+	}
 
 	m1 = NewMuxer(c1, 0, false, logrus.WithFields(logrus.Fields{
 		"muxer": "m1",
@@ -81,21 +91,37 @@ func makeMuxers(t *testing.T) (m1, m2 *Muxer, stop func()) {
 // but making them one generic test is much less readable
 //
 //nolint:dupl
-func manyReliableTubes(t *testing.T) {
+func manyReliableTubes(waitForOpen bool, bad bool, t *testing.T) {
 	// Each muxer can create exactly 128 tubes.
 	// The server creates even numbered tubes. The client creates odd numbered tubes
-	m1, m2, stop := makeMuxers(t)
+	m1, m2, stop := makeMuxers(bad, t)
+
+	wg := sync.WaitGroup{}
+	wg.Add(512)
+
 	for i := 1; i < 256; i += 2 {
 		logrus.Infof("CreateTube: %d", i)
 		tube, err := m1.CreateReliableTube(common.ExecTube)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, tube.GetID(), byte(i))
+		if waitForOpen {
+			go func() {
+				tube.SetDeadline(time.Time{})
+				wg.Done()
+			}()
+		}
 	}
 	for i := 0; i < 256; i += 2 {
 		logrus.Infof("CreateTube: %d", i)
 		tube, err := m2.CreateReliableTube(common.ExecTube)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, tube.GetID(), byte(i))
+		if waitForOpen {
+			go func() {
+				tube.SetDeadline(time.Time{})
+				wg.Done()
+			}()
+		}
 	}
 
 	tube, err := m1.CreateReliableTube(common.ExecTube)
@@ -106,6 +132,10 @@ func manyReliableTubes(t *testing.T) {
 	assert.ErrorType(t, err, ErrOutOfTubes)
 	assert.Assert(t, tube == nil)
 
+	if waitForOpen {
+		wg.Wait()
+	}
+
 	stop()
 }
 
@@ -113,7 +143,7 @@ func manyReliableTubes(t *testing.T) {
 func manyUnreliableTubes(t *testing.T) {
 	// Each muxer can create exactly 128 tubes.
 	// The server creates even numbered tubes. The client creates odd numbered tubes
-	m1, m2, stop := makeMuxers(t)
+	m1, m2, stop := makeMuxers(false, t)
 	for i := 1; i < 256; i += 2 {
 		logrus.Infof("CreateTube: %d", i)
 		tube, err := m1.CreateUnreliableTube(common.ExecTube)
@@ -140,7 +170,7 @@ func manyUnreliableTubes(t *testing.T) {
 
 // this ensures that tubes can still be opened even if the remote host is in the timeWait state
 func reusingTubes(t *testing.T) {
-	m1, m2, stop := makeMuxers(t)
+	m1, m2, stop := makeMuxers(false, t)
 
 	// Create a reliable tube
 	t1, err := m1.CreateReliableTube(common.ExecTube)
@@ -192,7 +222,12 @@ func reusingTubes(t *testing.T) {
 
 func TestMuxer(t *testing.T) {
 	logrus.SetLevel(logrus.TraceLevel)
-	t.Run("ManyUnreliableTubes", manyUnreliableTubes)
-	t.Run("ManyReliableTubes", manyReliableTubes)
+	t.Run("UnreliableTubes", manyUnreliableTubes)
+	t.Run("ReliableTubes/ImmediateStop", func(t *testing.T) {
+		manyReliableTubes(false, false, t)
+	})
+	t.Run("ReliableTubes/Wait", func(t *testing.T) {
+		manyReliableTubes(true, false, t)
+	})
 	t.Run("ReuseTubes", reusingTubes)
 }

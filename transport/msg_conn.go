@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"math/rand"
 	"net"
 )
 
@@ -50,5 +51,36 @@ func (c *UDPMsgConn) ReadMsg(b []byte) (n int, err error) {
 // WriteMsg implement the MsgConn interface
 func (c *UDPMsgConn) WriteMsg(b []byte) (err error) {
 	_, _, err = c.WriteMsgUDP(b, nil, nil)
+	return
+}
+
+// BREAK
+
+// BadUDPMsgConn is a wrapper around net.UDPConn that drops every other packet
+type BadUDPMsgConn struct {
+	net.UDPConn
+}
+
+var _ MsgConn = &UDPMsgConn{}
+
+// MakeBadUDPMsgConn converts a *net.UDPConn into a *UDPMsgConn
+func MakeBadUDPMsgConn(underlying *net.UDPConn) *BadUDPMsgConn {
+	return &BadUDPMsgConn{
+		*underlying,
+	}
+}
+
+// ReadMsg implements the MsgConn interface
+func (c *BadUDPMsgConn) ReadMsg(b []byte) (n int, err error) {
+	n, _, _, _, err = c.ReadMsgUDP(b, nil)
+	return
+}
+
+// WriteMsg implement the MsgConn interface
+func (c *BadUDPMsgConn) WriteMsg(b []byte) (err error) {
+	n := rand.Intn(2)
+	if n == 1 {
+		_, _, err = c.WriteMsgUDP(b, nil, nil)
+	}
 	return
 }
