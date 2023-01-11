@@ -1,10 +1,11 @@
 package authgrants
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
+
+	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
@@ -13,8 +14,9 @@ import (
 
 // TargetInfo is sent from principal indicating target
 type TargetInfo struct {
-	TargetPort uint16
+	TargetPort string
 	TargetSNI  certs.Name
+	TargetURL  core.URL
 }
 
 const confirmation = byte(1)
@@ -26,49 +28,29 @@ func WriteTargetInfo(targURL core.URL, w io.Writer) error {
 	return err
 }
 
-// WriteTo serializes an InitInfo message
-func (m *TargetInfo) WriteTo(w io.Writer) (int64, error) {
-	var written int64
-	// write port number
-	err := binary.Write(w, binary.BigEndian, m.TargetPort)
+// ReadTargetInfo reads target info
+func ReadTargetInfo(r io.Reader) (*core.URL, error) {
+	url, _, err := common.ReadString(r)
 	if err != nil {
-		return written, err
+		return nil, err
 	}
-	written += 2
-
-	// write targetSNI
-	n, err := m.TargetSNI.WriteTo(w)
-	written += n
-	return written, err
-}
-
-// ReadFrom reads a serialized InitInfo message
-func (m *TargetInfo) ReadFrom(r io.Reader) (int64, error) {
-	var bytesRead int64
-	// read target port
-	err := binary.Read(r, binary.BigEndian, &m.TargetPort)
-	if err != nil {
-		return bytesRead, err
-	}
-	bytesRead += 2
-
-	// read targetSNI
-	n, err := m.TargetSNI.ReadFrom(r)
-	bytesRead += n
-	return bytesRead, err
+	return core.ParseURL(url)
 }
 
 // ConnectToTarget initiates a udp conn to target
 func (m *TargetInfo) ConnectToTarget() (*net.UDPConn, error) {
 	// TODO(baumanl): make this work for all possible cert.Name.Types
-	hostname := string(m.TargetSNI.Label)
-	port := fmt.Sprint(m.TargetPort)
-	addr := net.JoinHostPort(hostname, port)
+	// hostname := string(m.TargetSNI.Label)
+	// port := fmt.Sprint(m.TargetPort)
+	// addr := net.JoinHostPort(hostname, port)
+	addr := m.TargetURL.Address()
 
 	throwaway, err := net.Dial("udp", addr)
 	if err != nil {
+		logrus.Error("couldn't connect to target: ", err)
 		return nil, err
 	}
+	logrus.Info("connected to target")
 	remoteAddr := throwaway.RemoteAddr()
 	throwaway.Close()
 	return net.DialUDP("udp", nil, remoteAddr.(*net.UDPAddr))
@@ -94,13 +76,13 @@ func WriteFailure(w io.Writer, errString string) error {
 
 // ReadResponse reads either confirmation or Failure message
 func ReadResponse(r io.Reader) error {
-	var resp byte
-	_, err := r.Read([]byte{resp})
+	resp := make([]byte, 1)
+	_, err := r.Read(resp)
 	if err != nil {
 		return err
 	}
 
-	if resp == confirmation {
+	if resp[0] == confirmation {
 		return nil
 	}
 
@@ -119,7 +101,7 @@ func WriteUnreliableProxyID(w io.Writer, id byte) error {
 
 // ReadUnreliableProxyID reads tube id of unreliable tube to proxy
 func ReadUnreliableProxyID(r io.Reader) (byte, error) {
-	var id byte
-	_, err := r.Read([]byte{id})
-	return id, err
+	id := make([]byte, 1)
+	_, err := r.Read(id)
+	return id[0], err
 }
