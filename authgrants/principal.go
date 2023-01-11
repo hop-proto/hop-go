@@ -42,7 +42,8 @@ func StartPrincipalInstance(dc net.Conn, ci checkIntentFunc, su setUpTargetConnF
 	}()
 
 	if ci == nil {
-		pi.checkIntent = defaultRejectAll
+		// pi.checkIntent = defaultRejectAll // this is correct
+		pi.checkIntent = insecureAcceptAll
 	}
 
 	pi.run()
@@ -53,11 +54,17 @@ func defaultRejectAll(i Intent) error {
 	return fmt.Errorf("default checkIntent func rejects all intent requests")
 }
 
+func insecureAcceptAll(i Intent) error {
+	logrus.Infof("principal: insecurely accepting intent with no checks")
+	return nil
+}
+
 // Run reads intent requests from the DelegateConn until it closes or error
 // reading intent request or sending conf/denial message to delegate
 func (p *principalInstance) run() {
 	// TODO(baumanl): add way to close without waiting for delegateconn to close?
 	for {
+		logrus.Info("principal: waiting for an ir or err")
 		err := p.handleIntentRequest()
 		if err != nil {
 			logrus.Errorf("principal: error handling intent request. Quitting.")
@@ -73,6 +80,7 @@ func (p *principalInstance) handleIntentRequest() error {
 		logrus.Errorf("principal: error reading ir: %s", err)
 		return err
 	}
+	logrus.Info("principal: read an ir")
 	return p.doIntentRequestChecks(i)
 }
 
@@ -89,8 +97,10 @@ func (p *principalInstance) doIntentRequestChecks(i Intent) error {
 	}
 
 	if !p.targetConnected {
+		logrus.Info("principal: not connected to target")
 		tc, err := p.setUpTargetConn(targURL)
 		if err != nil {
+			logrus.Info("principal: error setting up target connection")
 			return WriteIntentDenied(p.delegateConn, fmt.Sprintf("principal: target setup failed: %s", err))
 		}
 		p.targetConn = tc
