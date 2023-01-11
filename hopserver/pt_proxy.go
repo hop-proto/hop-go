@@ -89,7 +89,6 @@ func unreliableProxyHelper(a transport.UDPLike, b transport.UDPLike) {
 
 // manage principal to target proxying (t is a reliable tube)
 func (sess *hopSession) startPTProxy(t net.Conn, pq *ptProxyTubeQueue) {
-	defer t.Close()
 
 	// TODO(baumanl): add check for authgrant?
 
