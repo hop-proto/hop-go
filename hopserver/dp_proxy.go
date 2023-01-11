@@ -37,7 +37,7 @@ type GetPrincipal func(sessID) (*hopSession, bool)
 // dpproxy holds state used by server to proxy delegate requests to principals
 type dpproxy struct {
 	// +checklocks:proxyLock
-	address string
+	address string // unix socket to listen on.
 	// +checklocks:proxyLock
 	principals   map[int32]sessID
 	running      atomic.Bool
@@ -52,6 +52,7 @@ func (p *dpproxy) start() error {
 		return fmt.Errorf("DP Proxy: start called when already running")
 	}
 
+	logrus.Debug("DP Proxy: trying to acquire proxyLock")
 	p.proxyLock.Lock()
 	defer p.proxyLock.Unlock()
 
@@ -61,13 +62,13 @@ func (p *dpproxy) start() error {
 		if fileInfo.IsDir() {
 			return fmt.Errorf("DP Proxy: unable to start DP Proxy at address %s: is a directory", p.address)
 		}
-		//make sure the socket does not already exist.
+		// make sure the socket does not already exist. remove if it does.
 		if err := os.RemoveAll(p.address); err != nil {
 			return fmt.Errorf("DP Proxy: error removing %s: %s", p.address, err)
 		}
 	}
 
-	//set socket options and start listening to socket
+	// set socket options and start listening to socket
 	sockconfig := &net.ListenConfig{Control: setListenerOptions}
 	authgrantServer, err := sockconfig.Listen(context.Background(), "unix", p.address)
 	if err != nil {
@@ -96,6 +97,7 @@ func (p *dpproxy) serve() {
 
 // checks that the connecting process is a hop session descendent and then proxies
 func (p *dpproxy) checkAndProxy(c net.Conn) {
+	logrus.Debug("DP Proxy: just accepted a new connection")
 	// Verify that the client is a legit descendent and get principal sess
 	principalID, e := p.checkCredentials(c)
 	if e != nil {
@@ -107,6 +109,7 @@ func (p *dpproxy) checkAndProxy(c net.Conn) {
 		logrus.Error("DP Proxy: principal session not found.")
 		return
 	}
+	logrus.Debug("DP proxy: found the principal session")
 	p.proxyAuthGrantRequest(principalSess, c)
 }
 
@@ -155,6 +158,7 @@ func (p *dpproxy) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn) {
 }
 
 func proxyHelper(p net.Conn, c net.Conn) {
+	logrus.Infof("dp proxy: started proxyHelper")
 	var wg sync.WaitGroup
 	wg.Add(1)
 	// proxy the bytes
@@ -162,12 +166,12 @@ func proxyHelper(p net.Conn, c net.Conn) {
 		w, err := io.Copy(c, p)
 		logrus.Infof("DP Proxy: wrote %v bytes to client from principal. err: %v", w, err)
 		err = c.Close()
-		logrus.Debugf("c close: %v", err)
+		logrus.Infof("c close: %v", err)
 		wg.Done()
 	}()
 	w, err := io.Copy(p, c)
 	logrus.Infof("DP Proxy: wrote %v bytes to principal from client. err: %v", w, err)
 	err = p.Close()
-	logrus.Debugf("p close: %v", err)
+	logrus.Infof("p close: %v", err)
 	wg.Wait()
 }
