@@ -63,36 +63,39 @@ func (r *Reliable) initiate(req bool) {
 	defer close(r.initDone)
 	notInit := true
 
-	p := initiateFrame{
-		tubeID:     r.id,
-		tubeType:   r.tType,
-		data:       []byte{},
-		dataLength: 0,
-		frameNo:    0,
-		windowSize: r.recvWindow.getWindowSize(),
-		flags: frameFlags{
-			REQ:  req,
-			RESP: !req,
-			REL:  true,
-			ACK:  true,
-			FIN:  false,
-		},
-	}
-	ticker := time.NewTicker(retransmitOffset)
-	for notInit {
-		r.sendQueue <- p.toBytes()
-		select {
-		case <-ticker.C:
-			r.log.Info("init rto exceeded")
-			continue
-		case <-r.initRecv:
-			r.l.Lock()
-			notInit = r.tubeState == created
-			r.l.Unlock()
-		case <-r.closed:
-			return
+	if req {
+		p := initiateFrame{
+			tubeID:     r.id,
+			tubeType:   r.tType,
+			data:       []byte{},
+			dataLength: 0,
+			frameNo:    0,
+			windowSize: r.recvWindow.getWindowSize(),
+			flags: frameFlags{
+				REQ:  req,
+				RESP: !req,
+				REL:  true,
+				ACK:  true,
+				FIN:  false,
+			},
+		}
+		ticker := time.NewTicker(retransmitOffset)
+		for notInit {
+			r.sendQueue <- p.toBytes()
+			select {
+			case <-ticker.C:
+				r.log.Info("init rto exceeded")
+				continue
+			case <-r.initRecv:
+				r.l.Lock()
+				notInit = r.tubeState == created
+				r.l.Unlock()
+			case <-r.closed:
+				return
+			}
 		}
 	}
+
 	go r.send()
 	r.sender.Start()
 }
@@ -245,6 +248,25 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		r.tubeState = initiated
 		r.sender.recvAck(1)
 		close(r.initRecv)
+	}
+
+	if pkt.flags.REQ {
+		p := initiateFrame{
+			tubeID:     r.id,
+			tubeType:   r.tType,
+			data:       []byte{},
+			dataLength: 0,
+			frameNo:    0,
+			windowSize: r.recvWindow.getWindowSize(),
+			flags: frameFlags{
+				REQ:  false,
+				RESP: true,
+				REL:  true,
+				ACK:  true,
+				FIN:  false,
+			},
+		}
+		r.sendQueue <- p.toBytes()
 	}
 
 	return nil
