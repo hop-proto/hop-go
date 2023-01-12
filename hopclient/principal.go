@@ -42,10 +42,25 @@ func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable) {
 	ci := c.checkIntent
 	c.checkIntentLock.Unlock()
 
-	authgrants.StartPrincipalInstance(delTube, ci, c.setupTargetClient)
+	var client *HopClient
+	var err error
+
+	setup := func(url core.URL) (net.Conn, error) {
+		client, err = c.setupTargetClient(url)
+		if err != nil {
+			return nil, err
+		}
+		return client.newAuthgrantTube()
+	}
+
+	authgrants.StartPrincipalInstance(delTube, ci, setup)
+
+	if client != nil {
+		client.TubeMuxer.Stop()
+	}
 }
 
-func (c *HopClient) setupTargetClient(targURL core.URL) (net.Conn, error) {
+func (c *HopClient) setupTargetClient(targURL core.URL) (*HopClient, error) {
 	targetConn, err := c.setUpDelegateProxyToTarget(targURL)
 	if err != nil {
 		return nil, err
@@ -100,12 +115,12 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (net.Conn, error) {
 
 	client.TransportConn, err = transport.DialNP(client.hostconfig.HostURL().Address(), targetConn, transportConfig)
 	if err != nil {
-		return nil, err
+		return client, err
 	}
 	// defer close?
 	err = client.TransportConn.Handshake()
 	if err != nil {
-		return nil, err
+		return client, err
 	}
 
 	client.TubeMuxer = tubes.NewMuxer(client.TransportConn, client.hostconfig.DataTimeout, false, logrus.WithField("muxer", "principal subclient"))
@@ -123,7 +138,7 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (net.Conn, error) {
 	}
 	client.connected = true
 
-	return client.newAuthgrantTube()
+	return client, nil
 }
 
 func (c *HopClient) setUpDelegateProxyToTarget(targURL core.URL) (*tubes.Unreliable, error) {
