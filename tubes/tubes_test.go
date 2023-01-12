@@ -180,7 +180,7 @@ func reliable(t *testing.T) {
 
 	// Reliable Tubes should pass the nettests even with packet loss
 	f = func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
-		return makeConn(0.95, true, t)
+		return makeConn(0.90, true, t)
 	}
 	mp = nettest.MakePipe(f)
 	t.Run("BadConnection/BasicIO", func(t *testing.T) {

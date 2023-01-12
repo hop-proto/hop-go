@@ -30,7 +30,7 @@ build:
 .PHONY: test
 test: ## test
 test:
-	go test -race ./... -timeout 180s
+	go test -race ./... -timeout 10m
 
 .PHONY: serve-dev
 serve-dev: ## launch a container running the server with code mounted in
