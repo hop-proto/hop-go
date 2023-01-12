@@ -79,24 +79,43 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 	return m1, m2, stop
 }
 
-// These two tests are flagged as duplicates by the linter,
-// but making them one generic test is much less readable
-//
-//nolint:dupl
-func manyReliableTubes(odds float64, waitForOpen bool, t *testing.T) {
+func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 	// Each muxer can create exactly 128 tubes.
 	// The server creates even numbered tubes. The client creates odd numbered tubes
 	m1, m2, stop := makeMuxers(odds, t)
 
+	var m1CreateTube func() (Tube, error)
+	var m2CreateTube func() (Tube, error)
+
+	if rel {
+		m1CreateTube = func() (Tube, error) {
+			t, err := m1.CreateReliableTube(common.ExecTube)
+			return Tube(t), err
+		}
+		m2CreateTube = func() (Tube, error) {
+			t, err := m2.CreateReliableTube(common.ExecTube)
+			return Tube(t), err
+		}
+	} else {
+		m1CreateTube = func() (Tube, error) {
+			t, err := m1.CreateUnreliableTube(common.ExecTube)
+			return Tube(t), err
+		}
+		m2CreateTube = func() (Tube, error) {
+			t, err := m2.CreateUnreliableTube(common.ExecTube)
+			return Tube(t), err
+		}
+	}
+
 	wg := sync.WaitGroup{}
-	wg.Add(512)
 
 	for i := 1; i < 256; i += 2 {
 		logrus.Infof("CreateTube: %d", i)
-		tube, err := m1.CreateReliableTube(common.ExecTube)
+		tube, err := m1CreateTube()
 		assert.NilError(t, err)
 		assert.DeepEqual(t, tube.GetID(), byte(i))
 		if waitForOpen {
+			wg.Add(1)
 			go func() {
 				tube.SetDeadline(time.Time{})
 				wg.Done()
@@ -105,10 +124,11 @@ func manyReliableTubes(odds float64, waitForOpen bool, t *testing.T) {
 	}
 	for i := 0; i < 256; i += 2 {
 		logrus.Infof("CreateTube: %d", i)
-		tube, err := m2.CreateReliableTube(common.ExecTube)
+		tube, err := m2CreateTube()
 		assert.NilError(t, err)
 		assert.DeepEqual(t, tube.GetID(), byte(i))
 		if waitForOpen {
+			wg.Add(1)
 			go func() {
 				tube.SetDeadline(time.Time{})
 				wg.Done()
@@ -116,46 +136,17 @@ func manyReliableTubes(odds float64, waitForOpen bool, t *testing.T) {
 		}
 	}
 
-	tube, err := m1.CreateReliableTube(common.ExecTube)
+	tube, err := m1CreateTube()
 	assert.ErrorType(t, err, ErrOutOfTubes)
-	assert.Assert(t, tube == nil)
+	assert.Assert(t, tube == (*Unreliable)(nil) || tube == (*Reliable)(nil))
 
-	tube, err = m2.CreateReliableTube(common.ExecTube)
+	tube, err = m2CreateTube()
 	assert.ErrorType(t, err, ErrOutOfTubes)
-	assert.Assert(t, tube == nil)
+	assert.Assert(t, tube == (*Unreliable)(nil) || tube == (*Reliable)(nil))
 
 	if waitForOpen {
 		wg.Wait()
 	}
-
-	stop()
-}
-
-//nolint:dupl
-func manyUnreliableTubes(t *testing.T) {
-	// Each muxer can create exactly 128 tubes.
-	// The server creates even numbered tubes. The client creates odd numbered tubes
-	m1, m2, stop := makeMuxers(1.0, t)
-	for i := 1; i < 256; i += 2 {
-		logrus.Infof("CreateTube: %d", i)
-		tube, err := m1.CreateUnreliableTube(common.ExecTube)
-		assert.NilError(t, err)
-		assert.DeepEqual(t, tube.GetID(), byte(i))
-	}
-	for i := 0; i < 256; i += 2 {
-		logrus.Infof("CreateTube: %d", i)
-		tube, err := m2.CreateUnreliableTube(common.ExecTube)
-		assert.NilError(t, err)
-		assert.DeepEqual(t, tube.GetID(), byte(i))
-	}
-
-	tube, err := m1.CreateUnreliableTube(common.ExecTube)
-	assert.ErrorType(t, err, ErrOutOfTubes)
-	assert.Assert(t, tube == nil)
-
-	tube, err = m2.CreateUnreliableTube(common.ExecTube)
-	assert.ErrorType(t, err, ErrOutOfTubes)
-	assert.Assert(t, tube == nil)
 
 	stop()
 }
@@ -213,13 +204,20 @@ func reusingTubes(t *testing.T) {
 }
 
 func TestMuxer(t *testing.T) {
+
 	logrus.SetLevel(logrus.TraceLevel)
-	t.Run("UnreliableTubes", manyUnreliableTubes)
+	t.Run("UnreliableTubes/ImmediateStop", func(t *testing.T) {
+		manyTubes(1.0, false, false, t)
+	})
+	t.Run("UnreliableTubes/Wait", func(t *testing.T) {
+		manyTubes(0.9, false, true, t)
+	})
+
 	t.Run("ReliableTubes/ImmediateStop", func(t *testing.T) {
-		manyReliableTubes(1.0, false, t)
+		manyTubes(1.0, true, false, t)
 	})
 	t.Run("ReliableTubes/Wait", func(t *testing.T) {
-		manyReliableTubes(0.9, false, t)
+		manyTubes(0.9, true, true, t)
 	})
 	t.Run("ReuseTubes", reusingTubes)
 }

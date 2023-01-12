@@ -199,8 +199,7 @@ func (s *sender) fillWindow(rto bool, startIndex int) {
 			numFrames = maxFragTransPerRTO
 		}
 	} else {
-		// Clamp numFrames to avoid indexing out of bounds
-		numFrames = int(s.windowSize - s.unacked)
+		numFrames = int(s.windowSize) - int(s.unacked) - startIndex
 	}
 
 	// Clamp value to avoid going out of bounds

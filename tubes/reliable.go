@@ -250,7 +250,7 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		close(r.initRecv)
 	}
 
-	if pkt.flags.REQ {
+	if pkt.flags.REQ && r.tubeState != closed {
 		p := initiateFrame{
 			tubeID:     r.id,
 			tubeType:   r.tType,

@@ -177,14 +177,27 @@ func reliable(t *testing.T) {
 	t.Run("Nettest", func(t *testing.T) {
 		nettest.TestConn(t, mp)
 	})
+
+	// Reliable Tubes should pass the nettests even with packet loss
+	f = func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
+		return makeConn(0.90, true, t)
+	}
+	mp = nettest.MakePipe(f)
+	t.Run("BadConnection/BasicIO", func(t *testing.T) {
+		nettest.TimeoutWrapper(t, mp, nettest.BasicIO)
+	})
 }
 
 func unreliable(t *testing.T) {
 	logrus.SetLevel(logrus.TraceLevel)
 
 	t.Run("Close", func(t *testing.T) {
-		CloseTest(1.0, false, true, t)
-		CloseTest(1.0, false, false, t)
+		t.Run("Wait", func(t *testing.T) {
+			CloseTest(1.0, false, true, t)
+		})
+		t.Run("NoWait", func(t *testing.T) {
+			CloseTest(1.0, false, false, t)
+		})
 	})
 
 	f := func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {

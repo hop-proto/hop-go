@@ -70,7 +70,7 @@ func (u *Unreliable) makeInitFrame(req bool) initiateFrame {
 		frameNo:    0,
 		windowSize: 0,
 		flags: frameFlags{
-			ACK:  true,
+			ACK:  false,
 			FIN:  false,
 			REQ:  req,
 			RESP: !req,
@@ -115,6 +115,12 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 
 	if u.state.CompareAndSwap(created, initiated) {
 		close(u.initiated)
+	}
+
+	// Send a RESP packet in response to REQ packets
+	if pkt.flags.REQ && u.state.Load() != closed {
+		p := u.makeInitFrame(false)
+		u.sendQueue <- p.toBytes()
 	}
 
 	return nil
