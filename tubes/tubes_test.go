@@ -16,8 +16,9 @@ import (
 	"hop.computer/hop/transport"
 )
 
+// odds indicates the probability that a packet will be sent. 1.0 sends all packets, and 0.0 sends no packets
 // rel is true for reliable tubes and false for unreliable ones
-func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err error) {
+func makeConn(odds float64, rel bool, t *testing.T) (t1, t2 net.Conn, stop func(), r bool, err error) {
 	r = rel
 	var c1, c2 transport.MsgConn
 	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")
@@ -25,11 +26,11 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err
 
 	c1UDP, err := net.Dial("udp", c2Addr.String())
 	assert.NilError(t, err)
-	c1 = transport.MakeUDPMsgConn(c1UDP.(*net.UDPConn))
+	c1 = transport.MakeUDPMsgConn(odds, c1UDP.(*net.UDPConn))
 
 	c2UDP, err := net.DialUDP("udp", c2Addr, c1.LocalAddr().(*net.UDPAddr))
 	assert.NilError(t, err)
-	c2 = transport.MakeUDPMsgConn(c2UDP)
+	c2 = transport.MakeUDPMsgConn(odds, c2UDP)
 
 	muxer1 := NewMuxer(c1, 0, false, logrus.WithFields(logrus.Fields{
 		"muxer": "m1",
@@ -116,8 +117,8 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err
 }
 
 // CloseTest tests the closing behavior of tubes
-func CloseTest(t *testing.T, rel bool, wait bool) {
-	c1, c2, stop, _, err := makeConn(t, rel)
+func CloseTest(odds float64, rel bool, wait bool, t *testing.T) {
+	c1, c2, stop, _, err := makeConn(odds, rel, t)
 	assert.NilError(t, err)
 	defer stop()
 
@@ -157,12 +158,19 @@ func reliable(t *testing.T) {
 	logrus.SetLevel(logrus.TraceLevel)
 
 	t.Run("Close", func(t *testing.T) {
-		CloseTest(t, true, true)
-		CloseTest(t, true, false)
+		t.Run("Wait", func(t *testing.T) {
+			CloseTest(1.0, true, true, t)
+		})
+		t.Run("NoWait", func(t *testing.T) {
+			CloseTest(1.0, true, false, t)
+		})
+		t.Run("BadConnection", func(t *testing.T) {
+			CloseTest(0.2, true, true, t)
+		})
 	})
 
 	f := func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
-		return makeConn(t, true)
+		return makeConn(1.0, true, t)
 	}
 
 	mp := nettest.MakePipe(f)
@@ -175,12 +183,12 @@ func unreliable(t *testing.T) {
 	logrus.SetLevel(logrus.TraceLevel)
 
 	t.Run("Close", func(t *testing.T) {
-		CloseTest(t, false, true)
-		CloseTest(t, false, false)
+		CloseTest(1.0, false, true, t)
+		CloseTest(1.0, false, false, t)
 	})
 
 	f := func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
-		return makeConn(t, false)
+		return makeConn(1.0, false, t)
 	}
 	mp := nettest.MakePipe(f)
 	t.Run("Nettest", func(t *testing.T) {
