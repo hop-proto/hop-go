@@ -120,7 +120,7 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 	return nil
 }
 
-func (u *Unreliable) receive(pkt *dataFrame) error {
+func (u *Unreliable) receive(pkt *frame) error {
 	u.recv.C <- pkt.data
 	if pkt.flags.FIN {
 		u.recv.Close()
@@ -187,7 +187,7 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 		return
 	}
 
-	pkt := dataFrame{
+	pkt := frame{
 		tubeID: u.id,
 		flags: frameFlags{
 			ACK:  false,
@@ -222,7 +222,7 @@ func (u *Unreliable) Close() error {
 		return io.EOF
 	}
 
-	pkt := dataFrame{
+	pkt := frame{
 		tubeID: u.id,
 		flags: frameFlags{
 			ACK:  false,

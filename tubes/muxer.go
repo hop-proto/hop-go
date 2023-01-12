@@ -33,7 +33,7 @@ type Tube interface {
 	net.Conn
 	initiate(req bool)
 	receiveInitiatePkt(*initiateFrame) error
-	receive(*dataFrame) error
+	receive(*frame) error
 	Type() TubeType
 	GetID() byte
 	IsReliable() bool
@@ -192,7 +192,7 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 			windowSize:       windowSize,
 			endRetransmit:    make(chan struct{}, 1),
 			windowOpen:       make(chan struct{}, 1),
-			sendQueue:        make(chan frame),
+			sendQueue:        make(chan *frame),
 			retransmitEnded:  make(chan struct{}, 1),
 			log:              tubeLog.WithField("sender", ""),
 		},
@@ -270,7 +270,7 @@ func (m *Muxer) Accept() (Tube, error) {
 	return s, nil
 }
 
-func (m *Muxer) readMsg() (*dataFrame, error) {
+func (m *Muxer) readMsg() (*frame, error) {
 	_, err := m.underlying.ReadMsg(m.readBuf)
 	if err != nil {
 		return nil, err

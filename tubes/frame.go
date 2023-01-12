@@ -2,27 +2,23 @@ package tubes
 
 import "encoding/binary"
 
-type frame interface {
-	markerMethodForFrames()
-}
-
-type dataFrame struct {
-	tubeID     byte
-	flags      frameFlags
+type frame struct {
 	ackNo      uint32
 	frameNo    uint32
 	dataLength uint16
+	flags      frameFlags
+	tubeID     byte
 	data       []byte
 }
 
 type initiateFrame struct {
-	tubeID     byte
-	flags      frameFlags
-	dataLength uint16
-	windowSize uint16
-	tubeType   TubeType
 	frameNo    uint32
+	tubeID     byte
+	tubeType   TubeType
 	data       []byte
+	dataLength uint16
+	flags      frameFlags
+	windowSize uint16
 }
 
 type frameFlags struct {
@@ -38,9 +34,6 @@ type frameFlags struct {
 	FIN bool
 }
 
-var _ frame = &dataFrame{}
-var _ frame = &initiateFrame{}
-
 // The bit index for each of these flags.
 const (
 	REQIdx  = 0
@@ -49,14 +42,6 @@ const (
 	ACKIdx  = 3
 	FINIdx  = 4
 )
-
-func (p dataFrame) markerMethodForFrames() {
-	panic("this marker method should not be called!")
-}
-
-func (p initiateFrame) markerMethodForFrames() {
-	panic("this marker method should not be called!")
-}
 
 func flagsToMetaByte(p *frameFlags) byte {
 	meta := byte(0)
@@ -108,7 +93,7 @@ func (p *initiateFrame) toBytes() []byte {
 	)
 }
 
-func (p *dataFrame) toBytes() []byte {
+func (p *frame) toBytes() []byte {
 	frameNoBytes := []byte{0, 0, 0, 0}
 	binary.BigEndian.PutUint32(frameNoBytes, p.frameNo)
 	dataLength := []byte{0, 0}
@@ -125,9 +110,9 @@ func (p *dataFrame) toBytes() []byte {
 	)
 }
 
-func fromBytes(b []byte) (*dataFrame, error) {
+func fromBytes(b []byte) (*frame, error) {
 	dataLength := binary.BigEndian.Uint16(b[2:4])
-	return &dataFrame{
+	return &frame{
 		tubeID:     b[0],
 		flags:      metaToFlags(b[1]),
 		dataLength: dataLength,

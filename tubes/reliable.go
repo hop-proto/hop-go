@@ -58,7 +58,7 @@ var _ net.Conn = &Reliable{}
 // Reliable tubes are tubes
 var _ Tube = &Reliable{}
 
-// req: whether the tube is requesting to initiate a tube (true), or whether is responding to an initiation request (false).
+// req: whether the tube is requesting to initiate a tube (true), or whether is respondding to an initiation request (false).
 func (r *Reliable) initiate(req bool) {
 	defer close(r.initDone)
 	notInit := true
@@ -100,35 +100,27 @@ func (r *Reliable) initiate(req bool) {
 // send continuously reads packet from the sends and hands them to the muxer
 func (r *Reliable) send() {
 	for pkt := range r.sender.sendQueue {
-		switch pkt := pkt.(type) {
-		case *initiateFrame:
-			// TODO(hosono) handle this case
-		case *dataFrame:
-			pkt.tubeID = r.id
-			pkt.ackNo = r.recvWindow.getAck()
-			r.lastAckSent.Store(pkt.ackNo)
-			pkt.flags.ACK = true
-			pkt.flags.REL = true
-			r.sendQueue <- pkt.toBytes()
+		pkt.tubeID = r.id
+		pkt.ackNo = r.recvWindow.getAck()
+		r.lastAckSent.Store(pkt.ackNo)
+		pkt.flags.ACK = true
+		pkt.flags.REL = true
+		r.sendQueue <- pkt.toBytes()
 
-			r.log.WithFields(logrus.Fields{
-				"frameno": pkt.frameNo,
-				"ackno":   pkt.ackNo,
-				"ack":     pkt.flags.ACK,
-				"fin":     pkt.flags.FIN,
-				"dataLen": pkt.dataLength,
-			}).Trace("sent packet")
-		default:
-			// This should never happen since only dataFrame and initateFrame implement this interface
-			r.log.Panic("tried to send frame that was neither a dataFrame nor an initiateFrame")
-		}
+		r.log.WithFields(logrus.Fields{
+			"frameno": pkt.frameNo,
+			"ackno":   pkt.ackNo,
+			"ack":     pkt.flags.ACK,
+			"fin":     pkt.flags.FIN,
+			"dataLen": pkt.dataLength,
+		}).Trace("sent packet")
 	}
 	r.log.Debug("send ended")
 	close(r.sendDone)
 }
 
 // receive is called by the muxer for each new packet
-func (r *Reliable) receive(pkt *dataFrame) error {
+func (r *Reliable) receive(pkt *frame) error {
 	r.l.Lock()
 	defer r.l.Unlock()
 

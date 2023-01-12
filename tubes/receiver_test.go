@@ -13,8 +13,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func makePacket(frameNo uint32, b []byte) *dataFrame {
-	pkt := dataFrame{
+func makePacket(frameNo uint32, b []byte) *frame {
+	pkt := frame{
 		dataLength: uint16(len(b)),
 		frameNo:    frameNo,
 		data:       b,
@@ -47,7 +47,7 @@ func TestReceiveWindow(t *testing.T) {
 	assert.Equal(t, n, dataLength)
 	assert.NilError(t, err)
 
-	packets := make([]*dataFrame, dataLength/packetLength)
+	packets := make([]*frame, dataLength/packetLength)
 	i := 0
 	frameNo := 1
 	for i < dataLength/packetLength {
