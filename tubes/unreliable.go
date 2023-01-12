@@ -83,20 +83,23 @@ func (u *Unreliable) makeInitFrame(req bool) initiateFrame {
 func (u *Unreliable) initiate(req bool) {
 	defer close(u.initiateDone)
 
-	notInit := true
-	ticker := time.NewTicker(retransmitOffset)
-	for notInit {
-		p := u.makeInitFrame(req)
-		u.sendQueue <- p.toBytes()
+	// RESP init frames are generated in receiveInitiatePkt
+	if req {
+		notInit := true
+		ticker := time.NewTicker(retransmitOffset)
+		for notInit {
+			p := u.makeInitFrame(req)
+			u.sendQueue <- p.toBytes()
 
-		select {
-		case <-ticker.C:
-			u.log.Info("init rto exceeded")
-		case <-u.initiated:
-		case <-u.closed:
-			return
+			select {
+			case <-ticker.C:
+				u.log.Info("init rto exceeded")
+			case <-u.initiated:
+			case <-u.closed:
+				return
+			}
+			notInit = u.state.Load() == created
 		}
-		notInit = u.state.Load() == created
 	}
 
 	go u.sender()
