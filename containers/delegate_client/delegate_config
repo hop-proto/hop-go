@@ -1,0 +1,7 @@
+[Global]
+AutoSelfSign = true
+
+
+[[Hosts]]
+Patterns = ["127.0.0.1"]
+IsPrincipal = false
