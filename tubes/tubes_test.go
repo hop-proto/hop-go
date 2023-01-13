@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"io"
+	"math/big"
 	"net"
 	"sync"
 	"testing"
@@ -18,6 +19,42 @@ import (
 	"hop.computer/hop/transport"
 )
 
+// UDPMsgConn is a wrapper around net.UDPConn that implements MsgConn
+type UDPMsgConn struct {
+	odds float64
+	net.UDPConn
+}
+
+var _ transport.MsgConn = &UDPMsgConn{}
+
+// MakeUDPMsgConn converts a *net.UDPConn into a *UDPMsgConn
+func MakeUDPMsgConn(odds float64, underlying *net.UDPConn) *UDPMsgConn {
+	return &UDPMsgConn{
+		odds,
+		*underlying,
+	}
+}
+
+// ReadMsg implements the MsgConn interface
+func (c *UDPMsgConn) ReadMsg(b []byte) (n int, err error) {
+	n, _, _, _, err = c.ReadMsgUDP(b, nil)
+	return
+}
+
+// WriteMsg implement the MsgConn interface
+func (c *UDPMsgConn) WriteMsg(b []byte) (err error) {
+	size := big.NewInt(100000)
+	i, err := rand.Int(rand.Reader, size)
+	if err != nil {
+		return err
+	}
+	x := float64(i.Int64()) / float64(size.Int64())
+	if x < c.odds {
+		_, _, err = c.WriteMsgUDP(b, nil, nil)
+	}
+	return
+}
+
 // odds indicates the probability that a packet will be sent. 1.0 sends all packets, and 0.0 sends no packets
 // rel is true for reliable tubes and false for unreliable ones
 func makeConn(odds float64, rel bool, t *testing.T) (t1, t2 net.Conn, stop func(), r bool, err error) {
@@ -28,11 +65,11 @@ func makeConn(odds float64, rel bool, t *testing.T) (t1, t2 net.Conn, stop func(
 
 	c1UDP, err := net.Dial("udp", c2Addr.String())
 	assert.NilError(t, err)
-	c1 = transport.MakeUDPMsgConn(odds, c1UDP.(*net.UDPConn))
+	c1 = MakeUDPMsgConn(odds, c1UDP.(*net.UDPConn))
 
 	c2UDP, err := net.DialUDP("udp", c2Addr, c1.LocalAddr().(*net.UDPAddr))
 	assert.NilError(t, err)
-	c2 = transport.MakeUDPMsgConn(odds, c2UDP)
+	c2 = MakeUDPMsgConn(odds, c2UDP)
 
 	muxer1 := NewMuxer(c1, 0, false, logrus.WithFields(logrus.Fields{
 		"muxer": "m1",

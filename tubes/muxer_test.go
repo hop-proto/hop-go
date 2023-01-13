@@ -25,11 +25,11 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 
 	c1UDP, err := net.Dial("udp", c2Addr.String())
 	assert.NilError(t, err)
-	c1 = transport.MakeUDPMsgConn(odds, c1UDP.(*net.UDPConn))
+	c1 = MakeUDPMsgConn(odds, c1UDP.(*net.UDPConn))
 
 	c2UDP, err := net.DialUDP("udp", c2Addr, c1.LocalAddr().(*net.UDPAddr))
 	assert.NilError(t, err)
-	c2 = transport.MakeUDPMsgConn(odds, c2UDP)
+	c2 = MakeUDPMsgConn(odds, c2UDP)
 
 	m1 = NewMuxer(c1, 0, false, logrus.WithFields(logrus.Fields{
 		"muxer": "m1",
