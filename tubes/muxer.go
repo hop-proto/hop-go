@@ -47,7 +47,7 @@ type Muxer struct {
 	// +checklocks:m
 	tubes map[byte]Tube
 	// Channels waiting for an Accept() call.
-	tubeQueue chan Tube
+	TubeQueue chan Tube
 	m         sync.Mutex
 	// All hop tubes write raw bytes for a tube packet to this golang chan.
 	sendQueue  chan []byte
@@ -75,7 +75,7 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 	mux := &Muxer{
 		idParity:   idParity,
 		tubes:      make(map[byte]Tube),
-		tubeQueue:  make(chan Tube, 128),
+		TubeQueue:  make(chan Tube, 128),
 		m:          sync.Mutex{},
 		sendQueue:  make(chan []byte),
 		state:      state,
@@ -209,7 +209,7 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 	go r.initiate(req)
 	if !req {
 		r.getLog().WithField("tube", r.GetID()).Debug("added tube to queue")
-		m.tubeQueue <- r
+		m.TubeQueue <- r
 	}
 	return r, nil
 }
@@ -261,20 +261,9 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 	go tube.initiate(req)
 	if !req {
 		tube.getLog().WithField("tube", tube.GetID()).Debug("added tube to queue")
-		m.tubeQueue <- tube
+		m.TubeQueue <- tube
 	}
 	return tube, nil
-}
-
-// Accept blocks for and accepts a new tube
-func (m *Muxer) Accept() (Tube, error) {
-	s, ok := <-m.tubeQueue
-	if !ok {
-		m.log.Debug("Cannot accept new tubes after muxer is closed")
-		return nil, io.EOF
-	}
-	m.log.Infof("Accepted Tube: %v", s.GetID())
-	return s, nil
 }
 
 func (m *Muxer) readMsg() (*frame, error) {
@@ -427,7 +416,7 @@ func (m *Muxer) Stop() (err error) {
 
 	close(m.sendQueue)
 	close(m.stopped)
-	close(m.tubeQueue)
+	close(m.TubeQueue)
 	<-m.senderDone
 
 	m.underlying.Close()

@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"sync/atomic"
 	"syscall"
-	"time"
 
 	"github.com/AstromechZA/etcpwdparse"
 	"github.com/creack/pty"
@@ -29,8 +28,6 @@ type sessID uint32
 type hopSession struct {
 	transportConn   *transport.Handle
 	tubeMuxer       *tubes.Muxer
-	tubeQueue       chan tubes.Tube
-	done            chan int
 	controlChannels []net.Conn
 
 	ID sessID
@@ -48,7 +45,10 @@ type hopSession struct {
 }
 
 func (sess *hopSession) checkAuthorization() bool {
-	t, _ := sess.tubeMuxer.Accept()
+	t, ok := <-sess.tubeMuxer.TubeQueue
+	if !ok {
+		panic("TODO(hosono) muxer stopping during check authorization")
+	}
 	uaTube, ok := t.(*tubes.Reliable)
 	if !ok || uaTube.Type() != common.UserAuthTube {
 		return false
@@ -89,16 +89,7 @@ func (sess *hopSession) checkAuthorization() bool {
 // calls close when it receives a signal from the code execution tube that it is finished
 // TODO(baumanl): change closing behavior for sessions without cmd/shell --> integrate port forwarding duration
 func (sess *hopSession) start() {
-	// starting tube muxer, but not yet accepting incoming tubes
-	go func() {
-		err := sess.tubeMuxer.Start()
-		sess.done <- 1
-		if err != nil {
-			logrus.Error(err)
-		}
-	}()
-	logrus.Info("S: STARTED CHANNEL MUXER")
-	time.Sleep(time.Second)
+	// Tube Muxer is started when NewMuxer is called in hopserver.go
 
 	// User Authorization
 	if !sess.checkAuthorization() {
@@ -108,25 +99,14 @@ func (sess *hopSession) start() {
 
 	// start accepting incoming tubes
 	logrus.Info("STARTING TUBE LOOP")
-	go func() {
-		for {
-			tube, err := sess.tubeMuxer.Accept()
-			if err != nil {
-				logrus.Fatalf("S: ERROR ACCEPTING TUBE: %v", err)
-			}
-			sess.tubeQueue <- tube
-		}
-	}()
-
 	proxyQueue := newPTProxyTubeQueue()
 
 	for {
 		select {
-		case <-sess.done:
-			logrus.Info("Closing everything")
-			sess.close()
-			return
-		case tube := <-sess.tubeQueue:
+		case tube, ok := <-sess.tubeMuxer.TubeQueue:
+			if !ok {
+				sess.close()
+			}
 			logrus.Infof("S: ACCEPTED NEW TUBE (%v)", tube.Type())
 			r, ok := tube.(*tubes.Reliable)
 			if !ok {
@@ -165,8 +145,6 @@ func (sess *hopSession) start() {
 
 // TODO(baumanl): look closely at closing behavior
 func (sess *hopSession) close() error {
-	var err, err2 error
-
 	sess.tubeMuxer.Stop()
 
 	// remove from server session map
@@ -174,11 +152,7 @@ func (sess *hopSession) close() error {
 	defer sess.server.sessionLock.Unlock()
 	delete(sess.server.sessions, sess.ID)
 
-	err2 = sess.transportConn.Close()
-	if err != nil {
-		return err
-	}
-	return err2
+	return sess.transportConn.Close()
 }
 
 // handleAgc handles Intent Communications from principals and updates the outstanding authgrants maps appropriately
@@ -310,7 +284,7 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 			go func() {
 				codex.Server(tube, f)
 				logrus.Info("signaling done")
-				sess.done <- 1
+				sess.close()
 			}()
 		}
 	} else {

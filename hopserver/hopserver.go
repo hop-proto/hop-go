@@ -204,8 +204,6 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 		transportConn: serverConn,
 		// TODO(hosono) add logging context to server
 		tubeMuxer:       tubes.NewMuxer(serverConn, s.config.DataTimeout, true, logrus.WithField("muxer", "server")),
-		tubeQueue:       make(chan tubes.Tube),
-		done:            make(chan int),
 		controlChannels: []net.Conn{},
 		server:          s,
 		pty:             make(chan *os.File, 1),

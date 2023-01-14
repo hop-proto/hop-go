@@ -124,14 +124,6 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (*HopClient, error) {
 	}
 
 	client.TubeMuxer = tubes.NewMuxer(client.TransportConn, client.hostconfig.DataTimeout, false, logrus.WithField("muxer", "principal subclient"))
-	go func() {
-		err := client.TubeMuxer.Start()
-		if err != nil {
-			logrus.Error("principal: subclient muxer has stopped with err: ", err)
-			return
-		}
-		logrus.Debug("principal: subclient muxer stopped without error")
-	}()
 	err = client.userAuthorization()
 	if err != nil {
 		return nil, err
