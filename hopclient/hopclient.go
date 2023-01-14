@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -101,16 +102,6 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	// c.address = address
 	c.authenticator = authenticator
 	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.hostconfig.DataTimeout, false, logrus.WithField("muxer", "client"))
-	go func() {
-		err := c.TubeMuxer.Start()
-		if c.ExecTube != nil {
-			// restoring terminal state
-			c.ExecTube.Restore()
-		}
-		if err != nil {
-			logrus.Fatal(err)
-		}
-	}()
 
 	err = c.userAuthorization()
 	if err != nil {
@@ -250,11 +241,11 @@ func (c *HopClient) Wait() {
 
 // Close explicitly closes down hop session (usually used after PF is down and can be terminated)
 func (c *HopClient) Close() error {
-	c.TubeMuxer.Stop()
 	if c.ExecTube != nil {
 		c.ExecTube.Restore()
 	}
-	return nil
+	return c.TubeMuxer.Stop()
+	//close all remote and local port forwarding relationships
 }
 
 func (c *HopClient) startUnderlying(address string, authenticator core.Authenticator) error {
@@ -322,12 +313,9 @@ func (c *HopClient) startExecTube() error {
 // HandleTubes handles incoming tube requests to the client
 func (c *HopClient) HandleTubes() {
 	//TODO(baumanl): figure out responses to different tube types/what all should be allowed
-	for {
-		t, e := c.TubeMuxer.Accept()
-		if e != nil {
-			logrus.Errorf("Muxer closing or closed. Accept failed with error: %v", e)
-			break
-		}
+	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****
+	var err error
+	for t, err := c.TubeMuxer.Accept(); err == nil; {
 		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v. Reliable? %t", t.Type(), t.IsReliable())
 
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
@@ -342,5 +330,8 @@ func (c *HopClient) HandleTubes() {
 			}
 			continue
 		}
+	}
+	if !errors.Is(err, io.EOF) {
+		logrus.Warn("error when accepting tube: %v", err)
 	}
 }

@@ -72,7 +72,7 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 	}
 	state := atomic.Value{}
 	state.Store(muxerRunning)
-	return &Muxer{
+	mux := &Muxer{
 		idParity:   idParity,
 		tubes:      make(map[byte]Tube),
 		tubeQueue:  make(chan Tube, 128),
@@ -86,6 +86,9 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 		log:        log,
 		readBuf:    make([]byte, 65535),
 	}
+
+	mux.start()
+	return mux
 }
 
 // waits for tubes to close and then removes them so their IDs can be reused
@@ -265,7 +268,11 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 
 // Accept blocks for and accepts a new tube
 func (m *Muxer) Accept() (Tube, error) {
-	s := <-m.tubeQueue
+	s, ok := <-m.tubeQueue
+	if !ok {
+		m.log.Debug("Cannot accept new tubes after muxer is closed")
+		return nil, io.EOF
+	}
 	m.log.Infof("Accepted Tube: %v", s.GetID())
 	return s, nil
 }
@@ -304,8 +311,8 @@ func (m *Muxer) sender() {
 	m.log.Debug("muxer sender stopped")
 }
 
-// Start allows a muxer to start listening and handling incoming tube requests and messages
-func (m *Muxer) Start() (err error) {
+// start allows a muxer to start listening and handling incoming tube requests and messages
+func (m *Muxer) start() (err error) {
 	go m.sender()
 
 	defer func() {
@@ -420,6 +427,7 @@ func (m *Muxer) Stop() (err error) {
 
 	close(m.sendQueue)
 	close(m.stopped)
+	close(m.tubeQueue)
 	<-m.senderDone
 
 	m.underlying.Close()
