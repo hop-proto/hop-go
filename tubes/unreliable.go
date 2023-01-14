@@ -70,7 +70,7 @@ func (u *Unreliable) makeInitFrame(req bool) initiateFrame {
 		frameNo:    0,
 		windowSize: 0,
 		flags: frameFlags{
-			ACK:  true,
+			ACK:  false,
 			FIN:  false,
 			REQ:  req,
 			RESP: !req,
@@ -83,20 +83,23 @@ func (u *Unreliable) makeInitFrame(req bool) initiateFrame {
 func (u *Unreliable) initiate(req bool) {
 	defer close(u.initiateDone)
 
-	notInit := true
-	ticker := time.NewTicker(retransmitOffset)
-	for notInit {
-		p := u.makeInitFrame(req)
-		u.sendQueue <- p.toBytes()
+	// RESP init frames are generated in receiveInitiatePkt
+	if req {
+		notInit := true
+		ticker := time.NewTicker(retransmitOffset)
+		for notInit {
+			p := u.makeInitFrame(req)
+			u.sendQueue <- p.toBytes()
 
-		select {
-		case <-ticker.C:
-			u.log.Info("init rto exceeded")
-		case <-u.initiated:
-		case <-u.closed:
-			return
+			select {
+			case <-ticker.C:
+				u.log.Info("init rto exceeded")
+			case <-u.initiated:
+			case <-u.closed:
+				return
+			}
+			notInit = u.state.Load() == created
 		}
-		notInit = u.state.Load() == created
 	}
 
 	go u.sender()
@@ -115,6 +118,12 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 
 	if u.state.CompareAndSwap(created, initiated) {
 		close(u.initiated)
+	}
+
+	// Send a RESP packet in response to REQ packets
+	if pkt.flags.REQ && u.state.Load() != closed {
+		p := u.makeInitFrame(false)
+		u.sendQueue <- p.toBytes()
 	}
 
 	return nil

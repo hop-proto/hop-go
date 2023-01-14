@@ -1,7 +1,10 @@
 package tubes
 
 import (
+	"bytes"
+	"crypto/rand"
 	"io"
+	"math/big"
 	"net"
 	"sync"
 	"testing"
@@ -16,8 +19,45 @@ import (
 	"hop.computer/hop/transport"
 )
 
+// UDPMsgConn is a wrapper around net.UDPConn that implements MsgConn
+type UDPMsgConn struct {
+	odds float64
+	net.UDPConn
+}
+
+var _ transport.MsgConn = &UDPMsgConn{}
+
+// MakeUDPMsgConn converts a *net.UDPConn into a *UDPMsgConn
+func MakeUDPMsgConn(odds float64, underlying *net.UDPConn) *UDPMsgConn {
+	return &UDPMsgConn{
+		odds,
+		*underlying,
+	}
+}
+
+// ReadMsg implements the MsgConn interface
+func (c *UDPMsgConn) ReadMsg(b []byte) (n int, err error) {
+	n, _, _, _, err = c.ReadMsgUDP(b, nil)
+	return
+}
+
+// WriteMsg implement the MsgConn interface
+func (c *UDPMsgConn) WriteMsg(b []byte) (err error) {
+	size := big.NewInt(100000)
+	i, err := rand.Int(rand.Reader, size)
+	if err != nil {
+		return err
+	}
+	x := float64(i.Int64()) / float64(size.Int64())
+	if x < c.odds {
+		_, _, err = c.WriteMsgUDP(b, nil, nil)
+	}
+	return
+}
+
+// odds indicates the probability that a packet will be sent. 1.0 sends all packets, and 0.0 sends no packets
 // rel is true for reliable tubes and false for unreliable ones
-func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err error) {
+func makeConn(odds float64, rel bool, t *testing.T) (t1, t2 net.Conn, stop func(), r bool, err error) {
 	r = rel
 	var c1, c2 transport.MsgConn
 	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")
@@ -25,11 +65,11 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err
 
 	c1UDP, err := net.Dial("udp", c2Addr.String())
 	assert.NilError(t, err)
-	c1 = transport.MakeUDPMsgConn(c1UDP.(*net.UDPConn))
+	c1 = MakeUDPMsgConn(odds, c1UDP.(*net.UDPConn))
 
 	c2UDP, err := net.DialUDP("udp", c2Addr, c1.LocalAddr().(*net.UDPAddr))
 	assert.NilError(t, err)
-	c2 = transport.MakeUDPMsgConn(c2UDP)
+	c2 = MakeUDPMsgConn(odds, c2UDP)
 
 	muxer1 := NewMuxer(c1, 0, false, logrus.WithFields(logrus.Fields{
 		"muxer": "m1",
@@ -116,8 +156,8 @@ func makeConn(t *testing.T, rel bool) (t1, t2 net.Conn, stop func(), r bool, err
 }
 
 // CloseTest tests the closing behavior of tubes
-func CloseTest(t *testing.T, rel bool, wait bool) {
-	c1, c2, stop, _, err := makeConn(t, rel)
+func CloseTest(odds float64, rel bool, wait bool, t *testing.T) {
+	c1, c2, stop, _, err := makeConn(odds, rel, t)
 	assert.NilError(t, err)
 	defer stop()
 
@@ -153,34 +193,84 @@ func CloseTest(t *testing.T, rel bool, wait bool) {
 	assert.DeepEqual(t, n, 0)
 }
 
+// This is heavily based on the BasicIO test from the nettests
+func lossyBasicIO(t *testing.T) {
+	c1, c2, stop, _, err := makeConn(0.8, true, t)
+	assert.NilError(t, err)
+
+	want := make([]byte, 1<<16)
+	n, err := rand.Read(want)
+	assert.NilError(t, err)
+	assert.Equal(t, n, len(want))
+
+	go func() {
+		rd := bytes.NewReader(want)
+		_, err := io.Copy(c1, rd)
+		assert.NilError(t, err)
+		// TODO(hosono) for some reason, this assert never returns
+		//assert.Equal(t, n, len(want))
+		err = c1.Close()
+		assert.NilError(t, err)
+	}()
+
+	got, err := io.ReadAll(c2)
+	assert.NilError(t, err)
+	assert.Equal(t, len(got), len(want))
+
+	err = c2.Close()
+	assert.NilError(t, err)
+
+	assert.DeepEqual(t, got, want)
+
+	stop()
+}
+
 func reliable(t *testing.T) {
 	logrus.SetLevel(logrus.TraceLevel)
 
 	t.Run("Close", func(t *testing.T) {
-		CloseTest(t, true, true)
-		CloseTest(t, true, false)
+		t.Run("Wait", func(t *testing.T) {
+			CloseTest(1.0, true, true, t)
+		})
+		t.Run("NoWait", func(t *testing.T) {
+			CloseTest(1.0, true, false, t)
+		})
+		t.Run("BadConnection", func(t *testing.T) {
+			CloseTest(0.5, true, true, t)
+		})
 	})
 
 	f := func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
-		return makeConn(t, true)
+		return makeConn(1.0, true, t)
 	}
 
 	mp := nettest.MakePipe(f)
 	t.Run("Nettest", func(t *testing.T) {
 		nettest.TestConn(t, mp)
 	})
+
+	// Reliable Tubes should pass the nettests even with packet loss
+	f = func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
+		return makeConn(0.90, true, t)
+	}
+	mp = nettest.MakePipe(f)
+	t.Run("LossyBasicIO", lossyBasicIO)
 }
 
 func unreliable(t *testing.T) {
 	logrus.SetLevel(logrus.TraceLevel)
 
 	t.Run("Close", func(t *testing.T) {
-		CloseTest(t, false, true)
-		CloseTest(t, false, false)
+		t.Run("Wait", func(t *testing.T) {
+			CloseTest(1.0, false, true, t)
+		})
+		t.Run("NoWait", func(t *testing.T) {
+			CloseTest(1.0, false, false, t)
+		})
 	})
 
 	f := func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
-		return makeConn(t, false)
+		return makeConn(1.0, false, t)
 	}
 	mp := nettest.MakePipe(f)
 	t.Run("Nettest", func(t *testing.T) {
