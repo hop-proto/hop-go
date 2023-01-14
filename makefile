@@ -32,10 +32,12 @@ test: ## test
 test:
 	go test -race ./... -timeout 180s
 
+.PHONY: authgrant-dev
+authgrant-dev: ## launch two containers running two servers to test authgrant protocol
+	make -C hack authgrant-dev
+
 .PHONY: serve-dev
 serve-dev: ## launch a container running the server with code mounted in
 	make -C hack serve-dev
 
-.PHONY: authgrant-dev
-authgrant-dev:
-	make -C hack authgrant-dev
+
