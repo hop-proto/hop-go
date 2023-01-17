@@ -1,10 +1,8 @@
 package hoptests
 
 import (
-	"io"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"sync"
 	"testing"
@@ -50,9 +48,10 @@ type TestServer struct {
 	AuthorizedKeyFiles map[string][]byte // username to file contents
 	FileSystem         *fstest.MapFS
 
-	UDPConn   *net.UDPConn
-	Transport *transport.Server
-	Server    *hopserver.HopServer
+	UDPConn    *net.UDPConn
+	Transport  *transport.Server
+	Server     *hopserver.HopServer
+	ServerName string
 }
 
 // One hopclient process
@@ -92,7 +91,9 @@ func NewTestServer(t *testing.T) *TestServer {
 	s.Intermediate.ProvideKey((*[32]byte)(&s.IntermediateKeyPair.Private))
 	assert.NilError(t, err)
 
-	s.Leaf, err = certs.IssueLeaf(s.Intermediate, certs.LeafIdentity(s.LeafKeyPair, certs.DNSName("example.local")))
+	s.ServerName = "example.local"
+
+	s.Leaf, err = certs.IssueLeaf(s.Intermediate, certs.LeafIdentity(s.LeafKeyPair, certs.DNSName(s.ServerName)))
 	assert.NilError(t, err)
 
 	s.Store = certs.Store{}
@@ -195,22 +196,26 @@ func NewTestClient(t *testing.T, s *TestServer, username string, isPrincipal boo
 		User:         username,
 		AutoSelfSign: true,
 		Key:          "home/" + username + "/.hop/id_hop.pem",
-		IsPrincipal:  isPrincipal,
+		IsPrincipal:  true,
+		ServerName:   s.ServerName,
+		CAFiles:      []string{"home/username/.hop/root.cert", "home/username/.hop/intermediate.cert"},
 	}
 
-	hopBinary, err := os.Open("../containers/delegate_proxy_server/hop")
-	assert.NilError(t, err)
-	hopBytes, err := io.ReadAll(hopBinary)
-	assert.NilError(t, err)
+	rootBytes, _ := certs.EncodeCertificateToPEM(s.Root)
+	intermediateBytes, _ := certs.EncodeCertificateToPEM(s.Intermediate)
 
 	c.FileSystem = &fstest.MapFS{
 		"home/" + username + "/.hop/" + common.DefaultKeyFile: &fstest.MapFile{
 			Data: []byte(c.KeyPair.Private.String() + "\n"),
 			Mode: 0600,
 		},
-		"hop": &fstest.MapFile{
-			Data: hopBytes,
-			Mode: 0007,
+		"home/username/.hop/root.cert": &fstest.MapFile{
+			Data: rootBytes,
+			Mode: 0600,
+		},
+		"home/username/.hop/intermediate.cert": &fstest.MapFile{
+			Data: intermediateBytes,
+			Mode: 0600,
 		},
 	}
 
