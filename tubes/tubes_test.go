@@ -120,24 +120,20 @@ func makeConn(odds float64, rel bool, t *testing.T) (t1, t2 net.Conn, stop func(
 			defer wg.Done()
 			t1.Close()
 			t1.(Tube).WaitForClose()
-			muxer1.Stop()
+			err := muxer1.Stop()
+			assert.NilError(t, err)
 			assert.DeepEqual(t, muxer1.state.Load(), muxerStopped)
 		}()
 		go func() {
 			defer wg.Done()
 			t2.Close()
 			t2.(Tube).WaitForClose()
-			muxer2.Stop()
+			err := muxer2.Stop()
+			assert.NilError(t, err)
 			assert.DeepEqual(t, muxer2.state.Load(), muxerStopped)
 		}()
 
 		wg.Wait()
-
-		err = muxer1.WaitForStop()
-		assert.NilError(t, err)
-
-		err = muxer1.WaitForStop()
-		assert.NilError(t, err)
 
 		c1.Close()
 		c2.Close()

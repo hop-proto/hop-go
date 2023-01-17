@@ -46,21 +46,17 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 		wg := sync.WaitGroup{}
 		wg.Add(2)
 		go func() {
-			m1.Stop()
+			err := m1.Stop()
+			assert.NilError(t, err)
 			wg.Done()
 		}()
 		go func() {
-			m2.Stop()
+			err := m2.Stop()
+			assert.NilError(t, err)
 			wg.Done()
 		}()
 
 		wg.Wait()
-
-		err = m1.WaitForStop()
-		assert.NilError(t, err)
-
-		err = m2.WaitForStop()
-		assert.NilError(t, err)
 
 		c1UDP.Close()
 		c2UDP.Close()

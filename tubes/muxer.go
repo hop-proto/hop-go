@@ -59,7 +59,7 @@ type Muxer struct {
 	log        *logrus.Entry
 
 	// +checklocks:m
-	startErr error
+	startErr chan error
 
 	// This buffer is only used in m.readMsg
 	readBuf []byte
@@ -88,14 +88,10 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 		timeout:    timeout,
 		log:        log,
 		readBuf:    make([]byte, 65535),
+		startErr:   make(chan error),
 	}
 
-	go func() {
-		err := mux.start()
-		mux.m.Lock()
-		defer mux.m.Unlock()
-		mux.startErr = err
-	}()
+	go mux.start()
 	return mux
 }
 
@@ -309,17 +305,21 @@ func (m *Muxer) sender() {
 }
 
 // start allows a muxer to start listening and handling incoming tube requests and messages
-func (m *Muxer) start() (err error) {
+func (m *Muxer) start() {
 	go m.sender()
 
+	// When start finishes, it sends its error on this channel.
+	// m.Stop receives this error and passes it to the called.
+	var err error
 	defer func() {
 		// This case indicates that the muxer was stopped by m.Stop()
 		if m.state.Load() == muxerStopped || errors.Is(err, syscall.ECONNREFUSED) {
 			err = nil
 		} else if err != nil {
 			m.log.Errorf("Muxer ended with error: %s", err)
-			m.Stop()
+			go m.Stop()
 		}
+		m.startErr <- err
 	}()
 
 	// Set initial timeout
@@ -329,7 +329,7 @@ func (m *Muxer) start() (err error) {
 	for m.state.Load() != muxerStopped {
 		frame, err := m.readMsg()
 		if err != nil {
-			return err
+			return
 		}
 		var tube Tube
 		tube, ok := m.getTube(frame.tubeID)
@@ -365,15 +365,7 @@ func (m *Muxer) start() (err error) {
 
 	}
 
-	return nil
-}
-
-// WaitForStop blocks until the muxer is stopped and returns any error returned by start
-func (m *Muxer) WaitForStop() error {
-	<-m.stopped
-	m.m.Lock()
-	defer m.m.Unlock()
-	return m.startErr
+	return
 }
 
 // Stop ensures all the muxer tubes are closed
@@ -438,5 +430,7 @@ func (m *Muxer) Stop() (err error) {
 	m.underlying.Close()
 
 	m.log.Info("Muxer.Stop() finished")
-	return nil
+
+	err = <-m.startErr
+	return err
 }
