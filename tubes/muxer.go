@@ -366,6 +366,14 @@ func (m *Muxer) start() {
 	}
 }
 
+// WaitForStop blocks until the muxer is stopped and returns any error returned by start
+func (m *Muxer) WaitForStop() error {
+	<-m.stopped
+	m.m.Lock()
+	defer m.m.Unlock()
+	return m.startErr
+}
+
 // Stop ensures all the muxer tubes are closed
 func (m *Muxer) Stop() (err error) {
 	m.m.Lock()
