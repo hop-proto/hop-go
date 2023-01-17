@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -314,7 +313,6 @@ func (c *HopClient) startExecTube() error {
 func (c *HopClient) HandleTubes() {
 	//TODO(baumanl): figure out responses to different tube types/what all should be allowed
 	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****
-	var err error
 	for t := range c.TubeMuxer.TubeQueue {
 		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v. Reliable? %t", t.Type(), t.IsReliable())
 
@@ -328,10 +326,6 @@ func (c *HopClient) HandleTubes() {
 			if e != nil {
 				logrus.Errorf("Error closing tube: %v", e)
 			}
-			continue
 		}
-	}
-	if !errors.Is(err, io.EOF) {
-		logrus.Warnf("error when accepting tube: %v", err)
 	}
 }
