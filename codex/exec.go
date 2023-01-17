@@ -68,7 +68,6 @@ func getStatus(t *tubes.Reliable) error {
 // NewExecTube sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
 // Stores state in an ExecChan struct so stdin can be manipulated during authgrant process
 func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTube, error) {
-	// TODO(baumanl): if no actual attached terminal then this causes issues.
 	var oldState *term.State
 	var e error
 	var termEnv string
@@ -128,7 +127,7 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 
 	go func(ex *ExecTube) {
 		defer wg.Done()
-		io.Copy(os.Stdout, ex.tube) //read bytes from tube to os.Stdout
+		io.Copy(os.Stdout, ex.tube) // read bytes from tube to os.Stdout
 		if oldState != nil {
 			term.Restore(int(os.Stdin.Fd()), oldState)
 		}

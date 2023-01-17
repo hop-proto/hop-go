@@ -104,6 +104,7 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	go func() {
 		err := c.TubeMuxer.Start()
 		if c.ExecTube != nil {
+			// restoring terminal state
 			c.ExecTube.Restore()
 		}
 		if err != nil {
@@ -235,7 +236,6 @@ func (c *HopClient) Start() error {
 		logrus.Error(err)
 		return ErrClientStartingExecTube
 	}
-	// }
 
 	// handle incoming tubes
 	go c.HandleTubes()
@@ -250,8 +250,11 @@ func (c *HopClient) Wait() {
 
 // Close explicitly closes down hop session (usually used after PF is down and can be terminated)
 func (c *HopClient) Close() error {
-	panic("not implemented")
-	//close all remote and local port forwarding relationships
+	c.TubeMuxer.Stop()
+	if c.ExecTube != nil {
+		c.ExecTube.Restore()
+	}
+	return nil
 }
 
 func (c *HopClient) startUnderlying(address string, authenticator core.Authenticator) error {
@@ -300,7 +303,6 @@ func (c *HopClient) startExecTube() error {
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	//Hop Session is tied to the life of this code execution tube.
 	// TODO(baumanl): provide support for Cmd in ClientConfig
-
 	logrus.Infof("Performing action: %v", c.hostconfig.Cmd)
 	ch, err := c.TubeMuxer.CreateReliableTube(common.ExecTube)
 	if err != nil {
@@ -320,12 +322,11 @@ func (c *HopClient) startExecTube() error {
 // HandleTubes handles incoming tube requests to the client
 func (c *HopClient) HandleTubes() {
 	//TODO(baumanl): figure out responses to different tube types/what all should be allowed
-	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****
 	for {
 		t, e := c.TubeMuxer.Accept()
 		if e != nil {
-			logrus.Errorf("Error accepting tube: %v", e)
-			continue
+			logrus.Errorf("Muxer closing or closed. Accept failed with error: %v", e)
+			break
 		}
 		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v. Reliable? %t", t.Type(), t.IsReliable())
 
@@ -334,7 +335,7 @@ func (c *HopClient) HandleTubes() {
 		} else if t.Type() == common.RemotePFTube {
 			panic("client RemotePFTubes: unimplemented")
 		} else {
-			//Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
+			// Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
 			e := t.Close()
 			if e != nil {
 				logrus.Errorf("Error closing tube: %v", e)
@@ -342,10 +343,4 @@ func (c *HopClient) HandleTubes() {
 			continue
 		}
 	}
-	/*
-		switch {
-		case <- mux.Stop()
-		case <- mux.Accept()
-		}
-	*/
 }

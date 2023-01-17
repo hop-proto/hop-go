@@ -48,7 +48,6 @@ type hopSession struct {
 }
 
 func (sess *hopSession) checkAuthorization() bool {
-	time.Sleep(time.Second * 3) // TODO(baumanl): hack to avoid muxer bug till tubes pr merged
 	t, _ := sess.tubeMuxer.Accept()
 	uaTube, ok := t.(*tubes.Reliable)
 	if !ok || uaTube.Type() != common.UserAuthTube {
