@@ -102,44 +102,41 @@ func (sess *hopSession) start() {
 	proxyQueue := newPTProxyTubeQueue()
 
 	for {
-		select {
-		case tube, ok := <-sess.tubeMuxer.TubeQueue:
-			if !ok {
-				sess.close()
-			}
-			logrus.Infof("S: ACCEPTED NEW TUBE (%v)", tube.Type())
-			r, ok := tube.(*tubes.Reliable)
-			if !ok {
-				// TODO(hosono) handle unreliable tubes (general case)
-				r, ok := tube.(*tubes.Unreliable)
-				if ok && r.Type() == common.PrincipalProxyTube {
-					// add to map and signal waiting processes
-					proxyQueue.lock.Lock()
-					proxyQueue.tubes[r.GetID()] = r
-					proxyQueue.lock.Unlock()
-					proxyQueue.cv.Broadcast()
-					logrus.Infof("session muxer broadcasted that unreliable tube is here: %x", r.GetID())
-				}
-				continue
-			}
-			switch tube.Type() {
-			case common.ExecTube:
-				go sess.startCodex(r)
-			case common.AuthGrantTube:
-				go sess.handleAgc(r)
-			case common.PrincipalProxyTube:
-				go sess.startPTProxy(r, proxyQueue)
-			case common.RemotePFTube:
-				panic("unimplemented: remote pf")
-			case common.LocalPFTube:
-				panic("unimplmented: local pf")
-			case common.WinSizeTube:
-				go sess.startSizeTube(r)
-			default:
-				tube.Close() // Close unrecognized tube types
-			}
+		tube, ok := <-sess.tubeMuxer.TubeQueue
+		if !ok {
+			sess.close()
 		}
-
+		logrus.Infof("S: ACCEPTED NEW TUBE (%v)", tube.Type())
+		r, ok := tube.(*tubes.Reliable)
+		if !ok {
+			// TODO(hosono) handle unreliable tubes (general case)
+			r, ok := tube.(*tubes.Unreliable)
+			if ok && r.Type() == common.PrincipalProxyTube {
+				// add to map and signal waiting processes
+				proxyQueue.lock.Lock()
+				proxyQueue.tubes[r.GetID()] = r
+				proxyQueue.lock.Unlock()
+				proxyQueue.cv.Broadcast()
+				logrus.Infof("session muxer broadcasted that unreliable tube is here: %x", r.GetID())
+			}
+			continue
+		}
+		switch tube.Type() {
+		case common.ExecTube:
+			go sess.startCodex(r)
+		case common.AuthGrantTube:
+			go sess.handleAgc(r)
+		case common.PrincipalProxyTube:
+			go sess.startPTProxy(r, proxyQueue)
+		case common.RemotePFTube:
+			panic("unimplemented: remote pf")
+		case common.LocalPFTube:
+			panic("unimplmented: local pf")
+		case common.WinSizeTube:
+			go sess.startSizeTube(r)
+		default:
+			tube.Close() // Close unrecognized tube types
+		}
 	}
 }
 
