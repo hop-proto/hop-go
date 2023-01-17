@@ -20,7 +20,7 @@ import (
 	"hop.computer/hop/hack/data"
 )
 
-func buildContainer(ctx context.Context, c *client.Client) error {
+func buildContainer(ctx context.Context, c *client.Client, dFile string, id string) error {
 	// This only works because the Dockerfile is in the same root as the container.
 	path := filepath.Join(data.Workspace(), "containers")
 	t, err := archive.TarWithOptions(path, &archive.TarOptions{})
@@ -28,8 +28,8 @@ func buildContainer(ctx context.Context, c *client.Client) error {
 		return err
 	}
 	res, err := c.ImageBuild(ctx, t, types.ImageBuildOptions{
-		Dockerfile: "hopd-dev.dockerfile",
-		Tags:       []string{"hopd-dev"},
+		Dockerfile: dFile,
+		Tags:       []string{id},
 		Remove:     true,
 	})
 	if err != nil {
@@ -40,9 +40,9 @@ func buildContainer(ctx context.Context, c *client.Client) error {
 	return nil
 }
 
-func runContainer(ctx context.Context, c *client.Client) error {
+func runContainer(ctx context.Context, c *client.Client, id string, hostport string) error {
 	containerConfig := container.Config{
-		Image:        "hopd-dev",
+		Image:        id,
 		Volumes:      map[string]struct{}{"/app": {}},
 		ExposedPorts: nat.PortSet{"77/udp": {}},
 	}
@@ -55,7 +55,8 @@ func runContainer(ctx context.Context, c *client.Client) error {
 				ReadOnly: true,
 			},
 		},
-		PortBindings: nat.PortMap{"77/udp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: "7777"}}},
+		PortBindings: nat.PortMap{"77/udp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: hostport}}},
+		AutoRemove:   true,
 	}
 	res, err := c.ContainerCreate(ctx, &containerConfig, &hostConfig, nil, nil, "")
 	if err != nil {
@@ -86,10 +87,24 @@ func main() {
 	action := args[0]
 	switch action {
 	case "server":
-		if err := buildContainer(ctx, c); err != nil {
+		if err := buildContainer(ctx, c, "./hopd-dev.dockerfile", "hopd-dev"); err != nil {
 			logrus.Fatalf("unable to build container: %s", err)
 		}
-		if err := runContainer(ctx, c); err != nil {
+		if err := runContainer(ctx, c, "hopd-dev", "7777"); err != nil {
+			logrus.Fatalf("unable to run container: %s", err)
+		}
+	case "delegate":
+		if err := buildContainer(ctx, c, "./delegate_proxy_server/delegate_proxy.dockerfile", "delegate_proxy_server"); err != nil {
+			logrus.Fatalf("unable to build container: %s", err)
+		}
+		if err := runContainer(ctx, c, "delegate_proxy_server", "8888"); err != nil {
+			logrus.Fatalf("unable to run container: %s", err)
+		}
+	case "target":
+		if err := buildContainer(ctx, c, "./target_server/target_server.dockerfile", "target_server"); err != nil {
+			logrus.Fatalf("unable to build container: %s", err)
+		}
+		if err := runContainer(ctx, c, "target_server", "9999"); err != nil {
 			logrus.Fatalf("unable to run container: %s", err)
 		}
 	case "":

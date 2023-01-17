@@ -2,4 +2,7 @@ ListenAddress = ":77"
 
 Key = "/etc/hopd/id_hop.pem"
 Certificate = "/etc/hopd/id_hop.cert"
-InsecureSkipVerify = true
+
+Users = ["root"]
+EnableAuthorizedKeys = true
+AllowAuthgrants = true

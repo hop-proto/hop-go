@@ -374,11 +374,14 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	}
 
 	if !hs.certVerify.InsecureSkipVerify {
+		logrus.Debug("client: performing server certificate validation")
 		err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
 		if err != nil {
 			logrus.Errorf("client: failed to verify certificate: %s", err)
 			return 0, err
 		}
+	} else {
+		logrus.Debug("client: InsecureSkipVerify set. Not verifying server certificate")
 	}
 
 	// DH

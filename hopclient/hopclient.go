@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"sync"
 	"testing/fstest"
-	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -105,13 +104,14 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	go func() {
 		err := c.TubeMuxer.Start()
 		if c.ExecTube != nil {
+			// restoring terminal state
 			c.ExecTube.Restore()
 		}
 		if err != nil {
 			logrus.Fatal(err)
 		}
 	}()
-	time.Sleep(time.Second) // TODO(baumanl): hack to avoid muxer bug till tubes pr merged
+
 	err = c.userAuthorization()
 	if err != nil {
 		return err
@@ -157,6 +157,10 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		HTTPClient: http.DefaultClient,
 	}
 
+	verifyConfig := transport.VerifyConfig{
+		InsecureSkipVerify: true, // TODO(baumanl): enable host key verification
+	}
+
 	// Connect to the agent
 	aconn, _ := net.Dial("tcp", agentURL)
 
@@ -172,11 +176,9 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		copy(public[:], bc.Public[:]) // TODO(baumanl): resolve public key type awkwardness
 		leaf = loadLeaf(leafFile, autoSelfSign, &public, hc.HostURL())
 		authenticator = core.AgentAuthenticator{
-			BoundClient: bc,
-			VerifyConfig: transport.VerifyConfig{
-				InsecureSkipVerify: true, // TODO
-			},
-			Leaf: leaf,
+			BoundClient:  bc,
+			VerifyConfig: verifyConfig,
+			Leaf:         leaf,
 		}
 		logrus.Info("leaf: ", leaf)
 	} else {
@@ -191,10 +193,8 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		logrus.Infof("no agent running")
 		authenticator = core.InMemoryAuthenticator{
 			X25519KeyPair: keypair,
-			VerifyConfig: transport.VerifyConfig{
-				InsecureSkipVerify: true, // TODO(dadrian): Host-key verification
-			},
-			Leaf: leaf,
+			VerifyConfig:  verifyConfig,
+			Leaf:          leaf,
 		}
 	}
 	c.authenticator = authenticator
@@ -236,7 +236,6 @@ func (c *HopClient) Start() error {
 		logrus.Error(err)
 		return ErrClientStartingExecTube
 	}
-	// }
 
 	// handle incoming tubes
 	go c.HandleTubes()
@@ -251,8 +250,11 @@ func (c *HopClient) Wait() {
 
 // Close explicitly closes down hop session (usually used after PF is down and can be terminated)
 func (c *HopClient) Close() error {
-	panic("not implemented")
-	//close all remote and local port forwarding relationships
+	c.TubeMuxer.Stop()
+	if c.ExecTube != nil {
+		c.ExecTube.Restore()
+	}
+	return nil
 }
 
 func (c *HopClient) startUnderlying(address string, authenticator core.Authenticator) error {
@@ -263,13 +265,10 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 		Leaf:      authenticator.GetLeaf(),
 	}
 	var err error
-	// if !c.Proxied {
 	var dialer net.Dialer
 	dialer.Timeout = c.hostconfig.HandshakeTimeout
 	c.TransportConn, err = transport.DialWithDialer(&dialer, "udp", address, transportConfig)
-	// } else {
-	// 	c.TransportConn, err = transport.DialNP("netproxy", address, c.ProxyConn, transportConfig)
-	// }
+
 	if err != nil {
 		logrus.Errorf("C: error dialing server: %v", err)
 		return err
@@ -287,7 +286,10 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 
 func (c *HopClient) userAuthorization() error {
 	//PERFORM USER AUTHORIZATION******
-	uaCh, _ := c.TubeMuxer.CreateReliableTube(common.UserAuthTube)
+	uaCh, err := c.TubeMuxer.CreateReliableTube(common.UserAuthTube)
+	if err != nil {
+		logrus.Errorf("error creating userAuthTube")
+	}
 	defer uaCh.Close()
 	logrus.Infof("requesting auth for %s", c.hostconfig.User)
 	if ok := userauth.RequestAuthorization(uaCh, c.hostconfig.User); !ok {
@@ -301,7 +303,6 @@ func (c *HopClient) startExecTube() error {
 	//*****RUN COMMAND (BASH OR AG ACTION)*****
 	//Hop Session is tied to the life of this code execution tube.
 	// TODO(baumanl): provide support for Cmd in ClientConfig
-
 	logrus.Infof("Performing action: %v", c.hostconfig.Cmd)
 	ch, err := c.TubeMuxer.CreateReliableTube(common.ExecTube)
 	if err != nil {
@@ -321,21 +322,20 @@ func (c *HopClient) startExecTube() error {
 // HandleTubes handles incoming tube requests to the client
 func (c *HopClient) HandleTubes() {
 	//TODO(baumanl): figure out responses to different tube types/what all should be allowed
-	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****
 	for {
 		t, e := c.TubeMuxer.Accept()
 		if e != nil {
-			logrus.Errorf("Error accepting tube: %v", e)
-			continue
+			logrus.Errorf("Muxer closing or closed. Accept failed with error: %v", e)
+			break
 		}
 		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v. Reliable? %t", t.Type(), t.IsReliable())
 
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
 			go c.newPrincipalInstanceSetup(r)
 		} else if t.Type() == common.RemotePFTube {
-			panic("unimplemented")
+			panic("client RemotePFTubes: unimplemented")
 		} else {
-			//Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
+			// Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
 			e := t.Close()
 			if e != nil {
 				logrus.Errorf("Error closing tube: %v", e)
@@ -343,10 +343,4 @@ func (c *HopClient) HandleTubes() {
 			continue
 		}
 	}
-	/*
-		switch {
-		case <- mux.Stop()
-		case <- mux.Accept()
-		}
-	*/
 }

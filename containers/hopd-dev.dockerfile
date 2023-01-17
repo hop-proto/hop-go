@@ -1,4 +1,4 @@
-FROM golang:1.17
+FROM golang:1.19
 
 RUN mkdir -p /etc/hopd
 COPY id_server.pem /etc/hopd/id_hop.pem

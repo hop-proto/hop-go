@@ -42,9 +42,10 @@ type ServerConfig struct {
 	InsecureSkipVerify          *bool
 	EnableCertificateValidation *bool
 	EnableAuthorizedKeys        *bool
+	Users                       []string
 
 	AllowAuthgrants     *bool // as an authgrant Target this server will approve authgrants and as an authgrant Delegate server will proxy ag intent requests
-	AgProxyListenSocket string
+	AgProxyListenSocket *string
 }
 
 // HostConfigOptional contains a definition of a host pattern in a client
@@ -265,7 +266,7 @@ func locateHopClientConfigDirectory() {
 		clientDirectory = ""
 		return
 	}
-	clientDirectory = filepath.Join(home, common.UserConfigDirtory)
+	clientDirectory = filepath.Join(home, common.UserConfigDirectory)
 }
 
 // UserDirectory returns the path to Hop configuration directory for the current user.
@@ -280,7 +281,7 @@ func UserDirectoryFor(username string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(u.HomeDir, common.UserConfigDirtory), nil
+	return filepath.Join(u.HomeDir, common.UserConfigDirectory), nil
 }
 
 // DefaultKeyPath returns UserDirectory()/id_hop.pem.
@@ -375,9 +376,12 @@ func (hc *HostConfig) HostURL() core.URL {
 // HostURL extracts the Hostname, Port, and User from the HostConfig into an
 // core.URL.
 func (hc *HostConfigOptional) HostURL() core.URL {
-	u := core.URL{
-		Host: *hc.Hostname,
-		User: *hc.User,
+	u := core.URL{}
+	if hc.Hostname != nil {
+		u.Host = *hc.Hostname
+	}
+	if hc.User != nil {
+		u.User = *hc.User
 	}
 	if hc.Port != 0 {
 		u.Port = strconv.Itoa(hc.Port)

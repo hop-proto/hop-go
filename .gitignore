@@ -8,3 +8,4 @@ cmd/hop-keygen/hop-keygen
 cmd/remotePF/remotePF
 cmd/log.txt
 wireshark/lib*
+containers/delegate_proxy_server/hop

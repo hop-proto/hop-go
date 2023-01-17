@@ -16,12 +16,13 @@ func TestProxySimpleDenial(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
+	msg := authgrants.AgMessage{
+		MsgType: authgrants.IntentDenied,
+		Data:    authgrants.MessageData{Denial: "I say so"},
+	}
+
 	go func() {
 		// principal
-		msg := authgrants.AgMessage{
-			MsgType: authgrants.IntentDenied,
-			Data:    authgrants.MessageData{Denial: "I say so"},
-		}
 		_, err := msg.WriteTo(p)
 		assert.NilError(t, err)
 		recMsg := new(authgrants.AgMessage)
@@ -37,6 +38,8 @@ func TestProxySimpleDenial(t *testing.T) {
 		assert.NilError(t, err)
 		err = c.Close()
 		assert.NilError(t, err)
+		assert.Equal(t, msg.MsgType, recMsg.MsgType)
+		assert.Equal(t, msg.Data.Denial, recMsg.Data.Denial)
 		wg.Done()
 	}()
 

@@ -3,6 +3,7 @@ package hopserver
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"sync"
@@ -56,21 +57,29 @@ func unreliableProxyOneSide(a transport.UDPLike, b transport.UDPLike) {
 	buf := make([]byte, 65535)
 	for {
 		// TODO(baumanl): calibrate timeouts
-		a.SetReadDeadline(time.Now().Add(time.Second))
+		a.SetReadDeadline(time.Now().Add(time.Second * 30))
 		n, _, _, _, err := a.ReadMsgUDP(buf, nil)
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
 				logrus.Errorf("pt proxy: read deadline exceeded: %s", err)
 				return
 			}
+			if errors.Is(err, io.EOF) {
+				logrus.Error("pt_proxy: encountered EOF reading msg udp, returning: ", err)
+				return
+			}
 			logrus.Error(err)
 			continue
 		}
-		b.SetWriteDeadline(time.Now().Add(time.Second))
+		b.SetWriteDeadline(time.Now().Add(time.Second * 30))
 		_, _, err = b.WriteMsgUDP(buf[:n], nil, nil)
 		if err != nil {
 			if errors.Is(err, os.ErrDeadlineExceeded) {
 				logrus.Errorf("pt proxy: write deadline exceeded: %s", err)
+				return
+			}
+			if errors.Is(err, io.EOF) {
+				logrus.Error("pt_proxy: encountered EOF writing msg udp, returning: ", err)
 				return
 			}
 			logrus.Error(err)
@@ -89,7 +98,6 @@ func unreliableProxyHelper(a transport.UDPLike, b transport.UDPLike) {
 
 // manage principal to target proxying (t is a reliable tube)
 func (sess *hopSession) startPTProxy(t net.Conn, pq *ptProxyTubeQueue) {
-	defer t.Close()
 
 	// TODO(baumanl): add check for authgrant?
 
@@ -101,46 +109,79 @@ func (sess *hopSession) startPTProxy(t net.Conn, pq *ptProxyTubeQueue) {
 
 	// receive target message
 	var targetInfo authgrants.TargetInfo
-	_, err := targetInfo.ReadFrom(t)
+	url, err := authgrants.ReadTargetInfo(t)
 	if err != nil {
+		logrus.Errorf("pt_proxy: error reading target info: %s", err)
 		authgrants.WriteFailure(t, "Server: unable to read target info")
 		return
 	}
+	targetInfo.TargetURL = *url
+	logrus.Info("pt_proxy: read targetinfo")
 
 	// connect to target
 	targetConn, err := targetInfo.ConnectToTarget()
 	if err != nil {
+		logrus.Errorf("pt_proxy: error connecting to target: %s", err)
 		authgrants.WriteFailure(t, fmt.Sprint(err))
 		return
 	}
+	logrus.Info("pt_proxy: connected to target")
 	defer targetConn.Close()
 	err = authgrants.WriteConfirmation(t)
 	if err != nil {
+		logrus.Error("pt_proxy: error writing confirmation of target conn")
 		return
 	}
+	logrus.Info("pt_proxy: wrote confirmation of target conn")
 
 	// receive unreliable principal proxy tube id
 	tubeID, err := authgrants.ReadUnreliableProxyID(t)
 	if err != nil {
 		logrus.Errorf("Server: error reading unreliable proxy id: %s", err)
 	}
+	logrus.Infof("pt_proxy: got unreliable proxy ID: %v", tubeID)
 
+	test := func(m map[byte]*tubes.Unreliable, b byte) bool {
+		_, ok := m[b]
+		return ok
+	}
 	// check (and keep checking on signal) for the unreliable tube with the id
 	pq.lock.Lock()
-	for _, ok := pq.tubes[tubeID]; !ok; {
+	logrus.Info("pt_proxy: acquired pq.lock for the first time")
+	for !test(pq.tubes, tubeID) {
+		logrus.Info("tube not here yet. waiting...")
 		pq.cv.Wait()
 	}
 
 	principalTube := pq.tubes[tubeID]
+	logrus.Info("pt_proxy: got the unreliable tube")
 	delete(pq.tubes, tubeID)
 	pq.lock.Unlock()
 
 	// send confirmation to principal
 	err = authgrants.WriteConfirmation(t)
 	if err != nil {
+		logrus.Errorf("pt_proxy: error writing confirmation to principal: %s", err)
 		return
 	}
 
+	// t.Close() // bug to have this called right after write? (for now leave open till done proxying)
+
+	logrus.Info("pt_proxy: wrote conf to principal; starting unreliable proxy")
+
 	// proxy
 	unreliableProxyHelper(principalTube, targetConn)
+
+	err = principalTube.Close()
+	if err != nil {
+		logrus.Error("pt_proxy: error closing unreliable principal tube: ", err)
+	}
+	err = targetConn.Close()
+	if err != nil {
+		logrus.Error("pt_proxy: error closing target conn udp conn: ", err)
+	}
+	err = t.Close()
+	if err != nil {
+		logrus.Error("pt_proxy: error closing reliable principal conn: ", err)
+	}
 }

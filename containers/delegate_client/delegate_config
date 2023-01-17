@@ -1,7 +1,7 @@
 [Global]
 AutoSelfSign = true
-IsPrincipal = true
+
 
 [[Hosts]]
 Patterns = ["127.0.0.1"]
-Key = "containers/id_client.pem"
+IsPrincipal = false
