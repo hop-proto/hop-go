@@ -150,7 +150,7 @@ func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
 		return nil, err
 	}
 	tube, err := m.makeReliableTubeWithID(tType, id, true)
-	if err != nil {
+	if err == nil {
 		m.log.Infof("Created Tube: %v", tube.GetID())
 	}
 	return tube, err
