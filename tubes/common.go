@@ -32,7 +32,7 @@ const maxFragTransPerRTO = 50
 const windowSize = 128
 
 // maximum bytes per frame
-const maxFrameDataLength uint16 = 2000
+const MaxFrameDataLength uint16 = 2000
 
 // TODO(hosono) choose this time
 // amount of time to linger in the timeWait state when closing

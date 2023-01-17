@@ -53,38 +53,16 @@ func newPTProxyTubeQueue() *ptProxyTubeQueue {
 }
 
 func unreliableProxyOneSide(a transport.UDPLike, b transport.UDPLike) {
-	// TODO(baumanl): way to eliminate buffer? At least make it smaller?
-	buf := make([]byte, 65535)
+	buf := make([]byte, tubes.MaxFrameDataLength)
+	// Upon a call to Close, pending reads and write are canceled
 	for {
-		// TODO(baumanl): calibrate timeouts
-		a.SetReadDeadline(time.Now().Add(time.Second * 30))
 		n, _, _, _, err := a.ReadMsgUDP(buf, nil)
 		if err != nil {
-			if errors.Is(err, os.ErrDeadlineExceeded) {
-				logrus.Errorf("pt proxy: read deadline exceeded: %s", err)
-				return
-			}
-			if errors.Is(err, io.EOF) {
-				logrus.Error("pt_proxy: encountered EOF reading msg udp, returning: ", err)
-				return
-			}
-			logrus.Error(err)
-			continue
+			return
 		}
-		b.SetWriteDeadline(time.Now().Add(time.Second * 30))
-		_, _, err = b.WriteMsgUDP(buf[:n], nil, nil)
+		n, _, err = b.WriteMsgUDP(buf[:n], nil, nil)
 		if err != nil {
-			if errors.Is(err, os.ErrDeadlineExceeded) {
-				logrus.Errorf("pt proxy: write deadline exceeded: %s", err)
-				return
-			}
-			if errors.Is(err, io.EOF) {
-				logrus.Error("pt_proxy: encountered EOF writing msg udp, returning: ", err)
-				return
-			}
-			logrus.Error(err)
-			continue
-			// TODO(baumanl): what should we do
+			return
 		}
 	}
 }
