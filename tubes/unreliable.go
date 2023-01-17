@@ -191,7 +191,7 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 		break
 	}
 	dataLength := uint16(len(b))
-	if uint16(len(b)) > maxFrameDataLength {
+	if uint16(len(b)) > MaxFrameDataLength {
 		err = transport.ErrBufOverflow
 		return
 	}
