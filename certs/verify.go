@@ -176,7 +176,7 @@ func unknownParent(fp, parent SHA3Fingerprint, expectedType CertificateType) Ver
 	}
 	return &verifyError{
 		reason: reason,
-		error:  fmt.Errorf("%s: cert %x with has unknown parent %x with expected type %s", reason, fp, parent, expectedType),
+		error:  fmt.Errorf("%s: cert %x which has unknown parent %x with expected type %s", reason, fp, parent, expectedType),
 	}
 }
 

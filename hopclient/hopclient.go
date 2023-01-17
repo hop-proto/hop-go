@@ -163,8 +163,15 @@ func (c *HopClient) authenticatorSetupLocked() error {
 	for _, file := range c.hostconfig.CAFiles {
 		cert, err := certs.ReadCertificatePEMFile(file)
 		if err != nil {
-			logrus.Errorf("client: error loading cert at %s: %s", file, err)
-			continue
+			// this is to support hop_test.go. it is a bit awk
+			if c.Fsystem != nil {
+				cert, err = certs.ReadCertificatePEMFileFS(file, c.Fsystem)
+			}
+			if err != nil {
+				logrus.Errorf("client: error loading cert at %s: %s", file, err)
+				continue
+			}
+
 		}
 		verifyConfig.Store.AddCertificate(cert)
 		logrus.Debugf("client: loaded cert with fingerprint: %x", cert.Fingerprint)
