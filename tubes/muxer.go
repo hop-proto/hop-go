@@ -58,6 +58,9 @@ type Muxer struct {
 	timeout    time.Duration
 	log        *logrus.Entry
 
+	// +checklocks:m
+	startErr error
+
 	// This buffer is only used in m.readMsg
 	readBuf []byte
 }
@@ -87,7 +90,12 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 		readBuf:    make([]byte, 65535),
 	}
 
-	mux.start()
+	go func() {
+		err := mux.start()
+		mux.m.Lock()
+		defer mux.m.Unlock()
+		mux.startErr = err
+	}()
 	return mux
 }
 
@@ -358,6 +366,14 @@ func (m *Muxer) start() (err error) {
 	}
 
 	return nil
+}
+
+// WaitForStop blocks until the muxer is stopped and returns any error returned by start
+func (m *Muxer) WaitForStop() error {
+	<-m.stopped
+	m.m.Lock()
+	defer m.m.Unlock()
+	return m.startErr
 }
 
 // Stop ensures all the muxer tubes are closed
