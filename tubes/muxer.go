@@ -364,8 +364,6 @@ func (m *Muxer) start() {
 		}
 
 	}
-
-	return
 }
 
 // Stop ensures all the muxer tubes are closed
