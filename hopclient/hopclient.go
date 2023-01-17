@@ -149,7 +149,25 @@ func (c *HopClient) authenticatorSetupLocked() error {
 	}
 
 	verifyConfig := transport.VerifyConfig{
-		InsecureSkipVerify: true, // TODO(baumanl): enable host key verification
+		Store: certs.Store{},
+	}
+
+	// TODO(baumanl): RawStringName vs DNSName? ask dadrian
+	if hc.ServerName != "" {
+		verifyConfig.Name = certs.DNSName(hc.ServerName)
+	} else {
+		verifyConfig.Name = certs.RawStringName(hc.Hostname)
+	}
+
+	// enable host key verification
+	for _, file := range c.hostconfig.CAFiles {
+		cert, err := certs.ReadCertificatePEMFile(file)
+		if err != nil {
+			logrus.Errorf("client: error loading cert at %s: %s", file, err)
+			continue
+		}
+		verifyConfig.Store.AddCertificate(cert)
+		logrus.Debugf("client: loaded cert with fingerprint: %x", cert.Fingerprint)
 	}
 
 	// Connect to the agent
