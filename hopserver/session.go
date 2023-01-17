@@ -105,6 +105,7 @@ func (sess *hopSession) start() {
 		tube, ok := <-sess.tubeMuxer.TubeQueue
 		if !ok {
 			sess.close()
+			break
 		}
 		logrus.Infof("S: ACCEPTED NEW TUBE (%v)", tube.Type())
 		r, ok := tube.(*tubes.Reliable)
