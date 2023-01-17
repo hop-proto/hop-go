@@ -258,7 +258,7 @@ func (a *TestAgent) Run(t *testing.T) {
 }
 
 func TestHopClientExtAuth(t *testing.T) {
-	logrus.SetLevel(logrus.InfoLevel)
+	logrus.SetLevel(logrus.TraceLevel)
 	thunks.SetUpTest()
 	t.Run("connect external authenticator", func(t *testing.T) {
 		// Create the basic Client and Server
@@ -278,7 +278,7 @@ func TestHopClientExtAuth(t *testing.T) {
 }
 
 func TestHopClientInMemAuth(t *testing.T) {
-	logrus.SetLevel(logrus.InfoLevel)
+	logrus.SetLevel(logrus.TraceLevel)
 	thunks.SetUpTest()
 	t.Run("connect in memory authenticator", func(t *testing.T) {
 		// Create the basic Client and Server
@@ -296,7 +296,7 @@ func TestHopClientInMemAuth(t *testing.T) {
 }
 
 func TestHopClientAgentAuth(t *testing.T) {
-	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetLevel(logrus.TraceLevel)
 	thunks.SetUpTest()
 	t.Run("connect agent authenticator", func(t *testing.T) {
 		// Create the basic Client and Server
@@ -321,7 +321,7 @@ func TestHopClientAgentAuth(t *testing.T) {
 }
 
 func TestTwoClients(t *testing.T) {
-	logrus.SetLevel(logrus.InfoLevel)
+	logrus.SetLevel(logrus.TraceLevel)
 	thunks.SetUpTest()
 	t.Run("connect two clients", func(t *testing.T) {
 		// Create the basic Client and Server
@@ -353,7 +353,7 @@ func TestTwoClients(t *testing.T) {
 }
 
 func TestStartCmd(t *testing.T) {
-	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetLevel(logrus.TraceLevel)
 	thunks.SetUpTest()
 	t.Run("connect agent authenticator", func(t *testing.T) {
 		// Create the basic Client and Server
