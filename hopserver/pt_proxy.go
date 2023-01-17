@@ -1,13 +1,9 @@
 package hopserver
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"net"
-	"os"
 	"sync"
-	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -60,7 +56,7 @@ func unreliableProxyOneSide(a transport.UDPLike, b transport.UDPLike) {
 		if err != nil {
 			return
 		}
-		n, _, err = b.WriteMsgUDP(buf[:n], nil, nil)
+		_, _, err = b.WriteMsgUDP(buf[:n], nil, nil)
 		if err != nil {
 			return
 		}
