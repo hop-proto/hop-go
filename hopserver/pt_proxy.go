@@ -1,13 +1,9 @@
 package hopserver
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"net"
-	"os"
 	"sync"
-	"time"
 
 	"github.com/sirupsen/logrus"
 
