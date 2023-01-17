@@ -39,12 +39,13 @@ type ServerConfig struct {
 	DataTimeout      time.Duration
 
 	// transport layer client validation options
+	CAFiles                     []string // root and intermediate certs
 	InsecureSkipVerify          *bool
 	EnableCertificateValidation *bool
 	EnableAuthorizedKeys        *bool
-	Users                       []string
+	Users                       []string // users for whom to load their authorized_keys files into transport layer
 
-	AllowAuthgrants     *bool // as an authgrant Target this server will approve authgrants and as an authgrant Delegate server will proxy ag intent requests
+	EnableAuthgrants    *bool // as an authgrant Target this server will approve authgrants and as an authgrant Delegate server will proxy ag intent requests
 	AgProxyListenSocket *string
 }
 

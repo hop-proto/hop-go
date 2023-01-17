@@ -63,7 +63,7 @@ func (sess *hopSession) checkAuthorization() bool {
 	sess.usingAuthGrant = false
 	err := sess.server.authorizeKey(username, k)
 	if err != nil {
-		if sess.server.config.AllowAuthgrants != nil && *sess.server.config.AllowAuthgrants {
+		if sess.server.config.EnableAuthgrants != nil && *sess.server.config.EnableAuthgrants {
 			actions, err := sess.server.authorizeKeyAuthGrant(username, k)
 			if err != nil {
 				logrus.Errorf("rejecting key for %q: %s", username, err)
@@ -146,12 +146,8 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 	logrus.Info("target: received authgrant tube")
 
 	// Check server config (coarse grained enable/disable)
-	if sess.server.config.AllowAuthgrants == nil || !*sess.server.config.AllowAuthgrants { // AuthGrants not enabled
-		logrus.Info("target: authgrants not allowed. writing denial")
-		err := authgrants.WriteIntentDenied(tube, authgrants.TargetDenial)
-		if err != nil {
-			logrus.Error("target: error writing intent denied: ", err)
-		}
+	if sess.server.config.EnableAuthgrants == nil || !*sess.server.config.EnableAuthgrants { // AuthGrants not enabled
+		authgrants.WriteIntentDenied(tube, authgrants.TargetDenial)
 	} else {
 		logrus.Info("target: starting target instance")
 		authgrants.StartTargetInstance(tube, sess.checkIntent, sess.addAuthGrant)

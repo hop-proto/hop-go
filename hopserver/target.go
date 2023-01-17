@@ -23,7 +23,7 @@ import (
 //   authorized actions accordingly
 
 func (s *HopServer) authorizeKeyAuthGrant(user string, publicKey keys.PublicKey) ([]authgrants.Authgrant, error) {
-	if s.config.AllowAuthgrants != nil && *s.config.AllowAuthgrants {
+	if s.config.EnableAuthgrants != nil && *s.config.EnableAuthgrants {
 		return s.agMap.RemoveAuthgrants(user, publicKey)
 	}
 	return []authgrants.Authgrant{}, fmt.Errorf("auth grants not enabled")

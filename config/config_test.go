@@ -34,10 +34,10 @@ func TestLoadServerConfig(t *testing.T) {
 	assert.NilError(t, err)
 	ag := false
 	expected := &ServerConfig{
-		ListenAddress:   ":77",
-		Key:             "/etc/hopd/id_hop.pem",
-		Certificate:     "/etc/hopd/id_hop.cert",
-		AllowAuthgrants: &ag,
+		ListenAddress:    ":77",
+		Key:              "/etc/hopd/id_hop.pem",
+		Certificate:      "/etc/hopd/id_hop.cert",
+		EnableAuthgrants: &ag,
 	}
 	assert.DeepEqual(t, c, expected)
 }
