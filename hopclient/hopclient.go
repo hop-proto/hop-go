@@ -355,7 +355,4 @@ func (c *HopClient) HandleTubes() {
 			}
 		}
 	}
-	if !errors.Is(err, io.EOF) {
-		logrus.Warnf("error when accepting tube: %v", err)
-	}
 }
