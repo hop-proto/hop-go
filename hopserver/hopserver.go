@@ -122,19 +122,28 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	}
 
 	// serverConfig options inform verify config settings
-	// 4 main options right now:
+	// 4 main options at the transport layer right now:
 	// 1. InsecureSkipVerify: no verification of client cert
 	// 2. Certificate Validation ONLY: fails immediately if invalid cert chain
-	// 3. Cert Validation or Authorized Keys: will check for auth key if invalid cert chain
+	// 3. Cert Validation or Authorized Keys: will check for auth key and then look at cert chain if that fails
 	// 4. Authorized keys only: cert validation explicitly disabled and auth keys explicitly enabled
 
 	// Explicitly setting sc.InsecureSkipVerify overrides everything else
 	if sc.InsecureSkipVerify != nil && *sc.InsecureSkipVerify {
 		tconf.ClientVerify.InsecureSkipVerify = true
 	} else {
-		// Cert validation enabled
+		// Cert validation enabled by default
 		if sc.EnableCertificateValidation == nil || *sc.EnableCertificateValidation {
-			tconf.ClientVerify.Store = certs.Store{} // TODO(baumanl): load certificates into store from config
+			tconf.ClientVerify.Store = certs.Store{}
+			for _, s := range sc.CAFiles {
+				cert, err := certs.ReadCertificatePEMFile(s)
+				if err != nil {
+					logrus.Errorf("server: error loading cert at %s: %s", s, err)
+					continue
+				}
+				logrus.Debugf("server: loaded cert with fingerprint: %x", cert.Fingerprint)
+				tconf.ClientVerify.Store.AddCertificate(cert)
+			}
 		}
 		// Authorized keys enabled
 		if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys { // must be explicitly set to true
@@ -157,7 +166,6 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 					tconf.ClientVerify.AuthKeys.AddKey(key)
 				}
 			}
-
 			tconf.ClientVerify.AuthKeysAllowed = true
 		}
 	}
