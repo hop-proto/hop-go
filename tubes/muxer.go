@@ -58,8 +58,8 @@ type Muxer struct {
 	timeout    time.Duration
 	log        *logrus.Entry
 
-	// +checklocks:m
 	startErr chan error
+	stopErr  error
 
 	// This buffer is only used in m.readMsg
 	readBuf []byte
@@ -375,7 +375,10 @@ func (m *Muxer) Stop() (err error) {
 	if m.state.Load() != muxerRunning {
 		m.m.Unlock()
 		<-m.stopped
-		return io.EOF
+
+		m.m.Lock()
+		defer m.m.Unlock()
+		return m.stopErr
 	}
 
 	wg := sync.WaitGroup{}
@@ -427,8 +430,12 @@ func (m *Muxer) Stop() (err error) {
 
 	m.underlying.Close()
 
-	m.log.Info("Muxer.Stop() finished")
-
+	// Cache error for future calls to Stop
 	err = <-m.startErr
+	m.m.Lock()
+	defer m.m.Unlock()
+	m.stopErr = err
+
+	m.log.Info("Muxer.Stop() finished")
 	return err
 }
