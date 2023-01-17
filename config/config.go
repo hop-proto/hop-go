@@ -57,6 +57,7 @@ type HostConfigOptional struct {
 	AgentURL     *string
 	AutoSelfSign *bool
 	CAFiles      []string
+	ServerName   *string
 	Certificate  *string
 	Cmd          *string // what command to run on connect
 	DisableAgent *bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
@@ -67,8 +68,7 @@ type HostConfigOptional struct {
 	Patterns     []string
 	Port         int
 	User         *string
-	// something for principal vs. delegate
-	IsPrincipal *bool
+	IsPrincipal  *bool
 	// something for remote port forward
 	// something for local port forward
 
@@ -82,6 +82,7 @@ type HostConfig struct {
 	AgentURL     string
 	AutoSelfSign bool
 	CAFiles      []string
+	ServerName   string // expected name on server cert
 	Certificate  string
 	Cmd          string // what command to run on connect
 	DisableAgent bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
@@ -124,6 +125,9 @@ func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
 		hc.AutoSelfSign = other.AutoSelfSign
 	}
 	hc.CAFiles = append(hc.CAFiles, other.CAFiles...)
+	if other.ServerName != nil {
+		hc.ServerName = other.ServerName
+	}
 	if other.Certificate != nil {
 		hc.Certificate = other.Certificate
 	}
@@ -179,6 +183,9 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 		newHC.AutoSelfSign = *hc.AutoSelfSign
 	}
 	newHC.CAFiles = hc.CAFiles
+	if hc.ServerName != nil {
+		newHC.ServerName = *hc.ServerName
+	}
 	if hc.Certificate != nil {
 		newHC.Certificate = *hc.Certificate
 	}
