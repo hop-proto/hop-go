@@ -216,6 +216,8 @@ func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 		manyTubes(0.9, false, true, t)
 	})
 
+	defer goleak.VerifyNone(t)
+
 	logrus.SetLevel(logrus.TraceLevel)
 	t.Run("UnreliableTubes/ImmediateStop", func(t *testing.T) {
 		manyTubes(1.0, false, false, t)
