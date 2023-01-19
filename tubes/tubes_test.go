@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"go.uber.org/goleak"
 
 	"gotest.tools/assert"
 
@@ -267,6 +268,7 @@ func unreliable(t *testing.T) {
 }
 
 func TestTubes(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	t.Run("Reliable", reliable)
 	t.Run("Unreliable", unreliable)
 }

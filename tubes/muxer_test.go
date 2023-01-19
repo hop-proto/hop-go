@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"go.uber.org/goleak"
 
 	"gotest.tools/assert"
 
@@ -193,6 +194,8 @@ func reusingTubes(t *testing.T) {
 }
 
 func TestMuxer(t *testing.T) {
+
+	defer goleak.VerifyNone(t)
 
 	logrus.SetLevel(logrus.TraceLevel)
 	t.Run("UnreliableTubes/ImmediateStop", func(t *testing.T) {
