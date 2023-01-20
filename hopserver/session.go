@@ -90,7 +90,6 @@ func (sess *hopSession) checkAuthorization() bool {
 // TODO(baumanl): change closing behavior for sessions without cmd/shell --> integrate port forwarding duration
 func (sess *hopSession) start() {
 	// Tube Muxer is started when NewMuxer is called in hopserver.go
-
 	// User Authorization
 	if !sess.checkAuthorization() {
 		return
@@ -107,7 +106,7 @@ func (sess *hopSession) start() {
 			sess.close()
 			break
 		}
-		logrus.Infof("S: ACCEPTED NEW TUBE (%v)", tube.Type())
+		logrus.Infof("S: ACCEPTED NEW TUBE Type: %v, ID: %v, Reliable? %v)", tube.Type(), tube.GetID(), tube.IsReliable())
 		r, ok := tube.(*tubes.Reliable)
 		if !ok {
 			// TODO(hosono) handle unreliable tubes (general case)

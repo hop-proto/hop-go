@@ -22,7 +22,7 @@ func main() {
 	if f.Verbose {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
-
+	logrus.SetLevel(logrus.DebugLevel)
 	// default log at info level to file --> otherwise things get really
 	// confusing when running authgrant protocol and all processes are trying
 	// to log to std err.

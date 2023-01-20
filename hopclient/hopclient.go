@@ -39,6 +39,7 @@ type HopClient struct { // nolint:maligned
 	TransportConn *transport.Client
 	ProxyConn     *tubes.Reliable
 
+	// TODO(baumanl): move authgrant state to struct? sort of waiting till i finalize stuff
 	// +checklocks:checkIntentLock
 	checkIntent     func(authgrants.Intent) error // should only be set if principal
 	checkIntentLock sync.Mutex
@@ -230,6 +231,7 @@ func (c *HopClient) Start() error {
 	// handle incoming tubes
 	go c.HandleTubes()
 	c.Wait() // client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
+	c.Close()
 	return nil
 }
 
@@ -243,7 +245,11 @@ func (c *HopClient) Close() error {
 	if c.ExecTube != nil {
 		c.ExecTube.Restore()
 	}
-	return c.TubeMuxer.Stop()
+
+	if c.TubeMuxer != nil {
+		return c.TubeMuxer.Stop()
+	}
+	return nil
 	//close all remote and local port forwarding relationships
 }
 

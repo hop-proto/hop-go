@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	logrus.SetLevel(logrus.DebugLevel)
+
 	f, err := flags.ParseServerArgs(os.Args)
 	if err != nil {
 		logrus.Error(err)
@@ -24,7 +24,7 @@ func main() {
 	if f.Verbose {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
-
+	logrus.SetLevel(logrus.DebugLevel)
 	// TODO(baumanl): better options for enabling logging to file/level
 	// default log at info level to file --> otherwise things get really
 	// confusing when running authgrant protocol and all processes are trying

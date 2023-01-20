@@ -23,7 +23,7 @@ type principalInstance struct {
 	setUpTargetConn setUpTargetConnFunc
 }
 
-// StartPrincipalInstance creates and runs a new principal instance. errors if su is nil.
+// StartPrincipalInstance creates and runs a new principal instance. errors if su is nil. Caller responsible for closing delegateConn
 func StartPrincipalInstance(dc net.Conn, ci checkIntentFunc, su setUpTargetConnFunc) error {
 	if su == nil {
 		return fmt.Errorf("principal: must provide non-nil set up target function")
@@ -34,12 +34,6 @@ func StartPrincipalInstance(dc net.Conn, ci checkIntentFunc, su setUpTargetConnF
 		checkIntent:     ci,
 		setUpTargetConn: su,
 	}
-	defer func() {
-		pi.delegateConn.Close()
-		if pi.targetConnected {
-			pi.targetConn.Close()
-		}
-	}()
 
 	if ci == nil {
 		// pi.checkIntent = defaultRejectAll // this is correct

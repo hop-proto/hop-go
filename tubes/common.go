@@ -31,7 +31,7 @@ const maxFragTransPerRTO = 50
 // the number of packets in the window for reliable tubes
 const windowSize = 128
 
-// maximum bytes per frame
+// MaxFrameDataLength is maximum bytes per frame
 const MaxFrameDataLength uint16 = 2000
 
 // TODO(hosono) choose this time
