@@ -48,26 +48,20 @@ func newPTProxyTubeQueue() *ptProxyTubeQueue {
 	return proxyQueue
 }
 
-func unreliableProxyOneSide(a transport.UDPLike, b transport.UDPLike) {
+func unreliableProxyOneSide(a transport.UDPLike, b transport.UDPLike, wg *sync.WaitGroup) {
 	buf := make([]byte, tubes.MaxFrameDataLength)
+	defer wg.Done()
 	// Upon a call to Close, pending reads and write are canceled
 	for {
 		n, _, _, _, err := a.ReadMsgUDP(buf, nil)
 		if err != nil {
 			return
 		}
-		n, _, err = b.WriteMsgUDP(buf[:n], nil, nil)
+		_, _, err = b.WriteMsgUDP(buf[:n], nil, nil)
 		if err != nil {
 			return
 		}
 	}
-}
-
-// TODO(baumanl): make sure this closes down cleanly/consistently
-// unreliableProxyHelper proxies msgs from two udplike connections
-func unreliableProxyHelper(a transport.UDPLike, b transport.UDPLike) {
-	go unreliableProxyOneSide(a, b)
-	unreliableProxyOneSide(b, a)
 }
 
 // manage principal to target proxying (t is a reliable tube)
@@ -139,23 +133,34 @@ func (sess *hopSession) startPTProxy(t net.Conn, pq *ptProxyTubeQueue) {
 		return
 	}
 
-	// t.Close() // bug to have this called right after write? (for now leave open till done proxying)
-
 	logrus.Info("pt_proxy: wrote conf to principal; starting unreliable proxy")
 
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
+
 	// proxy
-	unreliableProxyHelper(principalTube, targetConn)
+	go unreliableProxyOneSide(principalTube, targetConn, wg)
+	go unreliableProxyOneSide(targetConn, principalTube, wg)
+
+	t.Read(make([]byte, 1)) // block until this tube is closed by principal
+	logrus.Info("pt_proxy: reliable tube with principal closed. shutting down pt proxy...")
+
+	err = targetConn.Close()
+	if err != nil {
+		logrus.Error("pt_proxy: error closing target conn udp conn: ", err)
+	}
+	logrus.Info("pt_proxy: closed udp conn to target")
 
 	err = principalTube.Close()
 	if err != nil {
 		logrus.Error("pt_proxy: error closing unreliable principal tube: ", err)
 	}
-	err = targetConn.Close()
-	if err != nil {
-		logrus.Error("pt_proxy: error closing target conn udp conn: ", err)
-	}
+	logrus.Infof("pt_proxy: closed unreliable principal tube with id %v", principalTube.GetID())
+
 	err = t.Close()
 	if err != nil {
 		logrus.Error("pt_proxy: error closing reliable principal conn: ", err)
 	}
+	logrus.Info("pt_proxy: closed reliable principal tube")
+	wg.Wait()
 }

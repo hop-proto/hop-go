@@ -131,6 +131,10 @@ func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable, ve
 	psubclient := &principalSubclient{
 		unrelProxyTube: dt,
 	}
+	psubclient := &principalSubclient{
+		relProxyTube:   proxyControl,
+		unrelProxyTube: targetConn,
+	}
 
 	// load client config from default path
 	cflags := &flags.ClientFlags{
