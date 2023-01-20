@@ -130,7 +130,11 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 }
 
 func (u *Unreliable) receive(pkt *frame) error {
-	u.recv.C <- pkt.data
+	select {
+	case u.recv.C <- pkt.data:
+	default:
+		return nil
+	}
 	if pkt.flags.FIN {
 		u.recv.Close()
 	}

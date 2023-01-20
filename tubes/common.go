@@ -18,6 +18,9 @@ var errFrameOutOfBounds = errors.New("received data frame out of receive window 
 
 // TODO(hosono) create a config struct to pass to the muxer to set these things
 
+// MaxFrameDataLength is the maximum bytes per frame in a Reliable or Unreliable tube
+const MaxFrameDataLength uint16 = 2000
+
 // maximum number of packet an unreliable tube will buffer
 const maxBufferedPackets = 1000
 
@@ -30,9 +33,6 @@ const maxFragTransPerRTO = 50
 
 // the number of packets in the window for reliable tubes
 const windowSize = 128
-
-// MaxFrameDataLength is maximum bytes per frame
-const MaxFrameDataLength uint16 = 2000
 
 // TODO(hosono) choose this time
 // amount of time to linger in the timeWait state when closing

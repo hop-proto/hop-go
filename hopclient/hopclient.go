@@ -245,12 +245,10 @@ func (c *HopClient) Close() error {
 	if c.ExecTube != nil {
 		c.ExecTube.Restore()
 	}
-
-	if c.TubeMuxer != nil {
-		return c.TubeMuxer.Stop()
-	}
-	return nil
+	err := c.TubeMuxer.Stop()
 	//close all remote and local port forwarding relationships
+	c.wg.Wait()
+	return err
 }
 
 func (c *HopClient) startUnderlying(address string, authenticator core.Authenticator) error {
@@ -300,7 +298,7 @@ func (c *HopClient) startExecTube() error {
 	//Hop Session is tied to the life of this code execution tube.
 	// TODO(baumanl): provide support for Cmd in ClientConfig
 	logrus.Infof("Performing action: %v", c.hostconfig.Cmd)
-	ch, err := c.TubeMuxer.CreateReliableTube(common.ExecTube)
+	codexTube, err := c.TubeMuxer.CreateReliableTube(common.ExecTube)
 	if err != nil {
 		logrus.Error(err)
 		return err
@@ -311,7 +309,7 @@ func (c *HopClient) startExecTube() error {
 		return err
 	}
 	c.wg.Add(1)
-	c.ExecTube, err = codex.NewExecTube(c.hostconfig.Cmd, c.hostconfig.UsePty, ch, winSizeTube, &c.wg)
+	c.ExecTube, err = codex.NewExecTube(c.hostconfig.Cmd, c.hostconfig.UsePty, codexTube, winSizeTube, &c.wg)
 	return err
 }
 
