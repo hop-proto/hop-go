@@ -45,7 +45,11 @@ type Tube interface {
 type Muxer struct {
 	idParity byte
 	// +checklocks:m
-	tubes map[byte]Tube
+	reliableTubes map[byte]*Reliable
+
+	// +checklocks:m
+	unreliableTubes map[byte]*Unreliable
+
 	// Channels waiting for an Accept() call.
 	TubeQueue chan Tube
 	m         sync.Mutex
@@ -76,19 +80,20 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 	state := atomic.Value{}
 	state.Store(muxerRunning)
 	mux := &Muxer{
-		idParity:   idParity,
-		tubes:      make(map[byte]Tube),
-		TubeQueue:  make(chan Tube, 128),
-		m:          sync.Mutex{},
-		sendQueue:  make(chan []byte),
-		state:      state,
-		senderDone: make(chan struct{}),
-		stopped:    make(chan struct{}),
-		underlying: msgConn,
-		timeout:    timeout,
-		log:        log,
-		readBuf:    make([]byte, 65535),
-		startErr:   make(chan error),
+		idParity:        idParity,
+		reliableTubes:   make(map[byte]*Reliable),
+		unreliableTubes: make(map[byte]*Unreliable),
+		TubeQueue:       make(chan Tube, 128),
+		m:               sync.Mutex{},
+		sendQueue:       make(chan []byte),
+		state:           state,
+		senderDone:      make(chan struct{}),
+		stopped:         make(chan struct{}),
+		underlying:      msgConn,
+		timeout:         timeout,
+		log:             log,
+		readBuf:         make([]byte, 65535),
+		startErr:        make(chan error),
 	}
 
 	go mux.start()
@@ -113,27 +118,49 @@ func (m *Muxer) reapTube(t Tube) {
 
 	m.m.Lock()
 	defer m.m.Unlock()
-	delete(m.tubes, t.GetID())
+	if t.IsReliable() {
+		delete(m.reliableTubes, t.GetID())
+	} else {
+		delete(m.unreliableTubes, t.GetID())
+	}
 }
 
 // +checklocks:m.m
-func (m *Muxer) addTube(c Tube) {
-	m.tubes[c.GetID()] = c
-	go m.reapTube(c)
+func (m *Muxer) addTube(t Tube) {
+	if t.IsReliable() {
+		m.reliableTubes[t.GetID()] = t.(*Reliable)
+	} else {
+		m.unreliableTubes[t.GetID()] = t.(*Unreliable)
+	}
+	go m.reapTube(t)
 }
 
-func (m *Muxer) getTube(tubeID byte) (Tube, bool) {
+func (m *Muxer) getTube(isReliable bool, tubeID byte) (Tube, bool) {
 	m.m.Lock()
 	defer m.m.Unlock()
-	c, ok := m.tubes[tubeID]
-	return c, ok
+
+	var t Tube
+	var ok bool
+	if isReliable {
+		t, ok = m.reliableTubes[tubeID]
+	} else {
+		t, ok = m.unreliableTubes[tubeID]
+	}
+	return t, ok
 }
 
 // +checklocks:m.m
-func (m *Muxer) pickTubeID() (byte, error) {
+func (m *Muxer) pickTubeID(isReliable bool) (byte, error) {
 	for guessInt := int(m.idParity); guessInt < 256; guessInt += 2 {
 		guess := byte(guessInt)
-		_, ok := m.tubes[guess]
+
+		var ok bool
+		if isReliable {
+			_, ok = m.reliableTubes[guess]
+		} else {
+			_, ok = m.unreliableTubes[guess]
+		}
+
 		if !ok {
 			m.log.WithField("tubeID", guess).Debug("picked new tube id")
 			return guess, nil
@@ -149,7 +176,7 @@ func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
 	m.m.Lock()
 	defer m.m.Unlock()
 
-	id, err := m.pickTubeID()
+	id, err := m.pickTubeID(true)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +250,7 @@ func (m *Muxer) CreateUnreliableTube(tType TubeType) (*Unreliable, error) {
 	m.m.Lock()
 	defer m.m.Unlock()
 
-	tubeID, err := m.pickTubeID()
+	tubeID, err := m.pickTubeID(false)
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +359,7 @@ func (m *Muxer) start() {
 			return
 		}
 		var tube Tube
-		tube, ok := m.getTube(frame.tubeID)
+		tube, ok := m.getTube(frame.flags.REL, frame.tubeID)
 		if !ok {
 			m.log.WithField("tube", frame.tubeID).Info("tube not found")
 			initFrame := fromInitiateBytes(frame.toBytes())
@@ -369,7 +396,7 @@ func (m *Muxer) start() {
 // Stop ensures all the muxer tubes are closed
 func (m *Muxer) Stop() (err error) {
 	m.m.Lock()
-	m.log.WithField("numTubes", len(m.tubes)).Info("Stopping muxer")
+	m.log.WithField("numTubes", len(m.reliableTubes)+len(m.unreliableTubes)).Info("Stopping muxer")
 
 	// Muxer.Stop() has already been called. Wait for it to finish
 	if m.state.Load() != muxerRunning {
@@ -383,7 +410,22 @@ func (m *Muxer) Stop() (err error) {
 
 	wg := sync.WaitGroup{}
 
-	for _, v := range m.tubes {
+	//tubeCloser := func(v Tube) {
+		//wg.Add(1)
+		//go func(v Tube) { //parallelized closing tubes because other side may close them in a different order
+			//defer wg.Done()
+			//m.log.Info("Closing tube: ", v.GetID())
+			//err := v.Close()
+			//if err != nil && err != io.EOF {
+				//// Tried to close tube in bad state. Nothing to do
+				//m.log.Errorf("tube %d closed with error: %s", v.GetID(), err)
+				//return
+			//}
+			//v.WaitForClose()
+		//}(v)
+	//}
+
+	for _, v := range m.reliableTubes {
 		wg.Add(1)
 		go func(v Tube) { //parallelized closing tubes because other side may close them in a different order
 			defer wg.Done()
@@ -397,6 +439,21 @@ func (m *Muxer) Stop() (err error) {
 			v.WaitForClose()
 		}(v)
 	}
+	for _, v := range m.unreliableTubes {
+		wg.Add(1)
+		go func(v Tube) { //parallelized closing tubes because other side may close them in a different order
+			defer wg.Done()
+			m.log.Info("Closing tube: ", v.GetID())
+			err := v.Close()
+			if err != nil && err != io.EOF {
+				// Tried to close tube in bad state. Nothing to do
+				m.log.Errorf("tube %d closed with error: %s", v.GetID(), err)
+				return
+			}
+			v.WaitForClose()
+		}(v)
+	}
+
 	m.state.Store(muxerStopping)
 	m.m.Unlock()
 
@@ -406,15 +463,13 @@ func (m *Muxer) Stop() (err error) {
 			return
 		}
 		m.m.Lock()
-		for _, v := range m.tubes {
-			if t, ok := v.(*Reliable); ok {
-				go func() {
-					t.l.Lock()
-					defer t.l.Unlock()
-					t.getLog().Error("Timed out. Forcing close")
-					t.enterClosedState()
-				}()
-			}
+		for _, v := range m.reliableTubes {
+			go func(r *Reliable) {
+				r.l.Lock()
+				defer r.l.Unlock()
+				r.getLog().Error("Timed out. Forcing close")
+				r.enterClosedState()
+			}(v)
 		}
 		m.m.Unlock()
 	})
