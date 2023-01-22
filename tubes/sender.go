@@ -226,10 +226,7 @@ func (s *sender) retransmit() {
 		select {
 		case <-s.RTOTicker.C:
 			s.l.Lock()
-			if len(s.frames) == 0 { // Keep Alive messages
-				s.log.Trace("Keep alive sent")
-				s.sendEmptyPacketLocked()
-			} else {
+			if len(s.frames) != 0 {
 				s.log.Trace("retransmitting")
 				s.fillWindow(true, 0)
 			}

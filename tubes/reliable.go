@@ -191,9 +191,8 @@ func (r *Reliable) receive(pkt *frame) error {
 		}
 	}
 
-	// Send preemptive ACKs to allow for better throughput for large transfers
-	if (r.recvWindow.getAck()-r.lastAckSent.Load()) >= windowSize/2 &&
-		!pkt.flags.FIN && r.tubeState != closed {
+	// ACK every data packet
+	if pkt.dataLength > 0 && r.tubeState != closed && !pkt.flags.FIN {
 		r.sender.sendEmptyPacket()
 	}
 
