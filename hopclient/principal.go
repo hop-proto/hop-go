@@ -49,9 +49,10 @@ func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable) {
 	c.checkIntentLock.Unlock()
 
 	var psubclient *principalSubclient
+	var err error
 
 	setup := func(url core.URL) (net.Conn, error) {
-		psubclient, err := c.setupTargetClient(url)
+		psubclient, err = c.setupTargetClient(url)
 		if err != nil {
 			logrus.Error("eror setting up target client")
 			return nil, err
@@ -63,6 +64,7 @@ func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable) {
 	logrus.Info("starting principal instance")
 
 	authgrants.StartPrincipalInstance(delTube, ci, setup)
+	delTube.Close()
 
 	if psubclient != nil {
 		logrus.Info("principal: closing subclient with target.")

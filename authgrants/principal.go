@@ -100,19 +100,26 @@ func (p *principalInstance) doIntentRequestChecks(i Intent) error {
 		p.targetConn = tc
 		p.targetInfo = targURL
 		p.targetConnected = true
+		logrus.Info("principal: connected to target")
 	}
 
 	err = WriteIntentCommunication(p.targetConn, i)
 	if err != nil {
+		logrus.Error("principal: error writing intent communication")
 		return WriteIntentDenied(p.delegateConn, fmt.Sprintf("principal: error sending intent comm: %s", err))
 	}
+	logrus.Info("principal: wrote intent communication")
 
 	resp, err := ReadConfOrDenial(p.targetConn)
 	if err != nil {
+		logrus.Error("principal: error reading conf or denial")
 		return WriteIntentDenied(p.delegateConn, fmt.Sprintf("principal: error reading target response: %s", err))
 	}
+
 	if resp.MsgType == IntentDenied {
+		logrus.Info("principal: read Intent denied")
 		return WriteIntentDenied(p.delegateConn, resp.Data.Denial)
 	}
+	logrus.Info("principal: read Intent Confirmation")
 	return WriteIntentConfirmation(p.delegateConn)
 }

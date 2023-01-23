@@ -3,6 +3,8 @@ package authgrants
 import (
 	"bytes"
 	"crypto/rand"
+	"net"
+	"sync"
 	"testing"
 
 	"gotest.tools/assert"
@@ -64,4 +66,26 @@ func TestAgMessageIntentEncodeDecode(t *testing.T) {
 	recBuf, err := recMsg.Data.Intent.DelegateCert.Marshal()
 	assert.NilError(t, err)
 	assert.DeepEqual(t, buf, recBuf)
+}
+
+func TestAgMessageConforDenial(t *testing.T) {
+	c, s := net.Pipe()
+	msg := AgMessage{
+		MsgType: IntentConfirmation,
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		recmsg, err := ReadConfOrDenial(c)
+		assert.NilError(t, err)
+		assert.Equal(t, msg.MsgType, recmsg.MsgType)
+		assert.Equal(t, msg.MsgType, recmsg.MsgType)
+		wg.Done()
+	}()
+
+	_, err := msg.WriteTo(s)
+	assert.NilError(t, err)
+
+	wg.Wait()
 }

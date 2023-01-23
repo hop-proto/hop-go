@@ -62,7 +62,7 @@ func (d *delegateInstance) run() error {
 			logrus.Infof("delegate: intent request denied with reason: %s", resp.Data.Denial)
 		}
 	}
-
+	logrus.Info("delegate: done sending intent requests")
 	if oneApproved {
 		return nil
 	}

@@ -4,10 +4,13 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 
 	"hop.computer/hop/authgrants"
+	"hop.computer/hop/proxy"
 )
 
 func TestProxySimpleDenial(t *testing.T) {
@@ -28,6 +31,9 @@ func TestProxySimpleDenial(t *testing.T) {
 		recMsg := new(authgrants.AgMessage)
 		_, err = recMsg.ReadFrom(p)
 		assert.Error(t, err, "EOF")
+		err = p.Close()
+		logrus.Info("p closed")
+		assert.NilError(t, err)
 		wg.Done()
 	}()
 
@@ -37,12 +43,36 @@ func TestProxySimpleDenial(t *testing.T) {
 		_, err := recMsg.ReadFrom(c)
 		assert.NilError(t, err)
 		err = c.Close()
+		logrus.Info("c closed")
 		assert.NilError(t, err)
 		assert.Equal(t, msg.MsgType, recMsg.MsgType)
 		assert.Equal(t, msg.Data.Denial, recMsg.Data.Denial)
 		wg.Done()
 	}()
 
-	proxyHelper(pproxy, cproxy)
+	proxywg := proxy.ReliableProxy(pproxy, cproxy)
+
+	ch := make(chan struct{})
+	go func() {
+		defer close(ch)
+		proxywg.Wait()
+	}()
+
+	close := func() {
+		err := pproxy.Close()
+		assert.NilError(t, err)
+		err = cproxy.Close()
+		assert.NilError(t, err)
+	}
+
+	select {
+	case <-ch:
+		logrus.Info("Wait group finished normally")
+		close()
+	case <-time.After(time.Second):
+		logrus.Info("Timed out waiting for wait group")
+		close()
+		<-ch
+	}
 	wg.Wait()
 }

@@ -8,6 +8,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
 	"hop.computer/hop/core"
@@ -116,6 +118,7 @@ func (m *AgMessage) WriteTo(w io.Writer) (int64, error) {
 	n, err := w.Write([]byte{byte(m.MsgType)})
 	written += int64(n)
 	if err != nil {
+		logrus.Error("error writing ag message type: ", err)
 		return written, err
 	}
 	// write message data
@@ -143,6 +146,10 @@ func (m *AgMessage) ReadFrom(r io.Reader) (int64, error) {
 	// read message type
 	err := binary.Read(r, binary.BigEndian, &m.MsgType)
 	if err != nil {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			logrus.Error("unexpected eof: ", err.Error())
+		}
+		logrus.Error("read: ", err.Error())
 		return bytesRead, err
 	}
 	bytesRead++
@@ -158,10 +165,7 @@ func (m *AgMessage) ReadFrom(r io.Reader) (int64, error) {
 	}
 
 	bytesRead += dataBytes
-	if err != nil {
-		return bytesRead, err
-	}
-	return bytesRead, nil
+	return bytesRead, err
 }
 
 // WriteTo serializes an intent block and implements the io.WriterTo interface

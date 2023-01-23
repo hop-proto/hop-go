@@ -3,14 +3,15 @@ package hopserver
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"sync"
-	"sync/atomic"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+
+	"hop.computer/hop/proxy"
 
 	"golang.org/x/exp/maps"
 )
@@ -37,25 +38,31 @@ type GetPrincipal func(sessID) (*hopSession, bool)
 
 // dpproxy holds state used by server to proxy delegate requests to principals
 type dpproxy struct {
-	// +checklocks:proxyLock
 	address string // unix socket to listen on.
-	// +checklocks:proxyLock
-	principals   map[int32]sessID
-	running      atomic.Bool
-	listener     net.Listener
-	proxyLock    sync.Mutex
+
+	// +checklocks:principalLock
+	principals    map[int32]sessID
+	principalLock sync.Mutex
+
+	// +checklocks:runningCV.L
+	listener net.Listener
+	running  bool
+	// +checklocks::runningCV.L
+	runningCV sync.Cond
+
+	proxyWG      sync.WaitGroup
 	getPrincipal GetPrincipal
 }
 
 // start starts DP Proxy server
 func (p *dpproxy) start() error {
-	if p.running.Load() {
+	if p.running {
 		return fmt.Errorf("DP Proxy: start called when already running")
 	}
 
 	logrus.Debug("DP Proxy: trying to acquire proxyLock")
-	p.proxyLock.Lock()
-	defer p.proxyLock.Unlock()
+	p.runningCV.L.Lock()
+	defer p.runningCV.L.Unlock()
 
 	fileInfo, err := os.Stat(p.address)
 	if err == nil { // file exists
@@ -77,7 +84,7 @@ func (p *dpproxy) start() error {
 	}
 
 	p.listener = authgrantServer
-	p.running.Store(true)
+	p.running = true
 	go p.serve()
 
 	return nil
@@ -96,19 +103,25 @@ func (p *dpproxy) serve() {
 			logrus.Error("DP Proxy: accept error:", err)
 			continue
 		}
+		p.proxyWG.Add(1)
 		go p.checkAndProxy(c)
 	}
 }
 
 // TODO(hosono) Make this correct
 func (p *dpproxy) stop() error {
+	p.runningCV.L.Lock()
 	l := p.listener.(*net.UnixListener)
 	l.Close()
+	p.runningCV.L.Unlock()
+	p.runningCV.Broadcast()
+	p.proxyWG.Wait()
 	return nil
 }
 
 // checks that the connecting process is a hop session descendent and then proxies
 func (p *dpproxy) checkAndProxy(c net.Conn) {
+	defer p.proxyWG.Done()
 	logrus.Debug("DP Proxy: just accepted a new connection")
 	// Verify that the client is a legit descendent and get principal sess
 	principalID, e := p.checkCredentials(c)
@@ -133,8 +146,8 @@ func (p *dpproxy) checkCredentials(c net.Conn) (sessID, error) {
 	if err != nil {
 		return 0, err
 	}
-	p.proxyLock.Lock()
-	defer p.proxyLock.Unlock()
+	p.principalLock.Lock()
+	defer p.principalLock.Unlock()
 	aPID, err := getAncestor(maps.Keys(p.principals), cPID)
 	if err != nil {
 		return 0, err
@@ -146,7 +159,6 @@ func (p *dpproxy) checkCredentials(c net.Conn) (sessID, error) {
 // proxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
 // Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
 func (p *dpproxy) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn) {
-	defer c.Close()
 	if principalSess.transportConn.IsClosed() {
 		logrus.Error("DP Proxy: connection with principal is closed or closing")
 		return
@@ -157,33 +169,52 @@ func (p *dpproxy) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn) {
 		logrus.Errorf("DP Proxy: error connecting to principal: %v", err)
 		return
 	}
-	defer principalConn.Close()
 	logrus.Infof("DP Proxy: connected to principal")
 
 	// enable principal to proxy a connection through the server
 	principalSess.numActiveReqDelegates.Add(1)
-
-	proxyHelper(principalConn, c)
-
 	// disable principal's ability to proxy a connection through the server
-	principalSess.numActiveReqDelegates.Add(-1)
-}
+	defer principalSess.numActiveReqDelegates.Add(-1)
 
-func proxyHelper(p net.Conn, c net.Conn) {
-	logrus.Infof("dp proxy: started proxyHelper")
-	var wg sync.WaitGroup
-	wg.Add(1)
-	// proxy the bytes
+	wg := proxy.ReliableProxy(principalConn, c)
+
+	ch := make(chan struct{})
 	go func() {
-		w, err := io.Copy(c, p)
-		logrus.Infof("DP Proxy: wrote %v bytes to client from principal. err: %v", w, err)
-		err = c.Close()
-		logrus.Infof("c close: %v", err)
-		wg.Done()
+		defer close(ch)
+		wg.Wait()
 	}()
-	w, err := io.Copy(p, c)
-	logrus.Infof("DP Proxy: wrote %v bytes to principal from client. err: %v", w, err)
-	err = p.Close()
-	logrus.Infof("p close: %v", err)
-	wg.Wait()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+
+		isRunning := func() bool {
+			return p.running
+		}
+
+		p.runningCV.L.Lock()
+		for isRunning() {
+			p.runningCV.Wait()
+		}
+		p.runningCV.L.Unlock()
+	}()
+
+	cleanup := func() {
+		c.Close()
+		principalConn.Close()
+	}
+
+	select {
+	case <-ch: // proxy closed normally
+		logrus.Info("proxy closed normally")
+		cleanup()
+	case <-time.After(time.Second * 30): // proxy timed out
+		logrus.Info("proxy timed out")
+		cleanup()
+		<-ch
+	case <-done:
+		logrus.Info("proxy being force closed")
+		cleanup()
+		<-ch
+	}
 }

@@ -156,11 +156,17 @@ func (sess *hopSession) close() error {
 func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 	defer tube.Close()
 	// TODO(baumanl): add check for authgrant?
+	logrus.Info("target: received authgrant tube")
 
 	// Check server config (coarse grained enable/disable)
 	if sess.server.config.AllowAuthgrants == nil || !*sess.server.config.AllowAuthgrants { // AuthGrants not enabled
-		authgrants.WriteIntentDenied(tube, authgrants.TargetDenial)
+		logrus.Info("target: authgrants not allowed. writing denial")
+		err := authgrants.WriteIntentDenied(tube, authgrants.TargetDenial)
+		if err != nil {
+			logrus.Error("target: error writing intent denied: ", err)
+		}
 	} else {
+		logrus.Info("target: starting target instance")
 		authgrants.StartTargetInstance(tube, sess.checkIntent, sess.addAuthGrant)
 	}
 }
@@ -237,8 +243,8 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 		var err error
 
 		// lock principals map so can be updated with pid after starting process
-		sess.server.dpProxy.proxyLock.Lock()
-		defer sess.server.dpProxy.proxyLock.Unlock()
+		sess.server.dpProxy.principalLock.Lock()
+		defer sess.server.dpProxy.principalLock.Unlock()
 
 		if shell {
 			if size != nil {

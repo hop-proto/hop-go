@@ -8,7 +8,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/authgrants"
-	"hop.computer/hop/transport"
+	"hop.computer/hop/proxy"
 	"hop.computer/hop/tubes"
 )
 
@@ -46,22 +46,6 @@ func newPTProxyTubeQueue() *ptProxyTubeQueue {
 		cv:    *sync.NewCond(&proxyLock),
 	}
 	return proxyQueue
-}
-
-func unreliableProxyOneSide(a transport.UDPLike, b transport.UDPLike, wg *sync.WaitGroup) {
-	buf := make([]byte, tubes.MaxFrameDataLength)
-	defer wg.Done()
-	// Upon a call to Close, pending reads and write are canceled
-	for {
-		n, _, _, _, err := a.ReadMsgUDP(buf, nil)
-		if err != nil {
-			return
-		}
-		_, _, err = b.WriteMsgUDP(buf[:n], nil, nil)
-		if err != nil {
-			return
-		}
-	}
 }
 
 // manage principal to target proxying (t is a reliable tube)
@@ -135,12 +119,7 @@ func (sess *hopSession) startPTProxy(t net.Conn, pq *ptProxyTubeQueue) {
 
 	logrus.Info("pt_proxy: wrote conf to principal; starting unreliable proxy")
 
-	wg := &sync.WaitGroup{}
-	wg.Add(2)
-
-	// proxy
-	go unreliableProxyOneSide(principalTube, targetConn, wg)
-	go unreliableProxyOneSide(targetConn, principalTube, wg)
+	wg := proxy.UnreliableProxy(principalTube, targetConn)
 
 	t.Read(make([]byte, 1)) // block until this tube is closed by principal
 	logrus.Info("pt_proxy: reliable tube with principal closed. shutting down pt proxy...")

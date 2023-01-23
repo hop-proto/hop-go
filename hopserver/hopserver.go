@@ -69,10 +69,11 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, 
 		agMap: authgrants.NewAuthgrantMapSync(),
 
 		dpProxy: &dpproxy{
-			address:    agproxyUnixSocket,
-			principals: make(map[int32]sessID),
-			running:    atomic.Bool{},
-			proxyLock:  sync.Mutex{},
+			address:       agproxyUnixSocket,
+			principals:    make(map[int32]sessID),
+			principalLock: sync.Mutex{},
+			runningCV:     sync.Cond{L: &sync.Mutex{}},
+			proxyWG:       sync.WaitGroup{},
 		},
 
 		principals: make(map[sessID]sessID),
