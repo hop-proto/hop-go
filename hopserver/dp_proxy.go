@@ -27,10 +27,10 @@ import (
 //   2. Principal hop client <--> Target hop server (pt_proxy.go)
 
 //   Responsibilities [status] (1: Delegate <--> Principal proxy):
-//   - listen on a unix socket for Delegate hop clients [implemented]
-//   - maintain a mapping of Delegate hop clients to Principal hop client sessions [implemented]
-//   - proxy all authgrant messages between the Delegate and Principal [implemented]
-//    - ensure that processes connecting to unix socket are legitimate descendants
+//   - listen on a unix socket for Delegate hop clients
+//   - maintain a mapping of Delegate hop clients to Principal hop client sessions
+//   - proxy all authgrant messages between the Delegate and Principal
+//   - ensure that processes connecting to unix socket are legitimate descendants
 //     of the hop server [implemented for linux, TODO others]
 
 // GetPrincipal is a callback to return principal of sessID

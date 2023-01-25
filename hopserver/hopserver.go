@@ -36,8 +36,7 @@ type HopServer struct {
 	agMap *authgrants.AuthgrantMapSync
 
 	// Delegate proxy server state
-	dpProxy    *dpproxy
-	principals map[sessID]sessID // principals[sess] is sess that is connected to principal
+	dpProxy *dpproxy
 
 	// Session management
 	// +checklocks:sessionLock
@@ -75,8 +74,6 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, 
 			runningCV:     sync.Cond{L: &sync.Mutex{}},
 			proxyWG:       sync.WaitGroup{},
 		},
-
-		principals: make(map[sessID]sessID),
 
 		sessions:      make(map[sessID]*hopSession),
 		sessionLock:   sync.Mutex{},
