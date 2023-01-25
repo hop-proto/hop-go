@@ -114,6 +114,7 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		"rel":     pkt.flags.REL,
 		"ack":     pkt.flags.ACK,
 		"fin":     pkt.flags.FIN,
+		"state":   u.state.Load(),
 	}).Debug("receiving initiate packet")
 
 	if u.state.CompareAndSwap(created, initiated) {
@@ -122,6 +123,7 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 
 	// Send a RESP packet in response to REQ packets
 	if pkt.flags.REQ && u.state.Load() != closed {
+		u.log.Trace("sending RESP packet")
 		p := u.makeInitFrame(false)
 		u.sendQueue <- p.toBytes()
 	}
