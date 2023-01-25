@@ -77,7 +77,7 @@ func WriteFailure(w io.Writer, errString string) error {
 // ReadResponse reads either confirmation or Failure message
 func ReadResponse(r io.Reader) error {
 	resp := make([]byte, 1)
-	_, err := r.Read(resp)
+	_, err := io.ReadFull(r, resp)
 	if err != nil {
 		return err
 	}
@@ -102,6 +102,6 @@ func WriteUnreliableProxyID(w io.Writer, id byte) error {
 // ReadUnreliableProxyID reads tube id of unreliable tube to proxy
 func ReadUnreliableProxyID(r io.Reader) (byte, error) {
 	id := make([]byte, 1)
-	_, err := r.Read(id)
+	_, err := io.ReadFull(r, id)
 	return id[0], err
 }

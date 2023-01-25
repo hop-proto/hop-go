@@ -263,7 +263,8 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 	bytesRead += 8
 	c.ExpiresAt = time.Unix(int64(t), 0)
 
-	n, err := r.Read(c.PublicKey[:])
+	// n, err := r.Read(c.PublicKey[:])
+	n, err := io.ReadFull(r, c.PublicKey[:])
 	bytesRead += int64(n)
 	if err != nil {
 		return bytesRead, err
@@ -272,7 +273,8 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 		return bytesRead, io.EOF
 	}
 
-	n, err = r.Read(c.Parent[:])
+	// n, err = r.Read(c.Parent[:])
+	n, err = io.ReadFull(r, c.Parent[:])
 	bytesRead += int64(n)
 	if err != nil {
 		return bytesRead, err
