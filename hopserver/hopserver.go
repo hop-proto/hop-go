@@ -133,12 +133,12 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		tconf.ClientVerify.InsecureSkipVerify = true
 	} else {
 		// Cert validation enabled by default
-		if sc.EnableCertificateValidation == nil || *sc.EnableCertificateValidation {
+		if sc.DisableCertificateValidation == nil || !*sc.DisableCertificateValidation {
 			tconf.ClientVerify.Store = certs.Store{}
 			for _, s := range sc.CAFiles {
 				cert, err := certs.ReadCertificatePEMFile(s)
 				if err != nil {
-					logrus.Errorf("server: error loading cert at %s: %s", s, err)
+					logrus.Fatalf("server: error loading cert at %s: %s", s, err)
 					continue
 				}
 				logrus.Debugf("server: loaded cert with fingerprint: %x", cert.Fingerprint)
