@@ -335,17 +335,18 @@ mac = duplex.squeeze()
 
 ##### Client Auth Construction
 
----
 
 ```python
 # Continuing from duplex prior
-duplex.absorb([type, reserved])
-duplex.absorb(SessionID)
-encStatic = duplex.encrypt(static)
+duplex.absorb(type + reserved + certsLen)
+duplex.absorb(sessionID)
+certificates := [len(leaf), leaf, len(intermediate), intermediate]
+encCerts = duplex.encrypt(certificates)
 tag = duplex.squeeze()
 duplex.absorb(DH(se))
 mac = duplex.squeeze()
 ```
+
 
 ##### Server Logic
 
@@ -353,17 +354,17 @@ mac = duplex.squeeze()
 
 ```python
 # Continuing from duplex prior
-duplex.absorb([type, reserved])
+duplex.absorb(type, reserved + certsLen)
 duplex.absorb(SessionID)
-static = duplex.decrypt(encStatic)
-tag = duplex.squeeze(tag)
-# Verify tag
+certificates = duplex.decrypt(encCerts)
+tag = duplex.squeeze()
+# verify tag
+# verify certs, extract server s
 duplex.absorb(DH(se))
 mac = duplex.squeeze()
 ```
-
-- Is the static a static of a valid client?
-- Verify the tag before doing DH
+- Verify the tag before parsing the certs
+- Quit the handshake if the certs are invalid
 - Is the mac the same (after DH)
 
 #### Transport Message
