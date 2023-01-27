@@ -156,7 +156,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 	if hc.ServerName != "" {
 		verifyConfig.Name = certs.DNSName(hc.ServerName)
 	} else {
-		verifyConfig.Name = certs.RawStringName(hc.Hostname)
+		verifyConfig.Name = certs.DNSName(hc.Hostname)
 	}
 
 	// enable host key verification
