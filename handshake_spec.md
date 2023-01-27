@@ -325,14 +325,13 @@ mac = duplex.squeeze()
 - Is the mac the same (after DH)
 
 #### Client Auth
-OUT OF DATE
 
----
+| type $:=$ 0x5 (1 byte) |     Reserved := 0 (1 byte)     | Certs Len (2 bytes)                    |
+| :--------------------: | :----------------------------: | -------------------------------------- |
+|  SessionID (4 bytes)   | Leaf Certificate (2 + n bytes) | Intermediate Certificate (2 + n bytes) |
+|     tag (16 bytes)     |         mac (16 bytes)         |                                        |
+|                        |                                |                                        |
 
-| type $:=$ 0x5 (1 byte) | reserved $:= 0^3$ (3 bytes) |
-| :--------------------: | :-------------------------: |
-|  SessionID (4 bytes)   | encrypted static (32 bytes) |
-|     tag (16 bytes)     |       mac (16 bytes)        |
 
 ##### Client Auth Construction
 
