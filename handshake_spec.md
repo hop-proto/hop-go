@@ -160,7 +160,7 @@ protocolName = “hop_NN_XX_cyclist_keccak_p1600_12” # 1-1 protocol version
 duplex = Cyclist()
 duplex.absorb(protocolName)
 
-duplex.absorb([type, version, reserved])
+duplex.absorb([type + version + reserved])
 duplex.absorb(ephemeral)
 mac = duplex.squeeze()
 ```
@@ -172,7 +172,7 @@ mac = duplex.squeeze()
 ```python
 duplex = Cyclist()
 duplex.absorb(protocolName)
-duplex.absorb([type, version, reserved])
+duplex.absorb([type + version +reserved])
 duplex.absorb(e_c)
 mac = duplex.squeeze()
 ```
@@ -219,7 +219,7 @@ We'll want to adjust nonce sizes once we're using SANE (/if we don't end up usin
 
 ```python
 # Continuing from duplex prior
-duplex.absorb([type, reserved])
+duplex.absorb([type + reserved])
 duplex.absorb(e_s)
 duplex.absorb(DH(ee))
 duplex.absorb(cookie)
@@ -246,7 +246,7 @@ mac = duplex.squeeze()
 
 ```python
 # Continuing from duplex prior
-duplex.absorb([type, reserved])
+duplex.absorb([type + reserved])
 duplex.absorb(e_c)
 duplex.absorb(cookie)
 sni = padTo(serverID, 256) # pad serverID to 256 bytes
@@ -262,7 +262,7 @@ mac = duplex.squeeze()
 # Use cookie AEAD construction
 e_s = aead_open(nonce=cookie[:12], ciphertext=cookie[12:], ad=H(e_c, clientIP, clientPort))
 # ... Resimulate duplex up until this point ...
-duplex.absorb([type, reserved])
+duplex.absorb([type + reserved])
 duplex.absorb(e_c)
 duplex.absorb(cooke)
 sni = duplex.decrypt(encrypted_sni)
@@ -310,7 +310,7 @@ Client Logic
 
 ```python
 # Continuing from duplex prior
-duplex.absorb(type, reserved + certsLen)
+duplex.absorb(type + reserved + certsLen)
 duplex.absorb(SessionID)
 certificates = duplex.decrypt(encCerts)
 tag = duplex.squeeze()
@@ -325,28 +325,28 @@ mac = duplex.squeeze()
 - Is the mac the same (after DH)
 
 #### Client Auth
-OUT OF DATE
 
----
+| type $:=$ 0x5 (1 byte) |     Reserved := 0 (1 byte)     | Certs Len (2 bytes)                    |
+| :--------------------: | :----------------------------: | -------------------------------------- |
+|  SessionID (4 bytes)   | Leaf Certificate (2 + n bytes) | Intermediate Certificate (2 + n bytes) |
+|     tag (16 bytes)     |         mac (16 bytes)         |                                        |
+|                        |                                |                                        |
 
-| type $:=$ 0x5 (1 byte) | reserved $:= 0^3$ (3 bytes) |
-| :--------------------: | :-------------------------: |
-|  SessionID (4 bytes)   | encrypted static (32 bytes) |
-|     tag (16 bytes)     |       mac (16 bytes)        |
 
 ##### Client Auth Construction
 
----
 
 ```python
 # Continuing from duplex prior
-duplex.absorb([type, reserved])
-duplex.absorb(SessionID)
-encStatic = duplex.encrypt(static)
+duplex.absorb(type + reserved + certsLen)
+duplex.absorb(sessionID)
+certificates := [len(leaf), leaf, len(intermediate), intermediate]
+encCerts = duplex.encrypt(certificates)
 tag = duplex.squeeze()
 duplex.absorb(DH(se))
 mac = duplex.squeeze()
 ```
+
 
 ##### Server Logic
 
@@ -354,17 +354,17 @@ mac = duplex.squeeze()
 
 ```python
 # Continuing from duplex prior
-duplex.absorb([type, reserved])
+duplex.absorb(type +  reserved + certsLen)
 duplex.absorb(SessionID)
-static = duplex.decrypt(encStatic)
-tag = duplex.squeeze(tag)
-# Verify tag
+certificates = duplex.decrypt(encCerts)
+tag = duplex.squeeze()
+# verify tag
+# verify certs, extract server s
 duplex.absorb(DH(se))
 mac = duplex.squeeze()
 ```
-
-- Is the static a static of a valid client?
-- Verify the tag before doing DH
+- Verify the tag before parsing the certs
+- Quit the handshake if the certs are invalid
 - Is the mac the same (after DH)
 
 #### Transport Message
@@ -447,7 +447,7 @@ TODO: also out of date (need client certs)
 protocolID = “noise_IK_cyclist_keccak_C512”
 duplex = Cyclist()
 duplex.absorb(protocolID)
-duplex.absorb([type, protocol, reserved, ephemeral])
+duplex.absorb([type + protocol + reserved +  ephemeral])
 duplex.absorb(DH(es))
 static = duplex.encrypt(s)
 tag = duplex.squeeze()
@@ -468,7 +468,7 @@ mac = duplex.squeeze()
 protocolID = “noise_IK_cyclist”
 duplex = Cyclist()
 duplex.absorb(protocolID)
-duplex.absorb([type, protocol, reserved, ephemeral])
+duplex.absorb([type + protocol + reserved + ephemeral])
 duplex.absorb(DH(es))
 static = duplex.decrypt(s, tag)
 duplex.absorb(ss)
@@ -496,7 +496,7 @@ timestamp = duplex.decrypt(TAI64N(), mac)
 
 ```python
 # Continuing from duplex prior
-duplex.absorb([type, reserved, sessionID])
+duplex.absorb([type + reserved + sessionID])
 duplex.absorb(DH(ee))
 certificates = duplex.encrypt(certificates)
 tag = duplex.squeeze()
@@ -510,7 +510,7 @@ mac = duplex.squeeze()
 
 ```python
 # Continuing from duplex prior
-duplex.absorb([type, reserved, sessionID])
+duplex.absorb([type + reserved + sessionID])
 duplex.absorb(DH(ee))
 certificates = duplex.decrypt(certificates, tag)
 duplex.absorb(DH(se))
