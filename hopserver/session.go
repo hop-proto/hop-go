@@ -301,7 +301,6 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 		pid := c.Process.Pid
 		sess.server.dpProxy.principals[int32(pid)] = principalSess
 
-		codex.SendSuccess(tube)
 		go func() {
 			c.Wait()
 			tube.Close()
