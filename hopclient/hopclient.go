@@ -37,7 +37,6 @@ type HopClient struct { // nolint:maligned
 	Fsystem fstest.MapFS // TODO(baumanl): current hack for test. switch to something better.
 
 	TransportConn *transport.Client
-	ProxyConn     *tubes.Reliable
 
 	// TODO(baumanl): move authgrant state to struct? sort of waiting till i finalize stuff
 	// +checklocks:checkIntentLock
@@ -246,6 +245,7 @@ func (c *HopClient) Close() error {
 		c.ExecTube.Restore()
 	}
 	err := c.TubeMuxer.Stop()
+
 	//close all remote and local port forwarding relationships
 	c.wg.Wait()
 	return err
