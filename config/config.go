@@ -149,10 +149,12 @@ func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
 	if other.Key != nil {
 		hc.Key = other.Key
 	}
+	hc.LocalFwds = append(hc.LocalFwds, other.LocalFwds...)
 	// don't need to merge Patterns
 	if other.Port != 0 {
 		hc.Port = other.Port
 	}
+	hc.RemoteFwds = append(hc.RemoteFwds, other.RemoteFwds...)
 	if other.User != nil {
 		hc.User = other.User
 	}
@@ -204,10 +206,12 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	if hc.Key != nil {
 		newHC.Key = *hc.Key
 	}
+	newHC.LocalFwds = hc.LocalFwds
 	// don't need to include patterns
 	if hc.Port != 0 {
 		newHC.Port = hc.Port
 	}
+	newHC.RemoteFwds = hc.RemoteFwds
 	if hc.User != nil {
 		newHC.User = *hc.User
 	}
