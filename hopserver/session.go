@@ -19,7 +19,6 @@ import (
 	"hop.computer/hop/codex"
 	"hop.computer/hop/common"
 	"hop.computer/hop/keys"
-	"hop.computer/hop/netproxy"
 	"hop.computer/hop/portforwarding"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"

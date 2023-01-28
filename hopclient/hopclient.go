@@ -243,7 +243,6 @@ func (c *HopClient) Start() error {
 
 	// TODO refactor
 	logrus.Error("Sending msgs")
-	ch, err := c.TubeMuxer.CreateTube(common.PFControlTube)
 	ch, err := c.TubeMuxer.CreateReliableTube(common.PFControlTube)
 	if err != nil {
 		logrus.Error(err)
@@ -346,8 +345,6 @@ func (c *HopClient) HandleTubes() {
 
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
 			go c.newPrincipalInstanceSetup(r)
-		} else if t.Type() == common.RemotePFTube {
-			go c.handleRemote(t)
 		} else if t.Type() == common.PFTube {
 			if r, ok := t.(*tubes.Reliable); ok {
 				go portforwarding.HandlePF(r, c.forwardingTable)
