@@ -201,7 +201,7 @@ func listen(local, remote *addr, table *FwdMapping, muxer *tubes.Muxer, conn *ne
 				tube.Close()
 				break
 			}
-			if b[0] != 0 {
+			if b[0] != success {
 				conn.Close()
 				tube.Close()
 				continue
