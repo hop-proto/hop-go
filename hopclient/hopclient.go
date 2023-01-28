@@ -42,6 +42,7 @@ type HopClient struct { // nolint:maligned
 	// +checklocks:checkIntentLock
 	checkIntent     func(authgrants.Intent) error // should only be set if principal
 	checkIntentLock sync.Mutex
+	delServerConn   net.Conn // conn to UDS with delegate server
 
 	TubeMuxer *tubes.Muxer
 	ExecTube  *codex.ExecTube
@@ -245,7 +246,9 @@ func (c *HopClient) Close() error {
 		c.ExecTube.Restore()
 	}
 	err := c.TubeMuxer.Stop()
-
+	if c.delServerConn != nil {
+		c.delServerConn.Close() // informs del server to close proxy b/w principal + target
+	}
 	//close all remote and local port forwarding relationships
 	c.wg.Wait()
 	return err

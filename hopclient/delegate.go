@@ -79,5 +79,15 @@ func (c *HopClient) getAuthorization() error {
 		logrus.Errorf("delegate: error dialing ag proxy socket: %s", err)
 		return err
 	}
+
+	// send targetInfo to the delserver
+	err = authgrants.WriteTargetInfo(irTemplate.TargetURL(), pconn)
+	if err != nil {
+		pconn.Close()
+		logrus.Error("delegate: error sending targetInfo to server")
+		return err
+	}
+
+	c.delServerConn = pconn
 	return authgrants.StartDelegateInstance(pconn, irs)
 }
