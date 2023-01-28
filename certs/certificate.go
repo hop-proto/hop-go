@@ -10,10 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"os"
 	"strings"
-	"testing/fstest"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -480,8 +480,13 @@ func ReadCertificatePEM(b []byte) (*Certificate, error) {
 }
 
 // ReadCertificatePEMFileFS reads the first PEM-encoded certificate from a PEM file.
-func ReadCertificatePEMFileFS(path string, fs fstest.MapFS) (*Certificate, error) {
-	b, err := fs.ReadFile(path)
+func ReadCertificatePEMFileFS(path string, fs fs.FS) (*Certificate, error) {
+	f, err := fs.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(f)
 	if err != nil {
 		return nil, err
 	}

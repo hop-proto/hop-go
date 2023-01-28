@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"sync"
-	"testing/fstest"
 
 	"github.com/sirupsen/logrus"
 
@@ -34,7 +34,7 @@ type HopClient struct { // nolint:maligned
 	connected     bool // true if connected to address
 	authenticator core.Authenticator
 
-	Fsystem fstest.MapFS // TODO(baumanl): current hack for test. switch to something better.
+	Fsystem fs.FS
 
 	TransportConn *transport.Client
 

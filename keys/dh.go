@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"strings"
-	"testing/fstest"
 
 	"golang.org/x/crypto/curve25519"
 )
@@ -120,11 +120,15 @@ func ReadDHKeyFromPEMFile(path string) (*X25519KeyPair, error) {
 
 // ReadDHKeyFromPEMFileFS reads the first PEM-encoded Hop DH key from the
 // file.
-func ReadDHKeyFromPEMFileFS(path string, fs fstest.MapFS) (*X25519KeyPair, error) {
+func ReadDHKeyFromPEMFileFS(path string, fs fs.FS) (*X25519KeyPair, error) {
 	if fs == nil {
 		return ReadDHKeyFromPEMFile(path)
 	}
-	b, err := fs.ReadFile(path)
+	f, err := fs.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	b, err := io.ReadAll(f)
 	if err != nil {
 		return nil, err
 	}
