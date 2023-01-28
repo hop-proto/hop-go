@@ -481,6 +481,9 @@ func ReadCertificatePEM(b []byte) (*Certificate, error) {
 
 // ReadCertificatePEMFileFS reads the first PEM-encoded certificate from a PEM file.
 func ReadCertificatePEMFileFS(path string, fs fs.FS) (*Certificate, error) {
+	if fs == nil {
+		return ReadCertificatePEMFile(path)
+	}
 	f, err := fs.Open(path)
 	if err != nil {
 		return nil, err
