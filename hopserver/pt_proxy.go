@@ -1,11 +1,5 @@
 package hopserver
 
-import (
-	"sync"
-
-	"hop.computer/hop/tubes"
-)
-
 // PT Proxy: Server acts as a proxy between the Principal client
 // and Target server.
 
@@ -21,23 +15,3 @@ import (
 // 	(udp "conn") (roughly implemented)
 // - only create a proxy if it is expected and allowed (partially implemented)
 // - close down the proxy/associated resources neatly if either side fails (TODO)
-
-// allows server to keep track of unreliable principal proxy
-// tubes before the reliable has received the tube id
-type ptProxyTubeQueue struct {
-	// +checklocks:lock
-	tubes map[byte]*tubes.Unreliable
-	lock  *sync.Mutex
-	cv    sync.Cond
-}
-
-// newPTProxyTubeQueue creates a synchronized set of unreliable principal proxy tubes
-func newPTProxyTubeQueue() *ptProxyTubeQueue {
-	proxyLock := sync.Mutex{}
-	proxyQueue := &ptProxyTubeQueue{
-		tubes: make(map[byte]*tubes.Unreliable), // tube ID --> tube
-		lock:  &proxyLock,
-		cv:    *sync.NewCond(&proxyLock),
-	}
-	return proxyQueue
-}

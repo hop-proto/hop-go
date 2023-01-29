@@ -319,12 +319,21 @@ func (c *HopClient) startExecTube() error {
 // HandleTubes handles incoming tube requests to the client
 func (c *HopClient) HandleTubes() {
 	//TODO(baumanl): figure out responses to different tube types/what all should be allowed
-	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****
+
+	proxyQueue := newPTProxyTubeQueue()
+
 	for t := range c.TubeMuxer.TubeQueue {
 		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v. Reliable? %t", t.Type(), t.IsReliable())
 
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
-			go c.newPrincipalInstanceSetup(r)
+			go c.newPrincipalInstanceSetup(r, proxyQueue)
+		} else if u, ok := t.(*tubes.Unreliable); ok && u.Type() == common.PrincipalProxyTube && c.hostconfig.IsPrincipal {
+			// add to map and signal waiting processes
+			proxyQueue.lock.Lock()
+			proxyQueue.tubes[u.GetID()] = u
+			proxyQueue.lock.Unlock()
+			proxyQueue.cv.Broadcast()
+			logrus.Infof("session muxer broadcasted that unreliable tube is here: %x", u.GetID())
 		} else if t.Type() == common.RemotePFTube {
 			panic("client RemotePFTubes: unimplemented")
 		} else {

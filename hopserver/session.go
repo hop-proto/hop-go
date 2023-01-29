@@ -96,7 +96,6 @@ func (sess *hopSession) start() {
 
 	// start accepting incoming tubes
 	logrus.Info("STARTING TUBE LOOP")
-	proxyQueue := newPTProxyTubeQueue()
 
 	for {
 		tube, ok := <-sess.tubeMuxer.TubeQueue
@@ -108,15 +107,7 @@ func (sess *hopSession) start() {
 		r, ok := tube.(*tubes.Reliable)
 		if !ok {
 			// TODO(hosono) handle unreliable tubes (general case)
-			r, ok := tube.(*tubes.Unreliable)
-			if ok && r.Type() == common.PrincipalProxyTube {
-				// add to map and signal waiting processes
-				proxyQueue.lock.Lock()
-				proxyQueue.tubes[r.GetID()] = r
-				proxyQueue.lock.Unlock()
-				proxyQueue.cv.Broadcast()
-				logrus.Infof("session muxer broadcasted that unreliable tube is here: %x", r.GetID())
-			}
+			r.Close()
 			continue
 		}
 		switch tube.Type() {

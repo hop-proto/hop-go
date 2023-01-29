@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
 
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/common"
@@ -16,7 +17,6 @@ import (
 
 type principalSubclient struct {
 	client         *HopClient
-	relProxyTube   *tubes.Reliable
 	unrelProxyTube *tubes.Unreliable
 }
 
@@ -43,7 +43,27 @@ func (c *HopClient) SetCheckIntentCallback(f func(authgrants.Intent) error) erro
 	return nil
 }
 
-func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable) {
+// allows principal client to keep track of unreliable principal proxy
+// tubes before the reliable has received the tube id
+type ptProxyTubeQueue struct {
+	// +checklocks:lock
+	tubes map[byte]*tubes.Unreliable
+	lock  *sync.Mutex
+	cv    sync.Cond
+}
+
+// newPTProxyTubeQueue creates a synchronized set of unreliable principal proxy tubes
+func newPTProxyTubeQueue() *ptProxyTubeQueue {
+	proxyLock := sync.Mutex{}
+	proxyQueue := &ptProxyTubeQueue{
+		tubes: make(map[byte]*tubes.Unreliable), // tube ID --> tube
+		lock:  &proxyLock,
+		cv:    *sync.NewCond(&proxyLock),
+	}
+	return proxyQueue
+}
+
+func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable, pq *ptProxyTubeQueue) {
 	c.checkIntentLock.Lock()
 	ci := c.checkIntent
 	c.checkIntentLock.Unlock()
@@ -51,8 +71,34 @@ func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable) {
 	var psubclient *principalSubclient
 	var err error
 
+	// read unreliable tube id
+	tubeID, err := authgrants.ReadUnreliableProxyID(delTube)
+	if err != nil {
+		logrus.Error("principal: error reading unreliable tube id")
+		delTube.Close()
+		return
+	}
+
+	test := func(m map[byte]*tubes.Unreliable, b byte) bool {
+		_, ok := m[b]
+		return ok
+	}
+	// check (and keep checking on signal) for the unreliable tube with the id
+	pq.lock.Lock()
+	logrus.Info("principal: acquired pq.lock for the first time")
+	for !test(pq.tubes, tubeID) {
+		logrus.Info("tube not here yet. waiting...")
+		pq.cv.Wait()
+	}
+
+	proxyTube := pq.tubes[tubeID]
+
+	logrus.Info("principal: got the unreliable tube")
+	delete(pq.tubes, tubeID)
+	pq.lock.Unlock()
+
 	setup := func(url core.URL) (net.Conn, error) {
-		psubclient, err = c.setupTargetClient(url)
+		psubclient, err = c.setupTargetClient(url, proxyTube)
 		if err != nil {
 			logrus.Error("eror setting up target client")
 			return nil, err
@@ -69,29 +115,16 @@ func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable) {
 	if psubclient != nil {
 		logrus.Info("principal: closing subclient with target.")
 		psubclient.client.Close()
-		// close this tube with the delegate to indicate it should
 		// stop proxying
-		psubclient.relProxyTube.Close()
 		psubclient.unrelProxyTube.Close()
 	} else {
 		logrus.Info("principal: psubclient is nil")
 	}
 }
 
-func (c *HopClient) setupTargetClient(targURL core.URL) (*principalSubclient, error) {
-	proxyControl, targetConn, err := c.setUpDelegateProxyToTarget(targURL)
-	if err != nil {
-		if proxyControl != nil {
-			proxyControl.Close()
-		}
-		if targetConn != nil {
-			targetConn.Close()
-		}
-		return nil, err
-	}
+func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable) (*principalSubclient, error) {
 	psubclient := &principalSubclient{
-		relProxyTube:   proxyControl,
-		unrelProxyTube: targetConn,
+		unrelProxyTube: dt,
 	}
 
 	// TODO(baumanl): think through best way to get the config for this
@@ -141,7 +174,7 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (*principalSubclient, er
 		Leaf:      client.authenticator.GetLeaf(),
 	}
 
-	client.TransportConn, err = transport.DialNP(client.hostconfig.HostURL().Address(), targetConn, transportConfig)
+	client.TransportConn, err = transport.DialNP(client.hostconfig.HostURL().Address(), dt, transportConfig)
 	if err != nil {
 		return psubclient, err
 	}
@@ -159,62 +192,6 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (*principalSubclient, er
 	client.connected = true
 
 	return psubclient, nil
-}
-
-func (c *HopClient) setUpDelegateProxyToTarget(targURL core.URL) (*tubes.Reliable, *tubes.Unreliable, error) {
-	// open reliable principal proxy tube with delegate proxy
-	delegateProxyConn, err := c.newReliablePrincipalProxyTube()
-	if err != nil {
-		return nil, nil, err
-	}
-	logrus.Info("principal: made a reliable delProxyConn with del proxy")
-
-	// send TargetInfo to delegate proxy
-	err = authgrants.WriteTargetInfo(targURL, delegateProxyConn)
-	if err != nil {
-		return nil, nil, err
-	}
-	logrus.Info("principal: wrote target info")
-
-	// read response (whether delegate proxy successfully connected to target)
-	err = authgrants.ReadResponse(delegateProxyConn)
-	if err != nil {
-		logrus.Error("principal: error reading response")
-		return nil, nil, err
-	}
-	logrus.Info("principal: del proxy successfully connected to target!")
-	// open unreliable tube with delegate proxy
-	unreliableDelProxyConn, err := c.newUnreliablePrincipalProxyTube()
-	if err != nil {
-		logrus.Error("principal: error starting unreliable proxy tube")
-		return nil, nil, err
-	}
-	logrus.Info("principal: successfully started unreliable proxy tube")
-
-	// send tubeID
-	err = authgrants.WriteUnreliableProxyID(delegateProxyConn, unreliableDelProxyConn.GetID())
-	if err != nil {
-		logrus.Error("principal: error writing unreliable proxy id")
-		return nil, nil, err
-	}
-	logrus.Info("principal: successfully wrote unreliable proxy id")
-
-	// await confirmation that delegate proxy ready to proxy with unreliable tube
-	err = authgrants.ReadResponse(delegateProxyConn)
-	if err != nil {
-		logrus.Error("principal: error reading response from del proxy")
-		return nil, nil, err
-	}
-	logrus.Info("principal: got unreliable proxy conn")
-	return delegateProxyConn, unreliableDelProxyConn, nil
-}
-
-func (c *HopClient) newReliablePrincipalProxyTube() (*tubes.Reliable, error) {
-	return c.TubeMuxer.CreateReliableTube(common.PrincipalProxyTube)
-}
-
-func (c *HopClient) newUnreliablePrincipalProxyTube() (*tubes.Unreliable, error) {
-	return c.TubeMuxer.CreateUnreliableTube(common.PrincipalProxyTube)
 }
 
 func (c *HopClient) newAuthgrantTube() (*tubes.Reliable, error) {
