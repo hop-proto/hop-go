@@ -137,6 +137,7 @@ func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable) (*
 	hc.User = targURL.User
 	hc.Headless = true
 	hc.UsePty = false
+	hc.IsPrincipal = true
 
 	// load client config from default path
 	// cflags := &flags.ClientFlags{
@@ -190,6 +191,8 @@ func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable) (*
 		return nil, err
 	}
 	client.connected = true
+
+	go client.HandleTubes()
 
 	return psubclient, nil
 }

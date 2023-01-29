@@ -9,8 +9,8 @@ authgrant-dev:
 	go run . delegate
 
 
-.PHONY: authgrant-dev-chain
-authgrant-dev:
+.PHONY: authgrant-chain-dev
+authgrant-chain-dev:
 	go build -o ../containers/delegate_proxy_server/hop ../cmd/hop
 	go build -o ../containers/target_server/hop ../cmd/hop
 	go run . target

@@ -201,6 +201,7 @@ func (p *dpproxy) proxyAuthGrantRequest(pi *dpInstance) {
 		logrus.Error("Proxy: error writing unreliable proxy id")
 		return
 	}
+	logrus.Info("proxy: wrote unreliable proxy id", pi.pproxy.GetID())
 
 	ptWG := proxy.UnreliableProxy(pi.pproxy, pi.targetUDP) // started proxy from principal to target
 	dpWG := proxy.ReliableProxy(pi.pconn, pi.dconn)        // started proxy from delegate to principal
