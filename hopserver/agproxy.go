@@ -32,11 +32,17 @@ import (
 //   - ensure that processes connecting to unix socket are legitimate descendants
 //     of the hop server [implemented for linux, TODO others]
 
+// 	Responsibilities [status] (2: Principal <--> Target proxy):
+// 	- run a proxy between the Principal (unreliable tube) and Target
+// 		(udp "conn") (roughly implemented)
+// 	- only create a proxy if it is expected and allowed (partially implemented)
+// 	- close down the proxy/associated resources neatly if either side fails (TODO)
+
 // GetPrincipal is a callback to return principal of sessID
 type GetPrincipal func(sessID) (*hopSession, bool)
 
-// dpproxy holds state used by server to proxy delegate requests to principals
-type dpproxy struct {
+// agProxy holds state used by server to proxy delegate requests to principals
+type agProxy struct {
 	address string // unix socket to listen on.
 
 	// +checklocks:principalLock
@@ -53,7 +59,7 @@ type dpproxy struct {
 	getPrincipal GetPrincipal
 }
 
-type dpInstance struct {
+type agpInstance struct {
 	dconn net.Conn        // connection to delegate (IPC)
 	pconn *tubes.Reliable // connection to target (reliable tube)
 
@@ -61,13 +67,13 @@ type dpInstance struct {
 	pproxy    *tubes.Unreliable // tube for principal to proxy to target over
 }
 
-// start starts DP Proxy server
-func (p *dpproxy) start() error {
+// start starts authgrant proxy server
+func (p *agProxy) start() error {
 	if p.running {
-		return fmt.Errorf("DP Proxy: start called when already running")
+		return fmt.Errorf("AG Proxy: start called when already running")
 	}
 
-	logrus.Debug("DP Proxy: trying to acquire proxyLock")
+	logrus.Debug("AG Proxy: trying to acquire proxyLock")
 	p.runningCV.L.Lock()
 	defer p.runningCV.L.Unlock()
 
@@ -75,11 +81,11 @@ func (p *dpproxy) start() error {
 	if err == nil { // file exists
 		// IsDir is short for fileInfo.Mode().IsDir()
 		if fileInfo.IsDir() {
-			return fmt.Errorf("DP Proxy: unable to start DP Proxy at address %s: is a directory", p.address)
+			return fmt.Errorf("AG Proxy: unable to start AG Proxy at address %s: is a directory", p.address)
 		}
 		// make sure the socket does not already exist. remove if it does.
 		if err := os.RemoveAll(p.address); err != nil {
-			return fmt.Errorf("DP Proxy: error removing %s: %s", p.address, err)
+			return fmt.Errorf("AG Proxy: error removing %s: %s", p.address, err)
 		}
 	}
 
@@ -87,7 +93,7 @@ func (p *dpproxy) start() error {
 	sockconfig := &net.ListenConfig{Control: setListenerOptions}
 	authgrantServer, err := sockconfig.Listen(context.Background(), "unix", p.address)
 	if err != nil {
-		return fmt.Errorf("DP Proxy: unix socket listen error: %s", err)
+		return fmt.Errorf("AG Proxy: unix socket listen error: %s", err)
 	}
 
 	p.listener = authgrantServer
@@ -98,8 +104,8 @@ func (p *dpproxy) start() error {
 }
 
 // serve accepts connections and starts proxying
-func (p *dpproxy) serve() {
-	logrus.Info("DP Proxy: listening on unix socket: ", p.listener.Addr().String())
+func (p *agProxy) serve() {
+	logrus.Info("AG Proxy: listening on unix socket: ", p.listener.Addr().String())
 	for {
 		c, err := p.listener.Accept()
 		// If the listener was closed, it's ok to return
@@ -107,7 +113,7 @@ func (p *dpproxy) serve() {
 			return
 		}
 		if err != nil {
-			logrus.Error("DP Proxy: accept error:", err)
+			logrus.Error("AG Proxy: accept error:", err)
 			continue
 		}
 		p.proxyWG.Add(1)
@@ -115,7 +121,7 @@ func (p *dpproxy) serve() {
 	}
 }
 
-func (p *dpproxy) stop() error {
+func (p *agProxy) stop() error {
 	p.runningCV.L.Lock()
 	l := p.listener.(*net.UnixListener)
 	l.Close()
@@ -126,42 +132,43 @@ func (p *dpproxy) stop() error {
 }
 
 // checks that the connecting process is a hop session descendent and then proxies
-func (p *dpproxy) checkAndProxy(c net.Conn) {
+func (p *agProxy) checkAndProxy(c net.Conn) {
 	defer p.proxyWG.Done()
 	defer c.Close()
-	logrus.Debug("DP Proxy: just accepted a new connection")
+	logrus.Debug("AG Proxy: just accepted a new connection")
 	// Verify that the client is a legit descendent and get principal sess
 	principalID, e := p.checkCredentials(c)
 	if e != nil {
-		logrus.Errorf("DP Proxy: error checking credentials: %v", e)
+		logrus.Errorf("AG Proxy: error checking credentials: %v", e)
 		return
 	}
 	principalSess, ok := p.getPrincipal(principalID)
 	if !ok {
-		logrus.Error("DP Proxy: principal session not found.")
+		logrus.Error("AG Proxy: principal session not found.")
 		return
 	}
-	logrus.Debug("DP proxy: found the principal session")
+	logrus.Debug("AG Proxy: found the principal session")
 
 	if principalSess.transportConn.IsClosed() {
-		logrus.Error("DP Proxy: connection with principal is closed or closing")
+		logrus.Error("AG Proxy: connection with principal is closed or closing")
 		return
 	}
-	// connect to principal
+	// connect to principal (reliable)
 	principalConn, err := principalSess.newAuthGrantTube()
 	if err != nil {
-		logrus.Errorf("DP Proxy: error connecting to principal: %v", err)
+		logrus.Errorf("AG Proxy: error connecting to principal: %v", err)
 		return
 	}
-	logrus.Infof("DP Proxy: connected to principal")
+	logrus.Infof("AG Proxy: connected to principal")
 	defer principalConn.Close()
 
+	// connect to principal (unreliable)
 	unreliableProxyTube, err := principalSess.newUnreliablePrincipalProxyTube()
 	if err != nil {
-		logrus.Errorf("DP Proxy: error making unreliable proxy tube with principal: %v", err)
+		logrus.Errorf("AG Proxy: error making unreliable proxy tube with principal: %v", err)
 		return
 	}
-	logrus.Infof("DP Proxy: got unreliable proxy tube to principal")
+	logrus.Infof("AG Proxy: got unreliable proxy tube to principal")
 	defer unreliableProxyTube.Close()
 
 	// read Target Info and get udp conn to target
@@ -176,35 +183,36 @@ func (p *dpproxy) checkAndProxy(c net.Conn) {
 
 	tconn, err := ti.ConnectToTarget()
 	if err != nil {
-		logrus.Error("Proxy: error connecting to target")
+		logrus.Error("AG Proxy: error connecting to target")
 		return
 	}
-	logrus.Infof("DP Proxy: successfully connected to target")
+	logrus.Infof("AG Proxy: successfully connected to target")
 	defer tconn.Close()
 
-	pi := dpInstance{
+	conns := &agpInstance{
 		dconn:     c,
 		pconn:     principalConn,
 		targetUDP: tconn,
 		pproxy:    unreliableProxyTube,
 	}
 
-	p.proxyAuthGrantRequest(&pi)
+	p.proxy(conns)
 }
 
-// proxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
+// proxy is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
 // Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
-func (p *dpproxy) proxyAuthGrantRequest(pi *dpInstance) {
+func (p *agProxy) proxy(conns *agpInstance) {
 	// send unreliable pproxy tube id to principal over pconn
-	err := authgrants.WriteUnreliableProxyID(pi.pconn, pi.pproxy.GetID())
+	err := authgrants.WriteUnreliableProxyID(conns.pconn, conns.pproxy.GetID())
 	if err != nil {
-		logrus.Error("Proxy: error writing unreliable proxy id")
+		logrus.Error("AG Proxy: error writing unreliable proxy id")
 		return
 	}
-	logrus.Info("proxy: wrote unreliable proxy id", pi.pproxy.GetID())
+	logrus.Info("AG Proxy: wrote unreliable proxy id", conns.pproxy.GetID())
+	logrus.Info("AG Proxy: starting PT and DP proxies")
 
-	ptWG := proxy.UnreliableProxy(pi.pproxy, pi.targetUDP) // started proxy from principal to target
-	dpWG := proxy.ReliableProxy(pi.pconn, pi.dconn)        // started proxy from delegate to principal
+	ptWG := proxy.UnreliableProxy(conns.pproxy, conns.targetUDP) // started proxy from principal to target
+	dpWG := proxy.ReliableProxy(conns.pconn, conns.dconn)        // started proxy from delegate to principal
 
 	dpCh := make(chan struct{})
 	go func() {
@@ -235,36 +243,33 @@ func (p *dpproxy) proxyAuthGrantRequest(pi *dpInstance) {
 
 	select {
 	case <-dpCh: // dp_proxy closed normally
-		logrus.Info("dp proxy closed normally")
+		logrus.Info("AG Proxy: closed normally")
 		// TODO(baumanl): give principal time to close hop sess with target
 		// before ripping out proxy?
-		pi.pconn.WaitForClose() // TODO(baumanl): ask george if this does what I want
-		pi.pproxy.Close()
-		pi.targetUDP.Close()
+		conns.pconn.WaitForClose() // TODO(baumanl): ask george if this does what I want
+		conns.pproxy.Close()
+		conns.targetUDP.Close()
 		<-ptCh
 	case <-ptCh:
-		logrus.Info("pt proxy closed before dp")
-		pi.pconn.Close()
-		pi.dconn.Close()
+		logrus.Info("AG Proxy: pt proxy closed before dp")
+		conns.pconn.Close()
+		conns.dconn.Close()
 		<-dpCh
 	case <-done:
-		logrus.Info("proxy being force closed")
-		pi.pconn.Close()
-		pi.dconn.Close()
+		logrus.Info("AG Proxy: proxy being force closed")
+		conns.pconn.Close()
+		conns.dconn.Close()
 		<-dpCh
-		pi.pconn.WaitForClose() // TODO(baumanl): ask george if this does what I want
-		pi.pproxy.Close()
-		pi.targetUDP.Close()
+		conns.pconn.WaitForClose() // TODO(baumanl): ask george if this does what I want
+		conns.pproxy.Close()
+		conns.targetUDP.Close()
 		<-ptCh
 	}
 }
 
 // verifies that client is a descendent of a process started by the principal
 // and returns its corresponding principal session
-func (p *dpproxy) checkCredentials(c net.Conn) (sessID, error) {
-
-	// read TargetInfo from c
-	// start UDP socket with Target
+func (p *agProxy) checkCredentials(c net.Conn) (sessID, error) {
 	// cPID is PID of client process that connected to socket
 	cPID, err := readCreds(c)
 	if err != nil {

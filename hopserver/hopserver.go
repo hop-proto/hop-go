@@ -36,7 +36,7 @@ type HopServer struct {
 	agMap *authgrants.AuthgrantMapSync
 
 	// Delegate proxy server state
-	dpProxy *dpproxy
+	dpProxy *agProxy
 
 	// Session management
 	// +checklocks:sessionLock
@@ -67,7 +67,7 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, 
 
 		agMap: authgrants.NewAuthgrantMapSync(),
 
-		dpProxy: &dpproxy{
+		dpProxy: &agProxy{
 			address:       agproxyUnixSocket,
 			principals:    make(map[int32]sessID),
 			principalLock: sync.Mutex{},
