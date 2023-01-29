@@ -9,5 +9,8 @@ COPY ./target_server/target_server_config /etc/hopd/config
 
 COPY ./principal_client/id_client.pub /root/.hop/authorized_keys
 
+COPY ./target/hop /root/hop
+COPY ./delegate_client/delegate_config /root/.hop/config
+
 WORKDIR /app
 CMD ./containers/hopd-wrapper.sh
