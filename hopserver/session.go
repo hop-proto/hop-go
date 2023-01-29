@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"os/user"
 	"strconv"
-	"sync/atomic"
 	"syscall"
 
 	"github.com/AstromechZA/etcpwdparse"
@@ -39,9 +38,8 @@ type hopSession struct {
 	// We use a channel (with size 1) to avoid reading window sizes before we've created the pty
 	pty chan *os.File
 
-	usingAuthGrant        bool // true if client authenticated with authgrant
-	authorizedActions     []authgrants.Authgrant
-	numActiveReqDelegates atomic.Int32
+	usingAuthGrant    bool // true if client authenticated with authgrant
+	authorizedActions []authgrants.Authgrant
 }
 
 func (sess *hopSession) checkAuthorization() bool {
@@ -126,8 +124,6 @@ func (sess *hopSession) start() {
 			go sess.startCodex(r)
 		case common.AuthGrantTube:
 			go sess.handleAgc(r)
-		case common.PrincipalProxyTube:
-			go sess.startPTProxy(r, proxyQueue)
 		case common.RemotePFTube:
 			panic("unimplemented: remote pf")
 		case common.LocalPFTube:

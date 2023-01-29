@@ -6,20 +6,19 @@ import (
 	"net"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/authgrants"
+	"hop.computer/hop/common"
 	"hop.computer/hop/proxy"
+	"hop.computer/hop/tubes"
 
 	"golang.org/x/exp/maps"
 )
 
-// DP Proxy: Server acts as a proxy between the Delegate client
-// and Principal client.
-
-//  Delegate proxy server: a hop server that has an active hop session with
+// Proxy: a hop server that has an active hop session with
 //   a (remote) Principal hop client and a (local) Delegate hop client that was
 //   started from a process spawned from that active hop session. Two "proxying"
 //   actions actually occur:
@@ -52,6 +51,14 @@ type dpproxy struct {
 
 	proxyWG      sync.WaitGroup
 	getPrincipal GetPrincipal
+}
+
+type dpInstance struct {
+	dconn net.Conn        // connection to delegate (IPC)
+	pconn *tubes.Reliable // connection to target (reliable tube)
+
+	targetUDP *net.UDPConn      // udp socket with target
+	pproxy    *tubes.Unreliable // tube for principal to proxy to target over
 }
 
 // start starts DP Proxy server
@@ -108,7 +115,6 @@ func (p *dpproxy) serve() {
 	}
 }
 
-// TODO(hosono) Make this correct
 func (p *dpproxy) stop() error {
 	p.runningCV.L.Lock()
 	l := p.listener.(*net.UnixListener)
@@ -122,6 +128,7 @@ func (p *dpproxy) stop() error {
 // checks that the connecting process is a hop session descendent and then proxies
 func (p *dpproxy) checkAndProxy(c net.Conn) {
 	defer p.proxyWG.Done()
+	defer c.Close()
 	logrus.Debug("DP Proxy: just accepted a new connection")
 	// Verify that the client is a legit descendent and get principal sess
 	principalID, e := p.checkCredentials(c)
@@ -135,30 +142,7 @@ func (p *dpproxy) checkAndProxy(c net.Conn) {
 		return
 	}
 	logrus.Debug("DP proxy: found the principal session")
-	p.proxyAuthGrantRequest(principalSess, c)
-}
 
-// verifies that client is a descendent of a process started by the principal
-// and returns its corresponding principal session
-func (p *dpproxy) checkCredentials(c net.Conn) (sessID, error) {
-	// cPID is PID of client process that connected to socket
-	cPID, err := readCreds(c)
-	if err != nil {
-		return 0, err
-	}
-	p.principalLock.Lock()
-	defer p.principalLock.Unlock()
-	aPID, err := getAncestor(maps.Keys(p.principals), cPID)
-	if err != nil {
-		return 0, err
-	}
-
-	return p.principals[aPID], nil
-}
-
-// proxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
-// Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
-func (p *dpproxy) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn) {
 	if principalSess.transportConn.IsClosed() {
 		logrus.Error("DP Proxy: connection with principal is closed or closing")
 		return
@@ -170,18 +154,67 @@ func (p *dpproxy) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn) {
 		return
 	}
 	logrus.Infof("DP Proxy: connected to principal")
+	defer principalConn.Close()
 
-	// enable principal to proxy a connection through the server
-	principalSess.numActiveReqDelegates.Add(1)
-	// disable principal's ability to proxy a connection through the server
-	defer principalSess.numActiveReqDelegates.Add(-1)
+	unreliableProxyTube, err := principalSess.newUnreliablePrincipalProxyTube()
+	if err != nil {
+		logrus.Errorf("DP Proxy: error making unreliable proxy tube with principal: %v", err)
+		return
+	}
+	logrus.Infof("DP Proxy: got unreliable proxy tube to principal")
+	defer unreliableProxyTube.Close()
 
-	wg := proxy.ReliableProxy(principalConn, c)
+	// read Target Info and get udp conn to target
+	targetURL, err := authgrants.ReadTargetInfo(c)
+	if err != nil {
+		return
+	}
 
-	ch := make(chan struct{})
+	ti := authgrants.TargetInfo{
+		TargetURL: *targetURL,
+	}
+
+	tconn, err := ti.ConnectToTarget()
+	if err != nil {
+		logrus.Error("Proxy: error connecting to target")
+		return
+	}
+	logrus.Infof("DP Proxy: successfully connected to target")
+	defer tconn.Close()
+
+	pi := dpInstance{
+		dconn:     c,
+		pconn:     principalConn,
+		targetUDP: tconn,
+		pproxy:    unreliableProxyTube,
+	}
+
+	p.proxyAuthGrantRequest(&pi)
+}
+
+// proxyAuthGrantRequest is used by Server to forward INTENT_REQUESTS from a Client -> Principal and responses from Principal -> Client
+// Checks hop client process is a descendent of the hop server and conducts authgrant request with the appropriate principal
+func (p *dpproxy) proxyAuthGrantRequest(pi *dpInstance) {
+	// send unreliable pproxy tube id to principal over pconn
+	err := authgrants.WriteUnreliableProxyID(pi.pconn, pi.pproxy.GetID())
+	if err != nil {
+		logrus.Error("Proxy: error writing unreliable proxy id")
+		return
+	}
+
+	ptWG := proxy.UnreliableProxy(pi.pproxy, pi.targetUDP) // started proxy from principal to target
+	dpWG := proxy.ReliableProxy(pi.pconn, pi.dconn)        // started proxy from delegate to principal
+
+	dpCh := make(chan struct{})
 	go func() {
-		defer close(ch)
-		wg.Wait()
+		defer close(dpCh)
+		dpWG.Wait()
+	}()
+
+	ptCh := make(chan struct{})
+	go func() {
+		defer close(ptCh)
+		ptWG.Wait()
 	}()
 
 	done := make(chan struct{})
@@ -199,22 +232,53 @@ func (p *dpproxy) proxyAuthGrantRequest(principalSess *hopSession, c net.Conn) {
 		p.runningCV.L.Unlock()
 	}()
 
-	cleanup := func() {
-		c.Close()
-		principalConn.Close()
-	}
-
 	select {
-	case <-ch: // proxy closed normally
-		logrus.Info("proxy closed normally")
-		cleanup()
-	case <-time.After(time.Second * 30): // proxy timed out
-		logrus.Info("proxy timed out")
-		cleanup()
-		<-ch
+	case <-dpCh: // dp_proxy closed normally
+		logrus.Info("dp proxy closed normally")
+		// TODO(baumanl): give principal time to close hop sess with target
+		// before ripping out proxy?
+		pi.pconn.WaitForClose() // TODO(baumanl): ask george if this does what I want
+		pi.pproxy.Close()
+		pi.targetUDP.Close()
+		<-ptCh
+	case <-ptCh:
+		logrus.Info("pt proxy closed before dp")
+		pi.pconn.Close()
+		pi.dconn.Close()
+		<-dpCh
 	case <-done:
 		logrus.Info("proxy being force closed")
-		cleanup()
-		<-ch
+		pi.pconn.Close()
+		pi.dconn.Close()
+		<-dpCh
+		pi.pconn.WaitForClose() // TODO(baumanl): ask george if this does what I want
+		pi.pproxy.Close()
+		pi.targetUDP.Close()
+		<-ptCh
 	}
+}
+
+// verifies that client is a descendent of a process started by the principal
+// and returns its corresponding principal session
+func (p *dpproxy) checkCredentials(c net.Conn) (sessID, error) {
+
+	// read TargetInfo from c
+	// start UDP socket with Target
+	// cPID is PID of client process that connected to socket
+	cPID, err := readCreds(c)
+	if err != nil {
+		return 0, err
+	}
+	p.principalLock.Lock()
+	defer p.principalLock.Unlock()
+	aPID, err := getAncestor(maps.Keys(p.principals), cPID)
+	if err != nil {
+		return 0, err
+	}
+
+	return p.principals[aPID], nil
+}
+
+func (sess *hopSession) newUnreliablePrincipalProxyTube() (*tubes.Unreliable, error) {
+	return sess.tubeMuxer.CreateUnreliableTube(common.PrincipalProxyTube)
 }

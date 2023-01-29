@@ -1,14 +1,8 @@
 package hopserver
 
 import (
-	"fmt"
-	"net"
 	"sync"
 
-	"github.com/sirupsen/logrus"
-
-	"hop.computer/hop/authgrants"
-	"hop.computer/hop/proxy"
 	"hop.computer/hop/tubes"
 )
 
@@ -46,100 +40,4 @@ func newPTProxyTubeQueue() *ptProxyTubeQueue {
 		cv:    *sync.NewCond(&proxyLock),
 	}
 	return proxyQueue
-}
-
-// manage principal to target proxying (t is a reliable tube)
-func (sess *hopSession) startPTProxy(t net.Conn, pq *ptProxyTubeQueue) {
-
-	// TODO(baumanl): add check for authgrant?
-
-	// make sure this is currently expected
-	if sess.numActiveReqDelegates.Load() == 0 {
-		logrus.Info("Server: received unexpected request to start net proxy")
-		return
-	}
-
-	// receive target message
-	var targetInfo authgrants.TargetInfo
-	url, err := authgrants.ReadTargetInfo(t)
-	if err != nil {
-		logrus.Errorf("pt_proxy: error reading target info: %s", err)
-		authgrants.WriteFailure(t, "Server: unable to read target info")
-		return
-	}
-	targetInfo.TargetURL = *url
-	logrus.Info("pt_proxy: read targetinfo")
-
-	// connect to target
-	targetConn, err := targetInfo.ConnectToTarget()
-	if err != nil {
-		logrus.Errorf("pt_proxy: error connecting to target: %s", err)
-		authgrants.WriteFailure(t, fmt.Sprint(err))
-		return
-	}
-	logrus.Info("pt_proxy: connected to target")
-	defer targetConn.Close()
-	err = authgrants.WriteConfirmation(t)
-	if err != nil {
-		logrus.Error("pt_proxy: error writing confirmation of target conn")
-		return
-	}
-	logrus.Info("pt_proxy: wrote confirmation of target conn")
-
-	// receive unreliable principal proxy tube id
-	tubeID, err := authgrants.ReadUnreliableProxyID(t)
-	if err != nil {
-		logrus.Errorf("Server: error reading unreliable proxy id: %s", err)
-	}
-	logrus.Infof("pt_proxy: got unreliable proxy ID: %v", tubeID)
-
-	test := func(m map[byte]*tubes.Unreliable, b byte) bool {
-		_, ok := m[b]
-		return ok
-	}
-	// check (and keep checking on signal) for the unreliable tube with the id
-	pq.lock.Lock()
-	logrus.Info("pt_proxy: acquired pq.lock for the first time")
-	for !test(pq.tubes, tubeID) {
-		logrus.Info("tube not here yet. waiting...")
-		pq.cv.Wait()
-	}
-
-	principalTube := pq.tubes[tubeID]
-	logrus.Info("pt_proxy: got the unreliable tube")
-	delete(pq.tubes, tubeID)
-	pq.lock.Unlock()
-
-	// send confirmation to principal
-	err = authgrants.WriteConfirmation(t)
-	if err != nil {
-		logrus.Errorf("pt_proxy: error writing confirmation to principal: %s", err)
-		return
-	}
-
-	logrus.Info("pt_proxy: wrote conf to principal; starting unreliable proxy")
-
-	wg := proxy.UnreliableProxy(principalTube, targetConn)
-
-	t.Read(make([]byte, 1)) // block until this tube is closed by principal
-	logrus.Info("pt_proxy: reliable tube with principal closed. shutting down pt proxy...")
-
-	err = targetConn.Close()
-	if err != nil {
-		logrus.Error("pt_proxy: error closing target conn udp conn: ", err)
-	}
-	logrus.Info("pt_proxy: closed udp conn to target")
-
-	err = principalTube.Close()
-	if err != nil {
-		logrus.Error("pt_proxy: error closing unreliable principal tube: ", err)
-	}
-	logrus.Infof("pt_proxy: closed unreliable principal tube with id %v", principalTube.GetID())
-
-	err = t.Close()
-	if err != nil {
-		logrus.Error("pt_proxy: error closing reliable principal conn: ", err)
-	}
-	logrus.Info("pt_proxy: closed reliable principal tube")
-	wg.Wait()
 }
