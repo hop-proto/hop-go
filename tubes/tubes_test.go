@@ -24,15 +24,17 @@ import (
 type UDPMsgConn struct {
 	odds float64
 	net.UDPConn
+	remote *net.UDPAddr
 }
 
 var _ transport.MsgConn = &UDPMsgConn{}
 
 // MakeUDPMsgConn converts a *net.UDPConn into a *UDPMsgConn
-func MakeUDPMsgConn(odds float64, underlying *net.UDPConn) *UDPMsgConn {
+func MakeUDPMsgConn(odds float64, underlying *net.UDPConn, remote *net.UDPAddr) *UDPMsgConn {
 	return &UDPMsgConn{
 		odds,
 		*underlying,
+		remote,
 	}
 }
 
@@ -60,17 +62,16 @@ func (c *UDPMsgConn) WriteMsg(b []byte) (err error) {
 // rel is true for reliable tubes and false for unreliable ones
 func makeConn(odds float64, rel bool, t *testing.T) (t1, t2 net.Conn, stop func(), r bool, err error) {
 	r = rel
-	var c1, c2 transport.MsgConn
-	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")
+
+	c1Packet, err := net.ListenPacket("udp", ":0")
+	c1UDP := c1Packet.(*net.UDPConn)
 	assert.NilError(t, err)
 
-	c1UDP, err := net.Dial("udp", c2Addr.String())
+	c2Packet, err := net.ListenPacket("udp", ":0")
 	assert.NilError(t, err)
-	c1 = MakeUDPMsgConn(odds, c1UDP.(*net.UDPConn))
-
-	c2UDP, err := net.DialUDP("udp", c2Addr, c1.LocalAddr().(*net.UDPAddr))
-	assert.NilError(t, err)
-	c2 = MakeUDPMsgConn(odds, c2UDP)
+	c2UDP := c2Packet.(*net.UDPConn)
+	c1 := MakeUDPMsgConn(odds, c1UDP, c2UDP.LocalAddr().(*net.UDPAddr))
+	c2 := MakeUDPMsgConn(odds, c2UDP, c1UDP.LocalAddr().(*net.UDPAddr))
 
 	var muxer1 *Muxer
 	var muxer2 *Muxer

@@ -13,24 +13,23 @@ import (
 	"gotest.tools/assert"
 
 	"hop.computer/hop/common"
-	"hop.computer/hop/transport"
 )
 
 // makeMuxers creates two connected muxers running over UDP
 // odds is the probability that a given packet is sent.
 // Set odds to 1.0 to send all packet and 0.0 to send no packets
 func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
-	var c1, c2 transport.MsgConn
-	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")
-	assert.NilError(t, err)
 
-	c1UDP, err := net.Dial("udp", c2Addr.String())
+	c1Packet, err := net.ListenPacket("udp", ":0")
 	assert.NilError(t, err)
-	c1 = MakeUDPMsgConn(odds, c1UDP.(*net.UDPConn))
+	c1UDP := c1Packet.(*net.UDPConn)
 
-	c2UDP, err := net.DialUDP("udp", c2Addr, c1.LocalAddr().(*net.UDPAddr))
+	c2Packet, err := net.ListenPacket("udp", ":0")
 	assert.NilError(t, err)
-	c2 = MakeUDPMsgConn(odds, c2UDP)
+	c2UDP := c2Packet.(*net.UDPConn)
+
+	c1 := MakeUDPMsgConn(odds, c1UDP, c2UDP.LocalAddr().(*net.UDPAddr))
+	c2 := MakeUDPMsgConn(odds, c2UDP, c1UDP.LocalAddr().(*net.UDPAddr))
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)
