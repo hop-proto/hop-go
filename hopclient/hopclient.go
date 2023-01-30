@@ -222,6 +222,7 @@ func loadLeaf(leafFile string, autoSelfSign bool, public *keys.PublicKey, addres
 func (c *HopClient) Start() error {
 	//TODO(baumanl): fix how session duration tied to cmd duration or port
 	//forwarding duration depending on options
+	logrus.Infof("hostconfig.Cmd: %v", c.hostconfig.Cmd)
 	err := c.startExecTube()
 	if err != nil {
 		logrus.Error(err)
@@ -242,6 +243,7 @@ func (c *HopClient) Wait() {
 
 // Close explicitly closes down hop session (usually used after PF is down and can be terminated)
 func (c *HopClient) Close() error {
+	defer logrus.Info("client done waiting!")
 	if c.ExecTube != nil {
 		c.ExecTube.Restore()
 	}
@@ -249,7 +251,8 @@ func (c *HopClient) Close() error {
 	if c.delServerConn != nil {
 		c.delServerConn.Close() // informs del server to close proxy b/w principal + target
 	}
-	//close all remote and local port forwarding relationships
+	// TODO: close all remote and local port forwarding relationships
+	logrus.Info("client waiting in close...")
 	c.wg.Wait()
 	return err
 }
@@ -282,7 +285,6 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 }
 
 func (c *HopClient) userAuthorization() error {
-	//PERFORM USER AUTHORIZATION******
 	uaCh, err := c.TubeMuxer.CreateReliableTube(common.UserAuthTube)
 	if err != nil {
 		logrus.Errorf("error creating userAuthTube")
@@ -297,8 +299,7 @@ func (c *HopClient) userAuthorization() error {
 }
 
 func (c *HopClient) startExecTube() error {
-	//*****RUN COMMAND (BASH OR AG ACTION)*****
-	//Hop Session is tied to the life of this code execution tube.
+	// Hop Session is tied to the life of this code execution tube if such a tube exists
 	// TODO(baumanl): provide support for Cmd in ClientConfig
 	logrus.Infof("Performing action: %v", c.hostconfig.Cmd)
 	codexTube, err := c.TubeMuxer.CreateReliableTube(common.ExecTube)
@@ -308,11 +309,17 @@ func (c *HopClient) startExecTube() error {
 	}
 	winSizeTube, err := c.TubeMuxer.CreateReliableTube(common.WinSizeTube)
 	if err != nil {
+		codexTube.Close()
 		logrus.Error(err)
 		return err
 	}
-	c.wg.Add(1)
 	c.ExecTube, err = codex.NewExecTube(c.hostconfig.Cmd, c.hostconfig.UsePty, codexTube, winSizeTube, &c.wg)
+	if err == nil {
+		c.wg.Add(1)
+	} else {
+		codexTube.Close()
+		winSizeTube.Close()
+	}
 	return err
 }
 

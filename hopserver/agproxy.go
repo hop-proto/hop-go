@@ -123,8 +123,10 @@ func (p *agProxy) serve() {
 
 func (p *agProxy) stop() error {
 	p.runningCV.L.Lock()
-	l := p.listener.(*net.UnixListener)
-	l.Close()
+	if p.listener != nil {
+		l := p.listener.(*net.UnixListener)
+		l.Close()
+	}
 	p.runningCV.L.Unlock()
 	p.runningCV.Broadcast()
 	p.proxyWG.Wait()

@@ -1,8 +1,10 @@
 package hoptests
 
 import (
+	"io"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"sync"
 	"testing"
@@ -173,7 +175,7 @@ func (s *TestServer) StartHopServer(t *testing.T) {
 	go s.Server.Serve()
 }
 
-func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
+func NewTestClient(t *testing.T, s *TestServer, username string, isPrincipal bool) *TestClient {
 	c := new(TestClient)
 
 	// TODO: make a better way to store this information
@@ -193,13 +195,22 @@ func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
 		User:         username,
 		AutoSelfSign: true,
 		Key:          "home/" + username + "/.hop/id_hop.pem",
-		IsPrincipal:  true,
+		IsPrincipal:  isPrincipal,
 	}
 
+	hopBinary, err := os.Open("../containers/delegate_proxy_server/hop")
+	assert.NilError(t, err)
+	hopBytes, err := io.ReadAll(hopBinary)
+	assert.NilError(t, err)
+
 	c.FileSystem = &fstest.MapFS{
-		"home/username/.hop/" + common.DefaultKeyFile: &fstest.MapFile{
+		"home/" + username + "/.hop/" + common.DefaultKeyFile: &fstest.MapFile{
 			Data: []byte(c.KeyPair.Private.String() + "\n"),
 			Mode: 0600,
+		},
+		"hop": &fstest.MapFile{
+			Data: hopBytes,
+			Mode: 0007,
 		},
 	}
 
@@ -272,7 +283,7 @@ func TestHopClientExtAuth(t *testing.T) {
 	t.Run("connect external authenticator", func(t *testing.T) {
 		// Create the basic Client and Server
 		s := NewTestServer(t)
-		c := NewTestClient(t, s, "username")
+		c := NewTestClient(t, s, "username", true)
 
 		// Modify authentication details
 		s.AddClientToAuthorizedKeys(t, c)
@@ -300,7 +311,7 @@ func TestHopClientInMemAuth(t *testing.T) {
 	t.Run("connect in memory authenticator", func(t *testing.T) {
 		// Create the basic Client and Server
 		s := NewTestServer(t)
-		c := NewTestClient(t, s, "username")
+		c := NewTestClient(t, s, "username", true)
 
 		// Modify authentication details
 		s.AddClientToAuthorizedKeys(t, c)
@@ -326,7 +337,7 @@ func TestHopClientAgentAuth(t *testing.T) {
 	t.Run("connect agent authenticator", func(t *testing.T) {
 		// Create the basic Client and Server
 		s := NewTestServer(t)
-		c := NewTestClient(t, s, "username")
+		c := NewTestClient(t, s, "username", true)
 
 		// Modify authentication details
 		s.AddClientToAuthorizedKeys(t, c)
@@ -360,8 +371,8 @@ func TestTwoClients(t *testing.T) {
 	t.Run("connect two clients", func(t *testing.T) {
 		// Create the basic Client and Server
 		s := NewTestServer(t)
-		c := NewTestClient(t, s, "username")
-		cTwo := NewTestClient(t, s, "bob")
+		c := NewTestClient(t, s, "username", true)
+		cTwo := NewTestClient(t, s, "bob", true)
 
 		// Modify authentication details
 		s.AddClientToAuthorizedKeys(t, c)
@@ -402,7 +413,7 @@ func TestStartCmd(t *testing.T) {
 	t.Run("connect agent authenticator", func(t *testing.T) {
 		// Create the basic Client and Server
 		s := NewTestServer(t)
-		c := NewTestClient(t, s, "baumanl")
+		c := NewTestClient(t, s, "baumanl", true)
 
 		// Modify authentication details
 		s.AddClientToAuthorizedKeys(t, c)
