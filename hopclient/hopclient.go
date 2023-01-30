@@ -152,9 +152,18 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		Store: certs.Store{},
 	}
 
-	// TODO(baumanl): RawStringName vs DNSName? ask dadrian
 	if hc.ServerName != "" {
 		verifyConfig.Name = certs.DNSName(hc.ServerName)
+	} else if hc.ServerIPv4 != "" {
+		verifyConfig.Name = certs.Name{
+			Type:  certs.TypeIPv4Address,
+			Label: []byte(hc.ServerIPv4),
+		}
+	} else if hc.ServerIPv6 != "" {
+		verifyConfig.Name = certs.Name{
+			Type:  certs.TypeIPv6Address,
+			Label: []byte(hc.ServerIPv6),
+		}
 	} else {
 		verifyConfig.Name = certs.DNSName(hc.Hostname)
 	}
