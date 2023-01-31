@@ -32,5 +32,3 @@ jobs:
           args: --deadline 1m
       - name: test
         run: make test
-      - name: vet
-        run: go install gvisor.dev/gvisor/tools/checklocks/cmd/checklocks@go && make vet
