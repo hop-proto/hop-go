@@ -67,7 +67,6 @@ func NewHopClient(config *config.HostConfig) (*HopClient, error) {
 // Dial connects to an address after setting up it's own authentication
 // using information in it's config.
 func (c *HopClient) Dial() error {
-	// TODO(baumanl): Connect to the authgrant server
 	err := c.authenticatorSetup() // TODO(baumanl): or should this be done in NewClient?
 	if err != nil {
 		return err
@@ -148,36 +147,8 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		HTTPClient: http.DefaultClient,
 	}
 
-	verifyConfig := transport.VerifyConfig{
-		Store: certs.Store{},
-	}
-
-	if hc.ServerName != "" {
-		verifyConfig.Name = certs.DNSName(hc.ServerName)
-	} else if hc.ServerIPv4 != "" {
-		verifyConfig.Name = certs.Name{
-			Type:  certs.TypeIPv4Address,
-			Label: []byte(hc.ServerIPv4),
-		}
-	} else if hc.ServerIPv6 != "" {
-		verifyConfig.Name = certs.Name{
-			Type:  certs.TypeIPv6Address,
-			Label: []byte(hc.ServerIPv6),
-		}
-	} else {
-		verifyConfig.Name = certs.DNSName(hc.Hostname)
-	}
-
-	// enable host key verification
-	for _, file := range c.hostconfig.CAFiles {
-		cert, err := certs.ReadCertificatePEMFileFS(file, c.Fsystem)
-		if err != nil {
-			logrus.Errorf("client: error loading cert at %s: %s", file, err)
-			continue
-		}
-		verifyConfig.Store.AddCertificate(cert)
-		logrus.Debugf("client: loaded cert with fingerprint: %x", cert.Fingerprint)
-	}
+	verifyConfig := constructVerifyConfig(hc)
+	c.loadCAFiles(&verifyConfig.Store)
 
 	// Connect to the agent
 	aconn, _ := net.Dial("tcp", agentURL)
