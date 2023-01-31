@@ -317,7 +317,12 @@ func (c *HopClient) startExecTube() error {
 func (c *HopClient) HandleTubes() {
 	//TODO(baumanl): figure out responses to different tube types/what all should be allowed
 	//*****START LISTENING FOR INCOMING CHANNEL REQUESTS*****
-	for t := range c.TubeMuxer.TubeQueue {
+	for {
+		t, err := c.TubeMuxer.Accept()
+		if err != nil {
+			logrus.WithField("error", err).Info("HandleTubes ending")
+			break
+		}
 		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v. Reliable? %t", t.Type(), t.IsReliable())
 
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
