@@ -43,8 +43,7 @@ type Tube interface {
 
 // Muxer handles delivering and sending tube messages
 type Muxer struct {
-	// Tubes ready to be used by the caller
-	TubeQueue chan Tube
+	tubeQueue chan Tube
 
 	idParity byte
 
@@ -88,7 +87,7 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 		idParity:            idParity,
 		reliableTubes:       make(map[byte]*Reliable),
 		unreliableTubes:     make(map[byte]*Unreliable),
-		TubeQueue:           make(chan Tube, 128),
+		tubeQueue:           make(chan Tube, 128),
 		m:                   sync.Mutex{},
 		sendQueue:           make(chan []byte),
 		state:               state,
@@ -250,7 +249,7 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 	go r.initiate(req)
 	if !req {
 		r.getLog().WithField("tube", r.GetID()).Debug("added tube to queue")
-		m.TubeQueue <- r
+		m.tubeQueue <- r
 	}
 	return r, nil
 }
@@ -303,7 +302,16 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 	go tube.initiate(req)
 	if !req {
 		tube.getLog().WithField("tube", tube.GetID()).Debug("added tube to queue")
-		m.TubeQueue <- tube
+		m.tubeQueue <- tube
+	}
+	return tube, nil
+}
+
+// Accept blocks until a new tube is available or the muxer stops
+func (m *Muxer) Accept() (Tube, error) {
+	tube, ok := <-m.tubeQueue
+	if !ok {
+		return nil, ErrMuxerStopping
 	}
 	return tube, nil
 }
@@ -361,10 +369,10 @@ func (m *Muxer) startKeepAlive() {
 	}
 	m.localKeepAliveTube.log.Info("created keep alive tube")
 
-	rt, ok := <-m.TubeQueue
-	// This case indicates that TubeQueue was closed by m.Stop()
+	rt, err := m.Accept()
+	// This case indicates that tubeQueue was closed by m.Stop()
 	// In that case, there's no point in constructing keep alives
-	if !ok {
+	if err != nil {
 		close(m.localKeepAliveDone)
 		close(m.remoteKeepAliveDone)
 		return
@@ -413,8 +421,10 @@ func (m *Muxer) receiver() {
 			}).Info("muxer receiver stopping")
 			err = nil
 		} else if err != nil {
-			m.log.Warnf("Muxer ended with error: %s", err)
+			m.log.Infof("Muxer receiver ended with error: %s", err)
 			go m.Stop()
+		} else {
+			m.log.Debug("Muxer receiver ended with no error")
 		}
 		m.receiverErr <- err
 	}()
@@ -459,7 +469,6 @@ func (m *Muxer) receiver() {
 				go tube.receive(frame)
 			}
 		}
-
 	}
 }
 
@@ -476,6 +485,7 @@ func (m *Muxer) Stop() error {
 	m.m.Lock()
 	m.log.WithField("numTubes", len(m.reliableTubes)+len(m.unreliableTubes)).Info("Stopping muxer")
 
+	var err error
 	// Muxer.Stop() has already been called. Wait for it to finish
 	if m.state.Load() != muxerRunning {
 		m.m.Unlock()
@@ -500,7 +510,7 @@ func (m *Muxer) Stop() error {
 		go func(v Tube) { //parallelized closing tubes because other side may close them in a different order
 			defer wg.Done()
 			m.log.Info("Closing tube: ", v.GetID())
-			err := v.Close()
+			err = v.Close()
 			if err != nil && err != io.EOF {
 				// Tried to close tube in bad state. Nothing to do
 				m.log.Errorf("tube %d closed with error: %s", v.GetID(), err)
@@ -542,7 +552,7 @@ func (m *Muxer) Stop() error {
 	m.state.Store(muxerStopped)
 
 	close(m.sendQueue)
-	close(m.TubeQueue)
+	close(m.tubeQueue)
 	<-m.localKeepAliveDone
 	<-m.remoteKeepAliveDone
 

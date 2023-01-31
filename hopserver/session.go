@@ -43,8 +43,8 @@ type hopSession struct {
 }
 
 func (sess *hopSession) checkAuthorization() bool {
-	t, ok := <-sess.tubeMuxer.TubeQueue
-	if !ok {
+	t, err := sess.tubeMuxer.Accept()
+	if err != nil {
 		panic("TODO(hosono) muxer stopping during check authorization")
 	}
 	uaTube, ok := t.(*tubes.Reliable)
@@ -61,7 +61,7 @@ func (sess *hopSession) checkAuthorization() bool {
 	logrus.Info("got userauth init message: ", k.String())
 
 	sess.usingAuthGrant = false
-	err := sess.server.authorizeKey(username, k)
+	err = sess.server.authorizeKey(username, k)
 	if err != nil {
 		if sess.server.config.EnableAuthgrants != nil && *sess.server.config.EnableAuthgrants {
 			actions, err := sess.server.authorizeKeyAuthGrant(username, k)
@@ -98,8 +98,8 @@ func (sess *hopSession) start() {
 	logrus.Info("STARTING TUBE LOOP")
 
 	for {
-		tube, ok := <-sess.tubeMuxer.TubeQueue
-		if !ok {
+		tube, err := sess.tubeMuxer.Accept()
+		if err != nil {
 			sess.close()
 			break
 		}

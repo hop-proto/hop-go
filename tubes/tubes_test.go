@@ -103,8 +103,8 @@ func makeConn(odds float64, rel bool, t *testing.T) (t1, t2 net.Conn, stop func(
 		return
 	}
 
-	t2, ok := <-muxer2.TubeQueue
-	if !ok {
+	t2, err = muxer2.Accept()
+	if err != nil {
 		err = ErrMuxerStopping
 		return
 	}

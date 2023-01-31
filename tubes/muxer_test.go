@@ -179,8 +179,8 @@ func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 	t1, err := m1.CreateReliableTube(common.ExecTube)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, t1.GetID(), byte(1))
-	t2, ok := <-m2.TubeQueue
-	assert.Assert(t, ok)
+	t2, err := m2.Accept()
+	assert.NilError(t, err)
 	t2Rel := t2.(*Reliable)
 
 	// Close it on both ends
@@ -205,8 +205,8 @@ func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 	t1, err = m1.CreateReliableTube(common.ExecTube)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, t1.GetID(), byte(1))
-	t2, ok = <-m2.TubeQueue
-	assert.Assert(t, ok)
+	t2, err = m2.Accept()
+	assert.NilError(t, err)
 	t2Rel = t2.(*Reliable)
 
 	// Attempt to send data on that tube
