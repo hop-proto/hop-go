@@ -2,7 +2,8 @@ package tubes
 
 import (
 	"bytes"
-	"math/rand"
+	"crypto/rand"
+	mathRand "math/rand"
 	"sync"
 	"testing"
 
@@ -55,7 +56,7 @@ func TestReceiveWindow(t *testing.T) {
 		i++
 		frameNo++
 	}
-	rand.Shuffle(len(packets), func(i, j int) {
+	mathRand.Shuffle(len(packets), func(i, j int) {
 		packets[i], packets[j] = packets[j], packets[i]
 	})
 
