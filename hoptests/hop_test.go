@@ -1,10 +1,8 @@
 package hoptests
 
 import (
-	"io"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"sync"
 	"testing"
@@ -198,19 +196,10 @@ func NewTestClient(t *testing.T, s *TestServer, username string, isPrincipal boo
 		IsPrincipal:  isPrincipal,
 	}
 
-	hopBinary, err := os.Open("../containers/delegate_proxy_server/hop")
-	assert.NilError(t, err)
-	hopBytes, err := io.ReadAll(hopBinary)
-	assert.NilError(t, err)
-
 	c.FileSystem = &fstest.MapFS{
 		"home/" + username + "/.hop/" + common.DefaultKeyFile: &fstest.MapFile{
 			Data: []byte(c.KeyPair.Private.String() + "\n"),
 			Mode: 0600,
-		},
-		"hop": &fstest.MapFile{
-			Data: hopBytes,
-			Mode: 0007,
 		},
 	}
 
