@@ -36,6 +36,10 @@ test:
 authgrant-dev: ## launch two containers running two servers to test authgrant protocol
 	make -C hack authgrant-dev
 
+.PHONY: authgrant-chain-dev
+authgrant-chain-dev: ## launch three containers running three servers to test authgrant protocol
+	make -C hack authgrant-chain-dev
+
 .PHONY: serve-dev
 serve-dev: ## launch a container running the server with code mounted in
 	make -C hack serve-dev

@@ -7,3 +7,12 @@ authgrant-dev:
 	go build -o ../containers/delegate_proxy_server/hop ../cmd/hop
 	go run . target
 	go run . delegate
+
+
+.PHONY: authgrant-chain-dev
+authgrant-chain-dev:
+	go build -o ../containers/delegate_proxy_server/hop ../cmd/hop
+	go build -o ../containers/target_server/hop ../cmd/hop
+	go run . target
+	go run . delegate
+	go run . third

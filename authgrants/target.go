@@ -41,7 +41,7 @@ func (t *targetInstance) run() {
 	for {
 		err := t.handleIntentCommunication()
 		if err != nil {
-			logrus.Errorf(err.Error())
+			logrus.Errorf("target: error handling intent communication: %v", err.Error())
 			return
 		}
 	}
@@ -50,14 +50,19 @@ func (t *targetInstance) run() {
 func (t *targetInstance) handleIntentCommunication() error {
 	i, err := ReadIntentCommunication(t.principalConn)
 	if err != nil {
+		logrus.Errorf("target: error reading intent communication: %v", err)
 		return fmt.Errorf("target: error reading intent communication: %s", err)
 	}
+	logrus.Info("target: read intent communication")
 	err = t.checkIntent(i)
 	if err != nil {
+		logrus.Error("target: error checking intent: ", err)
 		return WriteIntentDenied(t.principalConn, err.Error())
 	}
+	logrus.Info("target: finished checking intent")
 	err = t.addAuthGrant(&i)
 	if err != nil {
+		logrus.Error("target: error adding authgrant")
 		return WriteIntentDenied(t.principalConn, err.Error())
 	}
 	return WriteIntentConfirmation(t.principalConn)

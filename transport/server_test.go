@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"go.uber.org/goleak"
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
 
@@ -49,6 +50,8 @@ func newTestServerConfig(t *testing.T) (*ServerConfig, *VerifyConfig) {
 }
 
 func TestMultipleHandshakes(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
@@ -81,6 +84,10 @@ func TestMultipleHandshakes(t *testing.T) {
 				time.Sleep(delay)
 			}
 			c, err := Dial("udp", pc.LocalAddr().String(), clientConfig)
+			defer func() {
+				err := c.Close()
+				assert.NilError(t, err)
+			}()
 			assert.NilError(t, err)
 			err = c.Handshake()
 
@@ -107,6 +114,8 @@ func ExpectRead(t *testing.T, expected string, r io.Reader) {
 }
 
 func TestServerRead(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
@@ -126,6 +135,10 @@ func TestServerRead(t *testing.T) {
 	t.Run("test client write", func(t *testing.T) {
 		kp, cert := newClientAuth(t)
 		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, Exchanger: kp, Leaf: cert})
+		defer func() {
+			err := c.Close()
+			assert.NilError(t, err)
+		}()
 		assert.NilError(t, err)
 		err = c.Handshake()
 		assert.NilError(t, err)
@@ -141,6 +154,10 @@ func TestServerRead(t *testing.T) {
 	t.Run("test client write triggers handshake", func(t *testing.T) {
 		kp, cert := newClientAuth(t)
 		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, Exchanger: kp, Leaf: cert})
+		defer func() {
+			err := c.Close()
+			assert.NilError(t, err)
+		}()
 		assert.NilError(t, err)
 		s := "Another splinter under the skin. Another season of loneliness."
 		n, err := c.Write([]byte(s))
@@ -154,6 +171,10 @@ func TestServerRead(t *testing.T) {
 	t.Run("test big client writes", func(t *testing.T) {
 		kp, cert := newClientAuth(t)
 		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, Exchanger: kp, Leaf: cert})
+		defer func() {
+			err := c.Close()
+			assert.NilError(t, err)
+		}()
 		assert.NilError(t, err)
 		data := make([]byte, 3100)
 		n, err := rand.Read(data)
@@ -187,6 +208,8 @@ func TestServerRead(t *testing.T) {
 }
 
 func TestServerWrite(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
@@ -199,13 +222,15 @@ func TestServerWrite(t *testing.T) {
 		assert.NilError(t, err)
 	}()
 	assert.NilError(t, err)
-	go func() {
-		server.Serve()
-	}()
+	go server.Serve()
 
 	t.Run("server echo", func(t *testing.T) {
 		kp, leaf := newClientAuth(t)
 		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, Exchanger: kp, Leaf: leaf})
+		defer func() {
+			err := c.Close()
+			assert.NilError(t, err)
+		}()
 		assert.NilError(t, err)
 		c.Handshake()
 		h, err := server.AcceptTimeout(5 * time.Second)
@@ -242,6 +267,10 @@ func TestServerWrite(t *testing.T) {
 
 		kp, leaf := newClientAuth(t)
 		c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{Verify: *verify, Exchanger: kp, Leaf: leaf})
+		defer func() {
+			err := c.Close()
+			assert.NilError(t, err)
+		}()
 		assert.NilError(t, err)
 
 		wg := sync.WaitGroup{}
@@ -276,6 +305,8 @@ func TestServerWrite(t *testing.T) {
 }
 
 func TestBufferBehavior(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	data := []byte("hi this is some data!")
 	buf := bytes.Buffer{}
 	assert.Equal(t, 0, buf.Len())

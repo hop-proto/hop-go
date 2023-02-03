@@ -204,8 +204,11 @@ func (r *receiver) receive(p *frame) (bool, error) {
 		})
 		log.Trace("in bounds frame")
 	} else {
-		log.Debug("out of bounds frame")
-		return false, errFrameOutOfBounds
+		if p.dataLength > 0 {
+			log.Debug("out of bounds frame")
+			return false, errFrameOutOfBounds
+		}
+		log.Trace("keep alive frame")
 	}
 
 	fin := r.processIntoBuffer()

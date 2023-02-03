@@ -23,7 +23,7 @@ type principalInstance struct {
 	setUpTargetConn setUpTargetConnFunc
 }
 
-// StartPrincipalInstance creates and runs a new principal instance. errors if su is nil.
+// StartPrincipalInstance creates and runs a new principal instance. errors if su is nil. Caller responsible for closing delegateConn
 func StartPrincipalInstance(dc net.Conn, ci checkIntentFunc, su setUpTargetConnFunc) error {
 	if su == nil {
 		return fmt.Errorf("principal: must provide non-nil set up target function")
@@ -34,12 +34,6 @@ func StartPrincipalInstance(dc net.Conn, ci checkIntentFunc, su setUpTargetConnF
 		checkIntent:     ci,
 		setUpTargetConn: su,
 	}
-	defer func() {
-		pi.delegateConn.Close()
-		if pi.targetConnected {
-			pi.targetConn.Close()
-		}
-	}()
 
 	if ci == nil {
 		// pi.checkIntent = defaultRejectAll // this is correct
@@ -106,19 +100,26 @@ func (p *principalInstance) doIntentRequestChecks(i Intent) error {
 		p.targetConn = tc
 		p.targetInfo = targURL
 		p.targetConnected = true
+		logrus.Info("principal: connected to target")
 	}
 
 	err = WriteIntentCommunication(p.targetConn, i)
 	if err != nil {
+		logrus.Error("principal: error writing intent communication")
 		return WriteIntentDenied(p.delegateConn, fmt.Sprintf("principal: error sending intent comm: %s", err))
 	}
+	logrus.Info("principal: wrote intent communication")
 
 	resp, err := ReadConfOrDenial(p.targetConn)
 	if err != nil {
+		logrus.Error("principal: error reading conf or denial")
 		return WriteIntentDenied(p.delegateConn, fmt.Sprintf("principal: error reading target response: %s", err))
 	}
+
 	if resp.MsgType == IntentDenied {
+		logrus.Info("principal: read Intent denied")
 		return WriteIntentDenied(p.delegateConn, resp.Data.Denial)
 	}
+	logrus.Info("principal: read Intent Confirmation")
 	return WriteIntentConfirmation(p.delegateConn)
 }

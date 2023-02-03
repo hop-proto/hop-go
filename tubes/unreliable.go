@@ -130,7 +130,11 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 }
 
 func (u *Unreliable) receive(pkt *frame) error {
-	u.recv.C <- pkt.data
+	select {
+	case u.recv.C <- pkt.data:
+	default:
+		return nil
+	}
 	if pkt.flags.FIN {
 		u.recv.Close()
 	}
@@ -191,7 +195,7 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 		break
 	}
 	dataLength := uint16(len(b))
-	if uint16(len(b)) > maxFrameDataLength {
+	if uint16(len(b)) > MaxFrameDataLength {
 		err = transport.ErrBufOverflow
 		return
 	}

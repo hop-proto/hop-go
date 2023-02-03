@@ -8,6 +8,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
 	"hop.computer/hop/core"
@@ -116,6 +118,7 @@ func (m *AgMessage) WriteTo(w io.Writer) (int64, error) {
 	n, err := w.Write([]byte{byte(m.MsgType)})
 	written += int64(n)
 	if err != nil {
+		logrus.Error("error writing ag message type: ", err)
 		return written, err
 	}
 	// write message data
@@ -143,6 +146,10 @@ func (m *AgMessage) ReadFrom(r io.Reader) (int64, error) {
 	// read message type
 	err := binary.Read(r, binary.BigEndian, &m.MsgType)
 	if err != nil {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			logrus.Error("unexpected eof: ", err.Error())
+		}
+		logrus.Error("read: ", err.Error())
 		return bytesRead, err
 	}
 	bytesRead++
@@ -158,10 +165,7 @@ func (m *AgMessage) ReadFrom(r io.Reader) (int64, error) {
 	}
 
 	bytesRead += dataBytes
-	if err != nil {
-		return bytesRead, err
-	}
-	return bytesRead, nil
+	return bytesRead, err
 }
 
 // WriteTo serializes an intent block and implements the io.WriterTo interface
@@ -258,19 +262,23 @@ func (i *Intent) ReadFrom(r io.Reader) (int64, error) {
 		return bytesRead, err
 	}
 	if t > math.MaxInt64 {
+		logrus.Error("start timestamp too large")
 		return bytesRead, errors.New("start timestamp too large")
 	}
 	bytesRead += 8
 	i.StartTime = time.Unix(int64(t), 0)
+	logrus.Debugf("after reading start time of intent request, read %v bytes so far.", bytesRead)
 	// read exp time
 	err = binary.Read(r, binary.BigEndian, &t)
 	if err != nil {
 		return bytesRead, err
 	}
 	if t > math.MaxInt64 {
+		logrus.Error("exp timestamp too large")
 		return bytesRead, errors.New("exp timestamp too large")
 	}
 	bytesRead += 8
+	logrus.Debugf("after reading exp time of intent request, read %v bytes so far.", bytesRead)
 	i.ExpTime = time.Unix(int64(t), 0)
 	// read targetSNI
 	n, err := i.TargetSNI.ReadFrom(r)
@@ -278,12 +286,14 @@ func (i *Intent) ReadFrom(r io.Reader) (int64, error) {
 		return bytesRead, err
 	}
 	bytesRead += n
+	logrus.Debugf("after reading TargetSNI of intent request, read %v bytes so far.", bytesRead)
 	// read targetUsername
 	username, usernameBytes, err := common.ReadString(r)
 	if err != nil {
 		return bytesRead, err
 	}
 	bytesRead += usernameBytes
+	logrus.Debugf("after reading username of intent request, read %v bytes so far.", bytesRead)
 	i.TargetUsername = username
 	// read delegateCert
 	certBytes, err := i.DelegateCert.ReadFrom(r)
@@ -291,6 +301,7 @@ func (i *Intent) ReadFrom(r io.Reader) (int64, error) {
 		return bytesRead, err
 	}
 	bytesRead += certBytes
+	logrus.Debugf("after reading delegateCert of intent request, read %v bytes so far.", bytesRead)
 	// read all associatedData
 	var assocDataBytes int64
 	switch i.GrantType {
@@ -308,6 +319,7 @@ func (i *Intent) ReadFrom(r io.Reader) (int64, error) {
 		return bytesRead, err
 	}
 	bytesRead += assocDataBytes
+	logrus.Debugf("after reading assocData of intent request, read %v bytes so far.", bytesRead)
 	return bytesRead, nil
 }
 
@@ -360,7 +372,8 @@ func (d *RemotePFGrantData) ReadFrom(r io.Reader) (int64, error) {
 // ReadIntentRequest reads intent request and returns intent
 func ReadIntentRequest(r io.Reader) (Intent, error) {
 	var m AgMessage
-	_, err := m.ReadFrom(r)
+	n, err := m.ReadFrom(r)
+	logrus.Debugf("read %v bytes of intent request", n)
 	if err != nil {
 		return m.Data.Intent, err
 	}
@@ -373,7 +386,8 @@ func ReadIntentRequest(r io.Reader) (Intent, error) {
 // ReadIntentCommunication reads intent communication
 func ReadIntentCommunication(r io.Reader) (Intent, error) {
 	var m AgMessage
-	_, err := m.ReadFrom(r)
+	n, err := m.ReadFrom(r)
+	logrus.Debugf("read %v bytes of intent communication", n)
 	if err != nil {
 		return m.Data.Intent, err
 	}
@@ -386,7 +400,8 @@ func ReadIntentCommunication(r io.Reader) (Intent, error) {
 // ReadConfOrDenial reads an authgrant message and errors if it is not conf or denial
 func ReadConfOrDenial(r io.Reader) (AgMessage, error) {
 	var m AgMessage
-	_, err := m.ReadFrom(r)
+	n, err := m.ReadFrom(r)
+	logrus.Debugf("read %v bytes of conf or denial", n)
 	if err != nil {
 		return m, err
 	}
@@ -404,7 +419,8 @@ func WriteIntentDenied(w io.Writer, reason string) error {
 			Denial: reason,
 		},
 	}
-	_, err := m.WriteTo(w)
+	n, err := m.WriteTo(w)
+	logrus.Debugf("wrote %v bytes of intent denial", n)
 	return err
 }
 
@@ -413,7 +429,8 @@ func WriteIntentConfirmation(w io.Writer) error {
 	m := AgMessage{
 		MsgType: IntentConfirmation,
 	}
-	_, err := m.WriteTo(w)
+	n, err := m.WriteTo(w)
+	logrus.Debugf("wrote %v bytes of intent confirmation", n)
 	return err
 }
 
@@ -425,7 +442,8 @@ func WriteIntentCommunication(w io.Writer, i Intent) error {
 			Intent: i,
 		},
 	}
-	_, err := m.WriteTo(w)
+	n, err := m.WriteTo(w)
+	logrus.Debugf("wrote %v bytes of intent communication", n)
 	return err
 }
 

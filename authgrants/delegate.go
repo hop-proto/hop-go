@@ -20,9 +20,9 @@ type delegateInstance struct {
 	intentRequests []Intent
 }
 
-// StartDelegateInstance sends all intent requests to the principal
+// StartDelegateInstance sends all intent requests to the principal. Caller
+// responsible for closing pc when done with it.
 func StartDelegateInstance(pc net.Conn, irs []Intent) error {
-	defer pc.Close()
 	if pc == nil {
 		return fmt.Errorf("delegate: must provide non-nil connection to principal")
 	}
@@ -35,10 +35,10 @@ func StartDelegateInstance(pc net.Conn, irs []Intent) error {
 		intentRequests: irs,
 	}
 
-	return di.run()
+	return di.sendIntentRequests()
 }
 
-func (d *delegateInstance) run() error {
+func (d *delegateInstance) sendIntentRequests() error {
 	if d.principalConn == nil {
 		return fmt.Errorf("delegate: not connected to principal")
 	}
@@ -62,7 +62,7 @@ func (d *delegateInstance) run() error {
 			logrus.Infof("delegate: intent request denied with reason: %s", resp.Data.Denial)
 		}
 	}
-
+	logrus.Info("delegate: done sending intent requests")
 	if oneApproved {
 		return nil
 	}

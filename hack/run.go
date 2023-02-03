@@ -107,6 +107,13 @@ func main() {
 		if err := runContainer(ctx, c, "target_server", "9999"); err != nil {
 			logrus.Fatalf("unable to run container: %s", err)
 		}
+	case "third":
+		if err := buildContainer(ctx, c, "./third_server/third_server.dockerfile", "third_server"); err != nil {
+			logrus.Fatalf("unable to build container: %s", err)
+		}
+		if err := runContainer(ctx, c, "third_server", "6666"); err != nil {
+			logrus.Fatalf("unable to run container: %s", err)
+		}
 	case "":
 		fmt.Fprintf(os.Stderr, "%s\n", "usage: ACTION [args]")
 		return

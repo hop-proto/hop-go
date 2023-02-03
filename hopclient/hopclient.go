@@ -37,11 +37,12 @@ type HopClient struct { // nolint:maligned
 	Fsystem fstest.MapFS // TODO(baumanl): current hack for test. switch to something better.
 
 	TransportConn *transport.Client
-	ProxyConn     *tubes.Reliable
 
+	// TODO(baumanl): move authgrant state to struct? sort of waiting till i finalize stuff
 	// +checklocks:checkIntentLock
 	checkIntent     func(authgrants.Intent) error // should only be set if principal
 	checkIntentLock sync.Mutex
+	delServerConn   net.Conn // conn to UDS with delegate server
 
 	TubeMuxer *tubes.Muxer
 	ExecTube  *codex.ExecTube
@@ -101,16 +102,6 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	// c.address = address
 	c.authenticator = authenticator
 	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.hostconfig.DataTimeout, false, logrus.WithField("muxer", "client"))
-	go func() {
-		err := c.TubeMuxer.Start()
-		if c.ExecTube != nil {
-			// restoring terminal state
-			c.ExecTube.Restore()
-		}
-		if err != nil {
-			logrus.Fatal(err)
-		}
-	}()
 
 	err = c.userAuthorization()
 	if err != nil {
@@ -231,6 +222,7 @@ func loadLeaf(leafFile string, autoSelfSign bool, public *keys.PublicKey, addres
 func (c *HopClient) Start() error {
 	//TODO(baumanl): fix how session duration tied to cmd duration or port
 	//forwarding duration depending on options
+	logrus.Infof("hostconfig.Cmd: %v", c.hostconfig.Cmd)
 	err := c.startExecTube()
 	if err != nil {
 		logrus.Error(err)
@@ -240,6 +232,7 @@ func (c *HopClient) Start() error {
 	// handle incoming tubes
 	go c.HandleTubes()
 	c.Wait() // client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
+	c.Close()
 	return nil
 }
 
@@ -250,11 +243,18 @@ func (c *HopClient) Wait() {
 
 // Close explicitly closes down hop session (usually used after PF is down and can be terminated)
 func (c *HopClient) Close() error {
-	c.TubeMuxer.Stop()
+	defer logrus.Info("client done waiting!")
 	if c.ExecTube != nil {
 		c.ExecTube.Restore()
 	}
-	return nil
+	err := c.TubeMuxer.Stop()
+	if c.delServerConn != nil {
+		c.delServerConn.Close() // informs del server to close proxy b/w principal + target
+	}
+	// TODO: close all remote and local port forwarding relationships
+	logrus.Info("client waiting in close...")
+	c.wg.Wait()
+	return err
 }
 
 func (c *HopClient) startUnderlying(address string, authenticator core.Authenticator) error {
@@ -285,7 +285,6 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 }
 
 func (c *HopClient) userAuthorization() error {
-	//PERFORM USER AUTHORIZATION******
 	uaCh, err := c.TubeMuxer.CreateReliableTube(common.UserAuthTube)
 	if err != nil {
 		logrus.Errorf("error creating userAuthTube")
@@ -300,38 +299,48 @@ func (c *HopClient) userAuthorization() error {
 }
 
 func (c *HopClient) startExecTube() error {
-	//*****RUN COMMAND (BASH OR AG ACTION)*****
-	//Hop Session is tied to the life of this code execution tube.
+	// Hop Session is tied to the life of this code execution tube if such a tube exists
 	// TODO(baumanl): provide support for Cmd in ClientConfig
 	logrus.Infof("Performing action: %v", c.hostconfig.Cmd)
-	ch, err := c.TubeMuxer.CreateReliableTube(common.ExecTube)
+	codexTube, err := c.TubeMuxer.CreateReliableTube(common.ExecTube)
 	if err != nil {
 		logrus.Error(err)
 		return err
 	}
 	winSizeTube, err := c.TubeMuxer.CreateReliableTube(common.WinSizeTube)
 	if err != nil {
+		codexTube.Close()
 		logrus.Error(err)
 		return err
 	}
-	c.wg.Add(1)
-	c.ExecTube, err = codex.NewExecTube(c.hostconfig.Cmd, c.hostconfig.UsePty, ch, winSizeTube, &c.wg)
+	c.ExecTube, err = codex.NewExecTube(c.hostconfig.Cmd, c.hostconfig.UsePty, codexTube, winSizeTube, &c.wg)
+	if err == nil {
+		c.wg.Add(1)
+	} else {
+		codexTube.Close()
+		winSizeTube.Close()
+	}
 	return err
 }
 
 // HandleTubes handles incoming tube requests to the client
 func (c *HopClient) HandleTubes() {
 	//TODO(baumanl): figure out responses to different tube types/what all should be allowed
-	for {
-		t, e := c.TubeMuxer.Accept()
-		if e != nil {
-			logrus.Errorf("Muxer closing or closed. Accept failed with error: %v", e)
-			break
-		}
+
+	proxyQueue := newPTProxyTubeQueue()
+
+	for t := range c.TubeMuxer.TubeQueue {
 		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v. Reliable? %t", t.Type(), t.IsReliable())
 
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
-			go c.newPrincipalInstanceSetup(r)
+			go c.newPrincipalInstanceSetup(r, proxyQueue)
+		} else if u, ok := t.(*tubes.Unreliable); ok && u.Type() == common.PrincipalProxyTube && c.hostconfig.IsPrincipal {
+			// add to map and signal waiting processes
+			proxyQueue.lock.Lock()
+			proxyQueue.tubes[u.GetID()] = u
+			proxyQueue.lock.Unlock()
+			proxyQueue.cv.Broadcast()
+			logrus.Infof("session muxer broadcasted that unreliable tube is here: %x", u.GetID())
 		} else if t.Type() == common.RemotePFTube {
 			panic("client RemotePFTubes: unimplemented")
 		} else {
@@ -340,7 +349,6 @@ func (c *HopClient) HandleTubes() {
 			if e != nil {
 				logrus.Errorf("Error closing tube: %v", e)
 			}
-			continue
 		}
 	}
 }

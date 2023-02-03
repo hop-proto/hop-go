@@ -102,7 +102,7 @@ func (s *sender) write(b []byte) (int, error) {
 	startFrame := len(s.frames)
 
 	for len(s.buffer) > 0 {
-		dataLength := maxFrameDataLength
+		dataLength := MaxFrameDataLength
 		if len(s.buffer) < int(dataLength) {
 			dataLength = uint16(len(s.buffer))
 		}

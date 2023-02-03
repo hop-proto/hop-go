@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"go.uber.org/goleak"
 
 	"gotest.tools/assert"
 
@@ -82,21 +83,6 @@ func makeConn(odds float64, rel bool, t *testing.T) (t1, t2 net.Conn, stop func(
 	}))
 	muxer2.log.WithField("addr", c2.LocalAddr()).Info("Created")
 
-	go func() {
-		e := muxer1.Start()
-		if e != nil {
-			logrus.Errorf("muxer1 error: %v", e)
-			t.Fail()
-		}
-	}()
-	go func() {
-		e := muxer2.Start()
-		if e != nil {
-			logrus.Errorf("muxer2 error: %v", e)
-			t.Fail()
-		}
-	}()
-
 	if rel {
 		t1, err = muxer1.CreateReliableTube(common.ExecTube)
 	} else {
@@ -106,8 +92,9 @@ func makeConn(odds float64, rel bool, t *testing.T) (t1, t2 net.Conn, stop func(
 		return
 	}
 
-	t2, err = muxer2.Accept()
-	if err != nil {
+	t2, ok := <-muxer2.TubeQueue
+	if !ok {
+		err = ErrMuxerStopping
 		return
 	}
 
@@ -134,14 +121,16 @@ func makeConn(odds float64, rel bool, t *testing.T) (t1, t2 net.Conn, stop func(
 			defer wg.Done()
 			t1.Close()
 			t1.(Tube).WaitForClose()
-			muxer1.Stop()
+			err := muxer1.Stop()
+			assert.NilError(t, err)
 			assert.DeepEqual(t, muxer1.state.Load(), muxerStopped)
 		}()
 		go func() {
 			defer wg.Done()
 			t2.Close()
 			t2.(Tube).WaitForClose()
-			muxer2.Stop()
+			err := muxer2.Stop()
+			assert.NilError(t, err)
 			assert.DeepEqual(t, muxer2.state.Load(), muxerStopped)
 		}()
 
@@ -279,6 +268,7 @@ func unreliable(t *testing.T) {
 }
 
 func TestTubes(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	t.Run("Reliable", reliable)
 	t.Run("Unreliable", unreliable)
 }

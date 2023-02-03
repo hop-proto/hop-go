@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"go.uber.org/goleak"
 
 	"gotest.tools/assert"
 
@@ -42,28 +43,17 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 	}))
 	m2.log.WithField("addr", c2.LocalAddr()).Info("Created")
 
-	go func() {
-		e := m1.Start()
-		if e != nil {
-			logrus.Fatalf("muxer1 error: %v", e)
-		}
-	}()
-	go func() {
-		e := m2.Start()
-		if e != nil {
-			logrus.Fatalf("muxer2 error: %v", e)
-		}
-	}()
-
 	stop = func() {
 		wg := sync.WaitGroup{}
 		wg.Add(2)
 		go func() {
-			m1.Stop()
+			err := m1.Stop()
+			assert.NilError(t, err)
 			wg.Done()
 		}()
 		go func() {
-			m2.Stop()
+			err := m2.Stop()
+			assert.NilError(t, err)
 			wg.Done()
 		}()
 
@@ -159,8 +149,8 @@ func reusingTubes(t *testing.T) {
 	t1, err := m1.CreateReliableTube(common.ExecTube)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, t1.GetID(), byte(1))
-	t2, err := m2.Accept()
-	assert.NilError(t, err)
+	t2, ok := <-m2.TubeQueue
+	assert.Assert(t, ok)
 	t2Rel := t2.(*Reliable)
 
 	// Close it on both ends
@@ -180,8 +170,8 @@ func reusingTubes(t *testing.T) {
 	t1, err = m1.CreateReliableTube(common.ExecTube)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, t1.GetID(), byte(1))
-	t2, err = m2.Accept()
-	assert.NilError(t, err)
+	t2, ok = <-m2.TubeQueue
+	assert.Assert(t, ok)
 	t2Rel = t2.(*Reliable)
 
 	// Attempt to send data on that tube
@@ -204,6 +194,8 @@ func reusingTubes(t *testing.T) {
 }
 
 func TestMuxer(t *testing.T) {
+
+	defer goleak.VerifyNone(t)
 
 	logrus.SetLevel(logrus.TraceLevel)
 	t.Run("UnreliableTubes/ImmediateStop", func(t *testing.T) {

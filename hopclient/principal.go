@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
 
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/common"
@@ -13,6 +14,11 @@ import (
 
 	"github.com/sirupsen/logrus"
 )
+
+type principalSubclient struct {
+	client         *HopClient
+	unrelProxyTube *tubes.Unreliable
+}
 
 //  Principal client: a hop client that is authorized on both the Delegate
 //   Proxy server and the Target server and can issue authgrants to
@@ -37,33 +43,88 @@ func (c *HopClient) SetCheckIntentCallback(f func(authgrants.Intent) error) erro
 	return nil
 }
 
-func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable) {
+// allows principal client to keep track of unreliable principal proxy
+// tubes before the reliable has received the tube id
+type ptProxyTubeQueue struct {
+	// +checklocks:lock
+	tubes map[byte]*tubes.Unreliable
+	lock  *sync.Mutex
+	cv    sync.Cond
+}
+
+// newPTProxyTubeQueue creates a synchronized set of unreliable principal proxy tubes
+func newPTProxyTubeQueue() *ptProxyTubeQueue {
+	proxyLock := sync.Mutex{}
+	proxyQueue := &ptProxyTubeQueue{
+		tubes: make(map[byte]*tubes.Unreliable), // tube ID --> tube
+		lock:  &proxyLock,
+		cv:    *sync.NewCond(&proxyLock),
+	}
+	return proxyQueue
+}
+
+func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable, pq *ptProxyTubeQueue) {
 	c.checkIntentLock.Lock()
 	ci := c.checkIntent
 	c.checkIntentLock.Unlock()
 
-	var client *HopClient
+	var psubclient *principalSubclient
 	var err error
 
-	setup := func(url core.URL) (net.Conn, error) {
-		client, err = c.setupTargetClient(url)
-		if err != nil {
-			return nil, err
-		}
-		return client.newAuthgrantTube()
+	// read unreliable tube id
+	tubeID, err := authgrants.ReadUnreliableProxyID(delTube)
+	if err != nil {
+		logrus.Error("principal: error reading unreliable tube id")
+		delTube.Close()
+		return
 	}
 
-	authgrants.StartPrincipalInstance(delTube, ci, setup)
+	test := func(m map[byte]*tubes.Unreliable, b byte) bool {
+		_, ok := m[b]
+		return ok
+	}
+	// check (and keep checking on signal) for the unreliable tube with the id
+	pq.lock.Lock()
+	logrus.Info("principal: acquired pq.lock for the first time")
+	for !test(pq.tubes, tubeID) {
+		logrus.Info("tube not here yet. waiting...")
+		pq.cv.Wait()
+	}
 
-	if client != nil {
-		client.TubeMuxer.Stop()
+	proxyTube := pq.tubes[tubeID]
+
+	logrus.Info("principal: got the unreliable tube")
+	delete(pq.tubes, tubeID)
+	pq.lock.Unlock()
+
+	setup := func(url core.URL) (net.Conn, error) {
+		psubclient, err = c.setupTargetClient(url, proxyTube)
+		if err != nil {
+			logrus.Error("eror setting up target client")
+			return nil, err
+		}
+		logrus.Info("principal: setup successful for psubclient")
+		return psubclient.client.newAuthgrantTube()
+	}
+
+	logrus.Info("starting principal instance")
+
+	authgrants.StartPrincipalInstance(delTube, ci, setup)
+	delTube.Close()
+
+	if psubclient != nil {
+		logrus.Info("principal: closing subclient with target.")
+		psubclient.client.Close()
+		// stop proxying
+		psubclient.unrelProxyTube.Close()
+	} else {
+		logrus.Info("principal: psubclient is nil")
 	}
 }
 
-func (c *HopClient) setupTargetClient(targURL core.URL) (*HopClient, error) {
-	targetConn, err := c.setUpDelegateProxyToTarget(targURL)
-	if err != nil {
-		return nil, err
+func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable) (*principalSubclient, error) {
+	psubclient := &principalSubclient{
+		unrelProxyTube: dt,
 	}
 
 	// TODO(baumanl): think through best way to get the config for this
@@ -76,6 +137,7 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (*HopClient, error) {
 	hc.User = targURL.User
 	hc.Headless = true
 	hc.UsePty = false
+	hc.IsPrincipal = true
 
 	// load client config from default path
 	// cflags := &flags.ClientFlags{
@@ -91,9 +153,9 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (*HopClient, error) {
 
 	client, err := NewHopClient(hc)
 	if err != nil {
-		return nil, err
+		return psubclient, err
 	}
-
+	psubclient.client = client
 	// TODO(baumanl): necessary to do all of authenticator setup again?
 	// or could c.authenticator (principal's authenticator) sometimes be used
 	// instead?
@@ -113,89 +175,26 @@ func (c *HopClient) setupTargetClient(targURL core.URL) (*HopClient, error) {
 		Leaf:      client.authenticator.GetLeaf(),
 	}
 
-	client.TransportConn, err = transport.DialNP(client.hostconfig.HostURL().Address(), targetConn, transportConfig)
+	client.TransportConn, err = transport.DialNP(client.hostconfig.HostURL().Address(), dt, transportConfig)
 	if err != nil {
-		return client, err
+		return psubclient, err
 	}
 	// defer close?
 	err = client.TransportConn.Handshake()
 	if err != nil {
-		return client, err
+		return psubclient, err
 	}
 
 	client.TubeMuxer = tubes.NewMuxer(client.TransportConn, client.hostconfig.DataTimeout, false, logrus.WithField("muxer", "principal subclient"))
-	go func() {
-		err := client.TubeMuxer.Start()
-		if err != nil {
-			logrus.Error("principal: subclient muxer has stopped with err: ", err)
-			return
-		}
-		logrus.Debug("principal: subclient muxer stopped without error")
-	}()
 	err = client.userAuthorization()
 	if err != nil {
 		return nil, err
 	}
 	client.connected = true
 
-	return client, nil
-}
+	go client.HandleTubes()
 
-func (c *HopClient) setUpDelegateProxyToTarget(targURL core.URL) (*tubes.Unreliable, error) {
-	// open reliable principal proxy tube with delegate proxy
-	delegateProxyConn, err := c.newReliablePrincipalProxyTube()
-	if err != nil {
-		return nil, err
-	}
-	logrus.Info("principal: made a reliable delProxyConn with del proxy")
-	defer delegateProxyConn.Close()
-
-	// send TargetInfo to delegate proxy
-	err = authgrants.WriteTargetInfo(targURL, delegateProxyConn)
-	if err != nil {
-		return nil, err
-	}
-	logrus.Info("principal: wrote target info")
-
-	// read response (whether delegate proxy successfully connected to target)
-	err = authgrants.ReadResponse(delegateProxyConn)
-	if err != nil {
-		logrus.Error("principal: error reading response")
-		return nil, err
-	}
-	logrus.Info("principal: del proxy successfully connected to target!")
-	// open unreliable tube with delegate proxy
-	unreliableDelProxyConn, err := c.newUnreliablePrincipalProxyTube()
-	if err != nil {
-		logrus.Error("principal: error starting unreliable proxy tube")
-		return nil, err
-	}
-	logrus.Info("principal: successfully started unreliable proxy tube")
-
-	// send tubeID
-	err = authgrants.WriteUnreliableProxyID(delegateProxyConn, unreliableDelProxyConn.GetID())
-	if err != nil {
-		logrus.Error("principal: error writing unreliable proxy id")
-		return nil, err
-	}
-	logrus.Info("principal: successfully wrote unreliable proxy id")
-
-	// await confirmation that delegate proxy ready to proxy with unreliable tube
-	err = authgrants.ReadResponse(delegateProxyConn)
-	if err != nil {
-		logrus.Error("principal: error reading response from del proxy")
-		return nil, err
-	}
-	logrus.Info("principal: got unreliable proxy conn")
-	return unreliableDelProxyConn, nil
-}
-
-func (c *HopClient) newReliablePrincipalProxyTube() (*tubes.Reliable, error) {
-	return c.TubeMuxer.CreateReliableTube(common.PrincipalProxyTube)
-}
-
-func (c *HopClient) newUnreliablePrincipalProxyTube() (*tubes.Unreliable, error) {
-	return c.TubeMuxer.CreateUnreliableTube(common.PrincipalProxyTube)
+	return psubclient, nil
 }
 
 func (c *HopClient) newAuthgrantTube() (*tubes.Reliable, error) {

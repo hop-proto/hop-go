@@ -47,7 +47,7 @@ type Muxer struct {
 	// +checklocks:m
 	tubes map[byte]Tube
 	// Channels waiting for an Accept() call.
-	tubeQueue chan Tube
+	TubeQueue chan Tube
 	m         sync.Mutex
 	// All hop tubes write raw bytes for a tube packet to this golang chan.
 	sendQueue  chan []byte
@@ -57,6 +57,9 @@ type Muxer struct {
 	underlying transport.MsgConn
 	timeout    time.Duration
 	log        *logrus.Entry
+
+	startErr chan error
+	stopErr  error
 
 	// This buffer is only used in m.readMsg
 	readBuf []byte
@@ -72,10 +75,10 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 	}
 	state := atomic.Value{}
 	state.Store(muxerRunning)
-	return &Muxer{
+	mux := &Muxer{
 		idParity:   idParity,
 		tubes:      make(map[byte]Tube),
-		tubeQueue:  make(chan Tube, 128),
+		TubeQueue:  make(chan Tube, 128),
 		m:          sync.Mutex{},
 		sendQueue:  make(chan []byte),
 		state:      state,
@@ -85,7 +88,11 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 		timeout:    timeout,
 		log:        log,
 		readBuf:    make([]byte, 65535),
+		startErr:   make(chan error),
 	}
+
+	go mux.start()
+	return mux
 }
 
 // waits for tubes to close and then removes them so their IDs can be reused
@@ -147,7 +154,7 @@ func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
 		return nil, err
 	}
 	tube, err := m.makeReliableTubeWithID(tType, id, true)
-	if err != nil {
+	if err == nil {
 		m.log.Infof("Created Tube: %v", tube.GetID())
 	}
 	return tube, err
@@ -206,7 +213,7 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 	go r.initiate(req)
 	if !req {
 		r.getLog().WithField("tube", r.GetID()).Debug("added tube to queue")
-		m.tubeQueue <- r
+		m.TubeQueue <- r
 	}
 	return r, nil
 }
@@ -258,16 +265,9 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 	go tube.initiate(req)
 	if !req {
 		tube.getLog().WithField("tube", tube.GetID()).Debug("added tube to queue")
-		m.tubeQueue <- tube
+		m.TubeQueue <- tube
 	}
 	return tube, nil
-}
-
-// Accept blocks for and accepts a new tube
-func (m *Muxer) Accept() (Tube, error) {
-	s := <-m.tubeQueue
-	m.log.Infof("Accepted Tube: %v", s.GetID())
-	return s, nil
 }
 
 func (m *Muxer) readMsg() (*frame, error) {
@@ -304,18 +304,22 @@ func (m *Muxer) sender() {
 	m.log.Debug("muxer sender stopped")
 }
 
-// Start allows a muxer to start listening and handling incoming tube requests and messages
-func (m *Muxer) Start() (err error) {
+// start allows a muxer to start listening and handling incoming tube requests and messages
+func (m *Muxer) start() {
 	go m.sender()
 
+	// When start finishes, it sends its error on this channel.
+	// m.Stop receives this error and passes it to the called.
+	var err error
 	defer func() {
 		// This case indicates that the muxer was stopped by m.Stop()
 		if m.state.Load() == muxerStopped || errors.Is(err, syscall.ECONNREFUSED) {
 			err = nil
 		} else if err != nil {
 			m.log.Errorf("Muxer ended with error: %s", err)
-			m.Stop()
+			go m.Stop()
 		}
+		m.startErr <- err
 	}()
 
 	// Set initial timeout
@@ -325,7 +329,7 @@ func (m *Muxer) Start() (err error) {
 	for m.state.Load() != muxerStopped {
 		frame, err := m.readMsg()
 		if err != nil {
-			return err
+			return
 		}
 		var tube Tube
 		tube, ok := m.getTube(frame.tubeID)
@@ -360,8 +364,6 @@ func (m *Muxer) Start() (err error) {
 		}
 
 	}
-
-	return nil
 }
 
 // Stop ensures all the muxer tubes are closed
@@ -373,7 +375,10 @@ func (m *Muxer) Stop() (err error) {
 	if m.state.Load() != muxerRunning {
 		m.m.Unlock()
 		<-m.stopped
-		return io.EOF
+
+		m.m.Lock()
+		defer m.m.Unlock()
+		return m.stopErr
 	}
 
 	wg := sync.WaitGroup{}
@@ -420,10 +425,17 @@ func (m *Muxer) Stop() (err error) {
 
 	close(m.sendQueue)
 	close(m.stopped)
+	close(m.TubeQueue)
 	<-m.senderDone
 
 	m.underlying.Close()
 
+	// Cache error for future calls to Stop
+	err = <-m.startErr
+	m.m.Lock()
+	defer m.m.Unlock()
+	m.stopErr = err
+
 	m.log.Info("Muxer.Stop() finished")
-	return nil
+	return err
 }

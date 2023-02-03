@@ -18,15 +18,14 @@ func main() {
 	}
 
 	// TODO(baumanl): better options for enabling logging to file/level
-	// TODO (hosono) verbose logging seems to prevent hop from working. Concurrency bug?
 	if f.Verbose {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
-
+	logrus.SetLevel(logrus.DebugLevel)
 	// default log at info level to file --> otherwise things get really
 	// confusing when running authgrant protocol and all processes are trying
 	// to log to std err.
-	file, err := os.CreateTemp("/tmp", "hop.log")
+	file, err := os.CreateTemp("/tmp", "hop*.log")
 	if err != nil {
 		logrus.Error("unable to create log file")
 	} else {
@@ -59,5 +58,10 @@ func main() {
 	if err != nil {
 		logrus.Error(err)
 		return
+	}
+
+	err = client.Close()
+	if err != nil {
+		logrus.Errorf("Error closing client: %s", err)
 	}
 }
