@@ -68,10 +68,9 @@ type Muxer struct {
 	// This buffer is only used in m.readMsg
 	readBuf []byte
 
-	localKeepAliveTube  *Unreliable
-	remoteKeepAliveTube *Unreliable
-	localKeepAliveDone  chan struct{}
-	remoteKeepAliveDone chan struct{}
+	keepAliveTubeChan chan *Unreliable
+	sendKeepAliveDone chan struct{}
+	recvKeepAliveDone chan struct{}
 }
 
 // NewMuxer starts a new tube muxer
@@ -84,22 +83,23 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 	}
 	state := atomic.Value{}
 	mux := &Muxer{
-		idParity:            idParity,
-		reliableTubes:       make(map[byte]*Reliable),
-		unreliableTubes:     make(map[byte]*Unreliable),
-		tubeQueue:           make(chan Tube, 128),
-		m:                   sync.Mutex{},
-		sendQueue:           make(chan []byte),
-		state:               state,
-		stopped:             make(chan struct{}),
-		underlying:          msgConn,
-		timeout:             timeout,
-		log:                 log,
-		readBuf:             make([]byte, 65535),
-		receiverErr:         make(chan error),
-		senderErr:           make(chan error),
-		localKeepAliveDone:  make(chan struct{}),
-		remoteKeepAliveDone: make(chan struct{}),
+		idParity:          idParity,
+		reliableTubes:     make(map[byte]*Reliable),
+		unreliableTubes:   make(map[byte]*Unreliable),
+		tubeQueue:         make(chan Tube, 128),
+		m:                 sync.Mutex{},
+		sendQueue:         make(chan []byte),
+		state:             state,
+		stopped:           make(chan struct{}),
+		underlying:        msgConn,
+		timeout:           timeout,
+		log:               log,
+		readBuf:           make([]byte, 65535),
+		receiverErr:       make(chan error),
+		senderErr:         make(chan error),
+		keepAliveTubeChan: make(chan *Unreliable, 1),
+		sendKeepAliveDone: make(chan struct{}),
+		recvKeepAliveDone: make(chan struct{}),
 	}
 
 	mux.state.Store(muxerRunning)
@@ -247,8 +247,9 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 	m.addTube(r)
 	r.recvWindow.init()
 	go r.initiate(req)
+
 	if !req {
-		r.getLog().WithField("tube", r.GetID()).Debug("added tube to queue")
+		r.log.Debug("added tube to queue")
 		m.tubeQueue <- r
 	}
 	return r, nil
@@ -300,8 +301,15 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 	m.addTube(tube)
 	tube.state.Store(created)
 	go tube.initiate(req)
+
+	// Check for received keep alive tubes. Keep alive tubes always have id 0
+	if tube.id == 0 {
+		m.keepAliveTubeChan <- tube
+		return nil, errGotKeepAlive
+	}
+
 	if !req {
-		tube.getLog().WithField("tube", tube.GetID()).Debug("added tube to queue")
+		tube.log.Debug("added tube to queue")
 		m.tubeQueue <- tube
 	}
 	return tube, nil
@@ -353,56 +361,70 @@ func (m *Muxer) sender() {
 func (m *Muxer) start() {
 	go m.sender()
 	go m.receiver()
-	m.startKeepAlive()
-	m.state.Store(muxerRunning)
+
+	// Create the server opens the keep alive tube, which will always have ID 0
+	if m.idParity == 0 {
+		// Tube ID 0 is reserved for keep alives
+		_, err := m.makeUnreliableTubeWithID(common.KeepAlive, 0, true)
+		if err != errGotKeepAlive {
+			// If we can't create this tube, the muxer might randomly time out
+			// if it expects a keep alive and doesn't get it.
+			// In that case, it's better to crash early
+			m.log.WithField("error", err).Fatal("Failed to create keep alive tube")
+		}
+		m.log.Info("created keep alive tube")
+	}
+
+	go m.startKeepAlive()
 	m.log.Info("Muxer running!")
 }
 
 func (m *Muxer) startKeepAlive() {
-	lt, err := m.CreateUnreliableTube(common.KeepAlive)
-	m.localKeepAliveTube = lt
-	if err != nil {
-		// If we can't create this tube, the muxer might randomly time out
-		// if it expects a keep alive and doesn't get it.
-		// In that case, it's better to crash early
-		m.log.WithField("error", err).Fatal("Failed to create keep alive tube")
-	}
-	m.localKeepAliveTube.log.Info("created keep alive tube")
+	tube := <-m.keepAliveTubeChan
 
-	rt, err := m.Accept()
-	// This case indicates that tubeQueue was closed by m.Stop()
-	// In that case, there's no point in constructing keep alives
-	if err != nil {
-		close(m.localKeepAliveDone)
-		close(m.remoteKeepAliveDone)
+	// a nil channel is sent by m.Stop to finish this goroutine
+	if tube == nil {
+		close(m.sendKeepAliveDone)
+		close(m.recvKeepAliveDone)
 		return
 	}
-	m.remoteKeepAliveTube = rt.(*Unreliable)
-	m.remoteKeepAliveTube.log.Info("received keep alive tube")
 
+	// This goroutine sends 3 keep alives per timeout
 	go func() {
+		defer close(m.sendKeepAliveDone)
 		buf := make([]byte, 1)
-		ticker := time.NewTicker(retransmitOffset)
+
+		keepAliveTime := m.timeout / 3
+		if keepAliveTime == 0 {
+			keepAliveTime = 10 * retransmitOffset
+		}
+		ticker := time.NewTicker(keepAliveTime)
 		for {
 			<-ticker.C
-			err := m.localKeepAliveTube.WriteMsg(buf)
+			if tube == nil {
+				m.log.Info("haven't receive keep alive tube yet")
+				continue
+			}
+			err := tube.WriteMsg(buf)
 			if err != nil {
-				m.log.WithField("error", err).Info("Local keep alive ended")
-				close(m.localKeepAliveDone)
+				m.log.WithField("error", err).Info("Keep alive sender ended")
 				return
 			}
+			m.log.Debug("send keep alive")
 		}
 	}()
 
+	// This goroutine reads keep alives
 	go func() {
+		defer close(m.recvKeepAliveDone)
+		buf := make([]byte, 1)
 		for {
-			buf := make([]byte, MaxFrameDataLength)
-			_, err := m.remoteKeepAliveTube.Read(buf)
+			_, err := tube.Read(buf)
 			if err != nil {
-				m.log.WithField("error", err).Info("Remote keep alive ended")
-				close(m.remoteKeepAliveDone)
+				m.log.WithField("error", err).Info("Keep alive receiver ended")
 				return
 			}
+			m.log.Debug("got keep alive")
 		}
 	}()
 }
@@ -485,7 +507,6 @@ func (m *Muxer) Stop() error {
 	m.m.Lock()
 	m.log.WithField("numTubes", len(m.reliableTubes)+len(m.unreliableTubes)).Info("Stopping muxer")
 
-	var err error
 	// Muxer.Stop() has already been called. Wait for it to finish
 	if m.state.Load() != muxerRunning {
 		m.m.Unlock()
@@ -496,21 +517,14 @@ func (m *Muxer) Stop() error {
 		return m.stopErr
 	}
 
-	if m.localKeepAliveTube != nil {
-		m.localKeepAliveTube.Close()
-	}
-	if m.remoteKeepAliveTube != nil {
-		m.remoteKeepAliveTube.Close()
-	}
-
 	wg := sync.WaitGroup{}
 
 	closeTube := func(t Tube) {
 		wg.Add(1)
 		go func(v Tube) { //parallelized closing tubes because other side may close them in a different order
 			defer wg.Done()
-			m.log.Info("Closing tube: ", v.GetID())
-			err = v.Close()
+			v.getLog().Info("Closing tube: ", v.GetID())
+			err := v.Close()
 			if err != nil && err != io.EOF {
 				// Tried to close tube in bad state. Nothing to do
 				m.log.Errorf("tube %d closed with error: %s", v.GetID(), err)
@@ -551,10 +565,16 @@ func (m *Muxer) Stop() error {
 	wg.Wait()
 	m.state.Store(muxerStopped)
 
+	// This prevents startKeepAlive from blocking indefinitely waiting for a tube that isn't coming
+	select {
+	case m.keepAliveTubeChan <- nil:
+	default:
+	}
+
 	close(m.sendQueue)
 	close(m.tubeQueue)
-	<-m.localKeepAliveDone
-	<-m.remoteKeepAliveDone
+	<-m.recvKeepAliveDone
+	<-m.sendKeepAliveDone
 
 	m.underlying.Close()
 

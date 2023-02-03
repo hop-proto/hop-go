@@ -37,7 +37,7 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 
 	go func() {
 		defer wg.Done()
-		m1 = NewMuxer(c1, 0, false, logrus.WithFields(logrus.Fields{
+		m1 = NewMuxer(c1, 30*retransmitOffset, false, logrus.WithFields(logrus.Fields{
 			"muxer": "m1",
 			"test":  t.Name(),
 		}))
@@ -45,7 +45,7 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 	}()
 	go func() {
 		defer wg.Done()
-		m2 = NewMuxer(c2, 0, true, logrus.WithFields(logrus.Fields{
+		m2 = NewMuxer(c2, 30*retransmitOffset, true, logrus.WithFields(logrus.Fields{
 			"muxer": "m2",
 			"test":  t.Name(),
 		}))
@@ -114,15 +114,8 @@ func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 
 	wg := sync.WaitGroup{}
 
-	var numTubes int
-	if rel {
-		numTubes = 128
-	} else {
-		numTubes = 127
-	}
-
 	prevID := -1
-	for i := 0; i < numTubes; i++ {
+	for i := 0; i < 128; i++ {
 		tube, err := m1CreateTube()
 		assert.NilError(t, err)
 		assert.Assert(t, int(tube.GetID()) > prevID)
@@ -134,6 +127,15 @@ func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 				wg.Done()
 			}()
 		}
+	}
+
+	// Since muxer2 handles keep alives, it can only create 127 unreliable tubes
+	// Tube 0 is reserved for keep alives
+	var numTubes int
+	if rel {
+		numTubes = 128
+	} else {
+		numTubes = 127
 	}
 
 	prevID = -1
@@ -239,8 +241,12 @@ func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 	})
 
 	defer goleak.VerifyNone(t)
-
 	logrus.SetLevel(logrus.TraceLevel)
+
+	t.Run("ImmediateStop", func(t *testing.T) {
+		_, _, stop := makeMuxers(1.0, t)
+		stop()
+	})
 	t.Run("UnreliableTubes/ImmediateStop", func(t *testing.T) {
 		manyTubes(1.0, false, false, t)
 	})
