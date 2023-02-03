@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"os"
 	"strings"
@@ -476,6 +477,23 @@ func ReadCertificatePEM(b []byte) (*Certificate, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+// ReadCertificatePEMFileFS reads the first PEM-encoded certificate from a PEM file.
+func ReadCertificatePEMFileFS(path string, fs fs.FS) (*Certificate, error) {
+	if fs == nil {
+		return ReadCertificatePEMFile(path)
+	}
+	f, err := fs.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+	return ReadCertificatePEM(b)
 }
 
 // ReadCertificatePEMFile reads the first PEM-encoded certificate from a PEM file.

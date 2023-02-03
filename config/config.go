@@ -39,12 +39,13 @@ type ServerConfig struct {
 	DataTimeout      time.Duration
 
 	// transport layer client validation options
-	InsecureSkipVerify          *bool
-	EnableCertificateValidation *bool
-	EnableAuthorizedKeys        *bool
-	Users                       []string
+	CAFiles                      []string // root and intermediate certs
+	InsecureSkipVerify           *bool
+	DisableCertificateValidation *bool
+	EnableAuthorizedKeys         *bool
+	Users                        []string // users for whom to load their authorized_keys files into transport layer
 
-	AllowAuthgrants     *bool // as an authgrant Target this server will approve authgrants and as an authgrant Delegate server will proxy ag intent requests
+	EnableAuthgrants    *bool // as an authgrant Target this server will approve authgrants and as an authgrant Delegate server will proxy ag intent requests
 	AgProxyListenSocket *string
 }
 
@@ -56,6 +57,9 @@ type HostConfigOptional struct {
 	AgentURL     *string
 	AutoSelfSign *bool
 	CAFiles      []string
+	ServerName   *string
+	ServerIPv4   *string
+	ServerIPv6   *string
 	Certificate  *string
 	Cmd          *string // what command to run on connect
 	DisableAgent *bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
@@ -66,8 +70,7 @@ type HostConfigOptional struct {
 	Patterns     []string
 	Port         int
 	User         *string
-	// something for principal vs. delegate
-	IsPrincipal *bool
+	IsPrincipal  *bool
 	// something for remote port forward
 	// something for local port forward
 
@@ -81,6 +84,9 @@ type HostConfig struct {
 	AgentURL     string
 	AutoSelfSign bool
 	CAFiles      []string
+	ServerName   string // expected name on server cert
+	ServerIPv4   string
+	ServerIPv6   string
 	Certificate  string
 	Cmd          string // what command to run on connect
 	DisableAgent bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
@@ -123,6 +129,15 @@ func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
 		hc.AutoSelfSign = other.AutoSelfSign
 	}
 	hc.CAFiles = append(hc.CAFiles, other.CAFiles...)
+	if other.ServerName != nil {
+		hc.ServerName = other.ServerName
+	}
+	if other.ServerIPv4 != nil {
+		hc.ServerIPv4 = other.ServerIPv4
+	}
+	if other.ServerIPv6 != nil {
+		hc.ServerIPv6 = other.ServerIPv6
+	}
 	if other.Certificate != nil {
 		hc.Certificate = other.Certificate
 	}
@@ -178,6 +193,9 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 		newHC.AutoSelfSign = *hc.AutoSelfSign
 	}
 	newHC.CAFiles = hc.CAFiles
+	if hc.ServerName != nil {
+		newHC.ServerName = *hc.ServerName
+	}
 	if hc.Certificate != nil {
 		newHC.Certificate = *hc.Certificate
 	}

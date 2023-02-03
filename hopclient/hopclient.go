@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"sync"
-	"testing/fstest"
 
 	"github.com/sirupsen/logrus"
 
@@ -34,7 +34,7 @@ type HopClient struct { // nolint:maligned
 	connected     bool // true if connected to address
 	authenticator core.Authenticator
 
-	Fsystem fstest.MapFS // TODO(baumanl): current hack for test. switch to something better.
+	Fsystem fs.FS
 
 	TransportConn *transport.Client
 
@@ -67,7 +67,6 @@ func NewHopClient(config *config.HostConfig) (*HopClient, error) {
 // Dial connects to an address after setting up it's own authentication
 // using information in it's config.
 func (c *HopClient) Dial() error {
-	// TODO(baumanl): Connect to the authgrant server
 	err := c.authenticatorSetup() // TODO(baumanl): or should this be done in NewClient?
 	if err != nil {
 		return err
@@ -148,9 +147,8 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		HTTPClient: http.DefaultClient,
 	}
 
-	verifyConfig := transport.VerifyConfig{
-		InsecureSkipVerify: true, // TODO(baumanl): enable host key verification
-	}
+	verifyConfig := constructVerifyConfig(hc)
+	c.loadCAFiles(&verifyConfig.Store)
 
 	// Connect to the agent
 	aconn, _ := net.Dial("tcp", agentURL)

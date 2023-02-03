@@ -17,14 +17,19 @@ import (
 // Responsibilities [status]:
 // - receive and approve / deny "Intent Communication" messages from principals [implemented]
 // - maintain a mapping of current authgrants [implemented, removing expired still TODO]
-// - keep server authkey store up to date (add / remove) [adding implemented, removing TODO]
+// - keep server authkey store up to date (add / remove)
 // - conducting user authorization with authgrants
 // - checking all client actions if authorized using an authgrant and updating
 //   authorized actions accordingly
 
 func (s *HopServer) authorizeKeyAuthGrant(user string, publicKey keys.PublicKey) ([]authgrants.Authgrant, error) {
-	if s.config.AllowAuthgrants != nil && *s.config.AllowAuthgrants {
-		return s.agMap.RemoveAuthgrants(user, publicKey)
+	if s.config.EnableAuthgrants != nil && *s.config.EnableAuthgrants {
+		ags, err := s.agMap.RemoveAuthgrants(user, publicKey)
+		if err == nil {
+			// remove from transport layer key set
+			s.keyStore.RemoveKey(publicKey)
+		}
+		return ags, err
 	}
 	return []authgrants.Authgrant{}, fmt.Errorf("auth grants not enabled")
 }
@@ -33,7 +38,7 @@ func (sess *hopSession) addAuthGrant(intent *authgrants.Intent) error {
 	// add authorization grant to server mappings
 	sess.server.agMap.AddAuthGrant(intent, authgrants.PrincipalID(sess.ID))
 
-	//add delegate key from cert to transport server authorized key pool
+	// add delegate key from cert to transport server authorized key pool
 	sess.server.keyStore.AddKey(intent.DelegateCert.PublicKey)
 
 	return nil
@@ -76,32 +81,6 @@ func (sess *hopSession) checkIntent(intent authgrants.Intent) error {
 	}
 	return nil
 }
-
-// TODO(baumanl): how should expired authgrants be removed?
-// 1. how often or at what trigger
-// 2. when should key be removed from transport keyStore?
-// currently never...expired ones are just ignored
-
-// func (s *HopServer) agCleanup() {
-// 	s.agLock.Lock()
-// 	defer s.agLock.Unlock()
-// 	for _, ps := range s.authgrants {
-// 		for k, ags := range ps {
-// 			del := true
-// 			for _, ag := range ags {
-// 				if !ag.Data.ExpTime.Before(time.Now()) {
-// 					del = false
-// 					break
-// 				}
-// 			}
-// 			if del {
-// 				delete(ps, k)
-// 				s.keyStore.RemoveKey(k)
-// 			}
-
-// 		}
-// 	}
-// }
 
 // TODO(baumanl): rewrite this/think about best way to generalize to all grant types
 // checks if the session has an auth grant to perform cmd
