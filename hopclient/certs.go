@@ -2,6 +2,7 @@ package hopclient
 
 import (
 	"github.com/sirupsen/logrus"
+
 	"hop.computer/hop/certs"
 	"hop.computer/hop/config"
 	"hop.computer/hop/transport"
