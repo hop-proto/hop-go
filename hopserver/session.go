@@ -136,8 +136,11 @@ func (sess *hopSession) start() {
 func (sess *hopSession) close() error {
 	var err, err2 error
 
-	err = sess.tubeMuxer.Stop()
-	logrus.WithField("error", err).Info("session muxer stopped")
+	sendErr, recvErr := sess.tubeMuxer.Stop()
+	logrus.WithFields(logrus.Fields{
+		"sendErr": sendErr,
+		"recvErr": recvErr,
+	}).Info("session muxer stopped")
 
 	// remove from server session map
 	sess.server.sessionLock.Lock()

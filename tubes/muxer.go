@@ -2,12 +2,10 @@ package tubes
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"net"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -61,9 +59,11 @@ type Muxer struct {
 	timeout    time.Duration
 	log        *logrus.Entry
 
+	senderErr chan error
+	sendErr   error
+
 	receiverErr chan error
-	senderErr   chan error
-	stopErr     error
+	recvErr     error
 
 	// This buffer is only used in m.readMsg
 	readBuf []byte
@@ -73,7 +73,18 @@ type Muxer struct {
 	recvKeepAliveDone chan struct{}
 }
 
-// NewMuxer starts a new tube muxer
+// NewMuxer starts a new tube muxer running over the the specified msgConn.
+// The newly created muxer will close the msgConn when Muxer.Stop() is called.
+//
+// timeout specifies how long the muxer will wait before timing out all operations
+//
+// isServer controls whether the muxer will create even or odd numbered tubes.
+// When two muxers are connected, one must be creates with isServer set to true
+// and the other must have isServer set to false. The server will create even
+// numbered tubes. The client will create odd numbered tubes.
+//
+// log specifies the logging context for this muxer. All log messages from this
+// muxer and the tubes it creates will use this logging context.
 func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, log *logrus.Entry) *Muxer {
 	var idParity byte
 	if isServer {
@@ -109,6 +120,7 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 }
 
 // waits for tubes to close and then removes them so their IDs can be reused
+// reapTube is called in a goroutine whenever a tube is created or accepted.
 func (m *Muxer) reapTube(t Tube) {
 	t.WaitForClose()
 
@@ -133,6 +145,8 @@ func (m *Muxer) reapTube(t Tube) {
 	}
 }
 
+// addTube adds a tube to the relevant map for later lookup.
+// It automatically adds Reliable and Unreliable tubes to their respective maps.
 // +checklocks:m.m
 func (m *Muxer) addTube(t Tube) {
 	if t.IsReliable() {
@@ -143,6 +157,13 @@ func (m *Muxer) addTube(t Tube) {
 	go m.reapTube(t)
 }
 
+// getTube retrieves a tube from the muxer's maps. isReliable indicates
+// whether the method retrieves a Reliable or an Unreliable tube.
+// isReliable must be specified since tubes are identified by the tuple of
+// tubeID and reliability. In other words, there can be both a reliable
+// tube 17 and an unreliable tube 17.
+//
+// If no tube exists with the specified tubeID and reliablility
 func (m *Muxer) getTube(isReliable bool, tubeID byte) (Tube, bool) {
 	m.m.Lock()
 	defer m.m.Unlock()
@@ -157,6 +178,10 @@ func (m *Muxer) getTube(isReliable bool, tubeID byte) (Tube, bool) {
 	return t, ok
 }
 
+// pickTubeID performs a linear search through the muxer's map of tubes
+// in order to find the next open tube ID. isReliable indicates whether
+// this method will search through the map of Reliable or Unreliable tubes.
+// If no tube IDs are available, this method returns ErrOutOfTubes.
 // +checklocks:m.m
 func (m *Muxer) pickTubeID(isReliable bool) (byte, error) {
 	for guessInt := int(m.idParity); guessInt < 256; guessInt += 2 {
@@ -179,7 +204,9 @@ func (m *Muxer) pickTubeID(isReliable bool) (byte, error) {
 	return 0, ErrOutOfTubes
 }
 
-// CreateReliableTube starts a new reliable tube
+// CreateReliableTube starts a new reliable tube. If this method returns with
+// a nil error, the tube it has created is ready to use. If the error is not nil,
+// then the tube returned by this method will be nil
 func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
 	m.m.Lock()
 	defer m.m.Unlock()
@@ -195,6 +222,8 @@ func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
 	return tube, err
 }
 
+// makeReliableTubeWithID populates the struct for a reliable tube and calls its initiate method.
+// req is true if the tube is a new request and false if the tube responding to a request by the remote muxer.
 // +checklocks:m.m
 func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*Reliable, error) {
 	if m.state.Load() != muxerRunning {
@@ -255,7 +284,9 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 	return r, nil
 }
 
-// CreateUnreliableTube starts a new unreliable tube
+// CreateUnreliableTube starts a new unreliable tube. If this method returns
+// with a nil error, the created tube is ready for use. If it returns with an
+// error, then the tube it returns will be nil.
 func (m *Muxer) CreateUnreliableTube(tType TubeType) (*Unreliable, error) {
 	m.m.Lock()
 	defer m.m.Unlock()
@@ -271,7 +302,8 @@ func (m *Muxer) CreateUnreliableTube(tType TubeType) (*Unreliable, error) {
 	return tube, err
 }
 
-// req is true if the tube is a new request. False otherwise
+// makeUnreliableTubeWithID populates the struct for an unreliable tube and calls its initiate method.
+// req is true if the tube is a new request and false if the tube responding to a request by the remote muxer.
 // +checklocks:m.m
 func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) (*Unreliable, error) {
 	state := m.state.Load()
@@ -316,6 +348,8 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 }
 
 // Accept blocks until a new tube is available or the muxer stops
+// If the muxer stops, Accept will return a nil Tube and ErrMuxerStopping.
+// Otherwise, it will return a valid tube that is ready for use.
 func (m *Muxer) Accept() (Tube, error) {
 	tube, ok := <-m.tubeQueue
 	if !ok {
@@ -324,6 +358,8 @@ func (m *Muxer) Accept() (Tube, error) {
 	return tube, nil
 }
 
+// readMsg reads a new packet from the underlying MsgConn. It then sets the timeout
+// so that future calls to readMsg will timeout appropriately.
 func (m *Muxer) readMsg() (*frame, error) {
 	_, err := m.underlying.ReadMsg(m.readBuf)
 	if err != nil {
@@ -338,6 +374,9 @@ func (m *Muxer) readMsg() (*frame, error) {
 
 }
 
+// sender reads data from the muxer's sendQueue and writes it to the
+// underlying MsgConn. If an error occurs while sending data, sender will call
+// m.Stop in a new goroutine and the error will be reported by m.Stop
 func (m *Muxer) sender() {
 	var err error
 	for rawBytes := range m.sendQueue {
@@ -358,6 +397,8 @@ func (m *Muxer) sender() {
 	m.senderErr <- err
 }
 
+// start begins the goroutines that make the muxer work. Specifically,
+// it starts the sender, the receiver, and the keep alive tubes.
 func (m *Muxer) start() {
 	go m.sender()
 	go m.receiver()
@@ -383,6 +424,15 @@ func (m *Muxer) start() {
 	m.log.Info("Muxer running!")
 }
 
+// startKeepAlive beings the goroutines that handle keep alive messages.
+// startKeepAlive blocks until the keep alive tube is sent on m.keepAliveTubeChan.
+// Ones it receives a keep alive tube, this method spawns two goroutines:
+// One for sending keep alives and one for receiving them. The sending goroutine
+// sends 3 keep alive messages every timeout interval. The receiving goroutine
+// reads and discards every keep alive message sent by the remote muxer.
+// The sending and receiving goroutines exit if any errors occur in the
+// keep alive tube. They then close the channels m.sendKeepAliveDone and
+// m.recvKeepAliveDone respectively.
 func (m *Muxer) startKeepAlive() {
 	tube := <-m.keepAliveTubeChan
 
@@ -433,6 +483,8 @@ func (m *Muxer) startKeepAlive() {
 	}()
 }
 
+// receiver reads packet from the underlying MsgConn and forwards them to the relevant
+// tubes. If it gets a REQ packet requesting a new tube, it creates that tube.
 func (m *Muxer) receiver() {
 	var err error
 
@@ -518,7 +570,7 @@ func (m *Muxer) Stop() error {
 
 		m.m.Lock()
 		defer m.m.Unlock()
-		return m.stopErr
+		return m.sendErr, m.recvErr
 	}
 
 	wg := sync.WaitGroup{}
@@ -583,26 +635,19 @@ func (m *Muxer) Stop() error {
 	m.underlying.Close()
 
 	// Cache error for future calls to Stop
-	recvErr := <-m.receiverErr
-	sendErr := <-m.senderErr
+	m.recvErr = <-m.receiverErr
+	m.sendErr = <-m.senderErr
 	m.m.Lock()
 	defer m.m.Unlock()
-	if recvErr != nil {
-		m.stopErr = recvErr
-	} else if sendErr != nil {
-		m.stopErr = sendErr
-	} else {
-		m.stopErr = nil
-	}
 
-	// This error indicates that the muxer got an ICMP Destination Unreachable packet.
-	// This happens when the other side of the connetion has been closed, so we
-	// can ignore it.
-	if errors.Is(m.stopErr, syscall.ECONNREFUSED) {
-		m.stopErr = nil
-	}
+	//// This error indicates that the muxer got an ICMP Destination Unreachable packet.
+	//// This happens when the other side of the connetion has been closed, so we
+	//// can ignore it.
+	//if errors.Is(m.stopErr, syscall.ECONNREFUSED) {
+	//m.stopErr = nil
+	//}
 
 	close(m.stopped)
 	m.log.Info("Muxer.Stop() finished")
-	return m.stopErr
+	return m.sendErr, m.recvErr
 }
