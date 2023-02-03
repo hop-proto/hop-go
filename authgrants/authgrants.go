@@ -57,7 +57,6 @@ func (m *AuthgrantMapSync) RemoveAuthgrants(user string, key keys.PublicKey) ([]
 	if ags, ok := m.agMap[user]; ok { // if user has any authgrants
 		if val, ok := ags[key]; ok { // if key has an entry
 			delete(ags, key) // remove from server mapping
-			// TODO(baumanl): add check to remove from transport keyStore
 			return val, nil
 		}
 	}

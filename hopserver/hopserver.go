@@ -132,7 +132,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	if sc.InsecureSkipVerify != nil && *sc.InsecureSkipVerify {
 		tconf.ClientVerify.InsecureSkipVerify = true
 	} else {
-		// Cert validation enabled by default
+		// Cert validation enabled by default (must be explicitly disabled)
 		if sc.DisableCertificateValidation == nil || !*sc.DisableCertificateValidation {
 			tconf.ClientVerify.Store = certs.Store{}
 			for _, s := range sc.CAFiles {
@@ -145,10 +145,20 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 				tconf.ClientVerify.Store.AddCertificate(cert)
 			}
 		}
-		// Authorized keys enabled
-		if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys { // must be explicitly set to true
-			logrus.Debug("hopserver: authorized keys are enabled")
+		// Authgrants disabled by default (must be explicitly enabled)
+		if sc.EnableAuthgrants != nil && *sc.EnableAuthgrants {
+			// Create an empty key set for authgrant keys to be added to
 			tconf.ClientVerify.AuthKeys = authkeys.NewSyncAuthKeySet()
+		}
+
+		// Authorized keys disabled by default (must be explicitly enabled)
+		if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
+			logrus.Debug("hopserver: authorized keys are enabled")
+			if tconf.ClientVerify.AuthKeys == nil {
+				// Create key set if one doesn't already exist from Authgrants being enabled
+				tconf.ClientVerify.AuthKeys = authkeys.NewSyncAuthKeySet()
+			}
+			// Add all authorized keys from files in specified users' home directories
 			for _, name := range sc.Users {
 				user, err := user.Lookup(name)
 				if err != nil {
