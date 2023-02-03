@@ -70,11 +70,7 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 			wg.Done()
 		}()
 
-		err = m1.WaitForStop()
-		assert.NilError(t, err)
-
-		err = m2.WaitForStop()
-		assert.NilError(t, err)
+		wg.Wait()
 
 		c1UDP.Close()
 		c2UDP.Close()
@@ -171,13 +167,9 @@ func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 	stop()
 }
 
-	// Create a reliable tube
-	t1, err := m1.CreateReliableTube(common.ExecTube)
-	assert.NilError(t, err)
-	assert.DeepEqual(t, t1.GetID(), byte(1))
-	t2, ok := <-m2.TubeQueue
-	assert.Assert(t, ok)
-	t2Rel := t2.(*Reliable)
+// this ensures that tubes can still be opened even if the remote host is in the timeWait state
+func reusingTubes(t *testing.T) {
+	m1, m2, stop := makeMuxers(1.0, t)
 
 	// Create a reliable tube
 	t1, err := m1.CreateReliableTube(common.ExecTube)
@@ -197,13 +189,8 @@ func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 	t2State := t2Rel.tubeState
 	t2Rel.l.Unlock()
 
-	// Attempt to open another tube with the same ID
-	t1, err = m1.CreateReliableTube(common.ExecTube)
-	assert.NilError(t, err)
-	assert.DeepEqual(t, t1.GetID(), byte(1))
-	t2, ok = <-m2.TubeQueue
-	assert.Assert(t, ok)
-	t2Rel = t2.(*Reliable)
+	assert.DeepEqual(t, t2State, timeWait)
+	time.Sleep(timeWaitTime + time.Second)
 
 	// Attempt to open another tube with the same ID
 	t1, err = m1.CreateReliableTube(common.ExecTube)
@@ -232,15 +219,7 @@ func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 	stop()
 }
 
-	defer goleak.VerifyNone(t)
-
-	logrus.SetLevel(logrus.TraceLevel)
-	t.Run("UnreliableTubes/ImmediateStop", func(t *testing.T) {
-		manyTubes(1.0, false, false, t)
-	})
-	t.Run("UnreliableTubes/Wait", func(t *testing.T) {
-		manyTubes(0.9, false, true, t)
-	})
+func TestMuxer(t *testing.T) {
 
 	defer goleak.VerifyNone(t)
 	logrus.SetLevel(logrus.TraceLevel)

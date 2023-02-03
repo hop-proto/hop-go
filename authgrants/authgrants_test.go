@@ -58,11 +58,13 @@ func TestFlow(t *testing.T) {
 
 	go func() {
 		StartPrincipalInstance(pcP, ciFuncPrincipal, setupTarg)
+		tc.Close()
 		wg.Done()
 	}()
 
 	err := StartDelegateInstance(pc, []Intent{ir1.Data.Intent, ir2.Data.Intent, ir3.Data.Intent})
 	assert.NilError(t, err)
+	pc.Close()
 
 	wg.Wait()
 	assert.DeepEqual(t, correctApprovals, approved)

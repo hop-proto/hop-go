@@ -41,12 +41,6 @@ func StartPrincipalInstance(dc net.Conn, ci CheckIntentCallback, su setUpTargetC
 		checkIntent:     ci,
 		setUpTargetConn: su,
 	}
-	defer func() {
-		pi.delegateConn.Close()
-		if pi.targetConnected {
-			pi.targetConn.Close()
-		}
-	}()
 
 	if ci == nil {
 		// pi.checkIntent = defaultRejectAll // this is correct

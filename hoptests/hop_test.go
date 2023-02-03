@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"go.uber.org/goleak"
 	"gotest.tools/assert"
 
 	"hop.computer/hop/agent"
@@ -30,6 +31,7 @@ type TestAgent struct {
 	// Listener net.Listener
 	baseURL string
 	Agent   agent.Server
+	server  http.Server
 }
 
 // One hopserver process
@@ -269,11 +271,18 @@ func (a *TestAgent) Run(t *testing.T) {
 	assert.NilError(t, err)
 	logrus.Infof("agent listening on %s", sock.Addr().String())
 	a.baseURL = sock.Addr().String()
-	go http.Serve(sock, a.Agent)
+	a.server.Handler = a.Agent
+	go a.server.Serve(sock)
+}
+
+func (a *TestAgent) Stop() {
+	a.server.Close()
 }
 
 func TestHopClientExtAuth(t *testing.T) {
-	logrus.SetLevel(logrus.InfoLevel)
+	defer goleak.VerifyNone(t)
+
+	logrus.SetLevel(logrus.TraceLevel)
 	thunks.SetUpTest()
 	t.Run("connect external authenticator", func(t *testing.T) {
 		// Create the basic Client and Server
@@ -289,11 +298,19 @@ func TestHopClientExtAuth(t *testing.T) {
 		c.Authenticator = s.ChainAuthenticator(t, c.KeyPair)
 
 		c.StartClient(t)
+
+		var err error
+		err = s.Server.Close()
+		assert.NilError(t, err)
+		err = c.Client.Close()
+		assert.NilError(t, err)
 	})
 }
 
 func TestHopClientInMemAuth(t *testing.T) {
-	logrus.SetLevel(logrus.InfoLevel)
+	defer goleak.VerifyNone(t)
+
+	logrus.SetLevel(logrus.TraceLevel)
 	thunks.SetUpTest()
 	t.Run("connect in memory authenticator", func(t *testing.T) {
 		// Create the basic Client and Server
@@ -307,11 +324,19 @@ func TestHopClientInMemAuth(t *testing.T) {
 		s.StartHopServer(t)
 
 		c.StartClient(t)
+
+		var err error
+		err = s.Server.Close()
+		assert.NilError(t, err)
+		err = c.Client.Close()
+		assert.NilError(t, err)
 	})
 }
 
 func TestHopClientAgentAuth(t *testing.T) {
-	logrus.SetLevel(logrus.DebugLevel)
+	defer goleak.VerifyNone(t)
+
+	logrus.SetLevel(logrus.TraceLevel)
 	thunks.SetUpTest()
 	t.Run("connect agent authenticator", func(t *testing.T) {
 		// Create the basic Client and Server
@@ -328,15 +353,24 @@ func TestHopClientAgentAuth(t *testing.T) {
 		a := NewAgent(t)
 		a.AddClientKey(t, c)
 		a.Run(t)
+		defer a.Stop()
 
 		c.AddAgentConnToClient(t, a)
 
 		c.StartClient(t)
+
+		var err error
+		err = s.Server.Close()
+		assert.NilError(t, err)
+		err = c.Client.Close()
+		assert.NilError(t, err)
 	})
 }
 
 func TestTwoClients(t *testing.T) {
-	logrus.SetLevel(logrus.InfoLevel)
+	defer goleak.VerifyNone(t)
+
+	logrus.SetLevel(logrus.TraceLevel)
 	thunks.SetUpTest()
 	t.Run("connect two clients", func(t *testing.T) {
 		// Create the basic Client and Server
@@ -364,11 +398,21 @@ func TestTwoClients(t *testing.T) {
 
 		cTwo.StartClient(t)
 		wg.Wait()
+
+		var err error
+		err = s.Server.Close()
+		assert.NilError(t, err)
+		err = c.Client.Close()
+		assert.NilError(t, err)
+		err = cTwo.Client.Close()
+		assert.NilError(t, err)
 	})
 }
 
 func TestStartCmd(t *testing.T) {
-	logrus.SetLevel(logrus.DebugLevel)
+	defer goleak.VerifyNone(t)
+
+	logrus.SetLevel(logrus.TraceLevel)
 	thunks.SetUpTest()
 	t.Run("connect agent authenticator", func(t *testing.T) {
 		// Create the basic Client and Server
@@ -388,6 +432,7 @@ func TestStartCmd(t *testing.T) {
 		a := NewAgent(t)
 		a.AddClientKey(t, c)
 		a.Run(t)
+		defer a.Stop()
 
 		c.AddAgentConnToClient(t, a)
 
@@ -399,5 +444,11 @@ func TestStartCmd(t *testing.T) {
 		// TODO(baumanl): this currently doesn't work because code execution
 		// is tied to standard case of having an attached terminal
 		//assert.NilError(t, err)
+
+		var err error
+		err = s.Server.Close()
+		assert.NilError(t, err)
+		err = c.Client.Close()
+		assert.NilError(t, err)
 	})
 }

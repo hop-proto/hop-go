@@ -550,16 +550,12 @@ func (m *Muxer) receiver() {
 	}
 }
 
-// WaitForStop blocks until the muxer is stopped and returns any error returned by start
-func (m *Muxer) WaitForStop() error {
-	<-m.stopped
-	m.m.Lock()
-	defer m.m.Unlock()
-	return m.startErr
-}
-
-// Stop ensures all the muxer tubes are closed
-func (m *Muxer) Stop() error {
+// Stop ensures all the muxer tubes are closed. Calls to Stop are idempotent.
+// If a call to Stop is make while another call to stop is ongoing, the second
+// call with block until the first call has finish. Stop returns two errors:
+// the first error is any error returned by the muxer sender and the second
+// any error returned by the muxer receiver.
+func (m *Muxer) Stop() (sendErr error, recvErr error) {
 	m.m.Lock()
 	m.log.WithField("numTubes", len(m.reliableTubes)+len(m.unreliableTubes)).Info("Stopping muxer")
 

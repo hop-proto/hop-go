@@ -38,6 +38,7 @@ type HopClient struct { // nolint:maligned
 
 	TransportConn *transport.Client
 
+	// TODO(baumanl): move authgrant state to struct? sort of waiting till i finalize stuff
 	// +checklocks:checkIntentLock
 	checkIntent     authgrants.CheckIntentCallback // should only be set if principal
 	checkIntentLock sync.Mutex
@@ -231,6 +232,7 @@ func (c *HopClient) Start() error {
 	// handle incoming tubes
 	go c.HandleTubes()
 	c.Wait() // client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
+	c.Close()
 	return nil
 }
 
@@ -304,7 +306,7 @@ func (c *HopClient) startExecTube() error {
 	// Hop Session is tied to the life of this code execution tube if such a tube exists
 	// TODO(baumanl): provide support for Cmd in ClientConfig
 	logrus.Infof("Performing action: %v", c.hostconfig.Cmd)
-	ch, err := c.TubeMuxer.CreateReliableTube(common.ExecTube)
+	codexTube, err := c.TubeMuxer.CreateReliableTube(common.ExecTube)
 	if err != nil {
 		logrus.Error(err)
 		return err
@@ -331,7 +333,7 @@ func (c *HopClient) HandleTubes() {
 
 	proxyQueue := newPTProxyTubeQueue()
 
-	for t := range c.TubeMuxer.TubeQueue {
+	for t, err := c.TubeMuxer.Accept(); err != nil; {
 		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v. Reliable? %t", t.Type(), t.IsReliable())
 
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
@@ -351,7 +353,6 @@ func (c *HopClient) HandleTubes() {
 			if e != nil {
 				logrus.Errorf("Error closing tube: %v", e)
 			}
-			continue
 		}
 	}
 }

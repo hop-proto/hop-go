@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"go.uber.org/goleak"
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
 
@@ -114,6 +115,8 @@ func checkEOFReads(t *testing.T, client *Client, handle *Handle) {
 
 // Tests that closing the client connection causes server reads to error
 func clientClose(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	client, handle, _, stop, _, err := makeConn(t)
 	assert.NilError(t, err)
 
@@ -128,6 +131,8 @@ func clientClose(t *testing.T) {
 
 // Tests that closing the handle causes client reads to error
 func handleClose(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	client, handle, _, stop, _, err := makeConn(t)
 	assert.NilError(t, err)
 
@@ -152,6 +157,8 @@ func handleClose(t *testing.T) {
 }
 
 func bothClose(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	client, handle, _, stop, _, err := makeConn(t)
 	assert.NilError(t, err)
 
@@ -181,6 +188,8 @@ func bothClose(t *testing.T) {
 }
 
 func allClose(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	client, handle, server, stop, _, err := makeConn(t)
 	assert.NilError(t, err)
 
@@ -217,6 +226,8 @@ func allClose(t *testing.T) {
 
 // Tests that closing the server causes the handle and clients to close
 func serverClose(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	client, handle, server, stop, _, err := makeConn(t)
 	assert.NilError(t, err)
 
@@ -258,6 +269,8 @@ func serverClose(t *testing.T) {
 
 // Wrapper around the client nettests
 func TestTransportConn(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
 	makePipe1 := func(t *testing.T) (net.Conn, net.Conn, func(), bool, error) {
 		c1, c2, _, stop, rel, err := makeConn(t)
 		return c1, c2, stop, rel, err

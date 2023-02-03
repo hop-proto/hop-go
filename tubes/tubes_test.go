@@ -109,6 +109,10 @@ func makeConn(odds float64, rel bool, t *testing.T) (t1, t2 net.Conn, stop func(
 		return
 	}
 
+	if rel {
+		_, ok := t1.(*Reliable)
+		assert.Assert(t, ok)
+
 		_, ok = t2.(*Reliable)
 		assert.Assert(t, ok)
 	} else {
@@ -139,22 +143,7 @@ func makeConn(odds float64, rel bool, t *testing.T) (t1, t2 net.Conn, stop func(
 			assert.DeepEqual(t, muxer2.state.Load(), muxerStopped)
 		}()
 
-		go func() {
-			defer wg.Done()
-			t1.Close()
-			t1.(Tube).WaitForClose()
-			err := muxer1.Stop()
-			assert.NilError(t, err)
-			assert.DeepEqual(t, muxer1.state.Load(), muxerStopped)
-		}()
-		go func() {
-			defer wg.Done()
-			t2.Close()
-			t2.(Tube).WaitForClose()
-			err := muxer2.Stop()
-			assert.NilError(t, err)
-			assert.DeepEqual(t, muxer2.state.Load(), muxerStopped)
-		}()
+		wg.Wait()
 
 		c1.Close()
 		c2.Close()
@@ -277,6 +266,15 @@ func unreliable(t *testing.T) {
 			CloseTest(1.0, false, false, t)
 		})
 	})
+
+	f := func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
+		return makeConn(1.0, false, t)
+	}
+	mp := nettest.MakePipe(f)
+	t.Run("Nettest", func(t *testing.T) {
+		nettest.TestConn(t, mp)
+	})
+}
 
 func TestTubes(t *testing.T) {
 	defer goleak.VerifyNone(t)
