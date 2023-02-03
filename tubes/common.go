@@ -16,6 +16,9 @@ var ErrBadTubeState = errors.New("tube in bad state")
 
 var errFrameOutOfBounds = errors.New("received data frame out of receive window bounds")
 
+// This error is used to let the muxer retry Accept calls if it get a tube that cannot be given to the caller
+var errGotKeepAlive = errors.New("accepted keep alive tube. this tube is not passed to the caller")
+
 // TODO(hosono) create a config struct to pass to the muxer to set these things
 
 // MaxFrameDataLength is the maximum bytes per frame in a Reliable or Unreliable tube

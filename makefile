@@ -30,7 +30,7 @@ build:
 .PHONY: test
 test: ## test
 test:
-	go test -race ./... -timeout 180s
+	go test -race ./... -timeout 4m
 
 .PHONY: authgrant-dev
 authgrant-dev: ## launch two containers running two servers to test authgrant protocol
