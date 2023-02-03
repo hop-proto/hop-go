@@ -1,9 +1,7 @@
 package hopserver
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"net"
 	"os"
@@ -212,10 +210,7 @@ func (s *HopServer) Serve() {
 
 	for {
 		serverConn, err := s.server.AcceptTimeout(30 * time.Minute)
-		// io.EOF indicates the server was closed, which is ok
-		if errors.Is(err, io.EOF) {
-			return
-		} else if err != nil {
+		if err != nil {
 			logrus.Fatalf("S: SERVER TIMEOUT: %v", err)
 		}
 		logrus.Infof("S: ACCEPTED NEW CONNECTION")
@@ -229,6 +224,8 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 		transportConn: serverConn,
 		// TODO(hosono) add logging context to server
 		tubeMuxer:       tubes.NewMuxer(serverConn, s.config.DataTimeout, true, logrus.WithField("muxer", "server")),
+		tubeQueue:       make(chan tubes.Tube),
+		done:            make(chan int),
 		controlChannels: []net.Conn{},
 		server:          s,
 		pty:             make(chan *os.File, 1),
@@ -254,26 +251,6 @@ func (s *HopServer) ListenAddress() net.Addr {
 		return &net.UDPAddr{}
 	}
 	return s.server.Addr()
-}
-
-// Close stops the underlying connection and cleans up all resources
-// TODO(hosono) this is a very rough sketch of what this method needs to do
-func (s *HopServer) Close() error {
-	// TODO(hosono) sessions need to acquire s.sessionLock to remove themselves
-	// I think all this closing behavior needs to be redone
-	s.sessionLock.Lock()
-	defer s.sessionLock.Unlock()
-	wg := sync.WaitGroup{}
-	for sessID := range s.sessions {
-		wg.Add(1)
-		go func(sess *hopSession) {
-			sess.tubeMuxer.Stop()
-			wg.Done()
-		}(s.sessions[sessID])
-	}
-	wg.Wait()
-	s.dpProxy.stop()
-	return s.server.Close()
 }
 
 // authorizeKey returns nil if the publicKey is in the authorized_keys file for

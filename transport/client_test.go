@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"go.uber.org/goleak"
 	"gotest.tools/assert"
 
 	"hop.computer/hop/authkeys"
@@ -15,8 +14,6 @@ import (
 )
 
 func TestClientCertificates(t *testing.T) {
-	defer goleak.VerifyNone(t)
-
 	logrus.SetLevel(logrus.DebugLevel)
 	baseConfig, verify := newTestServerConfig(t)
 	baseConfig.MaxPendingConnections = 1
@@ -116,8 +113,6 @@ func TestClientCertificates(t *testing.T) {
 		err = client.Handshake()
 		assert.Check(t, err)
 		err = client.Close()
-		assert.Check(t, err)
-		err = server.Close()
 		assert.Check(t, err)
 	}
 

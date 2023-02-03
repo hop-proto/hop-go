@@ -673,10 +673,6 @@ func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 	select {
 	case handle := <-s.pendingConnections:
 		logrus.Debug("got a handle")
-		if handle == nil {
-			// Indicates that s.Close() has been called
-			return nil, io.EOF
-		}
 		h := s.fetchHandle(handle.ss.sessionID)
 		if h != handle {
 			// Should never happen

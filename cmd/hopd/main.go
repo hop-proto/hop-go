@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-
+	logrus.SetLevel(logrus.InfoLevel)
 	f, err := flags.ParseServerArgs(os.Args)
 	if err != nil {
 		logrus.Error(err)

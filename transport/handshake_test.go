@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"go.uber.org/goleak"
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
 
@@ -21,8 +20,6 @@ import (
 
 // +checklocksignore
 func TestClientServerCompatibilityHandshake(t *testing.T) {
-	defer goleak.VerifyNone(t)
-
 	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
@@ -53,15 +50,10 @@ func TestClientServerCompatibilityHandshake(t *testing.T) {
 	assert.Check(t, cmp.Equal(c.ss.serverToClientKey, h.ss.serverToClientKey))
 	assert.Check(t, c.ss.clientToServerKey != zero)
 	assert.Check(t, c.ss.serverToClientKey != zero)
-
-	assert.NilError(t, s.Close())
-	assert.NilError(t, c.Close())
 }
 
 // +checklocksignore
 func TestClientServerHSWithAgent(t *testing.T) {
-	defer goleak.VerifyNone(t)
-
 	logrus.SetLevel(logrus.DebugLevel)
 	// start server
 	pc, err := net.ListenPacket("udp", "localhost:0")
@@ -69,10 +61,6 @@ func TestClientServerHSWithAgent(t *testing.T) {
 	udpC := pc.(*net.UDPConn)
 	serverConfig, verifyConfig := newTestServerConfig(t)
 	s, err := NewServer(udpC, *serverConfig)
-	defer func() {
-		err := s.Close()
-		assert.NilError(t, err)
-	}()
 	assert.NilError(t, err)
 	go s.Serve()
 
@@ -91,11 +79,7 @@ func TestClientServerHSWithAgent(t *testing.T) {
 		logrus.Fatalf("unable to open tcp socket %s: %s", address, err)
 	}
 	logrus.Infof("listening on %s", sock.Addr().String())
-
-	httpServer := http.Server{}
-	httpServer.Handler = as
-	go httpServer.Serve(sock)
-	defer httpServer.Close()
+	go http.Serve(sock, as)
 
 	//aconn, err := net.Dial("tcp", sock.Addr().String())
 	assert.NilError(t, err)
@@ -133,10 +117,6 @@ func TestClientServerHSWithAgent(t *testing.T) {
 		Exchanger: bc,
 		Leaf:      leaf,
 	})
-	defer func() {
-		err := c.Close()
-		assert.NilError(t, err)
-	}()
 	assert.NilError(t, err)
 	err = c.Handshake()
 	assert.Check(t, err)

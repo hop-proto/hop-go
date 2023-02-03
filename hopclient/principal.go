@@ -101,14 +101,10 @@ func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable, pq *ptPro
 	setup := func(url core.URL, verifyCallback authgrants.AdditionalVerifyCallback) (net.Conn, error) {
 		psubclient, err = c.setupTargetClient(url, proxyTube, verifyCallback)
 		if err != nil {
-			logrus.Error("eror setting up target client")
 			return nil, err
 		}
-		logrus.Info("principal: setup successful for psubclient")
-		return psubclient.client.newAuthgrantTube()
+		return client.newAuthgrantTube()
 	}
-
-	logrus.Info("starting principal instance")
 
 	authgrants.StartPrincipalInstance(delTube, ci, setup)
 	delTube.Close()
@@ -131,10 +127,6 @@ func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable, ve
 	psubclient := &principalSubclient{
 		unrelProxyTube: dt,
 	}
-	psubclient := &principalSubclient{
-		relProxyTube:   proxyControl,
-		unrelProxyTube: targetConn,
-	}
 
 	// load client config from default path
 	cflags := &flags.ClientFlags{
@@ -150,7 +142,7 @@ func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable, ve
 
 	client, err := NewHopClient(hc)
 	if err != nil {
-		return psubclient, err
+		return nil, err
 	}
 	client.RawConfigFilePath = c.RawConfigFilePath
 	psubclient.client = client
@@ -169,12 +161,12 @@ func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable, ve
 
 	client.TransportConn, err = transport.DialNP(client.hostconfig.HostURL().Address(), dt, transportConfig)
 	if err != nil {
-		return psubclient, err
+		return client, err
 	}
 	// defer close?
 	err = client.TransportConn.Handshake()
 	if err != nil {
-		return psubclient, err
+		return client, err
 	}
 
 	client.TubeMuxer = tubes.NewMuxer(client.TransportConn, client.hostconfig.DataTimeout, false, logrus.WithField("muxer", "principal subclient"))

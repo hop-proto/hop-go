@@ -9,7 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"golang.org/x/exp/maps"
@@ -88,23 +87,12 @@ func (p *dpproxy) serve() {
 	logrus.Info("DP Proxy: listening on unix socket: ", p.listener.Addr().String())
 	for {
 		c, err := p.listener.Accept()
-		// If the listener was closed, it's ok to return
-		if errors.Is(err, net.ErrClosed) {
-			return
-		}
 		if err != nil {
 			logrus.Error("DP Proxy: accept error:", err)
 			continue
 		}
 		go p.checkAndProxy(c)
 	}
-}
-
-// TODO(hosono) Make this correct
-func (p *dpproxy) stop() error {
-	l := p.listener.(*net.UnixListener)
-	l.Close()
-	return nil
 }
 
 // checks that the connecting process is a hop session descendent and then proxies

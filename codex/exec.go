@@ -74,7 +74,7 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 	var size *pty.Winsize
 	if usePty {
 		termEnv = os.Getenv("TERM")
-		size, _ = pty.GetsizeFull(os.Stdin) // ignoring the error is okay here because then size is set to nil
+		size, _ = pty.GetsizeFull(os.Stdin) // ignoring the error is okay here becaus then size is set to nil
 		oldState, e = term.MakeRaw(int(os.Stdin.Fd()))
 		if e != nil {
 			logrus.Infof("C: error with terminal state: %v", e)
@@ -100,10 +100,8 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 	}
 
 	if usePty {
-		logrus.WithField("winTubeID", winTube.GetID()).Debug("Starting winTube")
 		// Send window size updates to window channel
 		go func() {
-			defer winTube.Close()
 			ch := make(chan os.Signal, 1)
 			signal.Notify(ch, syscall.SIGWINCH)
 			b := make([]byte, 8)
@@ -240,7 +238,6 @@ func serializeSize(b []byte, size *pty.Winsize) {
 
 // HandleSize deals with resizing the pty according to messages from a WinSize tube
 func HandleSize(tube *tubes.Reliable, ptyFile *os.File) {
-	defer tube.Close()
 	for {
 		if size, err := readSize(tube); err == nil {
 			pty.Setsize(ptyFile, size)

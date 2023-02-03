@@ -321,9 +321,7 @@ func (c *Client) Close() error {
 
 	logrus.Debug("client: closing")
 
-	if c.state == established {
-		c.writeControl(ControlMessageClose)
-	}
+	c.writeControl(ControlMessageClose)
 
 	c.recv.Close()
 	err := c.underlyingConn.Close()

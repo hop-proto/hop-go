@@ -362,6 +362,10 @@ func (m *Muxer) start() {
 	go m.sender()
 	go m.receiver()
 
+	// lock needed to call makeUnreliableTubeWithID
+	m.m.Lock()
+	defer m.m.Unlock()
+
 	// Create the server opens the keep alive tube, which will always have ID 0
 	if m.idParity == 0 {
 		// Tube ID 0 is reserved for keep alives
