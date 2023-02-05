@@ -66,7 +66,7 @@ func (t *targetInstance) handleIntentCommunication() error {
 	logrus.Info("target: finished checking intent")
 	err = t.addAuthGrant(&i)
 	if err != nil {
-		logrus.Error("target: error adding authgrant")
+		logrus.Errorf("target: error adding authgrant: %s", err)
 		return WriteIntentDenied(t.principalConn, err.Error())
 	}
 	return WriteIntentConfirmation(t.principalConn)

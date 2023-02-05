@@ -3,13 +3,13 @@ package hopclient
 import (
 	"fmt"
 	"net"
-	"strconv"
 	"sync"
 
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
 	"hop.computer/hop/core"
+	"hop.computer/hop/flags"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
 
@@ -115,9 +115,13 @@ func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable, pq *ptPro
 
 	if psubclient != nil {
 		logrus.Info("principal: closing subclient with target.")
-		psubclient.client.Close()
+		if psubclient.client != nil {
+			psubclient.client.Close()
+		}
 		// stop proxying
-		psubclient.unrelProxyTube.Close()
+		if psubclient.unrelProxyTube != nil {
+			psubclient.unrelProxyTube.Close()
+		}
 	} else {
 		logrus.Info("principal: psubclient is nil")
 	}
@@ -128,47 +132,27 @@ func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable, ve
 		unrelProxyTube: dt,
 	}
 
-	// TODO(baumanl): think through best way to get the config for this
-	// is it too slow to load entire config file again? Better to have
-	// that cached?
-
-	hc := c.hostconfig
-	hc.Hostname = targURL.Host
-	hc.Port, _ = strconv.Atoi(targURL.Port)
-	hc.User = targURL.User
-	hc.Headless = true
-	hc.UsePty = false
-	hc.IsPrincipal = true
-
 	// load client config from default path
-	// cflags := &flags.ClientFlags{
-	// 	ConfigPath: "", // TODO(baumanl): keep track of the path used when the principal itself started?
-	// 	Address:    &targURL,
-	// 	Headless:   true,
-	// 	UsePty:     false,
-	// }
-	// hc, err := flags.LoadClientConfigFromFlags(cflags)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	cflags := &flags.ClientFlags{
+		ConfigPath: c.RawConfigFilePath,
+		Address:    &targURL,
+		Headless:   true,
+		UsePty:     false,
+	}
+	hc, err := flags.LoadClientConfigFromFlags(cflags)
+	if err != nil {
+		return nil, err
+	}
 
 	client, err := NewHopClient(hc)
 	if err != nil {
 		return psubclient, err
 	}
 	psubclient.client = client
-	// TODO(baumanl): necessary to do all of authenticator setup again?
-	// or could c.authenticator (principal's authenticator) sometimes be used
-	// instead?
-	// err = client.authenticatorSetup()
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// TODO(baumanl): this is temporary. Not generalizable if the principal
-	// needs a different authentication method to connect to target than it
-	// needed to connect to delegate proxy server
-	client.authenticator = c.authenticator
+	err = client.authenticatorSetup()
+	if err != nil {
+		return nil, err
+	}
 
 	transportConfig := transport.ClientConfig{
 		Exchanger: client.authenticator,

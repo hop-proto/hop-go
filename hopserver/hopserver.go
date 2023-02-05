@@ -86,7 +86,8 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, 
 		fsystem: os.DirFS("/"),
 	}
 
-	if config.EnableAuthorizedKeys != nil && *config.EnableAuthorizedKeys {
+	if (config.EnableAuthorizedKeys != nil && *config.EnableAuthorizedKeys) ||
+		(config.EnableAuthgrants != nil && *config.EnableAuthgrants) {
 		server.keyStore = ks
 	}
 	return server, nil
@@ -148,7 +149,9 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		// Authgrants disabled by default (must be explicitly enabled)
 		if sc.EnableAuthgrants != nil && *sc.EnableAuthgrants {
 			// Create an empty key set for authgrant keys to be added to
+			logrus.Debug("created authkeys sync set")
 			tconf.ClientVerify.AuthKeys = authkeys.NewSyncAuthKeySet()
+			tconf.ClientVerify.AuthKeysAllowed = true
 		}
 
 		// Authorized keys disabled by default (must be explicitly enabled)
@@ -156,6 +159,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 			logrus.Debug("hopserver: authorized keys are enabled")
 			if tconf.ClientVerify.AuthKeys == nil {
 				// Create key set if one doesn't already exist from Authgrants being enabled
+				logrus.Debug("created authkeys sync set")
 				tconf.ClientVerify.AuthKeys = authkeys.NewSyncAuthKeySet()
 			}
 			// Add all authorized keys from files in specified users' home directories
@@ -282,12 +286,14 @@ func (s *HopServer) authorizeKey(user string, publicKey keys.PublicKey) error {
 	path := core.AuthorizedKeysPath(d)
 	f, err := s.fsystem.Open(path[1:])
 	if err != nil {
+		logrus.Errorf("error opening authkeys file at path: %s", path)
 		return err
 	}
 	akeys, err := core.ParseAuthorizedKeys(f)
 	if err != nil {
 		return nil
 	}
+	logrus.Info("successfully parsed authorized keys file")
 	if akeys.Allowed(publicKey) {
 		return nil
 	}

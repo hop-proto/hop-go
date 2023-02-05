@@ -47,7 +47,8 @@ type HopClient struct { // nolint:maligned
 	TubeMuxer *tubes.Muxer
 	ExecTube  *codex.ExecTube
 
-	hostconfig *config.HostConfig
+	hostconfig        *config.HostConfig
+	RawConfigFilePath string
 }
 
 // NewHopClient creates a new client object
@@ -245,7 +246,11 @@ func (c *HopClient) Close() error {
 	if c.ExecTube != nil {
 		c.ExecTube.Restore()
 	}
-	err := c.TubeMuxer.Stop()
+	var err error
+	if c.TubeMuxer != nil {
+		err = c.TubeMuxer.Stop()
+	}
+
 	if c.delServerConn != nil {
 		c.delServerConn.Close() // informs del server to close proxy b/w principal + target
 	}

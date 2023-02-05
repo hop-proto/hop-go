@@ -1,8 +1,14 @@
 [Global]
-AutoSelfSign = true
-
+Key = "containers/principal_client/id_client.pem"
+Certificate = "containers/principal_client/id_client.cert"
+CAFiles = ["containers/CAFiles/intermediate.cert", "containers/CAFiles/root.cert"]
 
 [[Hosts]]
 Patterns = ["127.0.0.1"]
-Key = "containers/principal_client/id_client.pem"
 IsPrincipal = true
+ServerName = "delegate.com"
+
+[[Hosts]]
+Patterns = ["172.17.0.2"]
+IsPrincipal = true
+ServerName = "target.com"

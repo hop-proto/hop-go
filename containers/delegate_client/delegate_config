@@ -1,7 +1,9 @@
 [Global]
 AutoSelfSign = true
+IsPrincipal = false
+CAFiles = ["/root/.hop/intermediate.cert", "/root/.hop/root.cert"]
 
 
 [[Hosts]]
-Patterns = ["127.0.0.1"]
-IsPrincipal = false
+Patterns = ["172.17.0.2"]
+ServerName = "target.com"

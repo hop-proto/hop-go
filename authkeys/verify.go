@@ -17,10 +17,10 @@ type SyncAuthKeySet struct {
 
 // NewSyncAuthKeySet returns a new store
 func NewSyncAuthKeySet() *SyncAuthKeySet {
-	aks := new(SyncAuthKeySet)
-	aks.keySet = make(map[keys.PublicKey]bool)
-	aks.lock = sync.Mutex{}
-	return aks
+	return &SyncAuthKeySet{
+		keySet: make(map[keys.PublicKey]bool),
+		lock:   sync.Mutex{},
+	}
 }
 
 // AddKey adds a key to set of trusted keys

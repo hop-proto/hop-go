@@ -49,6 +49,8 @@ func main() {
 		return
 	}
 
+	client.RawConfigFilePath = f.ConfigPath
+
 	err = client.Dial()
 	if err != nil {
 		logrus.Error(err)

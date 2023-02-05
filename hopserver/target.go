@@ -35,6 +35,23 @@ func (s *HopServer) authorizeKeyAuthGrant(user string, publicKey keys.PublicKey)
 }
 
 func (sess *hopSession) addAuthGrant(intent *authgrants.Intent) error {
+	if intent == nil {
+		logrus.Error("intent is nil")
+		return fmt.Errorf("intent is nil")
+	}
+
+	if sess.server == nil {
+		return fmt.Errorf("server is nil")
+	}
+
+	if sess.server.agMap == nil {
+		return fmt.Errorf("agmap is nil")
+	}
+
+	if sess.server.keyStore == nil {
+		return fmt.Errorf("keystore is nil")
+	}
+
 	// add authorization grant to server mappings
 	sess.server.agMap.AddAuthGrant(intent, authgrants.PrincipalID(sess.ID))
 
