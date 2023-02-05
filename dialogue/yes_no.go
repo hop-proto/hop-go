@@ -44,13 +44,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// These are the various styles that will be used to render the UI
-var (
-	titleStyle        = lipgloss.NewStyle().MarginLeft(2).MarginTop(1)
-	itemStyle         = lipgloss.NewStyle().PaddingLeft(4)
-	selectedItemStyle = itemStyle.Copy().Foreground(lipgloss.Color("#ff9900"))
-)
-
 // View renders the UI with the data contained in model
 func (m model) View() string {
 	title := titleStyle.Render(m.question)
