@@ -40,7 +40,7 @@ type HopClient struct { // nolint:maligned
 
 	// TODO(baumanl): move authgrant state to struct? sort of waiting till i finalize stuff
 	// +checklocks:checkIntentLock
-	checkIntent     func(authgrants.Intent) error // should only be set if principal
+	checkIntent     authgrants.CheckIntentFunc // should only be set if principal
 	checkIntentLock sync.Mutex
 	delServerConn   net.Conn // conn to UDS with delegate server
 
@@ -124,8 +124,11 @@ func (c *HopClient) authenticatorSetupLocked() error {
 
 	hc := c.hostconfig
 
+	verifyConfig := constructVerifyConfig(hc)
+	c.loadCAFiles(&verifyConfig.Store)
+
 	if !hc.IsPrincipal {
-		return c.getAuthorization()
+		return c.getAuthorization(verifyConfig)
 	}
 
 	// Host block overrides global block. Set overrides Unset. Certificate
@@ -146,9 +149,6 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		BaseURL:    agentURL,
 		HTTPClient: http.DefaultClient,
 	}
-
-	verifyConfig := constructVerifyConfig(hc)
-	c.loadCAFiles(&verifyConfig.Store)
 
 	// Connect to the agent
 	aconn, _ := net.Dial("tcp", agentURL)

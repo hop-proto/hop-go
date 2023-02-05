@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"hop.computer/hop/authgrants"
+	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
 	"hop.computer/hop/core"
 	"hop.computer/hop/transport"
@@ -30,7 +31,7 @@ type principalSubclient struct {
 //   - communicate Intent to Target server [implemented]
 
 // SetCheckIntentCallback can be used to set a custom approver for intent requests
-func (c *HopClient) SetCheckIntentCallback(f func(authgrants.Intent) error) error {
+func (c *HopClient) SetCheckIntentCallback(f func(authgrants.Intent, *certs.Certificate) error) error {
 	if c.hostconfig == nil {
 		return fmt.Errorf("can't set check intent callback without config loaded")
 	}
@@ -97,8 +98,8 @@ func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable, pq *ptPro
 	delete(pq.tubes, tubeID)
 	pq.lock.Unlock()
 
-	setup := func(url core.URL) (net.Conn, error) {
-		psubclient, err = c.setupTargetClient(url, proxyTube)
+	setup := func(url core.URL, verifyCallback authgrants.AdditionalVerifyCallback) (net.Conn, error) {
+		psubclient, err = c.setupTargetClient(url, proxyTube, verifyCallback)
 		if err != nil {
 			logrus.Error("eror setting up target client")
 			return nil, err
@@ -122,7 +123,7 @@ func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable, pq *ptPro
 	}
 }
 
-func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable) (*principalSubclient, error) {
+func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable, verifyCallback authgrants.AdditionalVerifyCallback) (*principalSubclient, error) {
 	psubclient := &principalSubclient{
 		unrelProxyTube: dt,
 	}
@@ -174,6 +175,8 @@ func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable) (*
 		Verify:    client.authenticator.GetVerifyConfig(),
 		Leaf:      client.authenticator.GetLeaf(),
 	}
+
+	transportConfig.Verify.AddVerifyCallback = transport.AdditionalVerifyCallback(verifyCallback)
 
 	client.TransportConn, err = transport.DialNP(client.hostconfig.HostURL().Address(), dt, transportConfig)
 	if err != nil {

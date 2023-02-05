@@ -9,6 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 
+	"hop.computer/hop/certs"
 	"hop.computer/hop/core"
 )
 
@@ -20,12 +21,12 @@ func TestFlow(t *testing.T) {
 	ir2 := getTestCmdIntentRequest(t, "cmd2")
 	ir3 := getTestCmdIntentRequest(t, "cmd3")
 
-	ciFuncPrincipal := func(Intent) error {
+	ciFuncPrincipal := func(i Intent, c *certs.Certificate) error {
 		logrus.Info("principal: checking intent")
 		return nil
 	}
 
-	ciFuncTarget := func(i Intent) error {
+	ciFuncTarget := func(i Intent, c *certs.Certificate) error {
 		logrus.Info("target: checking intent")
 		if i.AssociatedData.CommandGrantData.Cmd == "cmd2" {
 			return fmt.Errorf("no auth grants for cmd2")
@@ -33,7 +34,7 @@ func TestFlow(t *testing.T) {
 		return nil
 	}
 
-	setupTarg := func(u core.URL) (net.Conn, error) {
+	setupTarg := func(u core.URL, ciFuncTarget AdditionalVerifyCallback) (net.Conn, error) {
 		logrus.Infof("simulating connection to %s", u.String())
 		return tc, nil
 	}
@@ -51,7 +52,7 @@ func TestFlow(t *testing.T) {
 	wg.Add(2)
 
 	go func() {
-		StartTargetInstance(tcT, ciFuncTarget, addag)
+		StartTargetInstance(tcT, nil, ciFuncTarget, addag)
 		wg.Done()
 	}()
 

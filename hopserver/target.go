@@ -46,7 +46,7 @@ func (sess *hopSession) addAuthGrant(intent *authgrants.Intent) error {
 
 // checkIntent looks at details of Intent Request and ensures they follow its policies
 // func (sess *hopSession) checkIntent(tube *tubes.Reliable) (authgrants.MessageData, bool) {
-func (sess *hopSession) checkIntent(intent authgrants.Intent) error {
+func (sess *hopSession) checkIntent(intent authgrants.Intent, principalCert *certs.Certificate) error {
 	// check that requested time is valid
 	if intent.ExpTime.Before(time.Now()) {
 		return fmt.Errorf("invalid expiration time")

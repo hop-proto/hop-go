@@ -23,21 +23,19 @@ import (
 //   - connect to Delegate proxy server unix socket [TODO]
 //   - create and send Intent Requests [TODO]
 
-func makeAuthenticatorWithGeneratedKeypair(targetURL core.URL) core.Authenticator {
+func makeAuthenticatorWithGeneratedKeypair(targetURL core.URL, vc transport.VerifyConfig) core.Authenticator {
 	keypair := keys.GenerateNewX25519KeyPair()
 	leaf := loadLeaf("", true, &keypair.Public, targetURL)
 	return core.InMemoryAuthenticator{
 		X25519KeyPair: keypair,
-		VerifyConfig: transport.VerifyConfig{
-			InsecureSkipVerify: true, // TODO(dadrian): Host-key verification
-		},
-		Leaf: leaf,
+		VerifyConfig:  vc,
+		Leaf:          leaf,
 	}
 }
 
-func (c *HopClient) getAuthorization() error {
+func (c *HopClient) getAuthorization(vc transport.VerifyConfig) error {
 	// make authenticator
-	c.authenticator = makeAuthenticatorWithGeneratedKeypair(c.hostconfig.HostURL())
+	c.authenticator = makeAuthenticatorWithGeneratedKeypair(c.hostconfig.HostURL(), vc)
 	// make intent requests
 	irs := []authgrants.Intent{}
 	irTemplate := authgrants.Intent{

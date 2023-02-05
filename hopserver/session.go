@@ -150,7 +150,8 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 		authgrants.WriteIntentDenied(tube, authgrants.TargetDenial)
 	} else {
 		logrus.Info("target: starting target instance")
-		authgrants.StartTargetInstance(tube, sess.checkIntent, sess.addAuthGrant)
+		cert := sess.transportConn.FetchClientLeaf()
+		authgrants.StartTargetInstance(tube, &cert, sess.checkIntent, sess.addAuthGrant)
 	}
 }
 
