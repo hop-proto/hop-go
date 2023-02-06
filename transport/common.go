@@ -41,6 +41,7 @@ const MaxPlaintextSize = MaxTotalPacketSize - HeaderLen - SessionIDLen - Counter
 // Derived protocol size constants
 const (
 	HelloLen          = HeaderLen + DHLen + MacLen
+	HiddenHelloLen    = 0 // TODO(hosono) calculate this
 	AssociatedDataLen = HeaderLen + SessionIDLen + CounterLen
 )
 
@@ -94,6 +95,8 @@ const (
 	MessageTypeClientAck   MessageType = 0x03
 	MessageTypeServerAuth  MessageType = 0x04
 	MessageTypeClientAuth  MessageType = 0x05
+	MessageTypeClientRequestHidden MessageType = 0x08
+	MessageTypeServerResponseHidden MessageType = 0x09
 	MessageTypeTransport   MessageType = 0x10
 	MessageTypeControl     MessageType = 0x80
 )
