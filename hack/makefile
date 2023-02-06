@@ -13,6 +13,7 @@ authgrant-dev:
 authgrant-chain-dev:
 	go build -o ../containers/delegate_proxy_server/hop ../cmd/hop
 	go build -o ../containers/target_server/hop ../cmd/hop
+	./authgrant_gen.sh
 	go run . target
 	go run . delegate
 	go run . third
