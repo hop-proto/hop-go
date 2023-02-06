@@ -1,16 +1,21 @@
 package transport
 
 import (
+	"encoding/binary"
 	"errors"
+	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 // TODO(hosono) In the paper, the hidden mode client hello is called "Client Request"
 // which seems like an ambiguous name. I've changed it to ClientRequestHidden
 func (hs *HandshakeState) writeClientRequestHidden(b []byte) (int, error) {
+	logrus.Debug("Sending client request (hidden mode)")
 	encCertLen := EncryptedCertificatesLength(hs.leaf, hs.intermediate)
 
 	// TODO(hosono) calculate length correctly
-	length := HeaderLen + encCertLen
+	length := HeaderLen + DHLen + encCertLen + MacLen + TimestampLen + MacLen
 	if len(b) > length {
 		return 0, ErrBufOverflow
 	}
@@ -18,8 +23,7 @@ func (hs *HandshakeState) writeClientRequestHidden(b []byte) (int, error) {
 	// Header
 	b[0] = byte(MessageTypeClientRequestHidden)
 	b[1] = Version
-	b[2] = byte(encCertLen >> 8)
-	b[3] = byte(encCertLen)
+	binary.BigEndian.PutUint16(b[2:], uint16(encCertLen))
 	hs.duplex.Absorb(b[:HeaderLen])
 	b = b[HeaderLen:]
 
@@ -50,5 +54,16 @@ func (hs *HandshakeState) writeClientRequestHidden(b []byte) (int, error) {
 	hs.duplex.Squeeze(b[:MacLen])
 	b = b[MacLen:]
 
-	timestamp := hs.duplex.Encrypt(TAI64())
+	// Timestamp
+	now := time.Now().Unix()
+	timeBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(timeBytes, uint64(now))
+	hs.duplex.Encrypt(b, timeBytes)	
+	b = b[TimestampLen:]
+
+	// MAC Tag
+	hs.duplex.Squeeze(b[:MacLen])
+	b = b[MacLen:]
+
+	return length, nil
 }
