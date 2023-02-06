@@ -53,6 +53,7 @@ type HopClient struct { // nolint:maligned
 
 // NewHopClient creates a new client object
 func NewHopClient(config *config.HostConfig) (*HopClient, error) {
+	logrus.Debugf("new hop client IsPrincipal? %v, IsDelegate? %v", config.IsPrincipal, config.IsDelegate)
 	client := &HopClient{
 		hostconfig:      config,
 		wg:              sync.WaitGroup{},
@@ -128,7 +129,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 	verifyConfig := constructVerifyConfig(hc)
 	c.loadCAFiles(&verifyConfig.Store)
 
-	if !hc.IsPrincipal {
+	if hc.IsDelegate {
 		return c.getAuthorization(verifyConfig)
 	}
 

@@ -1,9 +1,12 @@
 [Global]
-AutoSelfSign = true
-IsPrincipal = false
+IsDelegate = true
 CAFiles = ["/root/.hop/intermediate.cert", "/root/.hop/root.cert"]
 
 
 [[Hosts]]
 Patterns = ["172.17.0.2"]
 ServerName = "target.com"
+
+[[Hosts]]
+Patterns = ["172.17.0.4"]
+ServerName = "third.com"

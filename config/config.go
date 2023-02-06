@@ -54,26 +54,24 @@ type ServerConfig struct {
 // default value can be distinguished from a set zero-value; users should
 // convert to a `HostConfig` (via .Unwrap) before reading the values
 type HostConfigOptional struct {
-	AgentURL     *string
-	AutoSelfSign *bool
-	CAFiles      []string
-	ServerName   *string
-	ServerIPv4   *string
-	ServerIPv6   *string
-	Certificate  *string
-	Cmd          *string // what command to run on connect
-	DisableAgent *bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
-	Headless     *bool   // run without command
-	Hostname     *string
-	Intermediate *string
-	Key          *string
-	Patterns     []string
-	Port         int
-	User         *string
-	IsPrincipal  *bool
-	// something for remote port forward
-	// something for local port forward
-
+	AgentURL         *string
+	AutoSelfSign     *bool
+	CAFiles          []string
+	ServerName       *string
+	ServerIPv4       *string
+	ServerIPv6       *string
+	Certificate      *string
+	Cmd              *string // what command to run on connect
+	DisableAgent     *bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
+	Headless         *bool   // run without command
+	Hostname         *string
+	Intermediate     *string
+	Key              *string
+	Patterns         []string
+	Port             int
+	User             *string
+	IsDelegate       *bool // If set then client will initiate authgrant protocol
+	IsPrincipal      *bool // If set then client will respond to authgrant requests
 	UsePty           *bool
 	HandshakeTimeout int
 	DataTimeout      int
@@ -81,26 +79,23 @@ type HostConfigOptional struct {
 
 // HostConfig contains a definition of a host pattern in a client configuration
 type HostConfig struct {
-	AgentURL     string
-	AutoSelfSign bool
-	CAFiles      []string
-	ServerName   string // expected name on server cert
-	ServerIPv4   string
-	ServerIPv6   string
-	Certificate  string
-	Cmd          string // what command to run on connect
-	DisableAgent bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
-	Headless     bool   // run without command
-	Hostname     string
-	Intermediate string
-	Key          string
-	Port         int
-	User         string
-	// something for principal vs. delegate
-	IsPrincipal bool
-	// something for remote port forward
-	// something for local port forward
-
+	AgentURL         string
+	AutoSelfSign     bool
+	CAFiles          []string
+	ServerName       string // expected name on server cert
+	ServerIPv4       string
+	ServerIPv6       string
+	Certificate      string
+	Cmd              string // what command to run on connect
+	DisableAgent     bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
+	Headless         bool   // run without command
+	Hostname         string
+	Intermediate     string
+	Key              string
+	Port             int
+	User             string
+	IsDelegate       bool
+	IsPrincipal      bool
 	UsePty           bool
 	HandshakeTimeout time.Duration
 	DataTimeout      time.Duration
@@ -166,6 +161,9 @@ func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
 	if other.User != nil {
 		hc.User = other.User
 	}
+	if other.IsDelegate != nil {
+		hc.IsDelegate = other.IsDelegate
+	}
 	if other.IsPrincipal != nil {
 		hc.IsPrincipal = other.IsPrincipal
 	}
@@ -223,6 +221,9 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	}
 	if hc.User != nil {
 		newHC.User = *hc.User
+	}
+	if hc.IsDelegate != nil {
+		newHC.IsDelegate = *hc.IsDelegate
 	}
 	if hc.IsPrincipal != nil {
 		newHC.IsPrincipal = *hc.IsPrincipal

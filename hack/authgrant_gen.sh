@@ -2,23 +2,23 @@
 set -e
 set -o pipefail
 
-HOME=${PWD}/../
+HOME=${PWD}/..
 
 CA_CERT_DNS_NAME=${CA_CERT_DNS_NAME:='super_ca.com'}
-CAFILES_OUTPUT_DIR=${HOME}${CAFILES_OUTPUT_DIR:='./containers/CAFiles'}
+CAFILES_OUTPUT_DIR=${HOME}/${CAFILES_OUTPUT_DIR:='./containers/CAFiles'}
 
 # servers
 TARGET_CERT_DNS_NAME=${TARGET_CERT_DNS_NAME:='target.com'}
 DELEGATE_CERT_DNS_NAME=${DELEGATE_CERT_DNS_NAME:='delegate.com'}
 THIRD_CERT_DNS_NAME=${THIRD_CERT_DNS_NAME:='third.com'}
 
-TARGET_CERT_OUTPUT_DIR=${HOME}${TARGET_CERT_OUTPUT_DIR:='./containers/target_server'}
-DELEGATE_CERT_OUTPUT_DIR=${HOME}${DELEGATE_CERT_OUTPUT_DIR:='./containers/delegate_proxy_server'}
-THIRD_CERT_OUTPUT_DIR=${HOME}${THIRD_CERT_OUTPUT_DIR:='./containers/third_server'}
+TARGET_CERT_OUTPUT_DIR=${HOME}/${TARGET_CERT_OUTPUT_DIR:='./containers/target_server'}
+DELEGATE_CERT_OUTPUT_DIR=${HOME}/${DELEGATE_CERT_OUTPUT_DIR:='./containers/delegate_proxy_server'}
+THIRD_CERT_OUTPUT_DIR=${HOME}/${THIRD_CERT_OUTPUT_DIR:='./containers/third_server'}
 
 # client
 PRINCIPAL_CERT_DNS_NAME=${PRINCIPAL_CERT_DNS_NAME:='principal'}
-PRINCIPAL_CERT_OUTPUT_DIR=${HOME}${PRINCIPAL_CERT_OUTPUT_DIR:='./containers/principal_client'}
+PRINCIPAL_CERT_OUTPUT_DIR=${HOME}/${PRINCIPAL_CERT_OUTPUT_DIR:='./containers/principal_client'}
 
 # Private Keys
 go run ${HOME}/cmd/hop-gen -signing | tee $CAFILES_OUTPUT_DIR/root-key.pem

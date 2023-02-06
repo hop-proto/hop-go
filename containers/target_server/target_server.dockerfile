@@ -10,10 +10,14 @@ COPY ./target_server/id_server.pub /etc/hopd/id_hop.pub
 COPY ./target_server/id_server.cert /etc/hopd/id_hop.cert
 COPY ./target_server/target_server_config /etc/hopd/config
 
+# using certs for authentication, but authorized keys for user authorization
+# still
 COPY ./principal_client/id_client.pub /root/.hop/authorized_keys
 
-# COPY ./target_server/hop /root/hop
-# COPY ./delegate_client/delegate_config /root/.hop/config
+COPY ./hop /root/hop
+COPY ./delegate_client/delegate_config /root/.hop/config
+COPY ./CAFiles/root.cert /root/.hop/root.cert
+COPY ./CAFiles/intermediate.cert /root/.hop/intermediate.cert
 
 WORKDIR /app
 CMD ./containers/hopd-wrapper.sh

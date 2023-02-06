@@ -36,7 +36,7 @@ func (c *HopClient) SetCheckIntentCallback(f func(authgrants.Intent, *certs.Cert
 		return fmt.Errorf("can't set check intent callback without config loaded")
 	}
 	if !c.hostconfig.IsPrincipal {
-		return fmt.Errorf("can't set check intent callback for delegate client")
+		return fmt.Errorf("can't set check intent callback for client with IsPrincipal not set")
 	}
 	c.checkIntentLock.Lock()
 	c.checkIntent = f
@@ -148,6 +148,7 @@ func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable, ve
 	if err != nil {
 		return psubclient, err
 	}
+	client.RawConfigFilePath = c.RawConfigFilePath
 	psubclient.client = client
 	err = client.authenticatorSetup()
 	if err != nil {
