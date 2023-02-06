@@ -40,18 +40,20 @@ type HopClient struct { // nolint:maligned
 
 	// TODO(baumanl): move authgrant state to struct? sort of waiting till i finalize stuff
 	// +checklocks:checkIntentLock
-	checkIntent     func(authgrants.Intent) error // should only be set if principal
+	checkIntent     authgrants.CheckIntentCallback // should only be set if principal
 	checkIntentLock sync.Mutex
 	delServerConn   net.Conn // conn to UDS with delegate server
 
 	TubeMuxer *tubes.Muxer
 	ExecTube  *codex.ExecTube
 
-	hostconfig *config.HostConfig
+	hostconfig        *config.HostConfig
+	RawConfigFilePath string
 }
 
 // NewHopClient creates a new client object
 func NewHopClient(config *config.HostConfig) (*HopClient, error) {
+	logrus.Debugf("new hop client IsPrincipal? %v, IsDelegate? %v", config.IsPrincipal, config.IsDelegate)
 	client := &HopClient{
 		hostconfig:      config,
 		wg:              sync.WaitGroup{},
@@ -124,8 +126,11 @@ func (c *HopClient) authenticatorSetupLocked() error {
 
 	hc := c.hostconfig
 
-	if !hc.IsPrincipal {
-		return c.getAuthorization()
+	verifyConfig := constructVerifyConfig(hc)
+	c.loadCAFiles(&verifyConfig.Store)
+
+	if hc.IsDelegate {
+		return c.getAuthorization(verifyConfig)
 	}
 
 	// Host block overrides global block. Set overrides Unset. Certificate
@@ -146,9 +151,6 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		BaseURL:    agentURL,
 		HTTPClient: http.DefaultClient,
 	}
-
-	verifyConfig := constructVerifyConfig(hc)
-	c.loadCAFiles(&verifyConfig.Store)
 
 	// Connect to the agent
 	aconn, _ := net.Dial("tcp", agentURL)
@@ -245,7 +247,11 @@ func (c *HopClient) Close() error {
 	if c.ExecTube != nil {
 		c.ExecTube.Restore()
 	}
-	err := c.TubeMuxer.Stop()
+	var err error
+	if c.TubeMuxer != nil {
+		err = c.TubeMuxer.Stop()
+	}
+
 	if c.delServerConn != nil {
 		c.delServerConn.Close() // informs del server to close proxy b/w principal + target
 	}

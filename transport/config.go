@@ -8,6 +8,10 @@ import (
 	"hop.computer/hop/keys"
 )
 
+// AdditionalVerifyCallback can be called mid handshake to do
+// other checks on server certificate
+type AdditionalVerifyCallback func(*certs.Certificate) error
+
 // VerifyConfig defines how to verify a remote certificate.
 type VerifyConfig struct {
 	// Store contains the trusted root certificates
@@ -24,6 +28,9 @@ type VerifyConfig struct {
 
 	// Name is used for SNI and compared to the certificate when non-empty.
 	Name certs.Name
+
+	// Can do additional verification in a call back.
+	AddVerifyCallback AdditionalVerifyCallback
 }
 
 // IdentityConfig associates a certificate chain with a Name.

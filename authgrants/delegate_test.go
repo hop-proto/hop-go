@@ -7,6 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 
+	"hop.computer/hop/certs"
 	"hop.computer/hop/core"
 )
 
@@ -16,12 +17,12 @@ func TestDelegate(t *testing.T) {
 
 	ir1 := getTestCmdIntentRequest(t, "test cmd")
 
-	ciFunc := func(Intent) error {
+	ciFunc := func(Intent, *certs.Certificate) error {
 		logrus.Info("principal: checking intent")
 		return nil
 	}
 
-	setupTarg := func(u core.URL) (net.Conn, error) {
+	setupTarg := func(u core.URL, vc AdditionalVerifyCallback) (net.Conn, error) {
 		logrus.Infof("target setup: simulating connection to %s", u.String())
 		return tc, nil
 	}
@@ -43,12 +44,12 @@ func TestDelegateMultipleIRs(t *testing.T) {
 	ir2 := getTestCmdIntentRequest(t, "cmd2")
 	ir3 := getTestCmdIntentRequest(t, "cmd3")
 
-	ciFunc := func(Intent) error {
+	ciFunc := func(Intent, *certs.Certificate) error {
 		logrus.Info("principal: checking intent")
 		return nil
 	}
 
-	setupTarg := func(u core.URL) (net.Conn, error) {
+	setupTarg := func(u core.URL, vc AdditionalVerifyCallback) (net.Conn, error) {
 		logrus.Infof("target setup: simulating connection to %s", u.String())
 		return tc, nil
 	}

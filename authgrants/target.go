@@ -5,6 +5,8 @@ import (
 	"net"
 
 	"github.com/sirupsen/logrus"
+
+	"hop.computer/hop/certs"
 )
 
 // logic for a hop server receiving an intent comm and approving or
@@ -14,17 +16,19 @@ type addAuthGrantFunc func(*Intent) error
 
 type targetInstance struct {
 	principalConn net.Conn
+	principalCert *certs.Certificate
 
-	checkIntent  checkIntentFunc
+	checkIntent  CheckIntentCallback
 	addAuthGrant addAuthGrantFunc
 }
 
 // StartTargetInstance creates and runs a new target instance
-func StartTargetInstance(pc net.Conn, ci checkIntentFunc, f addAuthGrantFunc) error {
+func StartTargetInstance(pc net.Conn, pcert *certs.Certificate, ci CheckIntentCallback, f addAuthGrantFunc) error {
 	defer pc.Close()
 
 	ti := targetInstance{
 		principalConn: pc,
+		principalCert: pcert,
 		checkIntent:   ci,
 		addAuthGrant:  f,
 	}
@@ -54,7 +58,7 @@ func (t *targetInstance) handleIntentCommunication() error {
 		return fmt.Errorf("target: error reading intent communication: %s", err)
 	}
 	logrus.Info("target: read intent communication")
-	err = t.checkIntent(i)
+	err = t.checkIntent(i, t.principalCert)
 	if err != nil {
 		logrus.Error("target: error checking intent: ", err)
 		return WriteIntentDenied(t.principalConn, err.Error())
@@ -62,7 +66,7 @@ func (t *targetInstance) handleIntentCommunication() error {
 	logrus.Info("target: finished checking intent")
 	err = t.addAuthGrant(&i)
 	if err != nil {
-		logrus.Error("target: error adding authgrant")
+		logrus.Errorf("target: error adding authgrant: %s", err)
 		return WriteIntentDenied(t.principalConn, err.Error())
 	}
 	return WriteIntentConfirmation(t.principalConn)

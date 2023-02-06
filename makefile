@@ -33,11 +33,11 @@ test:
 	go test -race ./... -timeout 180s
 
 .PHONY: authgrant-dev
-authgrant-dev: ## launch two containers running two servers to test authgrant protocol
+authgrant-dev: ## launch two containers (run hack/authgrant_gen.sh for creds)
 	make -C hack authgrant-dev
 
 .PHONY: authgrant-chain-dev
-authgrant-chain-dev: ## launch three containers running three servers to test authgrant protocol
+authgrant-chain-dev: ## launch three containers (run hack/authgrant_gen.sh for creds)
 	make -C hack authgrant-chain-dev
 
 .PHONY: serve-dev

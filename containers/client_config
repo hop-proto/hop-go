@@ -1,6 +1,5 @@
 [Global]
 AutoSelfSign = true
-IsPrincipal = true
 
 [[Hosts]]
 Patterns = ["127.0.0.1"]

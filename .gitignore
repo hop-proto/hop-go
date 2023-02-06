@@ -1,6 +1,7 @@
 .DS_Store
 .idea
 .vscode
+.cache
 app/authorized_keys
 cmd/hop/hop
 cmd/hopd/hopd
@@ -10,3 +11,4 @@ cmd/log.txt
 wireshark/lib*
 containers/delegate_proxy_server/hop
 containers/*/hop
+containers/hop

@@ -105,12 +105,12 @@ func TestPrincipal(t *testing.T) {
 	dc, dcD := net.Pipe() // delegate conn
 	tc, tcT := net.Pipe() // target conn
 
-	ciFunc := func(Intent) error {
+	ciFunc := func(Intent, *certs.Certificate) error {
 		logrus.Info("principal: checking intent")
 		return nil
 	}
 
-	setupTarg := func(u core.URL) (net.Conn, error) {
+	setupTarg := func(u core.URL, vc AdditionalVerifyCallback) (net.Conn, error) {
 		logrus.Infof("target setup: simulating connection to %s", u.String())
 		return tc, nil
 	}
@@ -128,7 +128,7 @@ func TestPrincipalNilCallback(t *testing.T) {
 	dc, dcD := net.Pipe() // delegate conn
 	tc, tcT := net.Pipe() // target conn
 
-	setupTarg := func(u core.URL) (net.Conn, error) {
+	setupTarg := func(u core.URL, vc AdditionalVerifyCallback) (net.Conn, error) {
 		logrus.Infof("target setup: simulating connection to %s", u.String())
 		return tc, nil
 	}
@@ -146,12 +146,12 @@ func TestPrincipalCheckIntentFail(t *testing.T) {
 	dc, dcD := net.Pipe() // delegate conn
 	tc, tcT := net.Pipe() // target conn
 
-	ciFunc := func(Intent) error {
+	ciFunc := func(Intent, *certs.Certificate) error {
 		logrus.Info("principal: checking intent")
 		return fmt.Errorf("not going to approve that")
 	}
 
-	setupTarg := func(u core.URL) (net.Conn, error) {
+	setupTarg := func(u core.URL, vc AdditionalVerifyCallback) (net.Conn, error) {
 		logrus.Infof("target setup: simulating connection to %s", u.String())
 		return tc, nil
 	}
@@ -169,12 +169,12 @@ func TestPrincipalCheckTargetFail(t *testing.T) {
 	dc, dcD := net.Pipe() // delegate conn
 	tc, tcT := net.Pipe() // target conn
 
-	ciFunc := func(Intent) error {
+	ciFunc := func(Intent, *certs.Certificate) error {
 		logrus.Info("principal: checking intent")
 		return nil
 	}
 
-	setupTarg := func(u core.URL) (net.Conn, error) {
+	setupTarg := func(u core.URL, vc AdditionalVerifyCallback) (net.Conn, error) {
 		logrus.Infof("target setup: simulating connection to %s", u.String())
 		return tc, nil
 	}

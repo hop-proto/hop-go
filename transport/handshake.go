@@ -380,8 +380,17 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 			logrus.Errorf("client: failed to verify certificate: %s", err)
 			return 0, err
 		}
+		logrus.Debug("client: leaf verification successful")
 	} else {
 		logrus.Debug("client: InsecureSkipVerify set. Not verifying server certificate")
+	}
+	if hs.certVerify.AddVerifyCallback != nil {
+		logrus.Debug("client: additional verify callback check enabled. running...")
+		if err := hs.certVerify.AddVerifyCallback(&leaf); err != nil {
+			logrus.Debugf("client: additional verify callback returned an error: %v", err.Error())
+			return 0, err
+		}
+		logrus.Debug("client: additional verify callback successful")
 	}
 
 	// DH

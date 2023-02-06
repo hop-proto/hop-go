@@ -54,7 +54,6 @@ func mergeAddresses(f *ClientFlags, hc *config.HostConfigOptional) error {
 }
 
 func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig, dc *config.ClientConfig) (*config.HostConfig, error) {
-	// TODO(baumanl): any need to preserve the original inputURL?
 	var hc *config.HostConfigOptional
 	if dc == nil {
 		hc = cc.MatchHost(f.Address.Host)

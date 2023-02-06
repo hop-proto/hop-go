@@ -6,11 +6,17 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/certs"
 	"hop.computer/hop/core"
 )
 
-type checkIntentFunc func(Intent) error
-type setUpTargetConnFunc func(core.URL) (net.Conn, error)
+// AdditionalVerifyCallback represents a function that is called mid
+// handshake. Wraps checkintent.
+type AdditionalVerifyCallback func(*certs.Certificate) error
+
+// CheckIntentCallback looks at intent and target cert. error nil if accepted.
+type CheckIntentCallback func(Intent, *certs.Certificate) error
+type setUpTargetConnCallback func(core.URL, AdditionalVerifyCallback) (net.Conn, error)
 
 // PrincipalInstance used to manage intent requests from a delegate to a single target
 type principalInstance struct {
@@ -18,13 +24,14 @@ type principalInstance struct {
 	targetConn      net.Conn
 	targetInfo      core.URL
 	targetConnected bool
+	targetCert      *certs.Certificate
 
-	checkIntent     checkIntentFunc
-	setUpTargetConn setUpTargetConnFunc
+	checkIntent     CheckIntentCallback
+	setUpTargetConn setUpTargetConnCallback
 }
 
 // StartPrincipalInstance creates and runs a new principal instance. errors if su is nil. Caller responsible for closing delegateConn
-func StartPrincipalInstance(dc net.Conn, ci checkIntentFunc, su setUpTargetConnFunc) error {
+func StartPrincipalInstance(dc net.Conn, ci CheckIntentCallback, su setUpTargetConnCallback) error {
 	if su == nil {
 		return fmt.Errorf("principal: must provide non-nil set up target function")
 	}
@@ -44,11 +51,11 @@ func StartPrincipalInstance(dc net.Conn, ci checkIntentFunc, su setUpTargetConnF
 	return nil
 }
 
-func defaultRejectAll(i Intent) error {
+func defaultRejectAll(i Intent, c *certs.Certificate) error {
 	return fmt.Errorf("default checkIntent func rejects all intent requests")
 }
 
-func insecureAcceptAll(i Intent) error {
+func insecureAcceptAll(i Intent, c *certs.Certificate) error {
 	logrus.Infof("principal: insecurely accepting intent with no checks")
 	return nil
 }
@@ -85,14 +92,17 @@ func (p *principalInstance) doIntentRequestChecks(i Intent) error {
 		return WriteIntentDenied(p.delegateConn, "principal: received intent request for different target")
 	}
 
-	err := p.checkIntent(i)
-	if err != nil {
-		return WriteIntentDenied(p.delegateConn, err.Error())
-	}
-
 	if !p.targetConnected {
 		logrus.Info("principal: not connected to target")
-		tc, err := p.setUpTargetConn(targURL)
+		checkIntentWithCert := func(cert *certs.Certificate) error {
+			p.targetCert = cert
+			err := p.checkIntent(i, cert)
+			if err != nil {
+				WriteIntentDenied(p.delegateConn, err.Error())
+			}
+			return err
+		}
+		tc, err := p.setUpTargetConn(targURL, checkIntentWithCert)
 		if err != nil {
 			logrus.Info("principal: error setting up target connection")
 			return WriteIntentDenied(p.delegateConn, fmt.Sprintf("principal: target setup failed: %s", err))
@@ -101,9 +111,11 @@ func (p *principalInstance) doIntentRequestChecks(i Intent) error {
 		p.targetInfo = targURL
 		p.targetConnected = true
 		logrus.Info("principal: connected to target")
+	} else {
+		p.checkIntent(i, p.targetCert)
 	}
 
-	err = WriteIntentCommunication(p.targetConn, i)
+	err := WriteIntentCommunication(p.targetConn, i)
 	if err != nil {
 		logrus.Error("principal: error writing intent communication")
 		return WriteIntentDenied(p.delegateConn, fmt.Sprintf("principal: error sending intent comm: %s", err))
