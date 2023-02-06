@@ -40,7 +40,7 @@ type HopClient struct { // nolint:maligned
 
 	// TODO(baumanl): move authgrant state to struct? sort of waiting till i finalize stuff
 	// +checklocks:checkIntentLock
-	checkIntent     authgrants.CheckIntentFunc // should only be set if principal
+	checkIntent     authgrants.CheckIntentCallback // should only be set if principal
 	checkIntentLock sync.Mutex
 	delServerConn   net.Conn // conn to UDS with delegate server
 

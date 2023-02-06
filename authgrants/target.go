@@ -18,12 +18,12 @@ type targetInstance struct {
 	principalConn net.Conn
 	principalCert *certs.Certificate
 
-	checkIntent  CheckIntentFunc
+	checkIntent  CheckIntentCallback
 	addAuthGrant addAuthGrantFunc
 }
 
 // StartTargetInstance creates and runs a new target instance
-func StartTargetInstance(pc net.Conn, pcert *certs.Certificate, ci CheckIntentFunc, f addAuthGrantFunc) error {
+func StartTargetInstance(pc net.Conn, pcert *certs.Certificate, ci CheckIntentCallback, f addAuthGrantFunc) error {
 	defer pc.Close()
 
 	ti := targetInstance{

@@ -14,9 +14,9 @@ import (
 // handshake. Wraps checkintent.
 type AdditionalVerifyCallback func(*certs.Certificate) error
 
-// CheckIntentFunc looks at intent and target cert. error nil if accepted.
-type CheckIntentFunc func(Intent, *certs.Certificate) error
-type setUpTargetConnFunc func(core.URL, AdditionalVerifyCallback) (net.Conn, error)
+// CheckIntentCallback looks at intent and target cert. error nil if accepted.
+type CheckIntentCallback func(Intent, *certs.Certificate) error
+type setUpTargetConnCallback func(core.URL, AdditionalVerifyCallback) (net.Conn, error)
 
 // PrincipalInstance used to manage intent requests from a delegate to a single target
 type principalInstance struct {
@@ -26,12 +26,12 @@ type principalInstance struct {
 	targetConnected bool
 	targetCert      *certs.Certificate
 
-	checkIntent     CheckIntentFunc
-	setUpTargetConn setUpTargetConnFunc
+	checkIntent     CheckIntentCallback
+	setUpTargetConn setUpTargetConnCallback
 }
 
 // StartPrincipalInstance creates and runs a new principal instance. errors if su is nil. Caller responsible for closing delegateConn
-func StartPrincipalInstance(dc net.Conn, ci CheckIntentFunc, su setUpTargetConnFunc) error {
+func StartPrincipalInstance(dc net.Conn, ci CheckIntentCallback, su setUpTargetConnCallback) error {
 	if su == nil {
 		return fmt.Errorf("principal: must provide non-nil set up target function")
 	}
