@@ -45,7 +45,9 @@ type hopSession struct {
 func (sess *hopSession) checkAuthorization() bool {
 	t, err := sess.tubeMuxer.Accept()
 	if err != nil {
-		panic("TODO(hosono) muxer stopping during check authorization")
+		// If we can't accept a tube here, it means the session is closing
+		logrus.Info("muxer stopping dufing check authorization")
+		return false
 	}
 	uaTube, ok := t.(*tubes.Reliable)
 	if !ok || uaTube.Type() != common.UserAuthTube {
