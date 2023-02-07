@@ -247,9 +247,15 @@ func (c *HopClient) Close() error {
 	if c.ExecTube != nil {
 		c.ExecTube.Restore()
 	}
+
 	var err error
 	if c.TubeMuxer != nil {
-		err = c.TubeMuxer.Stop()
+		sendErr, recvErr := c.TubeMuxer.Stop()
+		if sendErr != nil {
+			err = sendErr
+		} else if recvErr != nil {
+			err = recvErr
+		}
 	}
 
 	if c.delServerConn != nil {
