@@ -54,6 +54,7 @@ var _ Tube = &Unreliable{}
 
 func (u *Unreliable) sender() {
 	for b := range u.send.C {
+		u.log.Trace("sending packet")
 		u.sendQueue <- b
 	}
 
@@ -96,6 +97,7 @@ func (u *Unreliable) initiate(req bool) {
 				u.log.Info("init rto exceeded")
 			case <-u.initiated:
 			case <-u.closed:
+				close(u.senderDone)
 				return
 			}
 			notInit = u.state.Load() == created
@@ -114,6 +116,7 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		"rel":     pkt.flags.REL,
 		"ack":     pkt.flags.ACK,
 		"fin":     pkt.flags.FIN,
+		"state":   u.state.Load(),
 	}).Debug("receiving initiate packet")
 
 	if u.state.CompareAndSwap(created, initiated) {
@@ -122,6 +125,7 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 
 	// Send a RESP packet in response to REQ packets
 	if pkt.flags.REQ && u.state.Load() != closed {
+		u.log.Trace("sending RESP packet")
 		p := u.makeInitFrame(false)
 		u.sendQueue <- p.toBytes()
 	}
@@ -258,9 +262,7 @@ func (u *Unreliable) Close() error {
 
 	close(u.send.C)
 
-	if oldState == initiated {
-		<-u.senderDone
-	}
+	<-u.senderDone
 
 	close(u.closed)
 

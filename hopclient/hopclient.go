@@ -247,9 +247,15 @@ func (c *HopClient) Close() error {
 	if c.ExecTube != nil {
 		c.ExecTube.Restore()
 	}
+
 	var err error
 	if c.TubeMuxer != nil {
-		err = c.TubeMuxer.Stop()
+		sendErr, recvErr := c.TubeMuxer.Stop()
+		if sendErr != nil {
+			err = sendErr
+		} else if recvErr != nil {
+			err = recvErr
+		}
 	}
 
 	if c.delServerConn != nil {
@@ -333,7 +339,7 @@ func (c *HopClient) HandleTubes() {
 
 	proxyQueue := newPTProxyTubeQueue()
 
-	for t := range c.TubeMuxer.TubeQueue {
+	for t, err := c.TubeMuxer.Accept(); err != nil; {
 		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v. Reliable? %t", t.Type(), t.IsReliable())
 
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {

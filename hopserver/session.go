@@ -43,9 +43,11 @@ type hopSession struct {
 }
 
 func (sess *hopSession) checkAuthorization() bool {
-	t, ok := <-sess.tubeMuxer.TubeQueue
-	if !ok {
-		panic("TODO(hosono) muxer stopping during check authorization")
+	t, err := sess.tubeMuxer.Accept()
+	if err != nil {
+		// If we can't accept a tube here, it means the session is closing
+		logrus.Info("muxer stopping dufing check authorization")
+		return false
 	}
 	uaTube, ok := t.(*tubes.Reliable)
 	if !ok || uaTube.Type() != common.UserAuthTube {
@@ -61,7 +63,7 @@ func (sess *hopSession) checkAuthorization() bool {
 	logrus.Info("got userauth init message: ", k.String())
 
 	sess.usingAuthGrant = false
-	err := sess.server.authorizeKey(username, k)
+	err = sess.server.authorizeKey(username, k)
 	if err != nil {
 		if sess.server.config.EnableAuthgrants != nil && *sess.server.config.EnableAuthgrants {
 			actions, err := sess.server.authorizeKeyAuthGrant(username, k)
@@ -98,8 +100,8 @@ func (sess *hopSession) start() {
 	logrus.Info("STARTING TUBE LOOP")
 
 	for {
-		tube, ok := <-sess.tubeMuxer.TubeQueue
-		if !ok {
+		tube, err := sess.tubeMuxer.Accept()
+		if err != nil {
 			sess.close()
 			break
 		}

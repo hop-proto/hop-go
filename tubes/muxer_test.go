@@ -32,28 +32,41 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 	assert.NilError(t, err)
 	c2 = MakeUDPMsgConn(odds, c2UDP)
 
-	m1 = NewMuxer(c1, 0, false, logrus.WithFields(logrus.Fields{
-		"muxer": "m1",
-		"test":  t.Name(),
-	}))
-	m1.log.WithField("addr", c1.LocalAddr()).Info("Created")
-	m2 = NewMuxer(c2, 0, true, logrus.WithFields(logrus.Fields{
-		"muxer": "m2",
-		"test":  t.Name(),
-	}))
-	m2.log.WithField("addr", c2.LocalAddr()).Info("Created")
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		m1 = NewMuxer(c1, 30*retransmitOffset, false, logrus.WithFields(logrus.Fields{
+			"muxer": "m1",
+			"test":  t.Name(),
+		}))
+		m1.log.WithField("addr", c1.LocalAddr()).Info("Created")
+	}()
+	go func() {
+		defer wg.Done()
+		m2 = NewMuxer(c2, 30*retransmitOffset, true, logrus.WithFields(logrus.Fields{
+			"muxer": "m2",
+			"test":  t.Name(),
+		}))
+		m2.log.WithField("addr", c2.LocalAddr()).Info("Created")
+	}()
+
+	wg.Wait()
 
 	stop = func() {
 		wg := sync.WaitGroup{}
 		wg.Add(2)
 		go func() {
-			err := m1.Stop()
-			assert.NilError(t, err)
+			sendErr, recvErr := m1.Stop()
+			assert.NilError(t, sendErr)
+			assert.NilError(t, recvErr)
 			wg.Done()
 		}()
 		go func() {
-			err := m2.Stop()
-			assert.NilError(t, err)
+			sendErr, recvErr := m2.Stop()
+			assert.NilError(t, sendErr)
+			assert.NilError(t, recvErr)
 			wg.Done()
 		}()
 
@@ -70,7 +83,7 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 }
 
 func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
-	// Each muxer can create exactly 128 tubes.
+	// Each muxer can create exactly 127 Unreliable tubes and 128 Reliable tubes
 	// The server creates even numbered tubes. The client creates odd numbered tubes
 	m1, m2, stop := makeMuxers(odds, t)
 
@@ -99,11 +112,12 @@ func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 
 	wg := sync.WaitGroup{}
 
-	for i := 1; i < 256; i += 2 {
-		logrus.Infof("CreateTube: %d", i)
+	prevID := -1
+	for i := 0; i < 128; i++ {
 		tube, err := m1CreateTube()
 		assert.NilError(t, err)
-		assert.DeepEqual(t, tube.GetID(), byte(i))
+		assert.Assert(t, int(tube.GetID()) > prevID)
+		prevID = int(tube.GetID())
 		if waitForOpen {
 			wg.Add(1)
 			go func() {
@@ -112,11 +126,23 @@ func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 			}()
 		}
 	}
-	for i := 0; i < 256; i += 2 {
+
+	// Since muxer2 handles keep alives, it can only create 127 unreliable tubes
+	// Tube 0 is reserved for keep alives
+	var numTubes int
+	if rel {
+		numTubes = 128
+	} else {
+		numTubes = 127
+	}
+
+	prevID = -1
+	for i := 0; i < numTubes; i++ {
 		logrus.Infof("CreateTube: %d", i)
 		tube, err := m2CreateTube()
 		assert.NilError(t, err)
-		assert.DeepEqual(t, tube.GetID(), byte(i))
+		assert.Assert(t, int(tube.GetID()) > prevID)
+		prevID = int(tube.GetID())
 		if waitForOpen {
 			wg.Add(1)
 			go func() {
@@ -149,8 +175,8 @@ func reusingTubes(t *testing.T) {
 	t1, err := m1.CreateReliableTube(common.ExecTube)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, t1.GetID(), byte(1))
-	t2, ok := <-m2.TubeQueue
-	assert.Assert(t, ok)
+	t2, err := m2.Accept()
+	assert.NilError(t, err)
 	t2Rel := t2.(*Reliable)
 
 	// Close it on both ends
@@ -170,8 +196,8 @@ func reusingTubes(t *testing.T) {
 	t1, err = m1.CreateReliableTube(common.ExecTube)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, t1.GetID(), byte(1))
-	t2, ok = <-m2.TubeQueue
-	assert.Assert(t, ok)
+	t2, err = m2.Accept()
+	assert.NilError(t, err)
 	t2Rel = t2.(*Reliable)
 
 	// Attempt to send data on that tube
@@ -196,8 +222,12 @@ func reusingTubes(t *testing.T) {
 func TestMuxer(t *testing.T) {
 
 	defer goleak.VerifyNone(t)
-
 	logrus.SetLevel(logrus.TraceLevel)
+
+	t.Run("ImmediateStop", func(t *testing.T) {
+		_, _, stop := makeMuxers(1.0, t)
+		stop()
+	})
 	t.Run("UnreliableTubes/ImmediateStop", func(t *testing.T) {
 		manyTubes(1.0, false, false, t)
 	})

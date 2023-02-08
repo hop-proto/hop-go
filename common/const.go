@@ -33,6 +33,7 @@ const (
 
 // TubeType constants
 const (
+	KeepAlive          = 0 // Used for keep alive messages
 	ExecTube           = 1 // Used for Shell or Command Execution
 	AuthGrantTube      = 2 // Used for myriad Authorization Grant protocol steps
 	PrincipalProxyTube = 3 // Net Proxy should maybe be unreliable tube?

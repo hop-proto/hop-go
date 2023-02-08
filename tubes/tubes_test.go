@@ -72,16 +72,27 @@ func makeConn(odds float64, rel bool, t *testing.T) (t1, t2 net.Conn, stop func(
 	assert.NilError(t, err)
 	c2 = MakeUDPMsgConn(odds, c2UDP)
 
-	muxer1 := NewMuxer(c1, 0, false, logrus.WithFields(logrus.Fields{
-		"muxer": "m1",
-		"test":  t.Name(),
-	}))
-	muxer1.log.WithField("addr", c1.LocalAddr()).Info("Created")
-	muxer2 := NewMuxer(c2, 0, true, logrus.WithFields(logrus.Fields{
-		"muxer": "m2",
-		"test":  t.Name(),
-	}))
-	muxer2.log.WithField("addr", c2.LocalAddr()).Info("Created")
+	var muxer1 *Muxer
+	var muxer2 *Muxer
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		muxer1 = NewMuxer(c1, 30*retransmitOffset, false, logrus.WithFields(logrus.Fields{
+			"muxer": "m1",
+			"test":  t.Name(),
+		}))
+		muxer1.log.WithField("addr", c1.LocalAddr()).Info("Created")
+	}()
+	go func() {
+		defer wg.Done()
+		muxer2 = NewMuxer(c2, 30*retransmitOffset, true, logrus.WithFields(logrus.Fields{
+			"muxer": "m2",
+			"test":  t.Name(),
+		}))
+		muxer2.log.WithField("addr", c2.LocalAddr()).Info("Created")
+	}()
+	wg.Wait()
 
 	if rel {
 		t1, err = muxer1.CreateReliableTube(common.ExecTube)
@@ -92,8 +103,8 @@ func makeConn(odds float64, rel bool, t *testing.T) (t1, t2 net.Conn, stop func(
 		return
 	}
 
-	t2, ok := <-muxer2.TubeQueue
-	if !ok {
+	t2, err = muxer2.Accept()
+	if err != nil {
 		err = ErrMuxerStopping
 		return
 	}
@@ -121,16 +132,14 @@ func makeConn(odds float64, rel bool, t *testing.T) (t1, t2 net.Conn, stop func(
 			defer wg.Done()
 			t1.Close()
 			t1.(Tube).WaitForClose()
-			err := muxer1.Stop()
-			assert.NilError(t, err)
+			muxer1.Stop()
 			assert.DeepEqual(t, muxer1.state.Load(), muxerStopped)
 		}()
 		go func() {
 			defer wg.Done()
 			t2.Close()
 			t2.(Tube).WaitForClose()
-			err := muxer2.Stop()
-			assert.NilError(t, err)
+			muxer2.Stop()
 			assert.DeepEqual(t, muxer2.state.Load(), muxerStopped)
 		}()
 
