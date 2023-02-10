@@ -195,12 +195,10 @@ func (m *Muxer) pickTubeID(isReliable bool) (byte, error) {
 		}
 
 		if !ok {
-			m.log.WithField("tubeID", guess).Debug("picked new tube id")
+			m.log.WithField("tubeID", guess).Trace("picked new tube id")
 			return guess, nil
 		}
 	}
-
-	m.log.Warn("out of tube IDs")
 	return 0, ErrOutOfTubes
 }
 
@@ -216,9 +214,10 @@ func (m *Muxer) CreateReliableTube(tType TubeType) (*Reliable, error) {
 		return nil, err
 	}
 	tube, err := m.makeReliableTubeWithID(tType, id, true)
-	if err == nil {
-		m.log.Infof("Created Tube: %v", tube.GetID())
+	if err != nil {
+		return nil, err
 	}
+	m.log.Infof("Created Tube: %v", tube.GetID())
 	return tube, err
 }
 
@@ -296,9 +295,10 @@ func (m *Muxer) CreateUnreliableTube(tType TubeType) (*Unreliable, error) {
 		return nil, err
 	}
 	tube, err := m.makeUnreliableTubeWithID(tType, tubeID, true)
-	if err == nil {
-		m.log.Infof("Created Tube: %v", tube.GetID())
+	if err != nil {
+		return nil, err
 	}
+	m.log.Infof("Created Tube: %v", tube.GetID())
 	return tube, err
 }
 

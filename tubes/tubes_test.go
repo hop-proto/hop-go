@@ -3,6 +3,7 @@ package tubes
 import (
 	"bytes"
 	"crypto/rand"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -40,7 +41,14 @@ func MakeUDPMsgConn(odds float64, underlying *net.UDPConn, remote *net.UDPAddr) 
 
 // ReadMsg implements the MsgConn interface
 func (c *UDPMsgConn) ReadMsg(b []byte) (n int, err error) {
-	n, _, _, _, err = c.ReadMsgUDP(b, nil)
+	var addr *net.UDPAddr
+	n, _, _, addr, err = c.ReadMsgUDP(b, nil)
+	if err != nil {
+		return n, err
+	}
+	if !(addr.IP.Equal(c.remote.IP) && addr.Port == c.remote.Port) {
+		return n, fmt.Errorf("bad remote address: expected %s, got %s", c.remote, addr)
+	}
 	return
 }
 
@@ -53,7 +61,7 @@ func (c *UDPMsgConn) WriteMsg(b []byte) (err error) {
 	}
 	x := float64(i.Int64()) / float64(size.Int64())
 	if x < c.odds {
-		_, _, err = c.WriteMsgUDP(b, nil, nil)
+		_, _, err = c.WriteMsgUDP(b, nil, c.remote)
 	}
 	return
 }

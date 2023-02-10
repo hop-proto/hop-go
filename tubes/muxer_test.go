@@ -20,11 +20,11 @@ import (
 // Set odds to 1.0 to send all packet and 0.0 to send no packets
 func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 
-	c1Packet, err := net.ListenPacket("udp", ":0")
+	c1Packet, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
 	c1UDP := c1Packet.(*net.UDPConn)
 
-	c2Packet, err := net.ListenPacket("udp", ":0")
+	c2Packet, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
 	c2UDP := c2Packet.(*net.UDPConn)
 
@@ -33,6 +33,17 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)
+
+	m1 = NewMuxer(c1, 0, false, logrus.WithFields(logrus.Fields{
+		"muxer": "m1",
+		"test":  t.Name(),
+	}))
+	m1.log.WithField("addr", c1.LocalAddr()).Info("Created")
+	m2 = NewMuxer(c2, 0, true, logrus.WithFields(logrus.Fields{
+		"muxer": "m2",
+		"test":  t.Name(),
+	}))
+	m2.log.WithField("addr", c2.LocalAddr()).Info("Created")
 
 	go func() {
 		defer wg.Done()
@@ -57,16 +68,16 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 		wg := sync.WaitGroup{}
 		wg.Add(2)
 		go func() {
+			defer wg.Done()
 			sendErr, recvErr := m1.Stop()
 			assert.NilError(t, sendErr)
 			assert.NilError(t, recvErr)
-			wg.Done()
 		}()
 		go func() {
+			defer wg.Done()
 			sendErr, recvErr := m2.Stop()
 			assert.NilError(t, sendErr)
 			assert.NilError(t, recvErr)
-			wg.Done()
 		}()
 
 		wg.Wait()
@@ -75,6 +86,7 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 		c2UDP.Close()
 
 		// This makes sure that lingering goroutines do not panic
+		// TODO(dadrian): WHY ARE THEY PANICING IN THE FIRST PLACE?
 		time.Sleep(timeWaitTime + time.Second)
 	}
 
@@ -91,37 +103,47 @@ func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 
 	if rel {
 		m1CreateTube = func() (Tube, error) {
-			t, err := m1.CreateReliableTube(common.ExecTube)
-			return Tube(t), err
+			tube, err := m1.CreateReliableTube(common.ExecTube)
+			if err != nil {
+				return nil, err
+			}
+			return Tube(tube), nil
 		}
 		m2CreateTube = func() (Tube, error) {
-			t, err := m2.CreateReliableTube(common.ExecTube)
-			return Tube(t), err
+			tube, err := m2.CreateReliableTube(common.ExecTube)
+			if err != nil {
+				return nil, err
+			}
+			return Tube(tube), nil
 		}
 	} else {
 		m1CreateTube = func() (Tube, error) {
-			t, err := m1.CreateUnreliableTube(common.ExecTube)
-			return Tube(t), err
+			tube, err := m1.CreateUnreliableTube(common.ExecTube)
+			if err != nil {
+				return nil, err
+			}
+			return Tube(tube), nil
 		}
 		m2CreateTube = func() (Tube, error) {
-			t, err := m2.CreateUnreliableTube(common.ExecTube)
-			return Tube(t), err
+			tube, err := m2.CreateUnreliableTube(common.ExecTube)
+			if err != nil {
+				return nil, err
+			}
+			return Tube(tube), nil
 		}
 	}
 
 	wg := sync.WaitGroup{}
 
-	prevID := -1
-	for i := 0; i < 128; i++ {
+	for i := 1; i < 256; i += 2 {
 		tube, err := m1CreateTube()
 		assert.NilError(t, err)
-		assert.Assert(t, int(tube.GetID()) > prevID)
-		prevID = int(tube.GetID())
+		assert.Equal(t, tube.GetID(), byte(i))
 		if waitForOpen {
 			wg.Add(1)
 			go func() {
+				defer wg.Done()
 				tube.SetDeadline(time.Time{})
-				wg.Done()
 			}()
 		}
 	}
@@ -135,9 +157,8 @@ func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 		numTubes = 127
 	}
 
-	prevID = -1
+	prevID := -1
 	for i := 0; i < numTubes; i++ {
-		logrus.Infof("CreateTube: %d", i)
 		tube, err := m2CreateTube()
 		assert.NilError(t, err)
 		assert.Assert(t, int(tube.GetID()) > prevID)
@@ -145,19 +166,17 @@ func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 		if waitForOpen {
 			wg.Add(1)
 			go func() {
+				defer wg.Done()
 				tube.SetDeadline(time.Time{})
-				wg.Done()
 			}()
 		}
 	}
 
-	tube, err := m1CreateTube()
+	_, err := m1CreateTube()
 	assert.ErrorType(t, err, ErrOutOfTubes)
-	assert.Assert(t, tube == (*Unreliable)(nil) || tube == (*Reliable)(nil))
 
-	tube, err = m2CreateTube()
+	_, err = m2CreateTube()
 	assert.ErrorType(t, err, ErrOutOfTubes)
-	assert.Assert(t, tube == (*Unreliable)(nil) || tube == (*Reliable)(nil))
 
 	if waitForOpen {
 		wg.Wait()
@@ -173,7 +192,7 @@ func reusingTubes(t *testing.T) {
 	// Create a reliable tube
 	t1, err := m1.CreateReliableTube(common.ExecTube)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, t1.GetID(), byte(1))
+	assert.Equal(t, t1.GetID(), byte(1))
 	t2, err := m2.Accept()
 	assert.NilError(t, err)
 	t2Rel := t2.(*Reliable)
@@ -194,7 +213,7 @@ func reusingTubes(t *testing.T) {
 	// Attempt to open another tube with the same ID
 	t1, err = m1.CreateReliableTube(common.ExecTube)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, t1.GetID(), byte(1))
+	assert.Equal(t, t1.GetID(), byte(1))
 	t2, err = m2.Accept()
 	assert.NilError(t, err)
 	t2Rel = t2.(*Reliable)
@@ -221,7 +240,7 @@ func reusingTubes(t *testing.T) {
 func TestMuxer(t *testing.T) {
 
 	defer goleak.VerifyNone(t)
-	logrus.SetLevel(logrus.TraceLevel)
+	logrus.SetLevel(logrus.WarnLevel)
 
 	t.Run("ImmediateStop", func(t *testing.T) {
 		_, _, stop := makeMuxers(1.0, t)
@@ -233,7 +252,6 @@ func TestMuxer(t *testing.T) {
 	t.Run("UnreliableTubes/Wait", func(t *testing.T) {
 		manyTubes(0.9, false, true, t)
 	})
-
 	t.Run("ReliableTubes/ImmediateStop", func(t *testing.T) {
 		manyTubes(1.0, true, false, t)
 	})
