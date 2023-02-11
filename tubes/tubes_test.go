@@ -46,8 +46,8 @@ func (c *UDPMsgConn) ReadMsg(b []byte) (n int, err error) {
 	if err != nil {
 		return n, err
 	}
-	if !(addr.IP.Equal(c.remote.IP) && addr.Port == c.remote.Port) {
-		return n, fmt.Errorf("bad remote address: expected %s, got %s", c.remote, addr)
+	if !addr.IP.Equal(c.remote.IP) || addr.Port != c.remote.Port {
+		return n, fmt.Errorf("bad remote address, expected %s, got %s", c.remote, addr)
 	}
 	return
 }

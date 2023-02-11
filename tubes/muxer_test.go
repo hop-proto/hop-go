@@ -237,6 +237,54 @@ func reusingTubes(t *testing.T) {
 	stop()
 }
 
+func TestOneMuxer(t *testing.T) {
+	clientLogger := logrus.NewEntry(logrus.StandardLogger()).WithField("muxer", "client")
+	serverLogger := logrus.NewEntry(logrus.StandardLogger()).WithField("muxer", "server")
+
+	serverPacket, err := net.ListenPacket("udp", "localhost:0")
+	assert.NilError(t, err)
+	serverUDP := serverPacket.(*net.UDPConn)
+	serverAddr := serverUDP.LocalAddr().(*net.UDPAddr)
+
+	clientPacket, err := net.ListenPacket("udp", "localhost:0")
+	assert.NilError(t, err)
+	clientUDP := clientPacket.(*net.UDPConn)
+	clientAddr := clientUDP.LocalAddr().(*net.UDPAddr)
+
+	serverMsg := MakeUDPMsgConn(1.0, serverUDP, clientAddr)
+	clientMsg := MakeUDPMsgConn(1.0, clientUDP, serverAddr)
+	serverMuxer := NewMuxer(serverMsg, 100*time.Second, true, serverLogger)
+	clientMuxer := NewMuxer(clientMsg, time.Second*100, false, clientLogger)
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	s := "hello from server"
+	go func() {
+		defer wg.Done()
+		tube, err := serverMuxer.Accept()
+		assert.NilError(t, err)
+		n, err := tube.Write([]byte(s))
+		assert.Equal(t, len(s), n)
+		assert.NilError(t, err)
+		sendErr, recvErr := serverMuxer.Stop()
+		assert.NilError(t, sendErr)
+		assert.NilError(t, recvErr)
+	}()
+	tube, err := clientMuxer.CreateReliableTube(common.ExecTube)
+	assert.NilError(t, err)
+	buf := make([]byte, len(s))
+	n, err := tube.Read(buf)
+	assert.NilError(t, err)
+	assert.Equal(t, len(buf), n)
+	wg.Wait()
+	n, err = tube.Write([]byte("ope"))
+	assert.Equal(t, net.ErrClosed, err)
+	assert.Equal(t, 0, n)
+	sendErr, recvErr := clientMuxer.Stop()
+	assert.NilError(t, sendErr)
+	assert.NilError(t, recvErr)
+}
+
 func TestMuxer(t *testing.T) {
 
 	defer goleak.VerifyNone(t)
