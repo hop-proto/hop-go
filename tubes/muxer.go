@@ -39,6 +39,15 @@ type Tube interface {
 	getLog() *logrus.Entry
 }
 
+// Party indicates if a Muxer is an Intiator or a Responder
+type Party bool
+
+// There are only two types of Party
+const (
+	Initator  Party = false
+	Responder Party = true
+)
+
 // Muxer handles delivering and sending tube messages
 type Muxer struct {
 	tubeQueue chan Tube
@@ -85,14 +94,13 @@ type Muxer struct {
 //
 // log specifies the logging context for this muxer. All log messages from this
 // muxer and the tubes it creates will use this logging context.
-func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, log *logrus.Entry) *Muxer {
+func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, party Party, log *logrus.Entry) *Muxer {
 	var idParity byte
-	if isServer {
+	if party == Responder {
 		idParity = 0
 	} else {
 		idParity = 1
 	}
-	state := atomic.Value{}
 	mux := &Muxer{
 		idParity:          idParity,
 		reliableTubes:     make(map[byte]*Reliable),
@@ -100,7 +108,7 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 		tubeQueue:         make(chan Tube, 128),
 		m:                 sync.Mutex{},
 		sendQueue:         make(chan []byte),
-		state:             state,
+		state:             atomic.Value{},
 		stopped:           make(chan struct{}),
 		underlying:        msgConn,
 		timeout:           timeout,
