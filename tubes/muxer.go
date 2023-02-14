@@ -76,10 +76,6 @@ type Muxer struct {
 
 	// This buffer is only used in m.readMsg
 	readBuf []byte
-
-	keepAliveTubeChan chan *Unreliable
-	sendKeepAliveDone chan struct{}
-	recvKeepAliveDone chan struct{}
 }
 
 // NewMuxer starts a new tube muxer running over the the specified msgConn.
@@ -102,23 +98,20 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, party Party, log
 		idParity = 1
 	}
 	mux := &Muxer{
-		idParity:          idParity,
-		reliableTubes:     make(map[byte]*Reliable),
-		unreliableTubes:   make(map[byte]*Unreliable),
-		tubeQueue:         make(chan Tube, 128),
-		m:                 sync.Mutex{},
-		sendQueue:         make(chan []byte),
-		state:             atomic.Value{},
-		stopped:           make(chan struct{}),
-		underlying:        msgConn,
-		timeout:           timeout,
-		log:               log,
-		readBuf:           make([]byte, 65535),
-		receiverErr:       make(chan error),
-		senderErr:         make(chan error),
-		keepAliveTubeChan: make(chan *Unreliable, 1),
-		sendKeepAliveDone: make(chan struct{}),
-		recvKeepAliveDone: make(chan struct{}),
+		idParity:        idParity,
+		reliableTubes:   make(map[byte]*Reliable),
+		unreliableTubes: make(map[byte]*Unreliable),
+		tubeQueue:       make(chan Tube, 128),
+		m:               sync.Mutex{},
+		sendQueue:       make(chan []byte),
+		state:           atomic.Value{},
+		stopped:         make(chan struct{}),
+		underlying:      msgConn,
+		timeout:         timeout,
+		log:             log,
+		readBuf:         make([]byte, 65535),
+		receiverErr:     make(chan error),
+		senderErr:       make(chan error),
 	}
 
 	mux.state.Store(muxerRunning)
@@ -342,12 +335,6 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 	tube.state.Store(created)
 	go tube.initiate(req)
 
-	// Check for received keep alive tubes. Keep alive tubes always have id 0
-	if tube.id == 0 {
-		m.keepAliveTubeChan <- tube
-		return nil, errGotKeepAlive
-	}
-
 	if !req {
 		tube.log.Debug("added tube to queue")
 		m.tubeQueue <- tube
@@ -415,80 +402,10 @@ func (m *Muxer) start() {
 	m.m.Lock()
 	defer m.m.Unlock()
 
-	// Create the server opens the keep alive tube, which will always have ID 0
-	if m.idParity == 0 {
-		// Tube ID 0 is reserved for keep alives
-		_, err := m.makeUnreliableTubeWithID(common.KeepAlive, 0, true)
-		if err != errGotKeepAlive {
-			// If we can't create this tube, the muxer might randomly time out
-			// if it expects a keep alive and doesn't get it.
-			// In that case, it's better to crash early
-			m.log.WithField("error", err).Fatal("Failed to create keep alive tube")
-		}
-		m.log.Info("created keep alive tube")
-	}
+	// TODO(dadrian): Previously, we created a keep-alive tube with ID zero
+	// here. We may still want to reserve ID 0 for some sort of control?
 
-	go m.startKeepAlive()
 	m.log.Info("Muxer running!")
-}
-
-// startKeepAlive beings the goroutines that handle keep alive messages.
-// startKeepAlive blocks until the keep alive tube is sent on m.keepAliveTubeChan.
-// Ones it receives a keep alive tube, this method spawns two goroutines:
-// One for sending keep alives and one for receiving them. The sending goroutine
-// sends 3 keep alive messages every timeout interval. The receiving goroutine
-// reads and discards every keep alive message sent by the remote muxer.
-// The sending and receiving goroutines exit if any errors occur in the
-// keep alive tube. They then close the channels m.sendKeepAliveDone and
-// m.recvKeepAliveDone respectively.
-func (m *Muxer) startKeepAlive() {
-	tube := <-m.keepAliveTubeChan
-
-	// a nil channel is sent by m.Stop to finish this goroutine
-	if tube == nil {
-		close(m.sendKeepAliveDone)
-		close(m.recvKeepAliveDone)
-		return
-	}
-
-	// This goroutine sends 3 keep alives per timeout
-	go func() {
-		defer close(m.sendKeepAliveDone)
-		buf := make([]byte, 1)
-
-		keepAliveTime := m.timeout / 3
-		if keepAliveTime == 0 {
-			keepAliveTime = 10 * retransmitOffset
-		}
-		ticker := time.NewTicker(keepAliveTime)
-		for {
-			<-ticker.C
-			if tube == nil {
-				m.log.Info("haven't receive keep alive tube yet")
-				continue
-			}
-			err := tube.WriteMsg(buf)
-			if err != nil {
-				m.log.WithField("error", err).Info("Keep alive sender ended")
-				return
-			}
-			m.log.Debug("send keep alive")
-		}
-	}()
-
-	// This goroutine reads keep alives
-	go func() {
-		defer close(m.recvKeepAliveDone)
-		buf := make([]byte, 1)
-		for {
-			_, err := tube.Read(buf)
-			if err != nil {
-				m.log.WithField("error", err).Info("Keep alive receiver ended")
-				return
-			}
-			m.log.Debug("got keep alive")
-		}
-	}()
 }
 
 // receiver reads packet from the underlying MsgConn and forwards them to the relevant
@@ -525,15 +442,15 @@ func (m *Muxer) receiver() {
 			return
 		}
 		var tube Tube
-		tube, ok := m.getTube(frame.flags.REL, frame.tubeID)
+		tube, ok := m.getTube(frame.hasFlags(FlagREL), frame.tubeID)
 		if !ok {
 			m.log.WithField("tube", frame.tubeID).Info("tube not found")
 			initFrame := fromInitiateBytes(frame.toBytes())
 
 			// Handle requests for new tubes. We ignore errors when making a tube
 			// because failing to create one tube should not shut down all tubes.
-			if initFrame.flags.REQ {
-				if initFrame.flags.REL {
+			if initFrame.hasFlags(FlagREQ) {
+				if initFrame.hasFlags(FlagREL) {
 					m.m.Lock()
 					tube, _ = m.makeReliableTubeWithID(initFrame.tubeType, initFrame.tubeID, false)
 					m.m.Unlock()
@@ -548,7 +465,7 @@ func (m *Muxer) receiver() {
 		// Checking for tube != nil doesn't work because nil has a type
 		// This means we have to check every possible type that tube could have
 		if err == nil && tube != nil && tube != (*Reliable)(nil) && tube != (*Unreliable)(nil) {
-			if frame.flags.REQ || frame.flags.RESP {
+			if frame.flags&(FlagREQ|FlagRESP) != 0 {
 				initFrame := fromInitiateBytes(frame.toBytes())
 				tube.receiveInitiatePkt(initFrame)
 			} else {
@@ -625,16 +542,8 @@ func (m *Muxer) Stop() (sendErr error, recvErr error) {
 	wg.Wait()
 	m.state.Store(muxerStopped)
 
-	// This prevents startKeepAlive from blocking indefinitely waiting for a tube that isn't coming
-	select {
-	case m.keepAliveTubeChan <- nil:
-	default:
-	}
-
 	close(m.sendQueue)
 	close(m.tubeQueue)
-	<-m.recvKeepAliveDone
-	<-m.sendKeepAliveDone
 
 	m.underlying.Close()
 

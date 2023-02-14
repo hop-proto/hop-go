@@ -63,6 +63,12 @@ func (u *Unreliable) sender() {
 }
 
 func (u *Unreliable) makeInitFrame(req bool) initiateFrame {
+	var flags byte
+	if req {
+		flags |= FlagREQ
+	} else {
+		flags |= FlagRESP
+	}
 	return initiateFrame{
 		tubeID:     u.id,
 		tubeType:   u.tType,
@@ -70,13 +76,7 @@ func (u *Unreliable) makeInitFrame(req bool) initiateFrame {
 		dataLength: 0,
 		frameNo:    0,
 		windowSize: 0,
-		flags: frameFlags{
-			ACK:  false,
-			FIN:  false,
-			REQ:  req,
-			RESP: !req,
-			REL:  false,
-		},
+		flags:      flags,
 	}
 }
 
@@ -111,11 +111,11 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 	// Log the packet
 	u.log.WithFields(logrus.Fields{
 		"frameno": pkt.frameNo,
-		"req":     pkt.flags.REQ,
-		"resp":    pkt.flags.RESP,
-		"rel":     pkt.flags.REL,
-		"ack":     pkt.flags.ACK,
-		"fin":     pkt.flags.FIN,
+		"req":     pkt.hasFlags(FlagREQ),
+		"resp":    pkt.hasFlags(FlagRESP),
+		"rel":     pkt.hasFlags(FlagREL),
+		"ack":     pkt.hasFlags(FlagACK),
+		"fin":     pkt.hasFlags(FlagFIN),
 		"state":   u.state.Load(),
 	}).Debug("receiving initiate packet")
 
@@ -124,7 +124,7 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 	}
 
 	// Send a RESP packet in response to REQ packets
-	if pkt.flags.REQ && u.state.Load() != closed {
+	if pkt.hasFlags(FlagREQ) && u.state.Load() != closed {
 		u.log.Trace("sending RESP packet")
 		p := u.makeInitFrame(false)
 		u.sendQueue <- p.toBytes()
@@ -139,7 +139,7 @@ func (u *Unreliable) receive(pkt *frame) error {
 	default:
 		return nil
 	}
-	if pkt.flags.FIN {
+	if pkt.hasFlags(FlagFIN) {
 		u.recv.Close()
 	}
 	return nil
@@ -205,15 +205,8 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 	}
 
 	pkt := frame{
-		tubeID: u.id,
-		flags: frameFlags{
-			ACK:  false,
-			FIN:  false,
-			REQ:  false,
-			RESP: false,
-			REL:  false,
-		},
-
+		tubeID:     u.id,
+		flags:      0,
 		dataLength: dataLength,
 		frameNo:    u.frameNo.Load(),
 		data:       b,
@@ -240,15 +233,8 @@ func (u *Unreliable) Close() error {
 	}
 
 	pkt := frame{
-		tubeID: u.id,
-		flags: frameFlags{
-			ACK:  false,
-			FIN:  true,
-			REQ:  false,
-			RESP: false,
-			REL:  false,
-		},
-
+		tubeID:     u.id,
+		flags:      FlagFIN,
 		dataLength: 0,
 		frameNo:    u.frameNo.Load(),
 		data:       []byte{},

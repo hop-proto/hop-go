@@ -196,11 +196,11 @@ func (r *receiver) receive(p *frame) (bool, error) {
 		"windowEnd":   windowEnd,
 	})
 
-	if (p.dataLength > 0 || p.flags.FIN) && frameInBounds(windowStart, windowEnd, frameNo) {
+	if p.dataLength > 0 || (p.hasFlags(FlagFIN) && frameInBounds(windowStart, windowEnd, frameNo)) {
 		heap.Push(&r.fragments, &pqItem{
 			value:    p.data,
 			priority: frameNo,
-			FIN:      p.flags.FIN,
+			FIN:      p.hasFlags(FlagFIN),
 		})
 		log.Trace("in bounds frame")
 	} else {

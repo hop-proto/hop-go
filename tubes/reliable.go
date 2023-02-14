@@ -62,6 +62,13 @@ var _ Tube = &Reliable{}
 func (r *Reliable) initiate(req bool) {
 	defer close(r.initDone)
 	notInit := true
+	var flags byte
+	if req {
+		flags |= FlagREQ
+	} else {
+		flags |= FlagRESP
+	}
+	flags |= (FlagREL | FlagACK)
 
 	if req {
 		p := initiateFrame{
@@ -71,13 +78,7 @@ func (r *Reliable) initiate(req bool) {
 			dataLength: 0,
 			frameNo:    0,
 			windowSize: r.recvWindow.getWindowSize(),
-			flags: frameFlags{
-				REQ:  req,
-				RESP: !req,
-				REL:  true,
-				ACK:  true,
-				FIN:  false,
-			},
+			flags:      flags,
 		}
 		ticker := time.NewTicker(retransmitOffset)
 		for notInit {
@@ -106,15 +107,14 @@ func (r *Reliable) send() {
 		pkt.tubeID = r.id
 		pkt.ackNo = r.recvWindow.getAck()
 		r.lastAckSent.Store(pkt.ackNo)
-		pkt.flags.ACK = true
-		pkt.flags.REL = true
+		pkt.flags |= (FlagACK | FlagREL)
 		r.sendQueue <- pkt.toBytes()
 
 		r.log.WithFields(logrus.Fields{
 			"frameno": pkt.frameNo,
 			"ackno":   pkt.ackNo,
-			"ack":     pkt.flags.ACK,
-			"fin":     pkt.flags.FIN,
+			"ack":     pkt.hasFlags(FlagACK),
+			"fin":     pkt.hasFlags(FlagFIN),
 			"dataLen": pkt.dataLength,
 		}).Trace("sent packet")
 	}
@@ -131,15 +131,15 @@ func (r *Reliable) receive(pkt *frame) error {
 	r.log.WithFields(logrus.Fields{
 		"frameno": pkt.frameNo,
 		"ackno":   pkt.ackNo,
-		"ack":     pkt.flags.ACK,
-		"fin":     pkt.flags.FIN,
+		"ack":     pkt.hasFlags(FlagACK),
+		"fin":     pkt.hasFlags(FlagFIN),
 		"dataLen": pkt.dataLength,
 	}).Trace("receiving packet")
 
 	// created and closed tubes cannot handle incoming packets
 	if r.tubeState == created || r.tubeState == closed {
 		r.log.WithFields(logrus.Fields{
-			"fin":   pkt.flags.FIN,
+			"fin":   pkt.hasFlags(FlagFIN),
 			"state": r.tubeState,
 		}).Info("receive for tube in bad state")
 
@@ -150,12 +150,12 @@ func (r *Reliable) receive(pkt *frame) error {
 	finProcessed, err := r.recvWindow.receive(pkt)
 
 	// Pass the frame to the sender
-	if pkt.flags.ACK {
+	if pkt.hasFlags(FlagACK) {
 		r.sender.recvAck(pkt.ackNo)
 	}
 
 	// Handle ACK of FIN frame
-	if pkt.flags.ACK && r.tubeState != initiated && r.sender.unAckedFramesRemaining() == 0 {
+	if pkt.hasFlags(FlagACK) && r.tubeState != initiated && r.sender.unAckedFramesRemaining() == 0 {
 		switch r.tubeState {
 		case finWait1:
 			r.tubeState = finWait2
@@ -170,7 +170,7 @@ func (r *Reliable) receive(pkt *frame) error {
 	}
 
 	// Handle FIN frame
-	if (pkt.flags.FIN && r.recvWindow.closed.Load()) || finProcessed {
+	if (pkt.hasFlags(FlagFIN) && r.recvWindow.closed.Load()) || finProcessed {
 		switch r.tubeState {
 		case initiated:
 			r.tubeState = closeWait
@@ -192,7 +192,7 @@ func (r *Reliable) receive(pkt *frame) error {
 	}
 
 	// ACK every data packet
-	if pkt.dataLength > 0 && r.tubeState != closed && !pkt.flags.FIN {
+	if pkt.dataLength > 0 && r.tubeState != closed && !pkt.hasFlags(FlagFIN) {
 		r.sender.sendEmptyPacket()
 	}
 
@@ -232,11 +232,11 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 	// Log the packet
 	r.log.WithFields(logrus.Fields{
 		"frameno": pkt.frameNo,
-		"req":     pkt.flags.REQ,
-		"resp":    pkt.flags.RESP,
-		"rel":     pkt.flags.REL,
-		"ack":     pkt.flags.ACK,
-		"fin":     pkt.flags.FIN,
+		"req":     pkt.hasFlags(FlagREQ),
+		"resp":    pkt.hasFlags(FlagRESP),
+		"rel":     pkt.hasFlags(FlagREL),
+		"ack":     pkt.hasFlags(FlagACK),
+		"fin":     pkt.hasFlags(FlagFIN),
 	}).Debug("receiving initiate packet")
 
 	if r.tubeState == created {
@@ -249,7 +249,7 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		close(r.initRecv)
 	}
 
-	if pkt.flags.REQ && r.tubeState != closed {
+	if pkt.hasFlags(FlagREQ) && r.tubeState != closed {
 		p := initiateFrame{
 			tubeID:     r.id,
 			tubeType:   r.tType,
@@ -257,13 +257,7 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 			dataLength: 0,
 			frameNo:    0,
 			windowSize: r.recvWindow.getWindowSize(),
-			flags: frameFlags{
-				REQ:  false,
-				RESP: true,
-				REL:  true,
-				ACK:  true,
-				FIN:  false,
-			},
+			flags:      FlagRESP | FlagREL | FlagACK,
 		}
 		r.sendQueue <- p.toBytes()
 	}

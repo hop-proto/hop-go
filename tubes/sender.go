@@ -285,12 +285,7 @@ func (s *sender) sendFin() error {
 		dataLength: 0,
 		frameNo:    s.frameNo,
 		data:       []byte{},
-		flags: frameFlags{
-			ACK:  true,
-			FIN:  true,
-			REQ:  false,
-			RESP: false,
-		},
+		flags:      FlagACK | FlagFIN,
 	}
 	s.finFrameNo = pkt.frameNo
 	s.log.WithField("frameNo", pkt.frameNo).Debug("queueing FIN packet")
