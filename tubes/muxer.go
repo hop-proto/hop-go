@@ -115,7 +115,7 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, party Party, log
 	}
 
 	mux.state.Store(muxerRunning)
-	mux.start()
+	mux.start() // TODO(dadrian): Should this be an explicit call?
 
 	return mux
 }
@@ -392,15 +392,10 @@ func (m *Muxer) sender() {
 	m.senderErr <- err
 }
 
-// start begins the goroutines that make the muxer work. Specifically,
-// it starts the sender, the receiver, and the keep alive tubes.
+// Start begins the goroutines internal to the muxer.
 func (m *Muxer) start() {
 	go m.sender()
 	go m.receiver()
-
-	// lock needed to call makeUnreliableTubeWithID
-	m.m.Lock()
-	defer m.m.Unlock()
 
 	// TODO(dadrian): Previously, we created a keep-alive tube with ID zero
 	// here. We may still want to reserve ID 0 for some sort of control?
