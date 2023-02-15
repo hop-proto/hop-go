@@ -28,6 +28,7 @@ const (
 	SNILen       = 256
 	SessionIDLen = 4
 	CounterLen   = 8
+	TimestampLen = 8
 )
 
 // MaxTotalPacketSize is MaxUDPPacketSize minus bytes used by Ethernet frames and Wifi frames.
