@@ -32,7 +32,7 @@ test: ## test
 test:
 	go test -race ./... -timeout 4m
 
-.PHONY: containers-cred-gen
+.PHONY: cred-gen
 cred-gen: ## generates credentials for container tests
 	./hack/container_cred_gen.sh
 
