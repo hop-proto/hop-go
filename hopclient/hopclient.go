@@ -339,7 +339,7 @@ func (c *HopClient) HandleTubes() {
 
 	proxyQueue := newPTProxyTubeQueue()
 
-	for t, err := c.TubeMuxer.Accept(); err != nil; {
+	for t, err := c.TubeMuxer.Accept(); err == nil; {
 		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v. Reliable? %t", t.Type(), t.IsReliable())
 
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
