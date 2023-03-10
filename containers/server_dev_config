@@ -2,4 +2,6 @@ ListenAddress = ":77"
 
 Key = "/etc/hopd/id_hop.pem"
 Certificate = "/etc/hopd/id_hop.cert"
-InsecureSkipVerify = true
+CAFiles = [ "/etc/hopd/intermediate.cert" , "/etc/hopd/root.cert"]
+
+Users = ["root"]
