@@ -2,15 +2,20 @@
 serve-dev:
 	go run . server
 
-# go build -o ../containers/hop ../cmd/hop
+# the hop binary needs to be able to run on the docker container
+# TODO(baumanl): figure out weirdness with cross-compilation and kravatte
 .PHONY: authgrant-dev
 authgrant-dev:
+	go build -o ../containers/hop ../cmd/hop
 	go run . target
 	go run . delegate
 
-# go build -o ../containers/hop ../cmd/hop
+
+# the hop binary needs to be able to run on the docker container
+# TODO(baumanl): figure out weirdness with cross-compilation and kravatte
 .PHONY: authgrant-chain-dev
 authgrant-chain-dev:
+	go build -o ../containers/hop ../cmd/hop
 	go run . target
 	go run . delegate
 	go run . third
