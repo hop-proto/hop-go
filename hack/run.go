@@ -44,7 +44,7 @@ func runContainer(ctx context.Context, c *client.Client, id string, hostport str
 	containerConfig := container.Config{
 		Image:        id,
 		Volumes:      map[string]struct{}{"/app": {}},
-		ExposedPorts: nat.PortSet{"77/udp": {}},
+		ExposedPorts: nat.PortSet{"77/udp": {}, "22/tcp": {}},
 	}
 	hostConfig := container.HostConfig{
 		Mounts: []mount.Mount{
@@ -52,10 +52,13 @@ func runContainer(ctx context.Context, c *client.Client, id string, hostport str
 				Type:     mount.TypeBind,
 				Source:   data.Workspace(),
 				Target:   "/app",
-				ReadOnly: true,
+				ReadOnly: false,
 			},
 		},
-		PortBindings: nat.PortMap{"77/udp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: hostport}}},
+		PortBindings: nat.PortMap{
+			"77/udp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: hostport}},
+			"22/tcp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: hostport}},
+		},
 		AutoRemove:   true,
 	}
 	res, err := c.ContainerCreate(ctx, &containerConfig, &hostConfig, nil, nil, "")
@@ -112,6 +115,13 @@ func main() {
 			logrus.Fatalf("unable to build container: %s", err)
 		}
 		if err := runContainer(ctx, c, "third_server", "6666"); err != nil {
+			logrus.Fatalf("unable to run container: %s", err)
+		}
+	case "measurement":
+		if err := buildContainer(ctx, c, "./hopd-measurement.dockerfile", "hopd-measurement"); err != nil {
+			logrus.Fatalf("unable to build container: %s", err)
+		}
+		if err := runContainer(ctx, c, "hopd-measurement", "7777"); err != nil {
 			logrus.Fatalf("unable to run container: %s", err)
 		}
 	case "":

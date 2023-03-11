@@ -19,3 +19,7 @@ authgrant-chain-dev:
 	go run . target
 	go run . delegate
 	go run . third
+
+.PHONY: measurement-dev
+measurement-dev:
+	go run . measurement

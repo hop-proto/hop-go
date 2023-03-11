@@ -55,4 +55,5 @@ serve-dev: ## launch a container running the server with code mounted in
 
 .PHONY: measurements
 measurements: ## builds executable to help run measurements
+	make -C hack measurement-dev
 	make -C measurements
