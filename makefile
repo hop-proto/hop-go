@@ -53,4 +53,6 @@ authgrant-chain-dev: ## launch three containers
 serve-dev: ## launch a container running the server with code mounted in
 	make -C hack serve-dev
 
-
+.PHONY: measurements
+measurements: ## builds executable to help run measurements
+	make -C measurements
