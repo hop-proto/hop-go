@@ -98,19 +98,16 @@ int main(int argc, char *argv[]) {
             then -= start;
             printf("process start at: %lu microseconds\nkey string at: %lu microseconds\ndiff: %lu microseconds\n", then, now, now - then);
             // printf("%s\n", buf);
+            
 
-            // Closing the write end of the pipe closes the child process
-            // At least it does for hop
-            // TODO(hosono) ssh doesn't actually close when you close this file
-            CHECK_STATUS(close(pstdin));
+            // Write "exit" to the pipe closes both ssh and hop
+            char* exit_str = "exit\n";
+            nbytes = write(pstdin, exit_str, strlen(exit_str));
+            CHECK_STATUS(nbytes); // hack to print errno if an error occurs
+            assert((size_t)nbytes == strlen(exit_str) && "didn't write all of exit");
 
-            CHECK_STATUS(kill(pid, SIGINT));
-
-            // We intentionally orphan the process here since hop and ssh both close once stdin is closed
-            if (waitpid(pid, NULL, WNOHANG) == -1) {
-                perror("waitpid");
-                return 1;
-            }
+            // We intentionally orphan the process here since hop takes a while to exit
+            // sending "exit" will close both hop and ssh eventually
             return 0;
         }
         nread += nbytes;
