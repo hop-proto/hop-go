@@ -1,0 +1,5 @@
+# we build the hop executable to prevent our tests from being skewed by rebuilding it
+hop
+
+# ignore the pty_time executable
+pty_time/pty_time
