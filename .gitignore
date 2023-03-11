@@ -12,3 +12,5 @@ wireshark/lib*
 containers/delegate_proxy_server/hop
 containers/*/hop
 containers/hop
+go/
+Library/

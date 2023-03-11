@@ -6,8 +6,6 @@
 
 package kravatte
 
-import "math/bits"
-
 // rc stores the round constants for use in the ι step.
 var rc = [24]uint64{
 	0x0000000000000001,

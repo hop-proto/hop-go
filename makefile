@@ -32,12 +32,16 @@ test: ## test
 test:
 	go test -race ./... -timeout 4m
 
+.PHONY: cred-gen
+cred-gen: ## generates credentials for container tests
+	./hack/container_cred_gen.sh
+
 .PHONY: authgrant-dev
-authgrant-dev: ## launch two containers (run hack/authgrant_gen.sh for creds)
+authgrant-dev: ## launch two containers
 	make -C hack authgrant-dev
 
 .PHONY: authgrant-chain-dev
-authgrant-chain-dev: ## launch three containers (run hack/authgrant_gen.sh for creds)
+authgrant-chain-dev: ## launch three containers
 	make -C hack authgrant-chain-dev
 
 .PHONY: serve-dev

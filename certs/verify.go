@@ -204,7 +204,7 @@ func unexpectedTypeError(c *Certificate, expectedType CertificateType) error {
 func mismatchedName(c *Certificate, target Name) error {
 	return &verifyError{
 		reason: ReasonMismatchedName,
-		error:  fmt.Errorf("%s: %x not valid for name %d:%s", ReasonMismatchedName, c.Fingerprint, target.Type, target.Label),
+		error:  fmt.Errorf("%s: %x not valid for name %d: %s", ReasonMismatchedName, c.Fingerprint, target.Type, target.Label),
 	}
 }
 
