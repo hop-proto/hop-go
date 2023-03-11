@@ -1,5 +1,5 @@
 CC := gcc
-CFLAGS := -Ofast -g
+CFLAGS := -Ofast -Wextra -Wall -Werror
 
 GO_FILES := $(shell find .. -name "*.go")
 
@@ -9,8 +9,7 @@ pty_time/pty_time: pty_time/pty_time.c
 	$(CC) $(CFLAGS) $^ -o $@
 
 hop: $(GO_FILES)
-	go build ../cmd/hop/main.go
-	mv main hop
+	go build -o hop ../cmd/hop/main.go
 
 .PHONY: clean
 clean:
