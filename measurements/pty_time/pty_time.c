@@ -55,10 +55,8 @@ int main(int argc, char *argv[]) {
     }
     uint64_t start = get_time();
     char name[1000];
-    // p for primary r for replica
-    int pstdin, pstdout, rstdin, rstdout;
-    CHECK_STATUS(openpty(&pstdin, &rstdin, name, NULL, NULL));
-    CHECK_STATUS(openpty(&pstdout, &rstdout, name, NULL, NULL));
+    int primary, replica;
+    CHECK_STATUS(openpty(&primary, &replica, name, NULL, NULL));
     int fildes[2];
     CHECK_STATUS(pipe(fildes));
     pid_t pid = fork();
@@ -72,23 +70,21 @@ int main(int argc, char *argv[]) {
         close(1);
         close(2);
         // copy replica
-        dup2(rstdin, 0);
-        dup2(rstdout, 1);
-        dup2(rstdout, 2);
-        close(pstdin);
-        close(pstdout);
+        dup2(replica, 0);
+        dup2(replica, 1);
+        dup2(replica, 2);
+        close(primary);
         uint64_t time = get_time();
         CHECK_STATUS(Write(fildes[1], &time, sizeof(time)));
         execvp(argv[2], argv + 2);
         CHECK_STATUS(0);  // should never reach
     }
-    close(rstdin);
-    close(rstdout);
+    close(replica);
     char buf[16 * 1024];
     size_t nread = 0;
     while (1) {
         assert(sizeof(buf) - nread);
-        ssize_t nbytes = read(pstdout, buf + nread, sizeof(buf) - nread);
+        ssize_t nbytes = read(primary, buf + nread, sizeof(buf) - nread);
         CHECK_STATUS(nbytes);
         if (strstr((nread > key_len) ? buf + nread - key_len : buf, key) != NULL) {
             uint64_t now = get_time();
@@ -96,15 +92,13 @@ int main(int argc, char *argv[]) {
             CHECK_STATUS(Read(fildes[0], &then, sizeof(then)));
             now -= start;
             then -= start;
-            printf("process start at: %lu microseconds\nkey string at: %lu microseconds\ndiff: %lu microseconds\n", then, now, now - then);
+            printf("process start at: %llu microseconds\nkey string at: %llu microseconds\ndiff: %llu microseconds\n", then, now, now - then);
             // printf("%s\n", buf);
             
 
             // Write "exit" to the pipe closes both ssh and hop
             char* exit_str = "exit\n";
-            nbytes = write(pstdin, exit_str, strlen(exit_str));
-            CHECK_STATUS(nbytes); // hack to print errno if an error occurs
-            assert((size_t)nbytes == strlen(exit_str) && "didn't write all of exit");
+            CHECK_STATUS(Write(primary, exit_str, strlen(exit_str)));
 
             // We intentionally orphan the process here since hop takes a while to exit
             // sending "exit" will close both hop and ssh eventually
