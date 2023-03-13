@@ -1,3 +1,4 @@
+// hcp is a utility for copying files over hop
 package main
 
 import (
@@ -20,7 +21,7 @@ func main() {
 		logrus.Error(err)
 		return
 	}
- 
+
 	if f.IsRemote {
 		logrus.Info("Running as server")
 		server(f)
@@ -36,7 +37,7 @@ func parsePath(path string) (*core.URL, string, error) {
 	urlStr := ""
 	file := arr[len(arr)-1]
 
-	var url *core.URL = nil
+	var url *core.URL
 	var err error
 	if len(arr) > 1 {
 		urlStr = strings.Join(arr[:len(arr)-1], ":")
@@ -116,7 +117,6 @@ func client(f *flags.HcpFlags) {
 	}
 	f.Flags.Address = addr
 
-
 	srcFlag := ""
 	if srcURL != nil {
 		srcFlag = "-s"
@@ -152,33 +152,27 @@ func client(f *flags.HcpFlags) {
 		return
 	}
 
+	// TODO(hosono) currently Start does not return. But running start in a goroutine
+	// creates a race condition on accessing the ExecTube
 	err = client.Start()
 	if err != nil {
 		logrus.Error(err)
 	}
 
+	// TODO(hosono) figure out the best way to copy into an ExecTube
 	if srcURL == nil { // local to remote, read from local filesystem
-		_, err = io.Copy(client.ExecTube.Tube, localFd)
+		_, err = io.Copy(nil, localFd)
 	} else { // remote to local, write to local file system
-		_, err = io.Copy(localFd, client.ExecTube.Tube)
+		_, err = io.Copy(localFd, nil)
 	}
 	if err != nil {
 		logrus.Errorf("error copying: %v", err)
 		return
 	}
-
 	logrus.Info("Done copying")
-	err = client.ExecTube.Tube.Close()
-	if err != nil {
-		logrus.Errorf("error closing tube: %v", err)
-	}
-
-	client.Wait()
 
 	err = client.Close()
 	if err != nil {
 		logrus.Errorf("Error closing connection: %v", err)
 	}
-	return
-
 }

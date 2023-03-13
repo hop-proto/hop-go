@@ -5,8 +5,8 @@ import (
 	"flag"
 )
 
+// ErrMissingSrcFile indicates that no files were provided in the hcp command line arguments
 var ErrMissingSrcFile = errors.New("missing source file")
-var ErrMissingDstFile = errors.New("missing destination file")
 
 // HcpFlags holds CLI arguments for the hcp program.
 type HcpFlags struct {
@@ -15,7 +15,7 @@ type HcpFlags struct {
 	SrcFile  string // the source file to be copied from
 	DstFile  string // the destination to copy to
 
-	Flags*   ClientFlags // flags for the underlying hop instance
+	Flags *ClientFlags // flags for the underlying hop instance
 }
 
 // defineHcpFlags calls fs.StringVar for hcp
