@@ -6,6 +6,7 @@ export TIMEFORMAT="%3R"
 output_file=throughput.csv
 rm $output_file
 
+# takes in the name of a file to transfer
 hop_transfer_file() {
     echo -n "hop time $1 (seconds)," >> $output_file
     for i in {1..100}; do
@@ -19,6 +20,7 @@ hop_transfer_file() {
     echo "" >> $output_file
 }
 
+# takes in the name of a file to transfer
 ssh_transfer_file() {
     echo -n "ssh time $1 (seconds)," >> $output_file
     for i in {1..100}; do

@@ -11,6 +11,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/strslice"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -59,6 +60,7 @@ func runContainer(ctx context.Context, c *client.Client, id string, hostport str
 			"77/udp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: hostport}},
 			"22/tcp": []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: hostport}},
 		},
+		CapAdd: strslice.StrSlice{"NET_ADMIN"},
 		AutoRemove: true,
 	}
 	res, err := c.ContainerCreate(ctx, &containerConfig, &hostConfig, nil, nil, "")

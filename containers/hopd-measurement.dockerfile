@@ -18,5 +18,7 @@ RUN apt update
 RUN apt install -y ssh
 RUN mkdir -p /run/sshd
 
+RUN apt install -y iproute2
+
 WORKDIR /app
 CMD ./containers/hopd-measurement-wrapper.sh
