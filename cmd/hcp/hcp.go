@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -15,52 +14,44 @@ import (
 )
 
 func main() {
-	f := new(flags.ClientFlags)
-	fs := new(flag.FlagSet)
-
-	var isRemote bool
-	var isSource bool
-	fs.BoolVar(&isRemote, "t", false, "run hcp in remote mode")
-	fs.BoolVar(&isSource, "s", false, "if running in remote mode read from file and write to stdout")
-	flags.DefineClientFlags(fs, f)
-
-	err := fs.Parse(os.Args[1:])
+	logrus.SetLevel(logrus.DebugLevel)
+	f, err := flags.ParseHcpArgs(os.Args)
 	if err != nil {
 		logrus.Error(err)
 		return
 	}
-
-	if !isRemote && fs.NArg() < 2 {
-		logrus.Error("Usage: hcp source target")
-		return
-	}
-
-	if isRemote {
+ 
+	if f.IsRemote {
 		logrus.Info("Running as server")
-		server(fs.Arg(0), isSource)
+		server(f)
 	} else {
 		logrus.Info("Running as client")
-		srcURL, srcFile := parsePath(fs.Arg(0))
-		dstURL, dstFile := parsePath(fs.Arg(1))
-		client(srcURL, srcFile, dstURL, dstFile, f)
+		client(f)
 	}
 }
 
-func parsePath(path string) (string, string) {
+func parsePath(path string) (*core.URL, string, error) {
 	arr := strings.Split(path, ":")
 
-	url := ""
+	urlStr := ""
 	file := arr[len(arr)-1]
 
+	var url *core.URL = nil
+	var err error
 	if len(arr) > 1 {
-		url = strings.Join(arr[:len(arr)-1], ":")
+		urlStr = strings.Join(arr[:len(arr)-1], ":")
+		url, err = core.ParseURL(urlStr)
+		if err != nil {
+			return nil, "", err
+		}
 	}
-	return url, file
+	return url, file, nil
 }
 
-func server(remoteFile string, isSource bool) {
-	if isSource {
-		remoteFd, err := os.Open(remoteFile)
+func server(f *flags.HcpFlags) {
+	if f.IsSource {
+		logrus.Info("source for copy")
+		remoteFd, err := os.Open(f.SrcFile)
 		if err != nil {
 			logrus.Error(err)
 			return
@@ -72,13 +63,17 @@ func server(remoteFile string, isSource bool) {
 			return
 		}
 	} else {
-		remoteFd, err := os.Create(remoteFile)
+		logrus.Info("destination for copy")
+		remoteFd, err := os.Create(f.DstFile)
+		logrus.Info("created destination file")
 		if err != nil {
 			logrus.Error(err)
 			return
 		}
 
+		logrus.Info("copying from stdin")
 		_, err = io.Copy(remoteFd, os.Stdin)
+		logrus.Info("copying done")
 		if err != nil {
 			logrus.Error(err)
 			return
@@ -86,23 +81,24 @@ func server(remoteFile string, isSource bool) {
 	}
 }
 
-func client(srcURL string, srcFile string, dstURL string, dstFile string, f *flags.ClientFlags) {
+func client(f *flags.HcpFlags) {
+	srcURL, srcFile, err := parsePath(f.SrcFile)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+	dstURL, dstFile, err := parsePath(f.DstFile)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
 
 	var addr *core.URL
-	var err error
-	if srcURL == "" && dstURL != "" { // local to remote case
-		addr, err = core.ParseURL(dstURL)
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-	} else if srcURL != "" && dstURL == "" { // remote to local case
-		addr, err = core.ParseURL(srcURL)
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-	} else if srcURL == "" && dstURL == "" { // local to local case
+	if srcURL == nil && dstURL != nil { // local to remote case
+		addr = dstURL
+	} else if srcURL != nil && dstURL == nil { // remote to local case
+		addr = srcURL
+	} else if srcURL == nil && dstURL == nil { // local to local case
 		dstFd, err := os.Create(dstFile)
 		if err != nil {
 			logrus.Error(err)
@@ -118,26 +114,17 @@ func client(srcURL string, srcFile string, dstURL string, dstFile string, f *fla
 	} else { // TODO(hosono) remote to remote case
 		logrus.Error("TODO: remote to remote case")
 	}
-	f.Address = addr
+	f.Flags.Address = addr
 
-	// cc will be result of merging config file settings and flags
-	cc, err := flags.LoadClientConfigFromFlags(f)
-	if err != nil {
-		logrus.Error(err)
-		return
+
+	srcFlag := ""
+	if srcURL != nil {
+		srcFlag = "-s"
 	}
-
-	cc.Shell = false
-
-	if srcURL == "" {
-		cc.Cmd = fmt.Sprintf("/go/bin/hcp -t %s", dstFile)
-	} else {
-		// read from remote server
-		cc.Cmd = fmt.Sprintf("/go/bin/hcp -t -s %s", srcFile)
-	}
+	f.Flags.Cmd = fmt.Sprintf("/go/bin/hcp -t %s %s %s", srcFlag, srcFile, dstFile)
 
 	var localFd *os.File
-	if srcURL == "" { // local to remote, read from local filesystem
+	if srcURL == nil { // local to remote, read from local filesystem
 		localFd, err = os.Open(srcFile)
 	} else { // remote to local, write to local filesystem
 		localFd, err = os.Create(dstFile)
@@ -147,7 +134,13 @@ func client(srcURL string, srcFile string, dstURL string, dstFile string, f *fla
 		return
 	}
 
-	client, err := hopclient.NewHopClient(cc, f.Address.Host)
+	hc, err := flags.LoadClientConfigFromFlags(f.Flags)
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
+
+	client, err := hopclient.NewHopClient(hc)
 	if err != nil {
 		logrus.Error(err)
 		return
@@ -158,23 +151,34 @@ func client(srcURL string, srcFile string, dstURL string, dstFile string, f *fla
 		logrus.Error(err)
 		return
 	}
-	client.Start()
-	defer client.Wait()
-	defer func() {
-		err = client.ExecTube.Close()
-		if err != nil {
-			logrus.Error(err)
-		}
-	}()
 
-	if srcURL == "" { // local to remote, read from local filesystem
+	err = client.Start()
+	if err != nil {
+		logrus.Error(err)
+	}
+
+	if srcURL == nil { // local to remote, read from local filesystem
 		_, err = io.Copy(client.ExecTube.Tube, localFd)
 	} else { // remote to local, write to local file system
 		_, err = io.Copy(localFd, client.ExecTube.Tube)
 	}
 	if err != nil {
-		logrus.Error(err)
+		logrus.Errorf("error copying: %v", err)
 		return
 	}
+
 	logrus.Info("Done copying")
+	err = client.ExecTube.Tube.Close()
+	if err != nil {
+		logrus.Errorf("error closing tube: %v", err)
+	}
+
+	client.Wait()
+
+	err = client.Close()
+	if err != nil {
+		logrus.Errorf("Error closing connection: %v", err)
+	}
+	return
+
 }
