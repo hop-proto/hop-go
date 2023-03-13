@@ -36,7 +36,7 @@ int Read(int fd, void *buf, size_t nbytes) {
     size_t nread = 0;
     while (nread < nbytes) {
         ssize_t res = read(fd, (char *)buf + nread, nbytes - nread);
-        if (res < 0) {
+        if (res <= 0) {
             return -1;
         }
         nread += res;
