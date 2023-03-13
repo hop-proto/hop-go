@@ -11,7 +11,25 @@ pty_time/pty_time: pty_time/pty_time.c
 hop: $(GO_FILES)
 	go build -o hop ../cmd/hop/main.go
 
+BIG_FILES := 1kB_file 1MB_file 100MB_file 1GB_file
+
+.PHONY: files
+files: $(BIG_FILES)
+
+1kB_file:
+	dd bs=1k count=1 if=/dev/urandom of=$@ status=progress
+
+1MB_file:
+	dd bs=1M count=1 if=/dev/urandom of=$@ status=progress
+
+100MB_file:
+	dd bs=4M count=25 if=/dev/urandom of=$@ status=progress
+
+1GB_file:
+	dd bs=4M count=250 if=/dev/urandom of=$@ status=progress
+
 .PHONY: clean
 clean:
 	-rm pty_time/pty_time
 	-rm hop
+	-rm $(BIG_FILES)

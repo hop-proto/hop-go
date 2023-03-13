@@ -92,7 +92,7 @@ int main(int argc, char *argv[]) {
             CHECK_STATUS(Read(fildes[0], &then, sizeof(then)));
             now -= start;
             then -= start;
-            printf("process start at: %llu microseconds\nkey string at: %llu microseconds\ndiff: %llu microseconds\n", then, now, now - then);
+            printf("process start at: %lu microseconds\nkey string at: %lu microseconds\ndiff: %lu microseconds\n", then, now, now - then);
             // printf("%s\n", buf);
             
 
