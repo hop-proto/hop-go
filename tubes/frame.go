@@ -23,8 +23,8 @@ type initiateFrame struct {
 
 // Optional bit flags set on each frame. Set flags by OR'ing them together.
 const (
-	FlagREQ  = 0
-	FlagRESP = 1
+	FlagREQ  = 1
+	FlagRESP = 1 << 1
 	FlagREL  = 1 << 2
 	FlagACK  = 1 << 3
 	FlagFIN  = 1 << 4
@@ -59,6 +59,7 @@ func (p *frame) toBytes() []byte {
 	return append(
 		[]byte{
 			p.tubeID, p.flags,
+			dataLength[0], dataLength[1],
 			ackNoBytes[0], ackNoBytes[1], ackNoBytes[2], ackNoBytes[3],
 			frameNoBytes[0], frameNoBytes[1], frameNoBytes[2], frameNoBytes[3],
 		},
