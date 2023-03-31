@@ -26,7 +26,7 @@ go run ${HOME}/cmd/hop-issue -type intermediate -key-file $CAFILES_OUTPUT_DIR/ro
 
 # Generate files for make serve-dev (simple hop connection)
 ## server
-EXAMPLE_CERT_DNS_NAME=${EXAMPLE_CERT_DNS_NAME:='example.com'}
+EXAMPLE_CERT_DNS_NAME=${EXAMPLE_CERT_DNS_NAME:='hop.h4ck.dev'}
 EXAMPLE_CERT_OUTPUT_DIR=${HOME}/${EXAMPLE_CERT_OUTPUT_DIR:='./containers'}
 
 ## client
