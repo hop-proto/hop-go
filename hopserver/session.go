@@ -2,6 +2,7 @@ package hopserver
 
 import (
 	"errors"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -247,7 +248,17 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 		} else {
 			// Signal nil to sess.pty so that window sizes don't indefinitely buffer
 			sess.pty <- nil
-			c.Stdin = tube
+
+			// Using a pipe here means that we we don't need to close the tube for the process to return
+			// we merely need to wait for the process to exit.
+			stdin, err := c.StdinPipe()
+			if err != nil {
+				logrus.Errorf("S: error creating stdin pipe: %v", err)
+				codex.SendFailure(tube, err)
+				return
+			}
+			go io.Copy(stdin, tube)
+
 			c.Stdout = tube
 			c.Stderr = tube
 			err = c.Start()

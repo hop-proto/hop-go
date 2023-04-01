@@ -144,7 +144,6 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 
 	go func(ex *ExecTube) {
 		io.Copy(tube, os.Stdin)
-		tube.Close()
 	}(&ex)
 
 	return &ex, nil
