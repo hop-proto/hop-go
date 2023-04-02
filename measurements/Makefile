@@ -11,7 +11,7 @@ pty_time/pty_time: pty_time/pty_time.c
 hop: $(GO_FILES)
 	go build -o hop ../cmd/hop/main.go
 
-BIG_FILES := 1kB_file 1MB_file 100MB_file 1GB_file 10GB_file
+BIG_FILES := 1kB_file 1MB_file 100MB_file 1GB_file #10GB_file
 
 .PHONY: files
 files: $(BIG_FILES)
