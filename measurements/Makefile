@@ -3,7 +3,10 @@ CFLAGS := -Ofast -Wextra -Wall -Werror
 
 GO_FILES := $(shell find .. -name "*.go")
 
-default: pty_time/pty_time hop
+default: pty_time/pty_time pty_time/time hop
+
+pty_time/time: pty_time/time.c
+	$(CC) $(CFLAGS) $^ -o $@
 
 pty_time/pty_time: pty_time/pty_time.c
 	$(CC) $(CFLAGS) $^ -o $@
