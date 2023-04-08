@@ -89,7 +89,7 @@ func (k *PrivateKey) String() string {
 // and the data must be the correct length.
 func DHKeyFromPEM(p *pem.Block) (*X25519KeyPair, error) {
 	if p.Type != PEMTypeDHPrivate {
-		return nil, fmt.Errorf("wront PEM type %q, want %q", p.Type, PEMTypeDHPrivate)
+		return nil, fmt.Errorf("wrong PEM type %q, want %q", p.Type, PEMTypeDHPrivate)
 	}
 	out := new(X25519KeyPair)
 	if len(p.Bytes) != 32 {

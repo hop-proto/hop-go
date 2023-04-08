@@ -90,7 +90,7 @@ func (k *SigningPrivateKey) String() string {
 // the correct header.
 func SigningKeyFromPEM(p *pem.Block) (*SigningKeyPair, error) {
 	if p.Type != PEMTypeSigningPrivate {
-		return nil, fmt.Errorf("wront PEM type %q, want %q", p.Type, PEMTypeSigningPrivate)
+		return nil, fmt.Errorf("wrong PEM type %q, want %q", p.Type, PEMTypeSigningPrivate)
 	}
 	if len(p.Bytes) != 32 {
 		return nil, fmt.Errorf("invalid private key length. expected %d bytes, got %d", 32, len(p.Bytes))
