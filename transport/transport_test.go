@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	// "github.com/sirupsen/logrus"
 	"go.uber.org/goleak"
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
@@ -25,8 +25,8 @@ func TestTransportAEAD(t *testing.T) {
 	assert.Check(t, cmp.Equal(sanse.Overhead(), TagLen))
 }
 
-func makeConn(t *testing.T) (*Client, *Handle, *Server, func(), bool, error) {
-	logrus.SetLevel(logrus.DebugLevel)
+func makeConn(t assert.TestingT) (*Client, *Handle, *Server, func(), bool, error) {
+	// logrus.SetLevel(logrus.DebugLevel)
 
 	serverPkt, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
