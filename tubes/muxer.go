@@ -116,6 +116,8 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 	mux.state.Store(muxerRunning)
 	mux.start()
 
+	mux.log.WithField("timeout (ms)", mux.timeout.Milliseconds()).Info("Created Muxer")
+
 	return mux
 }
 
@@ -448,12 +450,12 @@ func (m *Muxer) startKeepAlive() {
 		defer close(m.sendKeepAliveDone)
 		buf := make([]byte, 1)
 
-		keepAliveTime := m.timeout / 3
+		keepAliveTime := m.timeout / 4
 		if keepAliveTime == 0 {
 			keepAliveTime = 10 * retransmitOffset
 		}
 		ticker := time.NewTicker(keepAliveTime)
-		for {
+		for m.state.Load() == muxerRunning {
 			<-ticker.C
 			if tube == nil {
 				m.log.Info("haven't receive keep alive tube yet")
@@ -472,7 +474,7 @@ func (m *Muxer) startKeepAlive() {
 	go func() {
 		defer close(m.recvKeepAliveDone)
 		buf := make([]byte, 1)
-		for {
+		for m.state.Load() == muxerRunning {
 			_, err := tube.Read(buf)
 			if err != nil {
 				m.log.WithField("error", err).Info("Keep alive receiver ended")

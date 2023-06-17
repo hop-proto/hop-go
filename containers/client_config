@@ -6,3 +6,4 @@ CAFiles = ["containers/CAFiles/intermediate.cert", "containers/CAFiles/root.cert
 [[Hosts]]
 Patterns = ["127.0.0.1"]
 ServerName = "example.com"
+Port = 7777

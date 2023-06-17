@@ -129,7 +129,10 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 
 	go func(ex *ExecTube) {
 		defer wg.Done()
-		io.Copy(os.Stdout, ex.tube) // read bytes from tube to os.Stdout
+		_, err := io.Copy(os.Stdout, ex.tube) // read bytes from tube to os.Stdout
+		if err != nil {
+			logrus.Errorf("codex: error copying from tube to stdout: %s", err)
+		}
 		if oldState != nil {
 			term.Restore(int(os.Stdin.Fd()), oldState)
 		}
@@ -244,6 +247,11 @@ func HandleSize(tube *tubes.Reliable, ptyFile *os.File) {
 	for {
 		if size, err := readSize(tube); err == nil {
 			pty.Setsize(ptyFile, size)
+		} else {
+			if !errors.Is(err, io.EOF) {
+				logrus.Warnf("Handle size exited with unexpected error: %s", err)
+			}
+			return
 		}
 	}
 }

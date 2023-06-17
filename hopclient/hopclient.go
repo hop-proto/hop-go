@@ -317,7 +317,10 @@ func (c *HopClient) startExecTube() error {
 		logrus.Error(err)
 		return err
 	}
-	winSizeTube, err := c.TubeMuxer.CreateReliableTube(common.WinSizeTube)
+	var winSizeTube *tubes.Reliable
+	if c.hostconfig.UsePty {
+		winSizeTube, err = c.TubeMuxer.CreateReliableTube(common.WinSizeTube)
+	}
 	if err != nil {
 		codexTube.Close()
 		logrus.Error(err)
@@ -328,7 +331,9 @@ func (c *HopClient) startExecTube() error {
 		c.wg.Add(1)
 	} else {
 		codexTube.Close()
-		winSizeTube.Close()
+		if winSizeTube != nil {
+			winSizeTube.Close()
+		}
 	}
 	return err
 }
