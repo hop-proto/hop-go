@@ -28,7 +28,8 @@ const MaxFrameDataLength uint16 = 2000
 const maxBufferedPackets = 1000
 
 // amount of time before retransmitting packets
-const retransmitOffset = 500 * time.Millisecond
+// TODO(hosono) implement RTT measurements to dynamically adjust this
+const retransmitOffset = 2 * time.Second
 
 // the maximum number of packets to retransmit per rto
 // even if the window is larger, no more packets will be transmitted
@@ -38,9 +39,5 @@ const maxFragTransPerRTO = 50
 const windowSize = 128
 
 // TODO(hosono) choose this time
-// amount of time to linger in the timeWait state when closing
-const timeWaitTime = 3 * time.Second
-
-// TODO(hosono) choose this time
 // amount of time to wait for all all tubes to close when muxer is stopping
-const muxerTimeout = 2 * timeWaitTime
+const muxerTimeout = time.Minute

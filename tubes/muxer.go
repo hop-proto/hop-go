@@ -124,9 +124,9 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 func (m *Muxer) reapTube(t Tube) {
 	t.WaitForClose()
 
-	// This prevents tubes IDs from being reused while the remote peer is in the timeWait state.
+	// This prevents tubes IDs from being reused while the remote peer is waiting in lastAck.
 	if _, ok := t.(*Reliable); ok && t.GetID()%2 == m.idParity {
-		timer := time.NewTimer(timeWaitTime)
+		timer := time.NewTimer(2*retransmitOffset)
 		select {
 		case <-m.stopped:
 			t.getLog().Debug("reaper stopped")
@@ -489,14 +489,14 @@ func (m *Muxer) receiver() {
 	var err error
 
 	// When start finishes, it sends its error on this channel.
-	// m.Stop receives this error and passes it to the called.
+	// m.Stop receives this error and passes it to the caller.
 	defer func() {
 		// This case indicates that the muxer was stopped by m.Stop()
 		if m.state.Load() == muxerStopped {
 			m.log.WithFields(logrus.Fields{
 				"state": m.state.Load(),
 				"error": err,
-			}).Info("muxer receiver stopping")
+			}).Warn("muxer receiver stopping")
 			err = nil
 		} else if err != nil {
 			m.log.Infof("Muxer receiver ended with error: %s", err)
@@ -512,7 +512,8 @@ func (m *Muxer) receiver() {
 		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
 	}
 	for m.state.Load() != muxerStopped {
-		frame, err := m.readMsg()
+		var frame *frame
+		frame, err = m.readMsg()
 		if err != nil {
 			return
 		}

@@ -1,7 +1,6 @@
 package tubes
 
 import (
-	"io"
 	"net"
 	"sync"
 	"testing"
@@ -37,7 +36,7 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 
 	go func() {
 		defer wg.Done()
-		m1 = NewMuxer(c1, 30*retransmitOffset, false, logrus.WithFields(logrus.Fields{
+		m1 = NewMuxer(c1, 4*retransmitOffset, false, logrus.WithFields(logrus.Fields{
 			"muxer": "m1",
 			"test":  t.Name(),
 		}))
@@ -45,7 +44,7 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 	}()
 	go func() {
 		defer wg.Done()
-		m2 = NewMuxer(c2, 30*retransmitOffset, true, logrus.WithFields(logrus.Fields{
+		m2 = NewMuxer(c2, 4*retransmitOffset, true, logrus.WithFields(logrus.Fields{
 			"muxer": "m2",
 			"test":  t.Name(),
 		}))
@@ -55,28 +54,28 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 	wg.Wait()
 
 	stop = func() {
-		wg := sync.WaitGroup{}
-		wg.Add(2)
+		stopWg := sync.WaitGroup{}
+		stopWg.Add(2)
 		go func() {
 			sendErr, recvErr := m1.Stop()
 			assert.NilError(t, sendErr)
 			assert.NilError(t, recvErr)
-			wg.Done()
+			stopWg.Done()
 		}()
 		go func() {
 			sendErr, recvErr := m2.Stop()
 			assert.NilError(t, sendErr)
 			assert.NilError(t, recvErr)
-			wg.Done()
+			stopWg.Done()
 		}()
 
-		wg.Wait()
+		stopWg.Wait()
 
 		c1UDP.Close()
 		c2UDP.Close()
 
 		// This makes sure that lingering goroutines do not panic
-		time.Sleep(timeWaitTime + time.Second)
+		// time.Sleep(muxerTimeout + time.Second)
 	}
 
 	return m1, m2, stop
@@ -167,57 +166,8 @@ func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 	stop()
 }
 
-// this ensures that tubes can still be opened even if the remote host is in the timeWait state
-func reusingTubes(t *testing.T) {
-	m1, m2, stop := makeMuxers(1.0, t)
-
-	// Create a reliable tube
-	t1, err := m1.CreateReliableTube(common.ExecTube)
-	assert.NilError(t, err)
-	assert.DeepEqual(t, t1.GetID(), byte(1))
-	t2, err := m2.Accept()
-	assert.NilError(t, err)
-	t2Rel := t2.(*Reliable)
-
-	// Close it on both ends
-	t2.Close()
-	time.Sleep(100 * time.Millisecond)
-	t1.Close()
-	time.Sleep(100 * time.Millisecond)
-
-	t2Rel.l.Lock()
-	t2State := t2Rel.tubeState
-	t2Rel.l.Unlock()
-
-	assert.DeepEqual(t, t2State, timeWait)
-	time.Sleep(timeWaitTime + time.Second)
-
-	// Attempt to open another tube with the same ID
-	t1, err = m1.CreateReliableTube(common.ExecTube)
-	assert.NilError(t, err)
-	assert.DeepEqual(t, t1.GetID(), byte(1))
-	t2, err = m2.Accept()
-	assert.NilError(t, err)
-	t2Rel = t2.(*Reliable)
-
-	// Attempt to send data on that tube
-	data := []byte("hello")
-	n, err := t1.Write(data)
-	assert.DeepEqual(t, n, len(data))
-	assert.NilError(t, err)
-	err = t1.Close()
-	assert.NilError(t, err)
-
-	buf, err := io.ReadAll(t2Rel)
-	assert.NilError(t, err)
-
-	assert.DeepEqual(t, buf, data)
-
-	err = t2Rel.Close()
-	assert.NilError(t, err)
-
-	stop()
-}
+// TODO(hosono) write a test to check that when the remote host
+// has a tube waiting in lastAck, we don't reuse that tube ID.
 
 func TestMuxer(t *testing.T) {
 
@@ -241,5 +191,4 @@ func TestMuxer(t *testing.T) {
 	t.Run("ReliableTubes/Wait", func(t *testing.T) {
 		manyTubes(0.9, true, true, t)
 	})
-	t.Run("ReuseTubes", reusingTubes)
 }

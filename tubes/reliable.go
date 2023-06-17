@@ -27,7 +27,6 @@ const (
 	finWait1  state = iota
 	finWait2  state = iota
 	closing   state = iota
-	timeWait  state = iota
 	closed    state = iota
 )
 
@@ -42,7 +41,7 @@ type Reliable struct {
 	sendQueue  chan []byte
 	// +checklocks:l
 	tubeState     state
-	timeWaitTimer *time.Timer
+	lastAckTimer *time.Timer
 	lastAckSent   atomic.Uint32
 	closed        chan struct{}
 	initRecv      chan struct{}
@@ -161,8 +160,8 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.tubeState = finWait2
 			r.log.Debug("got ACK of FIN packet. going from finWait1 to finWait2")
 		case closing:
-			r.log.Debug("got ACK of FIN packet. going from closing to timeWait")
-			r.enterTimeWaitState()
+			r.log.Debug("got ACK of FIN packet. going from closing to closed")
+			r.enterClosedState()
 		case lastAck:
 			r.log.Debug("got ACK of FIN packet. going from lastAck to closed")
 			r.enterClosedState()
@@ -179,11 +178,9 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.tubeState = closing
 			r.log.Debug("got FIN packet. going from finWait1 to closing")
 		case finWait2:
-			r.log.Debug("got FIN packet. going from finWait2 to timeWait")
-			r.enterTimeWaitState()
-		case timeWait:
-			r.log.Debug("got FIN packet. reseting timeWait timer")
-			r.timeWaitTimer.Reset(timeWaitTime)
+			r.log.Debug("got FIN packet. going from finWait2 to closed")
+			r.sender.sendEmptyPacket()
+			r.enterClosedState()
 		}
 		if r.tubeState != closed {
 			r.log.Trace("sending ACK of FIN")
@@ -200,13 +197,13 @@ func (r *Reliable) receive(pkt *frame) error {
 }
 
 // +checklocks:r.l
-func (r *Reliable) enterTimeWaitState() {
-	r.tubeState = timeWait
+func (r *Reliable) enterLastAckState() {
+	r.tubeState = lastAck
 	r.sender.stopRetransmit()
-	r.timeWaitTimer = time.AfterFunc(timeWaitTime, func() {
+	r.lastAckTimer = time.AfterFunc(2*retransmitOffset, func() {
 		r.l.Lock()
 		defer r.l.Unlock()
-		r.log.Debug("timer expired. going from timeWait to closed")
+		r.log.Warn("timer expired without getting ACK of FIN. going from lastAck to closed")
 		r.enterClosedState()
 	})
 }
@@ -215,6 +212,9 @@ func (r *Reliable) enterTimeWaitState() {
 func (r *Reliable) enterClosedState() {
 	if r.tubeState == closed {
 		return
+	}
+	if r.lastAckTimer != nil {
+		r.lastAckTimer.Stop()
 	}
 	r.sender.Close()
 	r.recvWindow.Close()
@@ -352,6 +352,7 @@ func (r *Reliable) Close() (err error) {
 	case closeWait:
 		r.tubeState = lastAck
 		r.log.Debug("call to close. going from closeWait to lastAck")
+		r.enterLastAckState()
 	default:
 		// In this case, Close() has already been called
 		return io.EOF
