@@ -128,7 +128,7 @@ func (m *Muxer) reapTube(t Tube) {
 
 	// This prevents tubes IDs from being reused while the remote peer is waiting in lastAck.
 	if _, ok := t.(*Reliable); ok && t.GetID()%2 == m.idParity {
-		timer := time.NewTimer(2*retransmitOffset)
+		timer := time.NewTimer(2 * retransmitOffset)
 		select {
 		case <-m.stopped:
 			t.getLog().Debug("reaper stopped")

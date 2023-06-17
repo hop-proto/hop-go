@@ -40,15 +40,15 @@ type Reliable struct {
 	recvWindow receiver
 	sendQueue  chan []byte
 	// +checklocks:l
-	tubeState     state
+	tubeState    state
 	lastAckTimer *time.Timer
-	lastAckSent   atomic.Uint32
-	closed        chan struct{}
-	initRecv      chan struct{}
-	initDone      chan struct{}
-	sendDone      chan struct{}
-	l             sync.Mutex
-	log           *logrus.Entry
+	lastAckSent  atomic.Uint32
+	closed       chan struct{}
+	initRecv     chan struct{}
+	initDone     chan struct{}
+	sendDone     chan struct{}
+	l            sync.Mutex
+	log          *logrus.Entry
 }
 
 // Reliable implements net.Conn
