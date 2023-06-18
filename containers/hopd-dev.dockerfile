@@ -13,5 +13,8 @@ COPY ./server_dev_config /etc/hopd/config
 
 COPY id_client.pub /root/.hop/authorized_keys
 
+RUN apt-get update
+RUN apt-get install -y rsync
+
 WORKDIR /app
 CMD ./containers/hopd-wrapper.sh

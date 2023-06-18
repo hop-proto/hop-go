@@ -1,6 +1,7 @@
 package hoptests
 
 import (
+	"io"
 	"net"
 	"net/http"
 	"strconv"
@@ -303,7 +304,7 @@ func TestHopClientExtAuth(t *testing.T) {
 		err = s.Server.Close()
 		assert.NilError(t, err)
 		err = c.Client.Close()
-		assert.NilError(t, err)
+		assert.ErrorType(t, err, io.EOF)
 	})
 }
 
@@ -329,7 +330,7 @@ func TestHopClientInMemAuth(t *testing.T) {
 		err = s.Server.Close()
 		assert.NilError(t, err)
 		err = c.Client.Close()
-		assert.NilError(t, err)
+		assert.ErrorType(t, err, io.EOF)
 	})
 }
 
@@ -363,7 +364,7 @@ func TestHopClientAgentAuth(t *testing.T) {
 		err = s.Server.Close()
 		assert.NilError(t, err)
 		err = c.Client.Close()
-		assert.NilError(t, err)
+		assert.ErrorType(t, err, io.EOF)
 	})
 }
 
@@ -403,9 +404,9 @@ func TestTwoClients(t *testing.T) {
 		err = s.Server.Close()
 		assert.NilError(t, err)
 		err = c.Client.Close()
-		assert.NilError(t, err)
+		assert.ErrorType(t, err, io.EOF)
 		err = cTwo.Client.Close()
-		assert.NilError(t, err)
+		assert.ErrorType(t, err, io.EOF)
 	})
 }
 
@@ -449,6 +450,6 @@ func TestStartCmd(t *testing.T) {
 		err = s.Server.Close()
 		assert.NilError(t, err)
 		err = c.Client.Close()
-		assert.NilError(t, err)
+		assert.ErrorType(t, err, io.EOF)
 	})
 }

@@ -116,6 +116,8 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 	mux.state.Store(muxerRunning)
 	mux.start()
 
+	mux.log.WithField("timeout (ms)", mux.timeout.Milliseconds()).Info("Created Muxer")
+
 	return mux
 }
 
@@ -124,9 +126,9 @@ func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 func (m *Muxer) reapTube(t Tube) {
 	t.WaitForClose()
 
-	// This prevents tubes IDs from being reused while the remote peer is in the timeWait state.
+	// This prevents tubes IDs from being reused while the remote peer is waiting in lastAck.
 	if _, ok := t.(*Reliable); ok && t.GetID()%2 == m.idParity {
-		timer := time.NewTimer(timeWaitTime)
+		timer := time.NewTimer(2 * retransmitOffset)
 		select {
 		case <-m.stopped:
 			t.getLog().Debug("reaper stopped")
@@ -448,12 +450,12 @@ func (m *Muxer) startKeepAlive() {
 		defer close(m.sendKeepAliveDone)
 		buf := make([]byte, 1)
 
-		keepAliveTime := m.timeout / 3
+		keepAliveTime := m.timeout / 4
 		if keepAliveTime == 0 {
 			keepAliveTime = 10 * retransmitOffset
 		}
 		ticker := time.NewTicker(keepAliveTime)
-		for {
+		for m.state.Load() == muxerRunning {
 			<-ticker.C
 			if tube == nil {
 				m.log.Info("haven't receive keep alive tube yet")
@@ -472,7 +474,7 @@ func (m *Muxer) startKeepAlive() {
 	go func() {
 		defer close(m.recvKeepAliveDone)
 		buf := make([]byte, 1)
-		for {
+		for m.state.Load() == muxerRunning {
 			_, err := tube.Read(buf)
 			if err != nil {
 				m.log.WithField("error", err).Info("Keep alive receiver ended")
@@ -489,14 +491,14 @@ func (m *Muxer) receiver() {
 	var err error
 
 	// When start finishes, it sends its error on this channel.
-	// m.Stop receives this error and passes it to the called.
+	// m.Stop receives this error and passes it to the caller.
 	defer func() {
 		// This case indicates that the muxer was stopped by m.Stop()
 		if m.state.Load() == muxerStopped {
 			m.log.WithFields(logrus.Fields{
 				"state": m.state.Load(),
 				"error": err,
-			}).Info("muxer receiver stopping")
+			}).Warn("muxer receiver stopping")
 			err = nil
 		} else if err != nil {
 			m.log.Infof("Muxer receiver ended with error: %s", err)
@@ -512,7 +514,8 @@ func (m *Muxer) receiver() {
 		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
 	}
 	for m.state.Load() != muxerStopped {
-		frame, err := m.readMsg()
+		var frame *frame
+		frame, err = m.readMsg()
 		if err != nil {
 			return
 		}
