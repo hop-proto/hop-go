@@ -73,7 +73,25 @@ type Muxer struct {
 	recvKeepAliveDone chan struct{}
 }
 
-// NewMuxer starts a new tube muxer running over the the specified msgConn.
+// A Config is used to configure a muxer client or server. After one has been
+// passed to a Muxer function, it must not be modified. A Config may be reused;
+// the tubes package does not modify it.
+type Config struct {
+	Timeout time.Duration
+	Log     *logrus.Entry
+}
+
+// Client returns a new Muxer configured as a client.
+func Client(msgConn transport.MsgConn, config *Config) *Muxer {
+	return newMuxer(msgConn, config.Timeout, false, config.Log)
+}
+
+// Server returns a new Muxer configured as a server.
+func Server(msgConn transport.MsgConn, config *Config) *Muxer {
+	return newMuxer(msgConn, config.Timeout, true, config.Log)
+}
+
+// newMuxer starts a new tube muxer running over the the specified msgConn.
 // The newly created muxer will close the msgConn when Muxer.Stop() is called.
 //
 // timeout specifies how long the muxer will wait before timing out all operations
@@ -85,7 +103,7 @@ type Muxer struct {
 //
 // log specifies the logging context for this muxer. All log messages from this
 // muxer and the tubes it creates will use this logging context.
-func NewMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, log *logrus.Entry) *Muxer {
+func newMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, log *logrus.Entry) *Muxer {
 	var idParity byte
 	if isServer {
 		idParity = 0

@@ -102,7 +102,11 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	// authgrant procedure.
 	// c.address = address
 	c.authenticator = authenticator
-	c.TubeMuxer = tubes.NewMuxer(c.TransportConn, c.hostconfig.DataTimeout, false, logrus.WithField("muxer", "client"))
+	config := tubes.Config{
+		Timeout: c.hostconfig.DataTimeout,
+		Log:     logrus.WithField("muxer", "client"),
+	}
+	c.TubeMuxer = tubes.Server(c.TransportConn, &config)
 
 	err = c.userAuthorization()
 	if err != nil {

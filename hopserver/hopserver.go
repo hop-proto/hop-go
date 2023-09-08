@@ -225,10 +225,14 @@ func (s *HopServer) Serve() {
 
 // newSession Starts a new hop session
 func (s *HopServer) newSession(serverConn *transport.Handle) {
+	muxerConfig := tubes.Config{
+		Timeout: s.config.DataTimeout,
+		Log:     logrus.WithField("muxer", "server"),
+	}
 	sess := &hopSession{
 		transportConn: serverConn,
 		// TODO(hosono) add logging context to server
-		tubeMuxer:       tubes.NewMuxer(serverConn, s.config.DataTimeout, true, logrus.WithField("muxer", "server")),
+		tubeMuxer:       tubes.Server(serverConn, &muxerConfig),
 		controlChannels: []net.Conn{},
 		server:          s,
 		pty:             make(chan *os.File, 1),

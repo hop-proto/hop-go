@@ -173,7 +173,11 @@ func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable, ve
 		return psubclient, err
 	}
 
-	client.TubeMuxer = tubes.NewMuxer(client.TransportConn, client.hostconfig.DataTimeout, false, logrus.WithField("muxer", "principal subclient"))
+	config := tubes.Config{
+		Timeout: client.hostconfig.DataTimeout,
+		Log:     logrus.WithField("muxer", "principal subclient"),
+	}
+	client.TubeMuxer = tubes.Client(client.TransportConn, &config)
 	err = client.userAuthorization()
 	if err != nil {
 		return nil, err
