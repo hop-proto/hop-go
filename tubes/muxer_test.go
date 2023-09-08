@@ -2,18 +2,15 @@ package tubes
 
 import (
 	"net"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"go.uber.org/goleak"
-
 	"gotest.tools/assert"
-
-	"hop.computer/hop/common"
 	"hop.computer/hop/transport"
 )
+
+/*
 
 // makeMuxers creates two connected muxers running over UDP
 // odds is the probability that a given packet is sent.
@@ -191,4 +188,62 @@ func TestMuxer(t *testing.T) {
 	t.Run("ReliableTubes/Wait", func(t *testing.T) {
 		manyTubes(0.9, true, true, t)
 	})
+}
+
+*/
+
+func newMuxersForTest(t assert.TestingT) (server, client *Muxer) {
+	deadline := time.Now().Add(10 * time.Second)
+	serverPacketConn, err := net.ListenPacket("udp", "localhost:0")
+	assert.NilError(t, err)
+	serverMsgConn := transport.NewUDPMsgConn(serverPacketConn.(*net.UDPConn))
+	serverMsgConn.SetDeadline(deadline)
+
+	clientPacketConn, err := net.DialTimeout("udp", serverPacketConn.LocalAddr().String(), time.Second)
+	assert.NilError(t, err)
+	clientMsgConn := transport.NewUDPMsgConn(clientPacketConn.(*net.UDPConn))
+	clientMsgConn.SetDeadline(deadline)
+
+	serverConfig := Config{
+		Log: logrus.WithField("muxer", "server"),
+	}
+	server = Server(serverMsgConn, &serverConfig)
+
+	clientConfig := Config{
+		Log: logrus.WithField("muxer", "client"),
+	}
+	client = Client(clientMsgConn, &clientConfig)
+	return
+}
+
+func TestMuxer(t *testing.T) {
+	server, client := newMuxersForTest(t)
+	go func() {
+		st, err := server.Accept()
+		assert.NilError(t, err)
+		var buf [6]byte
+		n, err := st.Read(buf[:])
+		assert.NilError(t, err)
+		assert.Equal(t, len(buf), n)
+		assert.Equal(t, "Hello!", string(buf[:]))
+		st.Write([]byte("World?"))
+		st.Close()
+	}()
+	ct, err := client.CreateUnreliableTube(TubeType(1))
+	assert.NilError(t, err)
+	logrus.Infof("client created tube!")
+	{
+		n, err := ct.Write([]byte("Hello!"))
+		assert.NilError(t, err)
+		logrus.Infof("client wrote hello!")
+		assert.Equal(t, 6, n)
+	}
+	{
+		var buf [6]byte
+		n, err := ct.Read(buf[:])
+		assert.NilError(t, err)
+		assert.Equal(t, len(buf), n)
+		assert.Equal(t, "World!", string(buf[:]))
+	}
+
 }

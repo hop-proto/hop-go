@@ -41,9 +41,13 @@ type Tube interface {
 
 // Muxer handles delivering and sending tube messages
 type Muxer struct {
-	tubeQueue chan Tube
+	// constant
+	idParity   byte
+	underlying transport.MsgConn
+	log        *logrus.Entry
 
-	idParity byte
+	// constant after handshake????
+	config *Config
 
 	m sync.Mutex
 	// +checklocks:m
@@ -51,13 +55,12 @@ type Muxer struct {
 	// +checklocks:m
 	unreliableTubes map[byte]*Unreliable
 
+	tubeQueue chan Tube
+
 	// All hop tubes write raw bytes for a tube packet to this golang chan.
-	sendQueue  chan []byte
-	state      atomic.Value
-	stopped    chan struct{}
-	underlying transport.MsgConn
-	timeout    time.Duration
-	log        *logrus.Entry
+	sendQueue chan []byte
+	state     atomic.Value
+	stopped   chan struct{}
 
 	senderErr chan error
 	sendErr   error
@@ -83,12 +86,12 @@ type Config struct {
 
 // Client returns a new Muxer configured as a client.
 func Client(msgConn transport.MsgConn, config *Config) *Muxer {
-	return newMuxer(msgConn, config.Timeout, false, config.Log)
+	return newMuxer(msgConn, config, false)
 }
 
 // Server returns a new Muxer configured as a server.
 func Server(msgConn transport.MsgConn, config *Config) *Muxer {
-	return newMuxer(msgConn, config.Timeout, true, config.Log)
+	return newMuxer(msgConn, config, true)
 }
 
 // newMuxer starts a new tube muxer running over the the specified msgConn.
@@ -103,26 +106,34 @@ func Server(msgConn transport.MsgConn, config *Config) *Muxer {
 //
 // log specifies the logging context for this muxer. All log messages from this
 // muxer and the tubes it creates will use this logging context.
-func newMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, log *logrus.Entry) *Muxer {
+func newMuxer(msgConn transport.MsgConn, config *Config, isServer bool) *Muxer {
+	if config == nil {
+		config = &Config{}
+	}
+	log := config.Log
+	if log == nil {
+		log = logrus.NewEntry(logrus.StandardLogger())
+	}
 	var idParity byte
 	if isServer {
 		idParity = 0
 	} else {
 		idParity = 1
 	}
-	state := atomic.Value{}
 	mux := &Muxer{
-		idParity:          idParity,
+		idParity:   idParity,
+		underlying: msgConn,
+		config:     config,
+		log:        log,
+
+		// Tube State
 		reliableTubes:     make(map[byte]*Reliable),
 		unreliableTubes:   make(map[byte]*Unreliable),
 		tubeQueue:         make(chan Tube, 128),
 		m:                 sync.Mutex{},
 		sendQueue:         make(chan []byte),
-		state:             state,
+		state:             atomic.Value{},
 		stopped:           make(chan struct{}),
-		underlying:        msgConn,
-		timeout:           timeout,
-		log:               log,
 		readBuf:           make([]byte, 65535),
 		receiverErr:       make(chan error),
 		senderErr:         make(chan error),
@@ -134,9 +145,45 @@ func newMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 	mux.state.Store(muxerRunning)
 	mux.start()
 
-	mux.log.WithField("timeout (ms)", mux.timeout.Milliseconds()).Info("Created Muxer")
+	mux.log.WithField("timeout (ms)", mux.config.Timeout.Milliseconds()).Info("Created Muxer")
 
 	return mux
+}
+
+// start begins the goroutines that make the muxer work. Specifically,
+// it starts the sender, the receiver, and the keep alive tubes.
+func (m *Muxer) start() {
+	go m.sender()
+	go m.receiver()
+	m.log.Info("Muxer running!")
+}
+
+// sender reads data from the muxer's sendQueue and writes it to the
+// underlying MsgConn. If an error occurs while sending data, sender will call
+// m.Stop in a new goroutine and the error will be reported by m.Stop
+func (m *Muxer) sender() {
+	var err error
+	for rawBytes := range m.sendQueue {
+		err = m.underlying.WriteMsg(rawBytes)
+		if err != nil {
+			m.log.Warnf("error in muxer sender. stopping muxer: %s", err)
+			// TODO(hosono) is it ok to stop the muxer here? Are the recoverable errors?
+			go m.Stop()
+			break
+		}
+	}
+
+	// if we broke out of the loop, consume all packets so tubes can still close
+	dropped := 0
+	for range m.sendQueue {
+		dropped++
+	}
+	if dropped > 0 {
+		m.log.Warnf("dropped %d packets", dropped)
+	}
+
+	m.log.WithField("error", err).Debug("muxer sender stopped")
+	m.senderErr <- err
 }
 
 // waits for tubes to close and then removes them so their IDs can be reused
@@ -339,7 +386,7 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 		remoteAddr:   m.underlying.RemoteAddr(),
 		recv:         common.NewDeadlineChan[[]byte](maxBufferedPackets),
 		send:         common.NewDeadlineChan[[]byte](maxBufferedPackets),
-		state:        atomic.Value{},
+		state:        atomic.Uint32{},
 		initiated:    make(chan struct{}),
 		initiateDone: make(chan struct{}),
 		senderDone:   make(chan struct{}),
@@ -351,19 +398,9 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 		}),
 	}
 	m.addTube(tube)
-	tube.state.Store(created)
-	go tube.initiate(req)
-
-	// Check for received keep alive tubes. Keep alive tubes always have id 0
-	if tube.id == 0 {
-		m.keepAliveTubeChan <- tube
-		return nil, errGotKeepAlive
-	}
-
-	if !req {
-		tube.log.Debug("added tube to queue")
-		m.tubeQueue <- tube
-	}
+	tube.state.Store(uint32(created))
+	// TODO(dadrian): Should this be done in a goroutine?
+	tube.initiate(req)
 	return tube, nil
 }
 
@@ -385,65 +422,10 @@ func (m *Muxer) readMsg() (*frame, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// Set timeout
-	if m.timeout != 0 {
-		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
-	}
 	return fromBytes(m.readBuf)
-
 }
 
-// sender reads data from the muxer's sendQueue and writes it to the
-// underlying MsgConn. If an error occurs while sending data, sender will call
-// m.Stop in a new goroutine and the error will be reported by m.Stop
-func (m *Muxer) sender() {
-	var err error
-	for rawBytes := range m.sendQueue {
-		err = m.underlying.WriteMsg(rawBytes)
-		if err != nil {
-			m.log.Warnf("error in muxer sender. stopping muxer: %s", err)
-			// TODO(hosono) is it ok to stop the muxer here? Are the recoverable errors?
-			go m.Stop()
-			break
-		}
-	}
-
-	// if we broke out of the loop, consume all packets so tubes can still close
-	for range m.sendQueue {
-	}
-
-	m.log.WithField("error", err).Debug("muxer sender stopped")
-	m.senderErr <- err
-}
-
-// start begins the goroutines that make the muxer work. Specifically,
-// it starts the sender, the receiver, and the keep alive tubes.
-func (m *Muxer) start() {
-	go m.sender()
-	go m.receiver()
-
-	// lock needed to call makeUnreliableTubeWithID
-	m.m.Lock()
-	defer m.m.Unlock()
-
-	// Create the server opens the keep alive tube, which will always have ID 0
-	if m.idParity == 0 {
-		// Tube ID 0 is reserved for keep alives
-		_, err := m.makeUnreliableTubeWithID(common.KeepAlive, 0, true)
-		if err != errGotKeepAlive {
-			// If we can't create this tube, the muxer might randomly time out
-			// if it expects a keep alive and doesn't get it.
-			// In that case, it's better to crash early
-			m.log.WithField("error", err).Fatal("Failed to create keep alive tube")
-		}
-		m.log.Info("created keep alive tube")
-	}
-
-	go m.startKeepAlive()
-	m.log.Info("Muxer running!")
-}
-
+/*
 // startKeepAlive beings the goroutines that handle keep alive messages.
 // startKeepAlive blocks until the keep alive tube is sent on m.keepAliveTubeChan.
 // Ones it receives a keep alive tube, this method spawns two goroutines:
@@ -502,6 +484,7 @@ func (m *Muxer) startKeepAlive() {
 		}
 	}()
 }
+*/
 
 // receiver reads packet from the underlying MsgConn and forwards them to the relevant
 // tubes. If it gets a REQ packet requesting a new tube, it creates that tube.
@@ -527,10 +510,10 @@ func (m *Muxer) receiver() {
 		m.receiverErr <- err
 	}()
 
-	// Set initial timeout
-	if m.timeout != 0 {
-		m.underlying.SetReadDeadline(time.Now().Add(m.timeout))
-	}
+	//// Set initial timeout
+	//if m.config.timeout != 0 {
+	//	m.underlying.SetReadDeadline(time.Now().Add(m.config.timeout))
+	//}
 	for m.state.Load() != muxerStopped {
 		var frame *frame
 		frame, err = m.readMsg()

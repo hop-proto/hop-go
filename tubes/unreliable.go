@@ -23,7 +23,7 @@ type Unreliable struct {
 	// created: Indicates the tube has been created and is waiting for the remote peer send back an initiate frame
 	// initiated: Indicates the tube is ready to read and write data
 	// closed: Indicates the tube is done reading and writing data
-	state        atomic.Value
+	state        atomic.Uint32
 	initiated    chan struct{}
 	initiateDone chan struct{}
 	senderDone   chan struct{}
@@ -60,6 +60,18 @@ func (u *Unreliable) sender() {
 
 	u.log.Debug("sender ended")
 	close(u.senderDone)
+}
+
+func (u *Unreliable) receiver(pkt *frame) error {
+	select {
+	case u.recv.C <- pkt.data:
+	default:
+		return nil
+	}
+	if pkt.flags.FIN {
+		u.recv.Close()
+	}
+	return nil
 }
 
 func (u *Unreliable) makeInitFrame(req bool) initiateFrame {
@@ -100,7 +112,7 @@ func (u *Unreliable) initiate(req bool) {
 				close(u.senderDone)
 				return
 			}
-			notInit = u.state.Load() == created
+			notInit = u.state.Load() == uint32(created)
 		}
 	}
 
@@ -119,12 +131,12 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		"state":   u.state.Load(),
 	}).Debug("receiving initiate packet")
 
-	if u.state.CompareAndSwap(created, initiated) {
+	if u.state.CompareAndSwap(uint32(created), uint32(initiated)) {
 		close(u.initiated)
 	}
 
 	// Send a RESP packet in response to REQ packets
-	if pkt.flags.REQ && u.state.Load() != closed {
+	if pkt.flags.REQ && u.state.Load() != uint32(closed) {
 		u.log.Trace("sending RESP packet")
 		p := u.makeInitFrame(false)
 		u.sendQueue <- p.toBytes()
@@ -133,109 +145,99 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 	return nil
 }
 
-func (u *Unreliable) receive(pkt *frame) error {
-	select {
-	case u.recv.C <- pkt.data:
-	default:
-		return nil
-	}
-	if pkt.flags.FIN {
-		u.recv.Close()
-	}
-	return nil
-}
-
 // Read implements net.Conn. It wraps ReadMsgUDP
 func (u *Unreliable) Read(b []byte) (n int, err error) {
-	n, _, _, _, err = u.ReadMsgUDP(b, nil)
-	return
+	panic("unimplemented")
 }
 
 // ReadMsg implements transport.MsgConn. It wraps Read
 func (u *Unreliable) ReadMsg(b []byte) (n int, err error) {
-	n, err = u.Read(b)
-	return
+	panic("unimplemented")
 }
 
 // ReadMsgUDP implements the UDPLike interface. addr is always nil
 func (u *Unreliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
-	select {
-	case <-u.initiated:
-		break
-	case <-u.closed:
-		break
-	}
-	msg, err := u.recv.Recv()
-	if err != nil {
+	panic("unimplemented")
+	/*
+		select {
+		case <-u.initiated:
+			break
+		case <-u.closed:
+			break
+		}
+		msg, err := u.recv.Recv()
+		if err != nil {
+			return
+		}
+		n = copy(b, msg)
+		if n < len(msg) {
+			err = transport.ErrBufOverflow
+			// net.UDPConn discards buffer leftovers, so Unreliable Tubes does the same
+		}
 		return
-	}
-	n = copy(b, msg)
-	if n < len(msg) {
-		err = transport.ErrBufOverflow
-		// net.UDPConn discards buffer leftovers, so Unreliable Tubes does the same
-	}
-	return
+	*/
 }
 
 // Write implements net.Conn. It wraps WriteMsgUDP
 func (u *Unreliable) Write(b []byte) (n int, err error) {
-	n, _, err = u.WriteMsgUDP(b, nil, nil)
-	return
+	panic("unimplemented")
 }
 
 // WriteMsg implements transport.MsgConn. It wraps Write
 func (u *Unreliable) WriteMsg(b []byte) (err error) {
-	_, err = u.Write(b)
-	return
+	panic("unimplemented")
 }
 
 // WriteMsgUDP implements implements the UDPLike interface
 // oob and addr are ignored
 func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
-	select {
-	case <-u.initiated:
-		break
-	case <-u.closed:
-		break
-	}
-	dataLength := uint16(len(b))
-	if uint16(len(b)) > MaxFrameDataLength {
-		err = transport.ErrBufOverflow
-		return
-	}
+	panic("unimplemented")
+	/*
+		select {
+		case <-u.initiated:
+			break
+		case <-u.closed:
+			break
+		}
+		dataLength := uint16(len(b))
+		if uint16(len(b)) > MaxFrameDataLength {
+			err = transport.ErrBufOverflow
+			return
+		}
 
-	pkt := frame{
-		tubeID: u.id,
-		flags: frameFlags{
-			ACK:  false,
-			FIN:  false,
-			REQ:  false,
-			RESP: false,
-			REL:  false,
-		},
+		pkt := frame{
+			tubeID: u.id,
+			flags: frameFlags{
+				ACK:  false,
+				FIN:  false,
+				REQ:  false,
+				RESP: false,
+				REL:  false,
+			},
 
-		dataLength: dataLength,
-		frameNo:    u.frameNo.Load(),
-		data:       b,
-	}
-	u.frameNo.Add(1)
+			dataLength: dataLength,
+			frameNo:    u.frameNo.Load(),
+			data:       b,
+		}
+		u.frameNo.Add(1)
 
-	err = u.send.Send(pkt.toBytes())
-	if err != nil {
-		return
-	}
-	n = len(b)
-	u.log.WithFields(logrus.Fields{
-		"frameNo":    pkt.frameNo,
-		"dataLength": pkt.dataLength,
-	}).Trace("wrote packet")
-	return n, 0, err
+		err = u.send.Send(pkt.toBytes())
+		if err != nil {
+			return
+		}
+		n = len(b)
+		u.log.WithFields(logrus.Fields{
+			"frameNo":    pkt.frameNo,
+			"dataLength": pkt.dataLength,
+		}).Trace("wrote packet")
+		return n, 0, err
+	*/
 }
 
 // Close implements the net.Conn interface. Future io operations will return io.EOF
 func (u *Unreliable) Close() error {
-	oldState := u.state.Swap(closed)
-	if oldState == closed {
+	oldState := u.state.Swap(uint32(closed))
+	if oldState == uint32(closed) {
 		return io.EOF
 	}
 

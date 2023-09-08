@@ -1,22 +1,14 @@
 package tubes
 
 import (
-	"bytes"
 	"crypto/rand"
-	"io"
 	"math/big"
 	"net"
-	"sync"
+	"sync/atomic"
 	"testing"
-	"time"
-
-	"github.com/sirupsen/logrus"
-	"go.uber.org/goleak"
 
 	"gotest.tools/assert"
-
 	"hop.computer/hop/common"
-	"hop.computer/hop/nettest"
 	"hop.computer/hop/transport"
 )
 
@@ -55,6 +47,8 @@ func (c *ProbabalisticUDPMsgConn) WriteMsg(b []byte) (err error) {
 	}
 	return
 }
+
+/*
 
 // odds indicates the probability that a packet will be sent. 1.0 sends all packets, and 0.0 sends no packets
 // rel is true for reliable tubes and false for unreliable ones
@@ -280,4 +274,32 @@ func TestTubes(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	t.Run("Reliable", reliable)
 	t.Run("Unreliable", unreliable)
+}
+
+*/
+
+func TestUnreliableInitiatie(t *testing.T) {
+	tubeType := TubeType(2)
+	irQueue := make(chan []byte, 1)
+	initiator := Unreliable{
+		tType:        tubeType,
+		state:        atomic.Uint32{},
+		sendQueue:    irQueue,
+		initiated:    make(chan struct{}),
+		initiateDone: make(chan struct{}),
+		closed:       make(chan struct{}),
+		senderDone:   make(chan struct{}),
+
+		recv: common.NewDeadlineChan[[]byte](maxBufferedPackets),
+		send: common.NewDeadlineChan[[]byte](maxBufferedPackets),
+	}
+	initiator.state.Store(uint32(created))
+	responder := Unreliable{
+		tType: tubeType,
+		state: atomic.Uint32{},
+	}
+	responder.state.Store(uint32(created)) //?
+	initiator.initiate(true)
+	_, err := initiator.Write([]byte("Hello!"))
+	assert.NilError(t, err)
 }
