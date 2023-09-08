@@ -18,7 +18,7 @@ import (
 	"hop.computer/hop/keys"
 )
 
-func newClientAuth(t *testing.T) (*keys.X25519KeyPair, *certs.Certificate) {
+func newClientAuth(t assert.TestingT) (*keys.X25519KeyPair, *certs.Certificate) {
 	k := keys.GenerateNewX25519KeyPair()
 	c, err := certs.SelfSignLeaf(&certs.Identity{
 		PublicKey: k.Public,
@@ -27,7 +27,7 @@ func newClientAuth(t *testing.T) (*keys.X25519KeyPair, *certs.Certificate) {
 	return k, c
 }
 
-func newTestServerConfig(t *testing.T) (*ServerConfig, *VerifyConfig) {
+func newTestServerConfig(t assert.TestingT) (*ServerConfig, *VerifyConfig) {
 	keyPair, err := keys.ReadDHKeyFromPEMFile("testdata/leaf-key.pem")
 	assert.NilError(t, err)
 	certificate, err := certs.ReadCertificatePEMFile("testdata/leaf.pem")

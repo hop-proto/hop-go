@@ -29,7 +29,15 @@ func Dial(network, address string, config ClientConfig) (*Client, error) {
 		return nil, err
 	}
 
-	return NewClient(inner.(*net.UDPConn), raddr, config), nil
+	c, err := NewClient(inner.(*net.UDPConn), raddr, config), nil
+	if err != nil {
+		return nil, err
+	}
+	err = c.Handshake()
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
 }
 
 // DialNP is similar to Dial, but using a reliable tube as an underlying conn for the Client
