@@ -20,30 +20,30 @@ import (
 	"hop.computer/hop/transport"
 )
 
-// UDPMsgConn is a wrapper around net.UDPConn that implements MsgConn
-type UDPMsgConn struct {
+// ProbabalisticUDPMsgConn is a wrapper around net.UDPConn that implements MsgConn
+type ProbabalisticUDPMsgConn struct {
 	odds float64
 	net.UDPConn
 }
 
-var _ transport.MsgConn = &UDPMsgConn{}
+var _ transport.MsgConn = &ProbabalisticUDPMsgConn{}
 
 // MakeUDPMsgConn converts a *net.UDPConn into a *UDPMsgConn
-func MakeUDPMsgConn(odds float64, underlying *net.UDPConn) *UDPMsgConn {
-	return &UDPMsgConn{
+func MakeUDPMsgConn(odds float64, underlying *net.UDPConn) *ProbabalisticUDPMsgConn {
+	return &ProbabalisticUDPMsgConn{
 		odds,
 		*underlying,
 	}
 }
 
 // ReadMsg implements the MsgConn interface
-func (c *UDPMsgConn) ReadMsg(b []byte) (n int, err error) {
+func (c *ProbabalisticUDPMsgConn) ReadMsg(b []byte) (n int, err error) {
 	n, _, _, _, err = c.ReadMsgUDP(b, nil)
 	return
 }
 
 // WriteMsg implement the MsgConn interface
-func (c *UDPMsgConn) WriteMsg(b []byte) (err error) {
+func (c *ProbabalisticUDPMsgConn) WriteMsg(b []byte) (err error) {
 	size := big.NewInt(100000)
 	i, err := rand.Int(rand.Reader, size)
 	if err != nil {
