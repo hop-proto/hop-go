@@ -491,6 +491,7 @@ func (c *Client) Read(b []byte) (n int, err error) {
 		if c.readBuf.Len() == 0 {
 			c.readBuf.Reset()
 		}
+		// TODO(dadrian): Should we try to fill up the output buffer to n if readBuf < n?
 		return n, err
 	}
 
