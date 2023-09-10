@@ -95,9 +95,9 @@ func TestMultipleHandshakes(t *testing.T) {
 			time.Sleep(time.Second)
 			assert.NilError(t, err, "error in client %d", i)
 
-			h := s.fetchHandle(c.ss.sessionID)
-			assert.Check(t, cmp.Equal(c.ss.clientToServerKey, h.ss.clientToServerKey))
-			assert.Check(t, cmp.Equal(c.ss.serverToClientKey, h.ss.serverToClientKey))
+			ss := s.fetchSession(c.ss.sessionID)
+			assert.Check(t, cmp.Equal(c.ss.clientToServerKey, ss.clientToServerKey))
+			assert.Check(t, cmp.Equal(c.ss.serverToClientKey, ss.serverToClientKey))
 			assert.Check(t, c.ss.clientToServerKey != zero)
 			assert.Check(t, c.ss.serverToClientKey != zero)
 		}(i)
@@ -128,9 +128,7 @@ func TestServerRead(t *testing.T) {
 		assert.NilError(t, err)
 	}()
 	assert.NilError(t, err)
-	go func() {
-		server.Serve()
-	}()
+	go server.Serve()
 
 	t.Run("test client write", func(t *testing.T) {
 		kp, cert := newClientAuth(t)
@@ -142,7 +140,7 @@ func TestServerRead(t *testing.T) {
 		assert.NilError(t, err)
 		err = c.Handshake()
 		assert.NilError(t, err)
-		h, err := server.AcceptTimeout(10 * time.Second)
+		h, err := server.AcceptTimeout(100 * time.Millisecond)
 		assert.NilError(t, err)
 		s := "It's time to ignite. I'm making a fire!"
 		n, err := c.Write([]byte(s))
@@ -230,6 +228,7 @@ func TestServerWrite(t *testing.T) {
 		defer func() {
 			err := c.Close()
 			assert.NilError(t, err)
+			logrus.Infof("client closed successfully")
 		}()
 		assert.NilError(t, err)
 		c.Handshake()
@@ -239,6 +238,7 @@ func TestServerWrite(t *testing.T) {
 		data := make([]byte, 10)
 		buf := make([]byte, 30)
 		for i := 0; i < 5; i++ {
+			logrus.Infof("test: loop iteration %d", i)
 			rand.Read(data)
 			n, err := c.Write(data)
 			assert.Check(t, err)

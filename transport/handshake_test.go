@@ -22,37 +22,38 @@ import (
 // +checklocksignore
 func TestClientServerCompatibilityHandshake(t *testing.T) {
 	defer goleak.VerifyNone(t)
+	logrus.SetLevel(logrus.TraceLevel)
 
-	logrus.SetLevel(logrus.DebugLevel)
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
-	udpC := pc.(*net.UDPConn)
-	serverConfig, verifyConfig := newTestServerConfig(t)
-	s, err := NewServer(udpC, *serverConfig)
+
+	sc, vc := newTestServerConfig(t)
+	s, err := NewServer(pc.(*net.UDPConn), *sc)
 	assert.NilError(t, err)
 	go s.Serve()
-	keyPair, err := keys.ReadDHKeyFromPEMFile("testdata/leaf-key.pem")
-	assert.NilError(t, err)
-	leaf, err := certs.SelfSignLeaf(&certs.Identity{
-		PublicKey: keyPair.Public,
-	})
-	assert.NilError(t, err)
-	c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{
-		Verify:    *verifyConfig,
-		Exchanger: keyPair,
+
+	ckp, leaf := newClientAuth(t)
+	clientConfig := ClientConfig{
+		Verify:    *vc,
+		Exchanger: ckp,
 		Leaf:      leaf,
-	})
+	}
+	c, err := Dial("udp", s.Addr().String(), clientConfig)
 	assert.NilError(t, err)
-	err = c.Handshake()
-	assert.Check(t, err)
-	time.Sleep(time.Second)
-	h := s.fetchHandle(c.ss.sessionID)
-	assert.DeepEqual(t, c.ss.sessionID, h.ss.sessionID)
+
+	_, err = s.AcceptTimeout(time.Millisecond * 100)
+	assert.NilError(t, err)
+
+	ss := s.fetchSession(c.ss.sessionID)
+	assert.DeepEqual(t, c.ss.sessionID, ss.sessionID)
 	var zero [KeyLen]byte
-	assert.Check(t, cmp.Equal(c.ss.clientToServerKey, h.ss.clientToServerKey))
-	assert.Check(t, cmp.Equal(c.ss.serverToClientKey, h.ss.serverToClientKey))
+	assert.Check(t, cmp.Equal(c.ss.clientToServerKey, ss.clientToServerKey))
+	assert.Check(t, cmp.Equal(c.ss.serverToClientKey, ss.serverToClientKey))
 	assert.Check(t, c.ss.clientToServerKey != zero)
 	assert.Check(t, c.ss.serverToClientKey != zero)
+
+	//assert.Equal(t, c.LocalAddr().String(), h.RemoteAddr().String())
+	//assert.Equal(t, c.RemoteAddr().String(), h.LocalAddr().String())
 
 	assert.NilError(t, s.Close())
 	assert.NilError(t, c.Close())
@@ -141,11 +142,11 @@ func TestClientServerHSWithAgent(t *testing.T) {
 	err = c.Handshake()
 	assert.Check(t, err)
 	time.Sleep(time.Second)
-	h := s.fetchHandle(c.ss.sessionID)
-	assert.DeepEqual(t, c.ss.sessionID, h.ss.sessionID)
+	ss := s.fetchSession(c.ss.sessionID)
+	assert.DeepEqual(t, c.ss.sessionID, ss.sessionID)
 	var zero [KeyLen]byte
-	assert.Check(t, cmp.Equal(c.ss.clientToServerKey, h.ss.clientToServerKey))
-	assert.Check(t, cmp.Equal(c.ss.serverToClientKey, h.ss.serverToClientKey))
+	assert.Check(t, cmp.Equal(c.ss.clientToServerKey, ss.clientToServerKey))
+	assert.Check(t, cmp.Equal(c.ss.serverToClientKey, ss.serverToClientKey))
 	assert.Check(t, c.ss.clientToServerKey != zero)
 	assert.Check(t, c.ss.serverToClientKey != zero)
 }

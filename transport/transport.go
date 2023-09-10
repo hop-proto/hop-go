@@ -18,16 +18,23 @@ type SessionID [4]byte
 // after the successful completion of a handshake.
 type SessionState struct {
 	sessionID SessionID
-	window    SlidingWindow
 
-	count             uint64
+	// Constant after handshake
 	clientToServerKey [KeyLen]byte
 	serverToClientKey [KeyLen]byte
-	remoteAddr        *net.UDPAddr
+	handle            *Handle
+	readKey, writeKey *[KeyLen]byte
+
+	// TODO(dadrian)[2023-09-09]: Should this be lock protected?
+	rawWrite bytes.Buffer
 
 	m sync.Mutex
+
 	// +checklocks:m
-	rawWrite bytes.Buffer
+	handleState connState
+	remoteAddr  *net.UDPAddr
+	window      SlidingWindow
+	count       uint64
 }
 
 // PlaintextLen returns the expected length of plaintext given the length of a
@@ -87,10 +94,7 @@ func (ss *SessionState) readCounter(b []byte) (count uint64) {
 	return
 }
 
-func (ss *SessionState) writePacket(conn UDPLike, msgType MessageType, in []byte, key *[KeyLen]byte) error {
-	ss.m.Lock()
-	defer ss.m.Unlock()
-
+func (ss *SessionState) writePacketLocked(conn UDPLike, msgType MessageType, in []byte, key *[KeyLen]byte) error {
 	length := HeaderLen + SessionIDLen + CounterLen + len(in) + TagLen
 	ss.rawWrite.Reset()
 	if ss.rawWrite.Cap() < length {
@@ -137,7 +141,7 @@ func (ss *SessionState) writePacket(conn UDPLike, msgType MessageType, in []byte
 	return nil
 }
 
-func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (int, MessageType, error) {
+func (ss *SessionState) readPacketLocked(plaintext, pkt []byte, key *[KeyLen]byte) (int, MessageType, error) {
 	plaintextLen := PlaintextLen(len(pkt))
 	ciphertextLen := plaintextLen + TagLen
 	if plaintextLen > len(plaintext) {
@@ -190,4 +194,32 @@ func (ss *SessionState) readPacket(plaintext, pkt []byte, key *[KeyLen]byte) (in
 	ss.window.Mark(count)
 
 	return plaintextLen, mt, nil
+}
+
+func (ss *SessionState) handleControlLocked(msg []byte) (err error) {
+	if len(msg) != 1 {
+		logrus.Error("handle: invalid control message: ", msg)
+		ss.closeLocked()
+		return ErrInvalidMessage
+	}
+
+	ctrlMsg := ControlMessage(msg[0])
+	switch ctrlMsg {
+	case ControlMessageClose:
+		logrus.Debug("handle: got close message")
+		return ss.closeLocked()
+	default:
+		logrus.Errorf("server: unexpected control message: %x", msg)
+		ss.closeLocked()
+		return ErrInvalidMessage
+	}
+}
+
+func (ss *SessionState) closeLocked() (err error) {
+	if ss.handleState == closed {
+		return nil
+	}
+	// TODO(dadrian)[2023-09-09]: Actually close. This is hard because sometimes
+	// the Server knows we're closing, and sometimes only the Handle knows.
+	return nil
 }

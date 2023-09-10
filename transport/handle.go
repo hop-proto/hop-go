@@ -2,45 +2,28 @@ package transport
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"net"
-	"os"
 	"sync"
 	"time"
-
-	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
 )
 
-type message struct {
-	msgType MessageType
-	data    []byte
-}
-
 // Handle implements net.Conn and MsgConn for connections accepted by a Server.
 type Handle struct { // nolint:maligned // unclear if 120-byte struct is better than 128
-	readLock  sync.Mutex
-	writeLock sync.Mutex
+	readLock sync.Mutex
 
-	sendWg sync.WaitGroup
-
-	recv *common.DeadlineChan[[]byte]  // incoming transport messages
-	send *common.DeadlineChan[message] // outgoing messages
-
-	// +checklocks:m
-	state connState
-	m     sync.Mutex
+	underlying UDPLike                      // outgoing socket-like
+	recv       *common.DeadlineChan[[]byte] // incoming transport messages
 
 	// +checklocks:readLock
 	buf bytes.Buffer
 
-	// +checklocks:m
+	// Constant after initialization
 	clientLeaf certs.Certificate
 	ss         *SessionState
-	server     *Server
 }
 
 var _ MsgReader = &Handle{}
@@ -49,18 +32,20 @@ var _ MsgConn = &Handle{}
 
 var _ net.Conn = &Handle{}
 
-func (c *Handle) getState() connState {
-	c.m.Lock()
-	defer c.m.Unlock()
-	return c.state
+func newHandleForSession(underlying UDPLike, ss *SessionState, packetBufLen int) *Handle {
+	return &Handle{
+		recv:       common.NewDeadlineChan[[]byte](packetBufLen),
+		underlying: underlying,
+		ss:         ss,
+	}
 }
 
 // IsClosed returns true if the handle is closed or in the process of closing.
 // Writes and reads to the handle return io.EOF if and only if IsClosed returns true
 func (c *Handle) IsClosed() bool {
-	c.m.Lock()
-	defer c.m.Unlock()
-	return c.state == closed
+	c.ss.m.Lock()
+	defer c.ss.m.Unlock()
+	return c.ss.handleState == closed
 }
 
 // ReadMsg implements the MsgReader interface. If b is too short to hold the
@@ -134,31 +119,16 @@ func (c *Handle) Read(b []byte) (int, error) {
 // WriteMsg writes b as a single packet. If b is too long, WriteMsg returns
 // ErrBufOverlow.
 func (c *Handle) WriteMsg(b []byte) error {
-	c.writeLock.Lock()
-	defer c.writeLock.Unlock()
-
-	if c.IsClosed() {
-		return io.EOF
-	}
-
 	if len(b) > MaxPlaintextSize {
 		return ErrBufOverflow
 	}
-
-	msg := message{
-		data:    append([]byte{}, b...),
-		msgType: MessageTypeTransport,
-	}
-	return c.send.Send(msg)
+	return c.send(MessageTypeTransport, b)
 }
 
 // Write implements io.Writer. It will split b into segments of length
 // MaxPlaintextLength and send them using WriteMsg. Each call to WriteMsg is
 // subject to the timeout.
 func (c *Handle) Write(buf []byte) (int, error) {
-	if c.IsClosed() {
-		return 0, io.EOF
-	}
 	b := append([]byte{}, buf...)
 	if len(b) <= MaxPlaintextSize {
 		err := c.WriteMsg(b)
@@ -183,120 +153,45 @@ func (c *Handle) Write(buf []byte) (int, error) {
 }
 
 // writeControl writes a control message to the remote host
-func (c *Handle) writeControl(msg ControlMessage) error {
-	toSend := message{
-		data:    []byte{byte(msg)},
-		msgType: MessageTypeControl,
-	}
-	return c.send.Send(toSend)
+func (c *Handle) writeControlLocked(msg ControlMessage) error {
+	return c.ss.writePacketLocked(c.underlying, MessageTypeControl, []byte{byte(msg)}, c.ss.writeKey)
 }
 
-func (c *Handle) sender() {
-	defer c.sendWg.Done()
-	for {
-		msg, err := c.send.Recv()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			} else if errors.Is(err, os.ErrDeadlineExceeded) {
-				continue
-			} else {
-				logrus.Errorf("handle: error receiving from send channel: %s", err)
-			}
-		}
-
-		err = c.ss.writePacket(c.server.udpConn, msg.msgType, msg.data, &c.ss.serverToClientKey)
-		if err != nil {
-			logrus.Errorf("handle: resetting connection. unable to write packet: %s", err)
-			go c.Close()
-		}
+func (c *Handle) send(msgType MessageType, b []byte) error {
+	c.ss.m.Lock()
+	defer c.ss.m.Unlock()
+	if c.ss.handleState == closed {
+		return io.EOF
 	}
-}
-
-func (c *Handle) handleControl(msg []byte) (err error) {
-	if len(msg) != 1 {
-		logrus.Error("handle: invalid control message: ", msg)
-		c.Close()
-		return ErrInvalidMessage
+	err := c.ss.writePacketLocked(c.underlying, msgType, b, c.ss.writeKey)
+	if err != nil {
+		// TODO(dadrian)[2023-09-08]: Is this necessary or correct?
+		go c.Close()
 	}
-
-	c.m.Lock()
-	defer c.m.Unlock()
-
-	ctrlMsg := ControlMessage(msg[0])
-	switch ctrlMsg {
-
-	case ControlMessageClose:
-		logrus.Debug("handle: got close message")
-		c.recv.Close()
-		return
-	default:
-		logrus.Errorf("server: unexpected control message: %x", msg)
-		c.Close()
-		return ErrInvalidMessage
-	}
-}
-
-// Start starts the goroutines that handle messages
-func (c *Handle) Start() {
-	c.m.Lock()
-	defer c.m.Unlock()
-
-	c.state = established
-
-	c.sendWg.Add(1)
-	go c.sender()
+	return err
 }
 
 // Close closes the connection. Future operations on non-buffered data will return io.EOF.
 func (c *Handle) Close() error {
-	c.m.Lock()
-	defer c.m.Unlock()
+	c.ss.m.Lock()
+	defer c.ss.m.Unlock()
 
-	if c.state == closed {
-		return io.EOF
-	}
-
-	logrus.Debug("handle: closing")
-
-	c.writeControl(ControlMessageClose)
-	c.recv.Close()
-	c.send.Close()
-
-	// Wait for the sending goroutine to exit
-	c.sendWg.Wait()
-
-	c.state = closed
-
-	go func() {
-		c.server.clearHandle(c.ss.sessionID)
-	}()
-
-	return nil
+	return c.ss.closeLocked()
 }
 
 // FetchClientLeaf returns the certificate the client presented when setting up the connection
 func (c *Handle) FetchClientLeaf() certs.Certificate {
-	c.m.Lock()
-	defer c.m.Unlock()
 	return c.clientLeaf
-}
-
-// SetClientLeaf stores the certificate presented by the client when setting up the connection
-func (c *Handle) SetClientLeaf(leaf certs.Certificate) {
-	c.m.Lock()
-	defer c.m.Unlock()
-	c.clientLeaf = leaf
 }
 
 // LocalAddr implements net.Conn.
 func (c *Handle) LocalAddr() net.Addr {
-	return c.server.udpConn.LocalAddr()
+	return c.underlying.LocalAddr()
 }
 
 // RemoteAddr implements net.Conn.
 func (c *Handle) RemoteAddr() net.Addr {
-	return c.server.udpConn.RemoteAddr()
+	return c.underlying.RemoteAddr()
 }
 
 // SetDeadline sets a deadline at which future operations will stop.
@@ -315,6 +210,9 @@ func (c *Handle) SetReadDeadline(t time.Time) error {
 
 // SetWriteDeadline sets a deadline at which future read operations will stop
 // Pending writes will be canceled
-func (c *Handle) SetWriteDeadline(t time.Time) error {
-	return c.send.SetDeadline(t)
+func (c *Handle) SetWriteDeadline(_ time.Time) error {
+	// There is no actual write deadline because sends go out immediately, subject to locking.
+	//
+	// TODO(dadrian)[2023-09-08]: Somehow limit lock wait time to write deadline.
+	return nil
 }

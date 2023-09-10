@@ -54,6 +54,9 @@ type HandshakeState struct {
 	certVerify         *VerifyConfig
 	leaf, intermediate []byte
 
+	// Parsed certs
+	parsedLeaf *certs.Certificate
+
 	remoteAddr *net.UDPAddr
 }
 

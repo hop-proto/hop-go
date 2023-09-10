@@ -1,11 +1,12 @@
 package transport
 
 import (
+	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"go.uber.org/goleak"
 	"gotest.tools/assert"
 
@@ -17,7 +18,6 @@ import (
 func TestClientCertificates(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	logrus.SetLevel(logrus.DebugLevel)
 	baseConfig, verify := newTestServerConfig(t)
 	baseConfig.MaxPendingConnections = 1
 	baseConfig.MaxBufferedPacketsPerConnection = 5
@@ -53,9 +53,7 @@ func TestClientCertificates(t *testing.T) {
 		config.ClientVerify = verify
 		server, err := NewServer(pc.(*net.UDPConn), config)
 		assert.NilError(t, err)
-		go func() {
-			server.Serve()
-		}()
+		go server.Serve()
 		return server
 	}
 
@@ -107,18 +105,36 @@ func TestClientCertificates(t *testing.T) {
 		client, err := Dial("udp", server.Addr().String(), clientConfig)
 		assert.NilError(t, err)
 
+		clientWg := sync.WaitGroup{}
+		clientWg.Add(1)
+
+		serverWg := sync.WaitGroup{}
+		serverWg.Add(1)
 		go func() {
-			_, err := server.AcceptTimeout(time.Second * 1)
-			assert.Check(t, err != nil)
+			defer serverWg.Done()
+
+			// Don't Accept until after the client has "finished" a handshake.
+			clientWg.Wait()
+			h, err := server.AcceptTimeout(time.Millisecond * 100)
+
+			// The AcceptTimeout should return with an ErrTimeout on a failed
+			// handshake because there will be nothing to Accept.
+			assert.Check(t, h == nil)
+			assert.Equal(t, io.EOF, err)
 		}()
 
-		// TODO(dadrian): We should have a better way of detecting handshake failure.
-		err = client.Handshake()
-		assert.Check(t, err)
-		err = client.Close()
-		assert.Check(t, err)
-		err = server.Close()
-		assert.Check(t, err)
+		func() {
+			// TODO(dadrian): We should have a better way of detecting handshake failure.
+			defer clientWg.Done()
+			err = client.Handshake()
+			assert.NilError(t, err)
+			err = client.Close()
+			assert.NilError(t, err)
+			err = server.Close()
+			assert.NilError(t, err)
+		}()
+		serverWg.Wait()
+
 	}
 
 	t.Run("username with no auth", func(t *testing.T) {
