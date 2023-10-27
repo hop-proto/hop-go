@@ -55,19 +55,17 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 
 	stop = func() {
 		stopWg := sync.WaitGroup{}
-		stopWg.Add(2)
+		stopWg.Add(1)
 		go func() {
 			sendErr, recvErr := m1.Stop()
 			assert.NilError(t, sendErr)
 			assert.NilError(t, recvErr)
 			stopWg.Done()
 		}()
-		go func() {
-			sendErr, recvErr := m2.Stop()
-			assert.NilError(t, sendErr)
-			assert.NilError(t, recvErr)
-			stopWg.Done()
-		}()
+
+		sendErr, recvErr := m2.Stop()
+		assert.NilError(t, sendErr)
+		assert.NilError(t, recvErr)
 
 		stopWg.Wait()
 
