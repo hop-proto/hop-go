@@ -58,7 +58,7 @@ func (c *ProbabalisticUDPMsgConn) WriteMsg(b []byte) (err error) {
 
 // odds indicates the probability that a packet will be sent. 1.0 sends all packets, and 0.0 sends no packets
 // rel is true for reliable tubes and false for unreliable ones
-func makeConn(odds float64, rel bool, t *testing.T) (t1, t2 net.Conn, stop func(), r bool, err error) {
+func makeConn(odds float64, rel bool, t testing.TB) (t1, t2 net.Conn, stop func(), r bool, err error) {
 	r = rel
 	var c1, c2 transport.MsgConn
 	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")
