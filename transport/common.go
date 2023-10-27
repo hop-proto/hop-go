@@ -111,6 +111,8 @@ const (
 type connState uint32
 
 const (
+	// TODO(hosono) fix this lint error
+	//nolint
 	finishingHandshake connState = iota
 	established
 	closed

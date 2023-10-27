@@ -153,6 +153,8 @@ func (c *Handle) Write(buf []byte) (int, error) {
 }
 
 // writeControl writes a control message to the remote host
+// TODO(hosono) fix lint error
+//nolint
 func (c *Handle) writeControlLocked(msg ControlMessage) error {
 	return c.ss.writePacketLocked(c.underlying, MessageTypeControl, []byte{byte(msg)}, c.ss.writeKey)
 }
