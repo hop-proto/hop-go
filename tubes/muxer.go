@@ -584,10 +584,10 @@ func (m *Muxer) Stop() (sendErr error, recvErr error) {
 	// can ignore it.
 	// TODO(hosono) is it really ok to ignore net.ErrClosed?
 	defer func() {
-		if errors.Is(sendErr, net.ErrClosed) || errors.Is(sendErr, syscall.ECONNREFUSED){
+		if errors.Is(sendErr, net.ErrClosed) || errors.Is(sendErr, syscall.ECONNREFUSED) {
 			sendErr = nil
 		}
-		if errors.Is(recvErr, net.ErrClosed) || errors.Is(recvErr, syscall.ECONNREFUSED){
+		if errors.Is(recvErr, net.ErrClosed) || errors.Is(recvErr, syscall.ECONNREFUSED) {
 			recvErr = nil
 		}
 	}()

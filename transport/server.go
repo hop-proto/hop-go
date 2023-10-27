@@ -99,7 +99,7 @@ func (s *Server) fetchHandshakeStateLocked(remoteAddr *net.UDPAddr) *HandshakeSt
 }
 
 // TODO(hosono) fix lint error
-//nolint
+// nolint
 func (s *Server) stopTrackingHandhshakeState(remoteAddr *net.UDPAddr) {
 	s.m.Lock()
 	defer s.m.Unlock()
