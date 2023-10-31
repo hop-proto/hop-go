@@ -67,15 +67,15 @@ func (r *receiver) processIntoBuffer() bool {
 	for r.fragments.Len() > 0 {
 		frag := heap.Pop(&(r.fragments)).(*pqItem)
 
-		log := r.log.WithFields(logrus.Fields{
-			"window start": r.windowStart,
-			"frameNo":      frag.priority,
-			"fin":          frag.FIN,
-		})
+		// log := r.log.WithFields(logrus.Fields{
+		// 	"window start": r.windowStart,
+		// 	"frameNo":      frag.priority,
+		// 	"fin":          frag.FIN,
+		// })
 
 		if r.windowStart != frag.priority {
 			// This packet cannot be added to the buffer yet.
-			log.Trace("cannot process packet into buffer yet")
+			// log.Trace("cannot process packet into buffer yet")
 			if frag.priority > r.windowStart {
 				heap.Push(&r.fragments, frag)
 				break
@@ -85,7 +85,7 @@ func (r *receiver) processIntoBuffer() bool {
 				r.closed.Store(true)
 				fin = true
 			}
-			log.Trace("processing packet")
+			// log.Trace("processing packet")
 			r.buffer.Write(frag.value)
 			r.windowStart++
 			r.ackNo++
@@ -190,11 +190,11 @@ func (r *receiver) receive(p *frame) (bool, error) {
 	windowEnd := r.windowStart + uint64(uint32(r.windowSize))
 	frameNo := r.unwrapFrameNo(p.frameNo)
 
-	log := r.log.WithFields(logrus.Fields{
-		"frameNo":     frameNo,
-		"windowStart": windowStart,
-		"windowEnd":   windowEnd,
-	})
+	// log := r.log.WithFields(logrus.Fields{
+	// 	"frameNo":     frameNo,
+	// 	"windowStart": windowStart,
+	// 	"windowEnd":   windowEnd,
+	// })
 
 	if (p.dataLength > 0 || p.flags.FIN) && frameInBounds(windowStart, windowEnd, frameNo) {
 		heap.Push(&r.fragments, &pqItem{
@@ -202,13 +202,13 @@ func (r *receiver) receive(p *frame) (bool, error) {
 			priority: frameNo,
 			FIN:      p.flags.FIN,
 		})
-		log.Trace("in bounds frame")
+		// log.Trace("in bounds frame")
 	} else {
 		if p.dataLength > 0 {
-			log.Debug("out of bounds frame")
+			// log.Debug("out of bounds frame")
 			return false, errFrameOutOfBounds
 		}
-		log.Trace("keep alive frame")
+		// log.Trace("keep alive frame")
 	}
 
 	fin := r.processIntoBuffer()

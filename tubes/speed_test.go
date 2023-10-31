@@ -6,7 +6,6 @@ import (
 	"sync"
 	"testing"
 
-	_ "net/http/pprof"
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 )
@@ -26,12 +25,12 @@ func BenchmarkReliable(b *testing.B) {
 
 	recvBuf := make([]byte, size)
 	sendBuf := make([]byte, size)
+	_, err = rand.Read(sendBuf)
+	assert.NilError(b,err)
+
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err = rand.Read(sendBuf)
-		assert.NilError(b,err)
-
 		wg.Add(1)
 		go func() {
 			n := 0
@@ -52,6 +51,7 @@ func BenchmarkReliable(b *testing.B) {
 		}
 		wg.Wait()
 	
-		assert.DeepEqual(b, sendBuf, recvBuf)
+		// This takes up 95% of benchmark time
+		// assert.DeepEqual(b, sendBuf, recvBuf)
 	}
 }

@@ -567,7 +567,7 @@ func (m *Muxer) receiver() {
 				initFrame := fromInitiateBytes(frame.toBytes())
 				tube.receiveInitiatePkt(initFrame)
 			} else {
-				go tube.receive(frame)
+				tube.receive(frame)
 			}
 		}
 	}
