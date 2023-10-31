@@ -19,10 +19,11 @@ func BenchmarkReliable(b *testing.B) {
 	defer stop()
 
 	wg := sync.WaitGroup{}
-	wg.Add(1)
 
 	size := 1 << 22
+	b.SetBytes(int64(size))
 	b.ReportAllocs()
+
 	recvBuf := make([]byte, size)
 	sendBuf := make([]byte, size)
 
@@ -31,6 +32,7 @@ func BenchmarkReliable(b *testing.B) {
 		_, err = rand.Read(sendBuf)
 		assert.NilError(b,err)
 
+		wg.Add(1)
 		go func() {
 			n := 0
 			for n < size {
@@ -52,5 +54,4 @@ func BenchmarkReliable(b *testing.B) {
 	
 		assert.DeepEqual(b, sendBuf, recvBuf)
 	}
-	b.SetBytes(int64(size))
 }
