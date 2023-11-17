@@ -26,8 +26,7 @@ func BenchmarkReliable(b *testing.B) {
 	recvBuf := make([]byte, size)
 	sendBuf := make([]byte, size)
 	_, err = rand.Read(sendBuf)
-	assert.NilError(b,err)
-
+	assert.NilError(b, err)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -50,7 +49,7 @@ func BenchmarkReliable(b *testing.B) {
 			assert.NilError(b, err)
 		}
 		wg.Wait()
-	
+
 		// This takes up 95% of benchmark time
 		// assert.DeepEqual(b, sendBuf, recvBuf)
 	}

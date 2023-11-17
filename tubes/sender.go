@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+
+	"hop.computer/hop/common"
 )
 
 type sender struct {
@@ -128,7 +130,7 @@ func (s *sender) recvAck(ackNo uint32) error {
 	s.l.Lock()
 	defer s.l.Unlock()
 
-	// oldAckNo := s.ackNo
+	oldAckNo := s.ackNo
 	newAckNo := uint64(ackNo)
 	if newAckNo < s.ackNo && (newAckNo+(1<<32)-s.ackNo <= uint64(s.windowSize)) { // wrap around
 		newAckNo = newAckNo + (1 << 32)
@@ -139,7 +141,9 @@ func (s *sender) recvAck(ackNo uint32) error {
 	for s.ackNo < newAckNo {
 		_, ok := s.frameDataLengths[uint32(s.ackNo)]
 		if !ok {
-			// s.log.WithField("ackNo", s.ackNo).Debug("data length missing for frame")
+			if common.Debug {
+				s.log.WithField("ackNo", s.ackNo).Debug("data length missing for frame")
+			}
 			return errors.New("no data length")
 		}
 		delete(s.frameDataLengths, uint32(s.ackNo))
@@ -148,10 +152,12 @@ func (s *sender) recvAck(ackNo uint32) error {
 		s.frames = s.frames[1:]
 	}
 
-	// s.log.WithFields(logrus.Fields{
-	// 	"old ackNo": oldAckNo,
-	// 	"new ackNo": newAckNo,
-	// }).Trace("updated ackNo")
+	if common.Debug {
+		s.log.WithFields(logrus.Fields{
+			"old ackNo": oldAckNo,
+			"new ackNo": newAckNo,
+		}).Trace("updated ackNo")
+	}
 
 	// Only fill the window if new space has really opened up
 	if windowOpen {
@@ -215,9 +221,11 @@ func (s *sender) fillWindow(rto bool, startIndex int) {
 		s.unacked++
 	}
 
-	// s.log.WithFields(logrus.Fields{
-	// 	"num sent": numFrames,
-	// }).Trace("fillWindow called")
+	if common.Debug {
+		s.log.WithFields(logrus.Fields{
+			"num sent": numFrames,
+		}).Trace("fillWindow called")
+	}
 }
 
 func (s *sender) retransmit() {

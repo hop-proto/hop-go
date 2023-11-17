@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+
+	"hop.computer/hop/common"
 )
 
 // TubeType represents identifier bytes of Tubes.
@@ -109,13 +111,15 @@ func (r *Reliable) send() {
 		pkt.flags.REL = true
 		r.sendQueue <- pkt.toBytes()
 
-		// r.log.WithFields(logrus.Fields{
-		// 	"frameno": pkt.frameNo,
-		// 	"ackno":   pkt.ackNo,
-		// 	"ack":     pkt.flags.ACK,
-		// 	"fin":     pkt.flags.FIN,
-		// 	"dataLen": pkt.dataLength,
-		// }).Trace("sent packet")
+		if common.Debug {
+			r.log.WithFields(logrus.Fields{
+				"frameno": pkt.frameNo,
+				"ackno":   pkt.ackNo,
+				"ack":     pkt.flags.ACK,
+				"fin":     pkt.flags.FIN,
+				"dataLen": pkt.dataLength,
+			}).Trace("sent packet")
+		}
 	}
 	r.log.Debug("send ended")
 	close(r.sendDone)
@@ -126,21 +130,24 @@ func (r *Reliable) receive(pkt *frame) error {
 	r.l.Lock()
 	defer r.l.Unlock()
 
-	// Log the packet
-	// r.log.WithFields(logrus.Fields{
-	// 	"frameno": pkt.frameNo,
-	// 	"ackno":   pkt.ackNo,
-	// 	"ack":     pkt.flags.ACK,
-	// 	"fin":     pkt.flags.FIN,
-	// 	"dataLen": pkt.dataLength,
-	// }).Trace("receiving packet")
+	if common.Debug {
+		r.log.WithFields(logrus.Fields{
+			"frameno": pkt.frameNo,
+			"ackno":   pkt.ackNo,
+			"ack":     pkt.flags.ACK,
+			"fin":     pkt.flags.FIN,
+			"dataLen": pkt.dataLength,
+		}).Trace("receiving packet")
+	}
 
 	// created and closed tubes cannot handle incoming packets
 	if r.tubeState == created || r.tubeState == closed {
-		// r.log.WithFields(logrus.Fields{
-		// 	"fin":   pkt.flags.FIN,
-		// 	"state": r.tubeState,
-		// }).Info("receive for tube in bad state")
+		if common.Debug {
+			r.log.WithFields(logrus.Fields{
+				"fin":   pkt.flags.FIN,
+				"state": r.tubeState,
+			}).Info("receive for tube in bad state")
+		}
 
 		return ErrBadTubeState
 	}
@@ -229,15 +236,16 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 	r.l.Lock()
 	defer r.l.Unlock()
 
-	// Log the packet
-	// r.log.WithFields(logrus.Fields{
-	// 	"frameno": pkt.frameNo,
-	// 	"req":     pkt.flags.REQ,
-	// 	"resp":    pkt.flags.RESP,
-	// 	"rel":     pkt.flags.REL,
-	// 	"ack":     pkt.flags.ACK,
-	// 	"fin":     pkt.flags.FIN,
-	// }).Debug("receiving initiate packet")
+	if common.Debug {
+		r.log.WithFields(logrus.Fields{
+			"frameno": pkt.frameNo,
+			"req":     pkt.flags.REQ,
+			"resp":    pkt.flags.RESP,
+			"rel":     pkt.flags.REL,
+			"ack":     pkt.flags.ACK,
+			"fin":     pkt.flags.FIN,
+		}).Debug("receiving initiate packet")
+	}
 
 	if r.tubeState == created {
 		r.recvWindow.m.Lock()
