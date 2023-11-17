@@ -22,7 +22,12 @@ var errGotKeepAlive = errors.New("accepted keep alive tube. this tube is not pas
 // TODO(hosono) create a config struct to pass to the muxer to set these things
 
 // MaxFrameDataLength is the maximum bytes per frame in a Reliable or Unreliable tube
-const MaxFrameDataLength uint16 = 2000
+// TODO(hosono) IPv4 is only required to support packets up to 576 bytes long,
+// but usually internet routers can support much larger packets.
+// Correctly implementing MTU discovery is complicated. Setting this to a
+// value that is always safe (~500), leads to unacceptable performance loss.
+// Setting this a large value may cause unreliable tubes to intermittently fail.
+const MaxFrameDataLength uint16 = 32768
 
 // maximum number of packet an unreliable tube will buffer
 const maxBufferedPackets = 1000
