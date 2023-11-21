@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+
+	"hop.computer/hop/common"
 )
 
 // UDPLike interface standardizes Reliable channels and UDPConn.
@@ -260,7 +262,9 @@ func (c *Client) handleSessionMessage(addr *net.UDPAddr, msg []byte) error {
 	if err != nil {
 		return err
 	}
-	logrus.Tracef("client: transport/control message for session %x", sessionID)
+	if common.Debug {
+		logrus.Tracef("client: transport/control message for session %x", sessionID)
+	}
 
 	c.ss.m.Lock()
 	defer c.ss.m.Unlock()
@@ -274,7 +278,9 @@ func (c *Client) handleSessionMessage(addr *net.UDPAddr, msg []byte) error {
 	if err != nil {
 		return err
 	}
-	logrus.Tracef("client: session %x: plaintextLen: %d type: %x from: %s", c.ss.sessionID, len(plaintext), mt, addr)
+	if common.Debug {
+		logrus.Tracef("client: session %x: plaintextLen: %d type: %x from: %s", c.ss.sessionID, len(plaintext), mt, addr)
+	}
 
 	switch mt {
 	case MessageTypeTransport:
