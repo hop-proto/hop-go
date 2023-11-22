@@ -8,8 +8,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"hop.computer/hop/kravatte"
 	"hop.computer/hop/common"
+	"hop.computer/hop/kravatte"
 )
 
 // SessionID is an IP-independent identifier of a tunnel.
