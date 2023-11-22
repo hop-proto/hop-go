@@ -44,7 +44,7 @@ func (c *ProbabalisticUDPMsgConn) ReadMsg(b []byte) (n int, err error) {
 
 // WriteMsg implement the MsgConn interface
 func (c *ProbabalisticUDPMsgConn) WriteMsg(b []byte) (err error) {
-	var x float64 = 0.0
+	var x float64 // defaults to 0.0
 	if c.odds != 1.0 {
 		size := big.NewInt(100000)
 		i, err := rand.Int(rand.Reader, size)
