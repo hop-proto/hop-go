@@ -13,6 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/certs"
+	"hop.computer/hop/common"
 )
 
 type serverState uint32
@@ -98,6 +99,8 @@ func (s *Server) fetchHandshakeStateLocked(remoteAddr *net.UDPAddr) *HandshakeSt
 	return s.handshakes[key]
 }
 
+// TODO(hosono) fix lint error
+// nolint
 func (s *Server) stopTrackingHandhshakeState(remoteAddr *net.UDPAddr) {
 	s.m.Lock()
 	defer s.m.Unlock()
@@ -143,7 +146,9 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 	if err != nil {
 		return err
 	}
-	logrus.Trace(msgLen, oobn, flags, addr)
+	if common.Debug {
+		logrus.Trace(msgLen, oobn, flags, addr)
+	}
 	if msgLen < 4 {
 		return ErrInvalidMessage
 	}
@@ -189,8 +194,10 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 			return err
 		}
 	case MessageTypeClientAuth:
-		logrus.Debug("server: received client auth with length ", msgLen)
-		logrus.Tracef("server: raw read: %x", rawRead[:msgLen])
+		if common.Debug {
+			logrus.Debug("server: received client auth with length ", msgLen)
+			logrus.Tracef("server: raw read: %x", rawRead[:msgLen])
+		}
 
 		_, hs, err := s.handleClientAuth(rawRead[:msgLen], addr)
 		if err != nil {
@@ -205,7 +212,9 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 		// Server-side should not receive messages only sent by the server
 		return ErrUnexpectedMessage
 	case MessageTypeTransport, MessageTypeControl:
-		logrus.Tracef("server: received transport/control message from %s", addr)
+		if common.Debug {
+			logrus.Tracef("server: received transport/control message from %s", addr)
+		}
 		err := s.handleSessionMessage(addr, rawRead[:msgLen])
 		if err != nil {
 			return err
@@ -292,7 +301,9 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState) (int, error) {
 	x = x[HeaderLen:]
 	pos += HeaderLen
 	copy(x, hs.sessionID[:])
-	logrus.Tracef("server: session ID %x", hs.sessionID[:])
+	if common.Debug {
+		logrus.Tracef("server: session ID %x", hs.sessionID[:])
+	}
 	hs.duplex.Absorb(x[:SessionIDLen])
 	x = x[SessionIDLen:]
 	pos += SessionIDLen
@@ -453,7 +464,9 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte) error {
 	if err != nil {
 		return err
 	}
-	logrus.Tracef("server: transport/control message for session %x", sessionID)
+	if common.Debug {
+		logrus.Tracef("server: transport/control message for session %x", sessionID)
+	}
 	ss := s.fetchSession(sessionID)
 	if ss == nil {
 		return ErrUnknownSession
@@ -467,7 +480,9 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte) error {
 	if err != nil {
 		return err
 	}
-	logrus.Tracef("server: session %x: plaintextLen: %d type: %x from: %s", ss.sessionID, len(plaintext), mt, addr)
+	if common.Debug {
+		logrus.Tracef("server: session %x: plaintextLen: %d type: %x from: %s", ss.sessionID, len(plaintext), mt, addr)
+	}
 
 	switch mt {
 	case MessageTypeTransport:

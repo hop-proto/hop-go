@@ -8,6 +8,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/common"
 	"hop.computer/hop/kravatte"
 )
 
@@ -111,7 +112,9 @@ func (ss *SessionState) writePacketLocked(conn UDPLike, msgType MessageType, in 
 
 	// Counter
 	ss.writeCounter(&ss.rawWrite)
-	logrus.Tracef("ss: writing packet with count %d", ss.count)
+	if common.Debug {
+		logrus.Tracef("ss: writing packet with count %d", ss.count)
+	}
 
 	// Encrypt the message. The associated data is the message header. There is
 	// no nonce. The output has an overhead of TagLength.
@@ -121,8 +124,10 @@ func (ss *SessionState) writePacketLocked(conn UDPLike, msgType MessageType, in 
 	}
 	buf := make([]byte, TagLen+len(in))
 	enc := aead.Seal(buf[:0], nil, in, ss.rawWrite.Bytes()[:AssociatedDataLen])
-	logrus.Tracef("write: %x %x", buf[:12], enc)
-	logrus.Tracef("write(buf): %x", buf)
+	if common.Debug {
+		logrus.Tracef("write: %x %x", buf[:12], enc)
+		logrus.Tracef("write(buf): %x", buf)
+	}
 	if len(enc) != len(buf) {
 		logrus.Panicf("expected len(buf) = len(enc), got: %d = %d + 12", len(buf), len(enc))
 	}
@@ -167,7 +172,9 @@ func (ss *SessionState) readPacketLocked(plaintext, pkt []byte, key *[KeyLen]byt
 
 	// Counter
 	count := ss.readCounter(b)
-	logrus.Tracef("ss: read packet with count %d", count)
+	if common.Debug {
+		logrus.Tracef("ss: read packet with count %d", count)
+	}
 	if !ss.window.Check(count) {
 		logrus.Debugf("ss: rejecting replayed packet")
 		return 0, 0x0, ErrReplay
@@ -179,7 +186,9 @@ func (ss *SessionState) readPacketLocked(plaintext, pkt []byte, key *[KeyLen]byt
 		return 0, 0x0, err
 	}
 	enc := b[:ciphertextLen]
-	logrus.Tracef("read enc: %x", enc)
+	if common.Debug {
+		logrus.Tracef("read enc: %x", enc)
+	}
 	b = b[ciphertextLen:]
 	if len(b) != 0 {
 		logrus.Panicf("len(b) = %d, expected 0", len(b))

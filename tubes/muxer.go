@@ -2,10 +2,12 @@ package tubes
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -565,7 +567,7 @@ func (m *Muxer) receiver() {
 				initFrame := fromInitiateBytes(frame.toBytes())
 				tube.receiveInitiatePkt(initFrame)
 			} else {
-				go tube.receive(frame)
+				tube.receive(frame)
 			}
 		}
 	}
@@ -577,6 +579,19 @@ func (m *Muxer) receiver() {
 // the first error is any error returned by the muxer sender and the second
 // any error returned by the muxer receiver.
 func (m *Muxer) Stop() (sendErr error, recvErr error) {
+	// This error indicates that the muxer got an ICMP Destination Unreachable packet.
+	// This happens when the other side of the connetion has been closed, so we
+	// can ignore it.
+	// TODO(hosono) is it really ok to ignore net.ErrClosed?
+	defer func() {
+		if errors.Is(sendErr, net.ErrClosed) || errors.Is(sendErr, syscall.ECONNREFUSED) {
+			sendErr = nil
+		}
+		if errors.Is(recvErr, net.ErrClosed) || errors.Is(recvErr, syscall.ECONNREFUSED) {
+			recvErr = nil
+		}
+	}()
+
 	m.m.Lock()
 	m.log.WithField("numTubes", len(m.reliableTubes)+len(m.unreliableTubes)).Info("Stopping muxer")
 
@@ -656,13 +671,6 @@ func (m *Muxer) Stop() (sendErr error, recvErr error) {
 	m.sendErr = <-m.senderErr
 	m.m.Lock()
 	defer m.m.Unlock()
-
-	//// This error indicates that the muxer got an ICMP Destination Unreachable packet.
-	//// This happens when the other side of the connetion has been closed, so we
-	//// can ignore it.
-	//if errors.Is(m.stopErr, syscall.ECONNREFUSED) {
-	//m.stopErr = nil
-	//}
 
 	close(m.stopped)
 	m.log.Info("Muxer.Stop() finished")

@@ -27,8 +27,13 @@ build: ## compile
 build:
 	go build ./...
 
+.PHONY: debug
+debug: ## compile in debug mode
+debug:
+	go build -tags debug ./...
+
 .PHONY: test
-test: ## test
+test: ## test. To run with trace logging, add "-tags debug" to the arguments
 test:
 	go test -race ./... -timeout 4m
 
