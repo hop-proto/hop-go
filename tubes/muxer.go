@@ -1,7 +1,6 @@
 package tubes
 
 import (
-	"bytes"
 	"errors"
 	"io"
 	"net"
@@ -268,7 +267,7 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 		closed:     make(chan struct{}, 1),
 		recvWindow: receiver{
 			dataReady:   common.NewDeadlineChan[struct{}](1),
-			buffer:      new(bytes.Buffer),
+			buffer:      buffer{buffer: make([][]byte, windowSize)},
 			fragments:   make(PriorityQueue, 0),
 			windowSize:  windowSize,
 			windowStart: 1,

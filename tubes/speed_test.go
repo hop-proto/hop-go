@@ -1,7 +1,6 @@
 package tubes
 
 import (
-	"bytes"
 	"crypto/rand"
 	"io"
 	"sync"
@@ -63,7 +62,7 @@ func BenchmarkReceiver(b *testing.B) {
     numMessages := size / packetSize
     r := receiver{
         dataReady:   common.NewDeadlineChan[struct{}](1),
-        buffer:      new(bytes.Buffer),
+        buffer:      buffer{buffer: make([][]byte, windowSize)},
         fragments:   make(PriorityQueue, 0),
         windowSize:  windowSize,
         windowStart: 1,

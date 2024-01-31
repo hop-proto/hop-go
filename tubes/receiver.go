@@ -1,7 +1,6 @@
 package tubes
 
 import (
-	"bytes"
 	"container/heap"
 	"io"
 	"sync"
@@ -32,7 +31,7 @@ type receiver struct {
 
 	dataReady *common.DeadlineChan[struct{}]
 	// +checklocks:m
-	buffer *bytes.Buffer
+	buffer buffer
 
 	log *logrus.Entry
 }

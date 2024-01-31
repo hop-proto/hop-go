@@ -1,7 +1,6 @@
 package tubes
 
 import (
-	"bytes"
 	"crypto/rand"
 	mathRand "math/rand"
 	"sync"
@@ -33,7 +32,7 @@ func makePacket(frameNo uint32, b []byte) *frame {
 func TestReceiveWindow(t *testing.T) {
 	recvWindow := receiver{
 		dataReady:   common.NewDeadlineChan[struct{}](1),
-		buffer:      new(bytes.Buffer),
+        buffer:      buffer{buffer: make([][]byte, 200)},
 		fragments:   make(PriorityQueue, 0),
 		windowSize:  200,
 		windowStart: 1,
