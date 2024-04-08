@@ -3,6 +3,7 @@ package transport
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -25,25 +26,28 @@ type UDPLike interface {
 var _ net.Conn = &Client{}
 
 const (
-	clientStateCreated     = 0
-	clientStateHandshaking = 1
-	clientStateOpen        = 2
-	clientStateClosing     = 3
-	clientStateClosed      = 4
+	clientStateCreated     = uint32(0)
+	clientStateHandshaking = uint32(1)
+	clientStateOpen        = uint32(2)
+	clientStateClosing     = uint32(3)
+	clientStateClosed      = uint32(4)
+	clientStateError       = uint32(5)
 )
 
-// Client implements net.Conn
+// Client implements net.Conn.
 //
 // TODO(dadrian): Further document
 type Client struct {
-	m     sync.Mutex
 	wg    sync.WaitGroup
 	state atomic.Uint32
+
+	handshakeWg sync.WaitGroup
 
 	underlyingConn UDPLike
 	dialAddr       *net.UDPAddr
 
 	// +checklocks:m
+	err          error
 	handshakeErr error
 	hs           *HandshakeState
 
@@ -54,42 +58,65 @@ type Client struct {
 	closeWg sync.WaitGroup
 }
 
-func (c *Client) enforceHandshake() error {
-	state := c.state.Load()
-	switch state {
-	case clientStateCreated, clientStateHandshaking:
-		return c.Handshake()
-	}
-	return c.handshakeErr
-}
-
-// IsClosed returns true if Close() has been called
+// IsClosed returns true if Close() has finished.
 func (c *Client) IsClosed() bool {
-	cur := c.state.Load()
-	switch cur {
-	case clientStateClosed:
-		return true
-	case clientStateClosing:
-		return true
-	default:
-		return false
-	}
+	return c.state.Load() == clientStateClosed
 }
 
 // Handshake performs the Portal handshake with the remote host. The connection
 // must already be open. It is an error to call Handshake on a connection that
 // has already performed the portal handshake.
 func (c *Client) Handshake() error {
-	logrus.Info("Client Handshake called")
-
-	c.m.Lock()
-	defer c.m.Unlock()
-
 	state := c.state.Load()
-	if state == clientStateCreated {
-		logrus.Debug("Handshake not complete. Completing handshake...")
-		c.handshakeErr = c.clientHandshakeLocked()
+	switch state {
+	case clientStateHandshaking:
+		// Wait for the handshake to finish, then return the cached error.
+		c.handshakeWg.Wait()
 		return c.handshakeErr
+	case clientStateOpen:
+		// If the client is open, it can't have had a handshake error.
+		return nil
+	case clientStateError:
+		return c.err
+	case clientStateClosing, clientStateClosed:
+		if c.hs != nil {
+			return nil
+		}
+		return io.EOF
+	}
+
+	// Only add to the semaphor if the first check indicates we might need to handshake.
+	c.handshakeWg.Add(1)
+	for !c.state.CompareAndSwap(clientStateCreated, clientStateHandshaking) {
+		state := c.state.Load()
+		switch state {
+		case clientStateCreated:
+			// Do nothing, try again
+		case clientStateHandshaking:
+			c.handshakeWg.Done()
+			c.handshakeWg.Wait()
+			return c.handshakeErr
+		case clientStateOpen:
+			c.handshakeWg.Done()
+			return nil
+		case clientStateError:
+			return c.err
+		case clientStateClosing, clientStateClosed:
+			c.handshakeWg.Done()
+			if c.hs != nil {
+				return nil
+			}
+			return io.EOF
+		}
+	}
+	defer c.handshakeWg.Done()
+	logrus.Info("Handshake not complete. Completing handshake...")
+	c.handshakeErr = c.clientHandshakeLocked()
+	if c.handshakeErr != nil {
+		c.hs = nil
+		c.ss = nil
+		c.err = c.handshakeErr
+		c.state.Store(clientStateError)
 	}
 	return c.handshakeErr
 }
@@ -245,6 +272,7 @@ func (c *Client) clientHandshakeLocked() error {
 func (c *Client) listen() {
 	defer c.wg.Done()
 	ciphertext := make([]byte, 65535)
+	c.handshakeWg.Wait()
 	for c.state.Load() == clientStateOpen {
 		msgLen, _, _, addr, err := c.underlyingConn.ReadMsgUDP(ciphertext, nil)
 		if err != nil {
@@ -308,66 +336,43 @@ func (c *Client) handleSessionMessage(addr *net.UDPAddr, msg []byte) error {
 
 // Write implements net.Conn.
 func (c *Client) Write(b []byte) (int, error) {
-	if err := c.enforceHandshake(); err != nil {
-		return 0, c.handshakeErr
+	if err := c.Handshake(); err != nil {
+		return 0, err
 	}
 	return c.ss.handle.Write(b)
 }
 
 // WriteMsg implements MsgConn. It send a single frame.
 func (c *Client) WriteMsg(b []byte) error {
-	if err := c.enforceHandshake(); err != nil {
-		return c.handshakeErr
+	if err := c.Handshake(); err != nil {
+		return err
 	}
 	return c.ss.handle.WriteMsg(b)
-}
-
-// Close immediately tears down the connection.
-// Future operations on non-buffered data will return io.EOF
-func (c *Client) Close() error {
-	c.closeWg.Add(1)
-	for !c.state.CompareAndSwap(clientStateOpen, clientStateClosing) {
-		cur := c.state.Load()
-		switch cur {
-		case clientStateCreated:
-			if c.state.CompareAndSwap(clientStateCreated, clientStateClosed) {
-				c.closeWg.Done()
-				return nil
-			}
-		case clientStateHandshaking:
-			c.m.Lock()
-			c.m.Unlock()
-		case clientStateClosing:
-			c.closeWg.Done()
-			c.closeWg.Wait()
-			return nil
-		case clientStateClosed:
-			c.closeWg.Done()
-			return nil
-		}
-	}
-	defer c.closeWg.Done()
-	c.underlyingConn.SetReadDeadline(time.Now())
-
-	c.wg.Wait()
-	c.ss.handle.Close()
-	c.underlyingConn.Close()
-	return nil
 }
 
 // ReadMsg reads a single message. If b is too short to hold the message, it is
 // buffered and ErrBufOverflow is returned.
 func (c *Client) ReadMsg(b []byte) (n int, err error) {
-	if err := c.enforceHandshake(); err != nil {
-		return 0, err
+	switch c.state.Load() {
+	case clientStateCreated, clientStateHandshaking:
+		if err := c.Handshake(); err != nil {
+			return 0, err
+		}
+	case clientStateError:
+		return 0, c.err
 	}
 	return c.ss.handle.ReadMsg(b)
 }
 
 // Read implements net.Conn.
 func (c *Client) Read(b []byte) (n int, err error) {
-	if err := c.enforceHandshake(); err != nil {
-		return 0, err
+	switch c.state.Load() {
+	case clientStateCreated, clientStateHandshaking:
+		if err := c.Handshake(); err != nil {
+			return 0, err
+		}
+	case clientStateError:
+		return 0, c.err
 	}
 	return c.ss.handle.Read(b)
 }
@@ -406,6 +411,45 @@ func (c *Client) SetWriteDeadline(t time.Time) error {
 		return c.ss.handle.SetWriteDeadline(t)
 	}
 	// TODO(dadrian)[2023-09-10]: What about the other cases?
+	return nil
+}
+
+// Close immediately tears down the connection.
+// Future operations on non-buffered data will return io.EOF
+func (c *Client) Close() error {
+	c.closeWg.Add(1)
+	for !c.state.CompareAndSwap(clientStateOpen, clientStateClosing) {
+		cur := c.state.Load()
+		switch cur {
+		case clientStateCreated:
+			if c.state.CompareAndSwap(clientStateCreated, clientStateClosed) {
+				c.closeWg.Done()
+				return nil
+			}
+		case clientStateHandshaking:
+			c.handshakeWg.Wait()
+		case clientStateClosing:
+			c.closeWg.Done()
+			c.closeWg.Wait()
+			return nil
+		case clientStateClosed:
+			c.closeWg.Done()
+			return nil
+		case clientStateError:
+			c.closeWg.Done()
+			return c.err
+		}
+	}
+	defer c.closeWg.Done()
+	// TODO(dadrian)[2024-04-07]: Document why this is correct, or fix it.
+	c.underlyingConn.SetReadDeadline(time.Now())
+
+	c.wg.Wait()
+
+	c.state.Store(clientStateClosed)
+	c.ss.handle.Close()
+	c.underlyingConn.Close()
+
 	return nil
 }
 

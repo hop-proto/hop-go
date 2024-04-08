@@ -178,6 +178,8 @@ func (c *Handle) Close() error {
 	c.ss.m.Lock()
 	defer c.ss.m.Unlock()
 
+	c.recv.Close()
+
 	return c.ss.closeLocked()
 }
 

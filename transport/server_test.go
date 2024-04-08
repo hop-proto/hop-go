@@ -27,6 +27,16 @@ func newClientAuth(t assert.TestingT) (*keys.X25519KeyPair, *certs.Certificate) 
 	return k, c
 }
 
+func newClientAuthAndConfig(t assert.TestingT, verifyConfig *VerifyConfig) (*keys.X25519KeyPair, *certs.Certificate, *ClientConfig) {
+	kp, leaf := newClientAuth(t)
+	cc := &ClientConfig{
+		Verify:    *verifyConfig,
+		Exchanger: kp,
+		Leaf:      leaf,
+	}
+	return kp, leaf, cc
+}
+
 func newTestServerConfig(t assert.TestingT) (*ServerConfig, *VerifyConfig) {
 	keyPair, err := keys.ReadDHKeyFromPEMFile("testdata/leaf-key.pem")
 	assert.NilError(t, err)
