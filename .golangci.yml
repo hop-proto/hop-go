@@ -5,24 +5,17 @@
 # fighting with false positives?
 # https://github.com/golangci/golangci-lint#nolint
 
-run:
-  skip-dirs:
-    - cmd/hop
-  skip-files:
-    - .*keccakf_amd64.s
-    - .*keccakf_amd64.go
 linters:
   enable:
     - gofmt # Gofmt checks whether code was gofmt-ed. By default this tool runs with -s option to check for code simplification [fast: true, auto-fix: true]
     - goimports # Goimports does everything that gofmt does. Additionally it checks unused imports [fast: true, auto-fix: true]
     - misspell # Finds commonly misspelled English words in comments [fast: true, auto-fix: true]
-    - deadcode # Finds unused code [fast: true, auto-fix: false]
     - govet
 
     - bodyclose # checks whether HTTP response body is closed successfully [fast: false, auto-fix: false]
     - depguard # Go linter that checks if package imports are in a list of acceptable packages [fast: true, auto-fix: false]
     - dupl # Tool for code clone detection [fast: true, auto-fix: false]
-    - exportloopref # Replaces scopelint
+    - copyloopvar # Replaces exportloopref
     - gochecknoinits # Checks that no init functions are present in Go code [fast: true, auto-fix: false]
     - goconst # Finds repeated strings that could be replaced by a constant [fast: true, auto-fix: false]
     - gocyclo # Computes and checks the cyclomatic complexity of functions [fast: true, auto-fix: false]
@@ -32,12 +25,10 @@ linters:
     - prealloc # Finds slice declarations that could potentially be preallocated [fast: true, auto-fix: false]
     - revive # Replaced golint
     - staticcheck # Staticcheck is a go vet on steroids, applying a ton of static analysis checks [fast: false, auto-fix: false]
-    - structcheck # Finds unused struct fields [fast: true, auto-fix: false]
     - stylecheck # Stylecheck is a replacement for golint [fast: false, auto-fix: false]
     - typecheck # Like the front-end of a Go compiler, parses and type-checks Go code [fast: true, auto-fix: false]
     - unconvert # Remove unnecessary type conversions [fast: true, auto-fix: false]
     - unused # Checks Go code for unused constants, variables, functions and types [fast: false, auto-fix: false]
-    - varcheck # Finds unused global variables and constants [fast: true, auto-fix: false]
   disable:
     # Don't care about line length, this is Go
     - lll # Reports long lines [fast: true, auto-fix: false]
@@ -55,10 +46,6 @@ linters:
 
     # Implementing interfaces can cause this to happen all the time
     - unparam # Reports unused function parameters [fast: false, auto-fix: false]
-
-    # Runs slow and often alerts on cases that you don't want to be more
-    # general.
-    - interfacer # Linter that suggests narrower interface types [fast: false, auto-fix: false]
 linters-settings:
   goimports:
     local-prefixes: hop.computer/hop
@@ -91,6 +78,11 @@ linters-settings:
       - unusedresult
 
 issues:
+  exclude-dirs:
+    - cmd/hop
+  exclude-files:
+    - .*keccakf_amd64.s
+    - .*keccakf_amd64.go
   exclude-use-default: false
   exclude:
     - G104 # 'Errors unhandled. (gosec)
