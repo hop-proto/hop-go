@@ -20,7 +20,7 @@ vet:
 lint: ## lint go code
 lint: ; $(GOLANGCI_LINT_ERR)
 	@echo "lint-go"
-	@$(GOLANGCI_LINT) run --deadline 1m
+	@$(GOLANGCI_LINT) run --timeout 1m
 
 .PHONY: build
 build: ## compile
