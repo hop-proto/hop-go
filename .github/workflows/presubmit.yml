@@ -5,7 +5,7 @@ on:
   pull_request:
     branches: [main]
 jobs:
-  lint:
+  test:
     runs-on: ubuntu-latest
     name: Test
     steps:
@@ -20,10 +20,14 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles(‘**/go.sum’) }}
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
       - name: build
         run: make build
+      - name: lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: v1.50
       - name: test
         run: make test
