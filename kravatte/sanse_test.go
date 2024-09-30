@@ -88,7 +88,6 @@ func TestAgainstReference(t *testing.T) {
 		"xkcp-sanse",
 	}
 	for _, implementation := range implementations {
-		implementation := implementation
 		t.Run(implementation, func(t *testing.T) {
 			path := fmt.Sprintf("testdata/%s.txt", implementation)
 			r, err := os.Open(path)

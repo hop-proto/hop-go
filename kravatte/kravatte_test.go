@@ -97,7 +97,6 @@ func TestKravatteAgainstReference(t *testing.T) {
 		"xkcp-kravatte",
 	}
 	for _, implementation := range implementations {
-		implementation := implementation
 		t.Run(implementation, func(t *testing.T) {
 			path := fmt.Sprintf("testdata/%s.txt", implementation)
 			r, err := os.Open(path)
