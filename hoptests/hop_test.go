@@ -199,6 +199,7 @@ func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
 		Key:          "home/" + username + "/.hop/id_hop.pem",
 		ServerName:   s.ServerName,
 		CAFiles:      []string{"home/username/.hop/root.cert", "home/username/.hop/intermediate.cert"},
+		DataTimeout:  time.Second,
 	}
 
 	rootBytes, _ := certs.EncodeCertificateToPEM(s.Root)

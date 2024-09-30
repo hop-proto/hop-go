@@ -602,7 +602,7 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	ss.readKey = &ss.clientToServerKey
 	ss.writeKey = &ss.serverToClientKey
 
-	ss.handle = newHandleForSession(s.udpConn, ss, s.config.maxBufferedPacketsPerConnection())
+	ss.handle = newHandleForSession(s.udpConn, ss, hs.parsedLeaf, s.config.maxBufferedPacketsPerConnection())
 	ss.handleState = established
 
 	h := ss.handle
