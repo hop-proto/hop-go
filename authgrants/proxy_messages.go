@@ -90,7 +90,7 @@ func ReadResponse(r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	return fmt.Errorf(reason)
+	return fmt.Errorf("%s", reason)
 }
 
 // WriteUnreliableProxyID writes tube id of unreliable tube to proxy

@@ -47,6 +47,28 @@ linters:
     # Implementing interfaces can cause this to happen all the time
     - unparam # Reports unused function parameters [fast: false, auto-fix: false]
 linters-settings:
+  depguard:
+    rules:
+      main:
+        allow:
+          - $gostd
+          - github.com/AstromechZA/etcpwdparse
+          - github.com/BurntSushi/toml
+          - github.com/creack/pty
+          - github.com/docker/docker
+          - github.com/docker/go-connections
+          - github.com/mattn/go-isatty
+          - github.com/sbinet/pstree
+          - github.com/sirupsen/logrus
+          - goji.io
+          - golang.org/x/crypto
+          - golang.org/x/exp
+          - golang.org/x/net
+          - golang.org/x/sys
+          - golang.org/x/term
+          - gotest.tools
+          - hop.computer/hop
+
   goimports:
     local-prefixes: hop.computer/hop
   govet:
@@ -76,7 +98,11 @@ linters-settings:
       - unreachable
       - unsafeptr
       - unusedresult
-
+  revive:
+    rules:
+      - name: unused-parameter
+        disabled: true
+      
 issues:
   exclude-dirs:
     - cmd/hop

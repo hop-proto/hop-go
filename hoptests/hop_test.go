@@ -122,7 +122,7 @@ func (s *TestServer) ChainAuthenticator(t *testing.T, clientKey *keys.X25519KeyP
 	}
 }
 
-func (s *TestServer) AddClientToAuthorizedKeys(t *testing.T, c *TestClient) {
+func (s *TestServer) AddClientToAuthorizedKeys(_t *testing.T, c *TestClient) {
 	logrus.Info("adding key for ", c.Username)
 	ak := s.AuthorizedKeyFiles[c.Username]
 	s.AuthorizedKeyFiles[c.Username] = append(ak, []byte(c.KeyPair.Public.String())...)

@@ -103,13 +103,13 @@ func makeConn(odds float64, rel bool, t testing.TB) (t1, t2 net.Conn, stop func(
 		t1, err = muxer1.CreateUnreliableTube(common.ExecTube)
 	}
 	if err != nil {
-		return
+		return t1, t2, stop, r, err
 	}
 
 	t2, err = muxer2.Accept()
 	if err != nil {
 		err = ErrMuxerStopping
-		return
+		return t1, t2, stop, r, err
 	}
 
 	if rel {
