@@ -247,7 +247,7 @@ func reliable(t *testing.T) {
 
 	mp := nettest.MakePipe(f)
 	t.Run("Nettest", func(t *testing.T) {
-		t.Skip()
+		t.Skip() // TODO(hosono) fix these tests
 		nettest.TestConn(t, mp)
 	})
 
