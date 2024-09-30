@@ -201,7 +201,7 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 	dataLength := uint16(len(b))
 	if uint16(len(b)) > MaxFrameDataLength {
 		err = transport.ErrBufOverflow
-		return
+		return n, oobn, err
 	}
 
 	pkt := frame{
@@ -222,7 +222,7 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 
 	err = u.send.Send(pkt.toBytes())
 	if err != nil {
-		return
+		return n, oobn, err
 	}
 	n = len(b)
 	u.log.WithFields(logrus.Fields{

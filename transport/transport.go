@@ -36,7 +36,6 @@ type SessionState struct {
 	remoteAddr  *net.UDPAddr
 	window      SlidingWindow
 	count       uint64
-	recvCount   uint64
 }
 
 // PlaintextLen returns the expected length of plaintext given the length of a

@@ -30,7 +30,6 @@ var inputs = []urlTestInput{
 
 func TestURL(t *testing.T) {
 	for i, in := range inputs {
-		in := in
 		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
 			u, err := ParseURL(in.raw)
 			if in.e != "" {
