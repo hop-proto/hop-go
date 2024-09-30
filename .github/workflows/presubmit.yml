@@ -5,7 +5,7 @@ on:
   pull_request:
     branches: [main]
 jobs:
-  lint:
+  test:
     runs-on: ubuntu-latest
     name: Test
     steps:
@@ -25,5 +25,9 @@ jobs:
             ${{ runner.os }}-go-
       - name: build
         run: make build
+      - name: lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: v1.50
       - name: test
         run: make test
