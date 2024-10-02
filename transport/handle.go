@@ -22,7 +22,7 @@ type Handle struct { // nolint:maligned // unclear if 120-byte struct is better 
 	buf bytes.Buffer
 
 	// Constant after initialization
-	clientLeaf certs.Certificate
+	clientLeaf *certs.Certificate
 	ss         *SessionState
 }
 
@@ -32,11 +32,12 @@ var _ MsgConn = &Handle{}
 
 var _ net.Conn = &Handle{}
 
-func newHandleForSession(underlying UDPLike, ss *SessionState, packetBufLen int) *Handle {
+func newHandleForSession(underlying UDPLike, ss *SessionState, leaf *certs.Certificate, packetBufLen int) *Handle {
 	return &Handle{
 		recv:       common.NewDeadlineChan[[]byte](packetBufLen),
 		underlying: underlying,
 		ss:         ss,
+		clientLeaf: leaf,
 	}
 }
 
@@ -184,7 +185,7 @@ func (c *Handle) Close() error {
 }
 
 // FetchClientLeaf returns the certificate the client presented when setting up the connection
-func (c *Handle) FetchClientLeaf() certs.Certificate {
+func (c *Handle) FetchClientLeaf() *certs.Certificate {
 	return c.clientLeaf
 }
 

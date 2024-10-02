@@ -1,7 +1,6 @@
 package hoptests
 
 import (
-	"io"
 	"net"
 	"net/http"
 	"strconv"
@@ -101,6 +100,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	s.Store.AddCertificate(s.Root)
 
 	s.Config = &config.ServerConfig{}
+	s.Config.DataTimeout = time.Second
 	s.FileSystem = &fstest.MapFS{}
 
 	s.AuthorizedKeyFiles = make(map[string][]byte)
@@ -199,6 +199,7 @@ func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
 		Key:          "home/" + username + "/.hop/id_hop.pem",
 		ServerName:   s.ServerName,
 		CAFiles:      []string{"home/username/.hop/root.cert", "home/username/.hop/intermediate.cert"},
+		DataTimeout:  time.Second,
 	}
 
 	rootBytes, _ := certs.EncodeCertificateToPEM(s.Root)
@@ -281,7 +282,6 @@ func (a *TestAgent) Stop() {
 }
 
 func TestHopClientExtAuth(t *testing.T) {
-	t.Skip() // TODO(hosono) fix this test
 	defer goleak.VerifyNone(t)
 
 	logrus.SetLevel(logrus.TraceLevel)
@@ -305,12 +305,11 @@ func TestHopClientExtAuth(t *testing.T) {
 		err = s.Server.Close()
 		assert.NilError(t, err)
 		err = c.Client.Close()
-		assert.ErrorType(t, err, io.EOF)
+		assert.NilError(t, err)
 	})
 }
 
 func TestHopClientInMemAuth(t *testing.T) {
-	t.Skip() // TODO(hosono) fix this test
 	defer goleak.VerifyNone(t)
 
 	logrus.SetLevel(logrus.TraceLevel)
@@ -332,12 +331,11 @@ func TestHopClientInMemAuth(t *testing.T) {
 		err = s.Server.Close()
 		assert.NilError(t, err)
 		err = c.Client.Close()
-		assert.ErrorType(t, err, io.EOF)
+		assert.NilError(t, err)
 	})
 }
 
 func TestHopClientAgentAuth(t *testing.T) {
-	t.Skip() // TODO(hosono) fix this test
 	defer goleak.VerifyNone(t)
 
 	logrus.SetLevel(logrus.TraceLevel)
@@ -367,12 +365,11 @@ func TestHopClientAgentAuth(t *testing.T) {
 		err = s.Server.Close()
 		assert.NilError(t, err)
 		err = c.Client.Close()
-		assert.ErrorType(t, err, io.EOF)
+		assert.NilError(t, err)
 	})
 }
 
 func TestTwoClients(t *testing.T) {
-	t.Skip() // TODO(hosono) fix this test
 	defer goleak.VerifyNone(t)
 
 	logrus.SetLevel(logrus.TraceLevel)
@@ -408,14 +405,13 @@ func TestTwoClients(t *testing.T) {
 		err = s.Server.Close()
 		assert.NilError(t, err)
 		err = c.Client.Close()
-		assert.ErrorType(t, err, io.EOF)
+		assert.NilError(t, err)
 		err = cTwo.Client.Close()
-		assert.ErrorType(t, err, io.EOF)
+		assert.NilError(t, err)
 	})
 }
 
 func TestStartCmd(t *testing.T) {
-	t.Skip() // TODO(hosono) fix this test
 	defer goleak.VerifyNone(t)
 
 	logrus.SetLevel(logrus.TraceLevel)
@@ -455,6 +451,6 @@ func TestStartCmd(t *testing.T) {
 		err = s.Server.Close()
 		assert.NilError(t, err)
 		err = c.Client.Close()
-		assert.ErrorType(t, err, io.EOF)
+		assert.NilError(t, err)
 	})
 }

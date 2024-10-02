@@ -153,7 +153,7 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 	} else {
 		logrus.Info("target: starting target instance")
 		cert := sess.transportConn.FetchClientLeaf()
-		authgrants.StartTargetInstance(tube, &cert, sess.checkIntent, sess.addAuthGrant)
+		authgrants.StartTargetInstance(tube, cert, sess.checkIntent, sess.addAuthGrant)
 	}
 }
 

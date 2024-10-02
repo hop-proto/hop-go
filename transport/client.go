@@ -261,7 +261,7 @@ func (c *Client) clientHandshakeLocked() error {
 	// DialContext functions should take a timeout or something like that. Also
 	// we should have a DialContext.
 	c.underlyingConn.SetReadDeadline(time.Time{})
-	c.ss.handle = newHandleForSession(c.underlyingConn, c.ss, c.config.maxBufferedPackets())
+	c.ss.handle = newHandleForSession(c.underlyingConn, c.ss, c.config.Leaf, c.config.maxBufferedPackets())
 	c.state.Store(clientStateOpen)
 	c.wg.Add(1)
 	go c.listen()
