@@ -91,15 +91,15 @@ type MessageType byte
 
 // MessageType constants for each type of handshake and transport message.
 const (
-	MessageTypeClientHello MessageType = 0x01
-	MessageTypeServerHello MessageType = 0x02
-	MessageTypeClientAck   MessageType = 0x03
-	MessageTypeServerAuth  MessageType = 0x04
-	MessageTypeClientAuth  MessageType = 0x05
-	MessageTypeClientRequestHidden MessageType = 0x08
+	MessageTypeClientHello          MessageType = 0x01
+	MessageTypeServerHello          MessageType = 0x02
+	MessageTypeClientAck            MessageType = 0x03
+	MessageTypeServerAuth           MessageType = 0x04
+	MessageTypeClientAuth           MessageType = 0x05
+	MessageTypeClientRequestHidden  MessageType = 0x08
 	MessageTypeServerResponseHidden MessageType = 0x09
-	MessageTypeTransport   MessageType = 0x10
-	MessageTypeControl     MessageType = 0x80
+	MessageTypeTransport            MessageType = 0x10
+	MessageTypeControl              MessageType = 0x80
 )
 
 // ControlMessage specifies the bytes that indicate different control messages.

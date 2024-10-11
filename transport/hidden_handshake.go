@@ -58,7 +58,7 @@ func (hs *HandshakeState) writeClientRequestHidden(b []byte) (int, error) {
 	now := time.Now().Unix()
 	timeBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(timeBytes, uint64(now))
-	hs.duplex.Encrypt(b, timeBytes)	
+	hs.duplex.Encrypt(b, timeBytes)
 	b = b[TimestampLen:]
 
 	// MAC Tag
