@@ -53,7 +53,7 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	out.duplex.Absorb(cookie)
 	out.duplex.Squeeze(out.macBuf[:])
 	logrus.Debugf("server: regen sh mac: %x", out.macBuf[:])
-	out.RekeyFromSqueeze()
+	out.RekeyFromSqueeze(ProtocolName)
 	return out, nil
 }
 
@@ -96,6 +96,7 @@ func EncryptCertificates(duplex *cyclist.Cyclist, leaf, intermediate []byte) ([]
 
 // EncryptedCertificatesLength returns 4 + len(leaf) + len(intermediate).
 // TODO(hosono) this should return a uint16 rather than an int since it's used as a uint16
+// TODO(paul): Over 65535 its makes a modulo, which may introduce an unligitimate buffer overflow in readServerAuth()
 func EncryptedCertificatesLength(leaf, intermediate []byte) int {
 	// TODO(dadrian): Handle padding
 	return 4 + len(leaf) + len(intermediate)

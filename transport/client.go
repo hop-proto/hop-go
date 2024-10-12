@@ -3,6 +3,7 @@ package transport
 import (
 	"errors"
 	"fmt"
+	"hop.computer/hop/certs"
 	"io"
 	"net"
 	"sync"
@@ -167,79 +168,108 @@ func (c *Client) clientHandshakeLocked() error {
 	if err != nil {
 		return err
 	}
+	// TODO (paul) this is where the static is created
 	c.hs.static = c.config.Exchanger
 	c.hs.certVerify = &c.config.Verify
-	c.hs.duplex.Absorb([]byte(ProtocolName))
 
 	// TODO(dadrian): This should be allocated smaller
 	buf := make([]byte, 65535)
 
 	logrus.Debugf("client: public ephemeral: %x", c.hs.ephemeral.Public)
-	n, err := writeClientHello(c.hs, buf)
-	if err != nil {
-		return err
-	}
-	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
-	if err != nil {
-		return err
-	}
-	c.setHSDeadline()
 
-	n, _, _, _, err = c.underlyingConn.ReadMsgUDP(buf, nil)
-	if err != nil {
-		return err
-	}
-	logrus.Debugf("client: recv %x", buf[:n])
-	if n < 4 {
-		return ErrInvalidMessage
-	}
-	shn, err := readServerHello(c.hs, buf)
-	if err != nil {
-		return err
-	}
-	if shn != n {
-		return fmt.Errorf("server hello too short. recevied %d bytes, SH only %d", n, shn)
-	}
+	// TODO (paul) handle dynamic hidden mode
+	c.hs.isHidden = true
 
-	c.hs.RekeyFromSqueeze()
+	if c.hs.isHidden {
+		// Protocol ID for the hidden handshake
+		c.hs.duplex.Absorb([]byte(HiddenProtocolName))
 
-	// Client Ack
-	n, err = c.hs.writeClientAck(buf)
-	if err != nil {
-		return err
-	}
+		c.hs.RekeyFromSqueeze(HiddenProtocolName)
 
-	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
-	if err != nil {
-		return err
-	}
-	c.setHSDeadline()
+		// TODO check certificate validity and dynamic certs
+		leaf, _ := certs.ReadCertificatePEMFile("certs/testdata/leaf.pem")
 
-	// Server Auth
-	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(buf, nil)
-	if err != nil {
-		return err
-	}
-	logrus.Debugf("clinet: sa msgLen: %d", msgLen)
+		n, err := c.hs.writeClientRequestHidden(buf, leaf)
 
-	n, err = c.hs.readServerAuth(buf[:msgLen])
-	if err != nil {
-		return err
-	}
-	if n != msgLen {
-		logrus.Debugf("got sa packet of %d, only read %d", msgLen, n)
-		return ErrInvalidMessage
-	}
+		if err != nil {
+			return err
+		}
+		_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
+		if err != nil {
+			logrus.Errorf("client: unable to make a hidden request: %s", err)
+			return err
+		}
 
-	// Client Auth
-	n, err = c.hs.writeClientAuth(buf)
-	if err != nil {
-		return err
-	}
-	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
-	if err != nil {
-		logrus.Errorf("client: unable to send client auth: %s", err)
-		return err
+	} else {
+		// Protocol ID for the regular handshake
+		c.hs.duplex.Absorb([]byte(ProtocolName))
+
+		n, err := writeClientHello(c.hs, buf)
+		if err != nil {
+			return err
+		}
+		_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
+		if err != nil {
+			return err
+		}
+		c.setHSDeadline()
+
+		n, _, _, _, err = c.underlyingConn.ReadMsgUDP(buf, nil)
+		if err != nil {
+			return err
+		}
+		logrus.Debugf("client: recv %x", buf[:n])
+		if n < 4 {
+			return ErrInvalidMessage
+		}
+		shn, err := readServerHello(c.hs, buf)
+		if err != nil {
+			return err
+		}
+		if shn != n {
+			return fmt.Errorf("server hello too short. recevied %d bytes, SH only %d", n, shn)
+		}
+
+		c.hs.RekeyFromSqueeze(ProtocolName)
+
+		// Client Ack
+		n, err = c.hs.writeClientAck(buf)
+		if err != nil {
+			return err
+		}
+
+		_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
+		if err != nil {
+			return err
+		}
+		c.setHSDeadline()
+
+		// Server Auth
+		msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(buf, nil)
+		if err != nil {
+			return err
+		}
+		logrus.Debugf("clinet: sa msgLen: %d", msgLen)
+
+		n, err = c.hs.readServerAuth(buf[:msgLen])
+		if err != nil {
+			return err
+		}
+		if n != msgLen {
+			logrus.Debugf("got sa packet of %d, only read %d", msgLen, n)
+			return ErrInvalidMessage
+		}
+
+		// Client Auth
+		n, err = c.hs.writeClientAuth(buf)
+		if err != nil {
+			return err
+		}
+		_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
+		if err != nil {
+			logrus.Errorf("client: unable to send client auth: %s", err)
+			return err
+		}
 	}
 	c.setHSDeadline()
 

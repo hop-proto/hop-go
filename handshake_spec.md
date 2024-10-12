@@ -416,6 +416,10 @@ counter +=1
 
 ---
 
+TODO (paul) change the values here for the MessageTypeClientRequestHidden
+and the MessageTypeServerResponseHidden
+
+
 ```sequence
 Client->Server: Client Auth [0x7]
 Server->Client: Server Auth [0x8]

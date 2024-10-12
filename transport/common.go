@@ -12,6 +12,7 @@ import (
 
 // ProtocolName is the string representation of the parameters used in this version
 const ProtocolName = "hop_NN_XX_cyclist_keccak_p1600_12"
+const HiddenProtocolName = "noise_IK_cyclist_keccak_C512"
 
 // Version is the protocol version being used. Only one version is supported.
 const Version byte = 0x01
@@ -28,7 +29,7 @@ const (
 	SNILen       = 256
 	SessionIDLen = 4
 	CounterLen   = 8
-	TimestampLen = 8
+	TimestampLen = 12
 )
 
 // MaxTotalPacketSize is MaxUDPPacketSize minus bytes used by Ethernet frames and Wifi frames.

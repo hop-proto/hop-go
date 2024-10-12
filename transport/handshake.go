@@ -49,6 +49,7 @@ type HandshakeState struct {
 	ee []byte
 	es []byte
 	se []byte
+	ss []byte
 
 	// Certificate Stuff
 	certVerify         *VerifyConfig
@@ -58,6 +59,8 @@ type HandshakeState struct {
 	parsedLeaf *certs.Certificate
 
 	remoteAddr *net.UDPAddr
+
+	isHidden bool
 }
 
 func (hs *HandshakeState) writeCookie(b []byte) (int, error) {
@@ -236,9 +239,9 @@ func readServerHello(hs *HandshakeState, b []byte) (int, error) {
 
 // RekeyFromSqueeze squeezes out KeyLen bytes and then re-initializes the duplex
 // using the new key.
-func (hs *HandshakeState) RekeyFromSqueeze() {
+func (hs *HandshakeState) RekeyFromSqueeze(usedProtocolName string) {
 	hs.duplex.Squeeze(hs.handshakeKey[:])
-	hs.duplex.Initialize(hs.handshakeKey[:], []byte(ProtocolName), nil)
+	hs.duplex.Initialize(hs.handshakeKey[:], []byte(usedProtocolName), nil)
 }
 
 // EncryptSNI encrypts the name to a buffer. The encrypted length is always
@@ -315,6 +318,7 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 		return 0, ErrInvalidMessage
 	}
 	// TODO(dadrian): Should we just get this out of UDP packet length?
+	// TODO (paul): This goes wrong if the value stored is over 65535 behave like a modulo
 	encryptedCertLen := (int(b[2]) << 8) + int(b[3])
 	logrus.Debugf("client: got encrypted cert length %d", encryptedCertLen)
 	fullLength := minLength + encryptedCertLen
