@@ -220,6 +220,34 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 			return err
 		}
 		return nil
+
+	// TODO (paul) verify if the errors can disclose a server in hidden mode
+	case MessageTypeClientRequestHidden:
+		logrus.Debug("server: receiving a hidden client request to handle")
+		n, hs, err := s.handleClientRequestHidden(rawRead[:msgLen])
+		if err != nil {
+			logrus.Debugf("server: unable to handle client hidden request: %s", err)
+			return err
+		}
+		if n != msgLen {
+			logrus.Debug("server: client hidden request had extra data")
+			return ErrInvalidMessage
+		}
+
+		n, err = s.writeServerRequestHidden(hs, handshakeWriteBuf)
+		logrus.Debugf("server: sh %x", handshakeWriteBuf[:n])
+		if err := s.writePacket(handshakeWriteBuf[:n], addr); err != nil {
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		logrus.Debug("server: finishHandshake hidden mode")
+		if err := s.finishHandshake(hs); err != nil {
+			return err
+		}
+		logrus.Debug("server: finished handshake!")
+
 	default:
 		// If the message is authenticated, this will closed the connection
 		// TODO(dadrian)[2023-09-09]: Make this explicit
@@ -614,6 +642,26 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 		ss.closeLocked()
 	}
 	return nil
+}
+
+// +checklocks:s.serveLock
+func (s *Server) handleClientRequestHidden(b []byte) (int, *HandshakeState, error) {
+	hs := &HandshakeState{}
+	hs.duplex.InitializeEmpty()
+	hs.ephemeral.Generate()
+
+	hs.duplex.Absorb([]byte(HiddenProtocolName))
+	hs.RekeyFromSqueeze(HiddenProtocolName)
+
+	n, err := s.readClientRequestHidden(hs, b)
+
+	if err != nil {
+		return n, nil, err
+	}
+	if n != len(b) {
+		return n, nil, ErrInvalidMessage
+	}
+	return n, hs, nil
 }
 
 // +checklocks:s.m

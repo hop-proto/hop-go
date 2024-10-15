@@ -168,7 +168,6 @@ func (c *Client) clientHandshakeLocked() error {
 	if err != nil {
 		return err
 	}
-	// TODO (paul) this is where the static is created
 	c.hs.static = c.config.Exchanger
 	c.hs.certVerify = &c.config.Verify
 
@@ -178,7 +177,7 @@ func (c *Client) clientHandshakeLocked() error {
 	logrus.Debugf("client: public ephemeral: %x", c.hs.ephemeral.Public)
 
 	// TODO (paul) handle dynamic hidden mode
-	c.hs.isHidden = true
+	c.hs.isHidden = false
 
 	if c.hs.isHidden {
 		// Protocol ID for the hidden handshake
@@ -186,10 +185,10 @@ func (c *Client) clientHandshakeLocked() error {
 
 		c.hs.RekeyFromSqueeze(HiddenProtocolName)
 
-		// TODO check certificate validity and dynamic certs
+		// TODO(paul): TO CHANGE here pass the server public static key
 		leaf, _ := certs.ReadCertificatePEMFile("certs/testdata/leaf.pem")
 
-		n, err := c.hs.writeClientRequestHidden(buf, leaf)
+		n, err := c.hs.writeClientRequestHidden(buf, leaf.PublicKey[:])
 
 		if err != nil {
 			return err

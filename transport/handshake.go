@@ -356,48 +356,10 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	b = b[MacLen:]
 
 	// Parse the certificate
-	opts := certs.VerifyOptions{
-		Name: hs.certVerify.Name,
-	}
-	leaf := certs.Certificate{}
-	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
+	leaf, _, err := hs.certificateParser(rawLeaf, rawIntermediate)
 	if err != nil {
+		logrus.Debugf("client: error parsing certificates: %s", err)
 		return 0, err
-	}
-	if int(leafLen) != len(rawLeaf) {
-		return 0, errors.New("extra bytes after leaf certificate")
-	}
-
-	intermediate := certs.Certificate{}
-	if len(rawIntermediate) > 0 {
-		intermediateLen, err := intermediate.ReadFrom(bytes.NewBuffer(rawIntermediate))
-		if err != nil {
-			return 0, err
-		}
-		if int(intermediateLen) != len(rawIntermediate) {
-			return 0, errors.New("extra bytes after intermediate certificate")
-		}
-		opts.PresentedIntermediate = &intermediate
-	}
-
-	if !hs.certVerify.InsecureSkipVerify {
-		logrus.Debug("client: performing server certificate validation")
-		err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
-		if err != nil {
-			logrus.Errorf("client: failed to verify certificate: %s", err)
-			return 0, err
-		}
-		logrus.Debug("client: leaf verification successful")
-	} else {
-		logrus.Debug("client: InsecureSkipVerify set. Not verifying server certificate")
-	}
-	if hs.certVerify.AddVerifyCallback != nil {
-		logrus.Debug("client: additional verify callback check enabled. running...")
-		if err := hs.certVerify.AddVerifyCallback(&leaf); err != nil {
-			logrus.Debugf("client: additional verify callback returned an error: %v", err.Error())
-			return 0, err
-		}
-		logrus.Debug("client: additional verify callback successful")
 	}
 
 	// DH
@@ -511,4 +473,54 @@ func readVector(src []byte) (int, []byte, error) {
 		return 0, nil, ErrBufUnderflow
 	}
 	return vecLen, src[2:end], nil
+}
+
+func (hs *HandshakeState) certificateParser(rawLeaf []byte, rawIntermediate []byte) (certs.Certificate, certs.Certificate, error) {
+	// Parse the certificate
+	opts := certs.VerifyOptions{
+		Name: hs.certVerify.Name,
+	}
+	leaf := certs.Certificate{}
+	intermediate := certs.Certificate{}
+
+	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
+	if err != nil {
+		return leaf, intermediate, err
+	}
+	if int(leafLen) != len(rawLeaf) {
+		return leaf, intermediate, errors.New("extra bytes after leaf certificate")
+	}
+
+	if len(rawIntermediate) > 0 {
+		intermediateLen, err := intermediate.ReadFrom(bytes.NewBuffer(rawIntermediate))
+		if err != nil {
+			return leaf, intermediate, err
+		}
+		if int(intermediateLen) != len(rawIntermediate) {
+			return leaf, intermediate, errors.New("extra bytes after intermediate certificate")
+		}
+		opts.PresentedIntermediate = &intermediate
+	}
+
+	if !hs.certVerify.InsecureSkipVerify {
+		logrus.Debug("performing certificate validation")
+		err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
+		if err != nil {
+			logrus.Errorf("failed to verify certificate: %s", err)
+			return leaf, intermediate, err
+		}
+		logrus.Debug("leaf verification successful")
+	} else {
+		logrus.Debug("InsecureSkipVerify set. Not verifying server certificate")
+	}
+	if hs.certVerify.AddVerifyCallback != nil {
+		logrus.Debug("additional verify callback check enabled. running...")
+		if err := hs.certVerify.AddVerifyCallback(&leaf); err != nil {
+			logrus.Debugf("additional verify callback returned an error: %v", err.Error())
+			return leaf, intermediate, err
+		}
+		logrus.Debug("additional verify callback successful")
+	}
+
+	return leaf, intermediate, err
 }
