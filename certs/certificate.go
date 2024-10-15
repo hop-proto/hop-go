@@ -117,6 +117,7 @@ const (
 	TypeDNSName     IDType = 0x01
 	TypeIPv4Address IDType = 0x02
 	TypeIPv6Address IDType = 0x03
+	TypeHidden      IDType = 0x04
 )
 
 // Name is a UTF-8 label and an IDType. It can be encoded to an IDBlock.

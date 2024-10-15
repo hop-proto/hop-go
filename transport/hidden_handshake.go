@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/sirupsen/logrus"
 	"github.com/vektra/tai64n"
+	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
 )
 
@@ -129,17 +130,25 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 	hs.duplex.Absorb(b[:DHLen])
 	b = b[DHLen:]
 
+	c, err := s.config.GetCertificate(ClientHandshakeInfo{
+		ServerName: certs.Name{
+			Label: []byte("hidden-handshake"),
+			Type:  certs.TypeHidden,
+		},
+	})
+
+	if err != nil {
+		return 0, err
+	}
+
 	// DH (es)
-	// TODO FIND THE STATIC and absorb
-	//hs.es, err = c.Exchanger.Agree(hs.remoteEphemeral[:])
+	hs.es, err = c.Exchanger.Agree(hs.remoteEphemeral[:])
 	if err != nil {
 		logrus.Debugf("server: unable to calculate es: %s", err)
 		return 0, err
 	}
 	logrus.Debugf("server: es: %x", hs.es)
-	//hs.duplex.Absorb(hs.es)
-
-	logrus.Debugf("server: name paul: %v", hs.certVerify)
+	hs.duplex.Absorb(hs.es)
 
 	// Client Encrypted Certificates
 	encCerts := b[:encCertsLen]
@@ -167,11 +176,10 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 		return 0, err
 	}
 
-	logrus.Debugf("server: leaf certificate: %x", leaf)
+	logrus.Debugf("server: leaf certificate: %v", leaf)
 
 	// DH (ss)
-	// TODO (paul) same problem as above: need to use the private static key
-	//hs.ss, err = hs.ephemeral.DH(leaf.PublicKey[:])
+	hs.ss, err = c.Exchanger.Agree(leaf.PublicKey[:])
 	if err != nil {
 		logrus.Debugf("server: could not calculate ss: %s", err)
 		return 0, err
@@ -209,14 +217,17 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 }
 
 func (s *Server) writeServerRequestHidden(hs *HandshakeState, b []byte) (int, error) {
-	// TODO get the sni from the first request
-	// or find a way to get the certificate hydrated here
 	c, err := s.config.GetCertificate(ClientHandshakeInfo{
-		ServerName: hs.sni,
+		ServerName: certs.Name{
+			Label: []byte("hidden-handshake"),
+			Type:  certs.TypeHidden,
+		},
 	})
+
 	if err != nil {
 		return 0, err
 	}
+
 	encCertLen := EncryptedCertificatesLength(c.RawLeaf, c.RawIntermediate)
 
 	length := HeaderLen + SessionIDLen + DHLen + encCertLen + 2*MacLen

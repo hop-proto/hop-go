@@ -113,6 +113,12 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		if h := vhosts.Match(info.ServerName); h != nil {
 			return &h.Certificate, nil
 		}
+		if info.ServerName.Type == certs.TypeHidden {
+			if len(vhosts) > 0 {
+				return &vhosts[0].Certificate, nil
+			}
+			return nil, fmt.Errorf("no certificates available for hidden services")
+		}
 		return nil, fmt.Errorf("%v did not match a host block", info.ServerName)
 	}
 

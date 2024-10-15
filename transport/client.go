@@ -177,7 +177,7 @@ func (c *Client) clientHandshakeLocked() error {
 	logrus.Debugf("client: public ephemeral: %x", c.hs.ephemeral.Public)
 
 	// TODO (paul) handle dynamic hidden mode
-	c.hs.isHidden = false
+	c.hs.isHidden = true
 
 	if c.hs.isHidden {
 		// Protocol ID for the hidden handshake
@@ -197,6 +197,22 @@ func (c *Client) clientHandshakeLocked() error {
 		if err != nil {
 			logrus.Errorf("client: unable to make a hidden request: %s", err)
 			return err
+		}
+
+		// Server Request hidden
+		msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(buf, nil)
+		if err != nil {
+			return err
+		}
+		logrus.Debugf("client: Server request hidden msgLen: %d", msgLen)
+
+		n, err = c.hs.readServerRequestHidden(buf[:msgLen])
+		if err != nil {
+			return err
+		}
+		if n != msgLen {
+			logrus.Debugf("client: Server request hidden packet of %d, only read %d", msgLen, n)
+			return ErrInvalidMessage
 		}
 
 	} else {
