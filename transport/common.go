@@ -43,7 +43,6 @@ const MaxPlaintextSize = MaxTotalPacketSize - HeaderLen - SessionIDLen - Counter
 // Derived protocol size constants
 const (
 	HelloLen          = HeaderLen + DHLen + MacLen
-	HiddenHelloLen    = 0 // TODO(hosono) calculate this
 	AssociatedDataLen = HeaderLen + SessionIDLen + CounterLen
 )
 
