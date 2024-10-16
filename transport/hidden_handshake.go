@@ -177,6 +177,7 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 	if int(leafLen) != len(rawLeaf) {
 		return 0, errors.New("extra bytes after leaf certificate")
 	}
+	hs.parsedLeaf = &leaf
 
 	// DH (ss)
 	hs.ss, err = c.Exchanger.Agree(leaf.PublicKey[:])
@@ -375,6 +376,7 @@ func (hs *HandshakeState) readServerRequestHidden(b []byte) (int, error) {
 	if int(leafLen) != len(rawLeaf) {
 		return 0, errors.New("extra bytes after leaf certificate")
 	}
+	hs.parsedLeaf = &leaf
 
 	// DH (se)
 	hs.se, err = hs.ephemeral.DH(leaf.PublicKey[:])
