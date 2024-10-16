@@ -5,8 +5,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+
 	"github.com/sirupsen/logrus"
 	"github.com/vektra/tai64n"
+
 	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
 )

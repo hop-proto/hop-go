@@ -61,6 +61,7 @@ linters-settings:
           - github.com/sbinet/pstree
           - github.com/sirupsen/logrus
           - github.com/pkg/errors
+          - github.com/vektra/tai64n
           - goji.io
           - golang.org/x/crypto
           - golang.org/x/exp

@@ -3,7 +3,6 @@ package transport
 import (
 	"errors"
 	"fmt"
-	"hop.computer/hop/keys"
 	"io"
 	"net"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/common"
+	"hop.computer/hop/keys"
 )
 
 // UDPLike interface standardizes Reliable channels and UDPConn.
