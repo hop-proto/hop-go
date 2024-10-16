@@ -364,10 +364,16 @@ func (hs *HandshakeState) readServerRequestHidden(b []byte) (int, error) {
 	}
 	b = b[MacLen:]
 
-	leaf, _, err := hs.certificateParser(rawLeaf, rawIntermediate)
+	// TODO add the parsing verification
+	// Parse certificates
+	leaf := certs.Certificate{}
+
+	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
 	if err != nil {
-		logrus.Debugf("client: error parsing certificates: %s", err)
 		return 0, err
+	}
+	if int(leafLen) != len(rawLeaf) {
+		return 0, errors.New("extra bytes after leaf certificate")
 	}
 
 	// DH (se)
@@ -376,7 +382,7 @@ func (hs *HandshakeState) readServerRequestHidden(b []byte) (int, error) {
 		logrus.Debugf("client: could not calculate se: %s", err)
 		return 0, err
 	}
-	logrus.Debugf("client: se: %x", hs.es)
+	logrus.Debugf("client: se: %x", hs.se)
 	hs.duplex.Absorb(hs.se)
 
 	// Mac

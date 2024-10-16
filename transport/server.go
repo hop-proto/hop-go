@@ -234,6 +234,7 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 			return ErrInvalidMessage
 		}
 
+		s.setHandshakeState(addr, hs)
 		n, err = s.writeServerRequestHidden(hs, handshakeWriteBuf)
 		logrus.Debugf("server: sh %x", handshakeWriteBuf[:n])
 		if err := s.writePacket(handshakeWriteBuf[:n], addr); err != nil {
