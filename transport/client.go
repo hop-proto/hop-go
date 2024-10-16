@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"hop.computer/hop/keys"
 	"io"
-	"io/ioutil"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -187,11 +187,15 @@ func (c *Client) clientHandshakeLocked() error {
 		c.hs.RekeyFromSqueeze(HiddenProtocolName)
 
 		// TODO(paul): TO CHANGE here pass the server public static key
-		pubKeyBytes, err := ioutil.ReadFile("containers/id_server.pub")
+		pubKeyBytes, err := os.ReadFile("containers/id_client.pub")
 		if err != nil {
 			logrus.Fatalf("could not read public key file: %s", err)
 		}
 		pubKey, err := keys.ParseDHPublicKey(string(pubKeyBytes))
+		if err != nil {
+			logrus.Errorf("client: unable to parse the server public key file: %s", err)
+			return err
+		}
 
 		n, err := c.hs.writeClientRequestHidden(buf, pubKey)
 
