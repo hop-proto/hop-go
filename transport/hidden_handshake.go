@@ -8,12 +8,12 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/vektra/tai64n"
 	"hop.computer/hop/certs"
-	"hop.computer/hop/common"
+	"hop.computer/hop/keys"
 )
 
 // TODO(hosono) In the paper, the hidden mode client hello is called "Client Request"
 // which seems like an ambiguous name. I've changed it to ClientRequestHidden
-func (hs *HandshakeState) writeClientRequestHidden(b []byte, serverStatic []byte) (int, error) {
+func (hs *HandshakeState) writeClientRequestHidden(b []byte, serverPublicKey *keys.PublicKey) (int, error) {
 
 	logrus.Debug("client: sending client request (hidden mode)")
 
@@ -45,7 +45,7 @@ func (hs *HandshakeState) writeClientRequestHidden(b []byte, serverStatic []byte
 	pos += DHLen
 
 	// DH (es)
-	secret, err := hs.ephemeral.DH(serverStatic)
+	secret, err := hs.ephemeral.DH(serverPublicKey[:])
 	if err != nil {
 		logrus.Debugf("client: could not calculate es: %s", err)
 		return 0, err
@@ -75,7 +75,7 @@ func (hs *HandshakeState) writeClientRequestHidden(b []byte, serverStatic []byte
 	pos += MacLen
 
 	// DH (ss)
-	hs.ss, err = hs.static.Agree(serverStatic)
+	hs.ss, err = hs.static.Agree(serverPublicKey[:])
 	if err != nil {
 		logrus.Debugf("client: unable to calculate ss: %s", err)
 		return 0, err
@@ -94,6 +94,7 @@ func (hs *HandshakeState) writeClientRequestHidden(b []byte, serverStatic []byte
 
 	// Mac
 	hs.duplex.Squeeze(b[:MacLen])
+	logrus.Debugf("client: calculated hidden client request mac: %x", b[:MacLen])
 	// b = b[MacLen:]
 	pos += MacLen
 
@@ -131,10 +132,7 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 	b = b[DHLen:]
 
 	c, err := s.config.GetCertificate(ClientHandshakeInfo{
-		ServerName: certs.Name{
-			Label: []byte("hidden-handshake"),
-			Type:  certs.TypeHidden,
-		},
+		ServerName: certs.HiddenName("hidden-handshake"),
 	})
 
 	if err != nil {
@@ -152,8 +150,7 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 
 	// Client Encrypted Certificates
 	encCerts := b[:encCertsLen]
-	logrus.Debugf("server: encCerts: %x", encCerts)
-	rawLeaf, rawIntermediate, err := DecryptCertificates(&hs.duplex, encCerts)
+	rawLeaf, _, err := DecryptCertificates(&hs.duplex, encCerts)
 	if err != nil {
 		logrus.Debugf("server: unable to decrypt certificates: %s", err)
 		return 0, err
@@ -169,14 +166,17 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 	}
 	b = b[MacLen:]
 
+	// TODO add the parsing verification
 	// Parse certificates
-	leaf, _, err := hs.certificateParser(rawLeaf, rawIntermediate)
+	leaf := certs.Certificate{}
+
+	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
 	if err != nil {
-		logrus.Debugf("server: error parsing certificates: %s", err)
 		return 0, err
 	}
-
-	logrus.Debugf("server: leaf certificate: %v", leaf)
+	if int(leafLen) != len(rawLeaf) {
+		return 0, errors.New("extra bytes after leaf certificate")
+	}
 
 	// DH (ss)
 	hs.ss, err = c.Exchanger.Agree(leaf.PublicKey[:])
@@ -184,7 +184,7 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 		logrus.Debugf("server: could not calculate ss: %s", err)
 		return 0, err
 	}
-	logrus.Debugf("server: ss: %x", hs.es)
+	logrus.Debugf("server: ss: %x", hs.ss)
 	hs.duplex.Absorb(hs.ss)
 
 	// Timestamp
@@ -197,10 +197,10 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 		Nanoseconds: binary.BigEndian.Uint32(decryptedTimestamp[8:12]), // Last 4 bytes are the Nanoseconds
 	}
 
-	// TODO (paul) 1 sec is a way too long, evaluate the time need for a connection
+	// TODO (paul) 5 sec is a way too long, evaluate the time need for a connection
 	// TODO (paul) what is considered a reasonable time range for a timestamp to prevent replay attack?
 	// Time comparison to prevent replay attacks
-	if tai64n.Now().Seconds-taiTime.Seconds > 1 {
+	if tai64n.Now().Seconds-taiTime.Seconds > 5 {
 		logrus.Debugf("server: hidden client request timestamp too long")
 		return 0, ErrInvalidMessage
 	}
@@ -209,19 +209,16 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 	hs.duplex.Squeeze(hs.macBuf[:])
 	logrus.Debugf("server: calculated hidden client request mac: %x", hs.macBuf)
 	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
-		logrus.Debugf("server: hidden client request tag mismatch, got %x, wanted %x", b[:MacLen], hs.macBuf)
+		logrus.Debugf("server: hidden client request mac mismatch, got %x, wanted %x", b[:MacLen], hs.macBuf)
 		return 0, ErrInvalidMessage
 	}
 
-	return len(b), err
+	return length, err
 }
 
 func (s *Server) writeServerRequestHidden(hs *HandshakeState, b []byte) (int, error) {
 	c, err := s.config.GetCertificate(ClientHandshakeInfo{
-		ServerName: certs.Name{
-			Label: []byte("hidden-handshake"),
-			Type:  certs.TypeHidden,
-		},
+		ServerName: certs.HiddenName("hidden-handshake"),
 	})
 
 	if err != nil {
@@ -249,9 +246,7 @@ func (s *Server) writeServerRequestHidden(hs *HandshakeState, b []byte) (int, er
 
 	// TODO (paul): check if there is any session ID at this point of the handshake
 	copy(b, hs.sessionID[:])
-	if common.Debug {
-		logrus.Tracef("server: session ID %x", hs.sessionID[:])
-	}
+	logrus.Debugf("server: session ID %x", hs.sessionID[:])
 	hs.duplex.Absorb(b[:SessionIDLen])
 	b = b[SessionIDLen:]
 	pos += SessionIDLen

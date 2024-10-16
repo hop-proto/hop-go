@@ -113,6 +113,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		if h := vhosts.Match(info.ServerName); h != nil {
 			return &h.Certificate, nil
 		}
+		// TODO find another solution for that
 		if info.ServerName.Type == certs.TypeHidden {
 			if len(vhosts) > 0 {
 				return &vhosts[0].Certificate, nil

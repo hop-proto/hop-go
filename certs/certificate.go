@@ -143,6 +143,14 @@ func RawStringName(label string) Name {
 	}
 }
 
+// HiddenName returns a Name with Type set to TypeHidden and the provided label.
+func HiddenName(label string) Name {
+	return Name{
+		Label: []byte(label),
+		Type:  TypeHidden,
+	}
+}
+
 // IsZero returns true if the label is empty and tye type is 0.
 func (name Name) IsZero() bool {
 	// When Label is []byte{} (0-length, non-nil), it does not count as zero.

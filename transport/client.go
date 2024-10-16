@@ -3,8 +3,9 @@ package transport
 import (
 	"errors"
 	"fmt"
-	"hop.computer/hop/certs"
+	"hop.computer/hop/keys"
 	"io"
+	"io/ioutil"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -186,9 +187,13 @@ func (c *Client) clientHandshakeLocked() error {
 		c.hs.RekeyFromSqueeze(HiddenProtocolName)
 
 		// TODO(paul): TO CHANGE here pass the server public static key
-		leaf, _ := certs.ReadCertificatePEMFile("certs/testdata/leaf.pem")
+		pubKeyBytes, err := ioutil.ReadFile("containers/id_server.pub")
+		if err != nil {
+			logrus.Fatalf("could not read public key file: %s", err)
+		}
+		pubKey, err := keys.ParseDHPublicKey(string(pubKeyBytes))
 
-		n, err := c.hs.writeClientRequestHidden(buf, leaf.PublicKey[:])
+		n, err := c.hs.writeClientRequestHidden(buf, pubKey)
 
 		if err != nil {
 			return err
