@@ -5,10 +5,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/sirupsen/logrus"
-	"github.com/vektra/tai64n"
-
 	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
 )
@@ -85,11 +84,9 @@ func (hs *HandshakeState) writeClientRequestHidden(b []byte, serverPublicKey *ke
 	logrus.Debugf("client: ss: %x", hs.ss)
 	hs.duplex.Absorb(hs.ss)
 
-	// Tai64N is necessary to prevent replay of Client Hello to trigger server response
-	now := tai64n.Now()
-	timeBytes := make([]byte, 12)
-	binary.BigEndian.PutUint64(timeBytes[0:], now.Seconds)
-	binary.BigEndian.PutUint32(timeBytes[8:], now.Nanoseconds)
+	now := time.Now().Unix()
+	timeBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(timeBytes, uint64(now))
 	hs.duplex.Encrypt(b, timeBytes[:])
 	b = b[TimestampLen:]
 	pos += TimestampLen
@@ -193,20 +190,23 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 	// Timestamp
 	hs.duplex.Decrypt(timestampBuf[:], b[:TimestampLen])
 	decryptedTimestamp := timestampBuf[:TimestampLen]
-	b = b[TimestampLen:]
-
-	taiTime := tai64n.TAI64N{
-		Seconds:     binary.BigEndian.Uint64(decryptedTimestamp[0:8]),  // First 8 bytes are the Seconds
-		Nanoseconds: binary.BigEndian.Uint32(decryptedTimestamp[8:12]), // Last 4 bytes are the Nanoseconds
+	if len(decryptedTimestamp) < TimestampLen {
+		logrus.Debugf("server: decrypted timestamp too short")
+		return 0, ErrInvalidMessage
 	}
+
+	timeBytes := binary.BigEndian.Uint64(decryptedTimestamp[0:TimestampLen])
+	now := time.Now().Unix()
 
 	// TODO (paul) 5 sec is a way too long, evaluate the time need for a connection
 	// TODO (paul) what is considered a reasonable time range for a timestamp to prevent replay attack?
 	// Time comparison to prevent replay attacks
-	if tai64n.Now().Seconds-taiTime.Seconds > 5 {
+	if timeBytes > uint64(now) || now-int64(timeBytes) > 5 {
 		logrus.Debugf("server: hidden client request timestamp too long")
 		return 0, ErrInvalidMessage
 	}
+
+	b = b[TimestampLen:]
 
 	// MAC (Client Static)
 	hs.duplex.Squeeze(hs.macBuf[:])

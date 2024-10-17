@@ -14,7 +14,6 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/sbinet/pstree v0.3.0
 	github.com/sirupsen/logrus v1.8.1
-	github.com/vektra/tai64n v0.0.0-20180410233929-12133dfe3281
 	goji.io v2.0.2+incompatible
 	golang.org/x/crypto v0.0.0-20220427172511-eb4f295cb31f
 	golang.org/x/exp v0.0.0-20221215174704-0915cd710c24
