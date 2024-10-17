@@ -3,6 +3,7 @@ package transport
 import (
 	"errors"
 	"fmt"
+	"hop.computer/hop/keys"
 	"io"
 	"net"
 	"os"
@@ -13,7 +14,6 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/common"
-	"hop.computer/hop/keys"
 )
 
 // UDPLike interface standardizes Reliable channels and UDPConn.
@@ -178,120 +178,15 @@ func (c *Client) clientHandshakeLocked() error {
 	logrus.Debugf("client: public ephemeral: %x", c.hs.ephemeral.Public)
 
 	// TODO (paul) handle dynamic hidden mode
-	c.hs.isHidden = true
 
 	if c.hs.isHidden {
-		// Protocol ID for the hidden handshake
-		c.hs.duplex.Absorb([]byte(HiddenProtocolName))
-
-		c.hs.RekeyFromSqueeze(HiddenProtocolName)
-
-		// TODO(paul): TO CHANGE here pass the server public static key
-		pubKeyBytes, err := os.ReadFile("containers/id_client.pub")
-		if err != nil {
-			logrus.Fatalf("could not read public key file: %s", err)
-		}
-		pubKey, err := keys.ParseDHPublicKey(string(pubKeyBytes))
-		if err != nil {
-			logrus.Errorf("client: unable to parse the server public key file: %s", err)
-			return err
-		}
-
-		n, err := c.hs.writeClientRequestHidden(buf, pubKey)
-
+		err := c.clientHiddenHandshakeBuilder(buf)
 		if err != nil {
 			return err
 		}
-		_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
-		if err != nil {
-			logrus.Errorf("client: unable to make a hidden request: %s", err)
-			return err
-		}
-
-		// Server Response hidden
-		msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(buf, nil)
-		if err != nil {
-			return err
-		}
-		logrus.Debugf("client: Server response hidden msgLen: %d", msgLen)
-
-		n, err = c.hs.readServerResponseHidden(buf[:msgLen])
-		if err != nil {
-			return err
-		}
-		if n != msgLen {
-			logrus.Debugf("client: Server response hidden packet of %d, only read %d", msgLen, n)
-			return ErrInvalidMessage
-		}
-
 	} else {
-		// Protocol ID for the regular handshake
-		c.hs.duplex.Absorb([]byte(ProtocolName))
-
-		n, err := writeClientHello(c.hs, buf)
+		err := c.clientRegularHandshakeBuilder(buf)
 		if err != nil {
-			return err
-		}
-		_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
-		if err != nil {
-			return err
-		}
-		c.setHSDeadline()
-
-		n, _, _, _, err = c.underlyingConn.ReadMsgUDP(buf, nil)
-		if err != nil {
-			return err
-		}
-		logrus.Debugf("client: recv %x", buf[:n])
-		if n < 4 {
-			return ErrInvalidMessage
-		}
-		shn, err := readServerHello(c.hs, buf)
-		if err != nil {
-			return err
-		}
-		if shn != n {
-			return fmt.Errorf("server hello too short. recevied %d bytes, SH only %d", n, shn)
-		}
-
-		c.hs.RekeyFromSqueeze(ProtocolName)
-
-		// Client Ack
-		n, err = c.hs.writeClientAck(buf)
-		if err != nil {
-			return err
-		}
-
-		_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
-		if err != nil {
-			return err
-		}
-		c.setHSDeadline()
-
-		// Server Auth
-		msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(buf, nil)
-		if err != nil {
-			return err
-		}
-		logrus.Debugf("clinet: sa msgLen: %d", msgLen)
-
-		n, err = c.hs.readServerAuth(buf[:msgLen])
-		if err != nil {
-			return err
-		}
-		if n != msgLen {
-			logrus.Debugf("got sa packet of %d, only read %d", msgLen, n)
-			return ErrInvalidMessage
-		}
-
-		// Client Auth
-		n, err = c.hs.writeClientAuth(buf)
-		if err != nil {
-			return err
-		}
-		_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
-		if err != nil {
-			logrus.Errorf("client: unable to send client auth: %s", err)
 			return err
 		}
 	}
@@ -319,6 +214,127 @@ func (c *Client) clientHandshakeLocked() error {
 	c.state.Store(clientStateOpen)
 	c.wg.Add(1)
 	go c.listen()
+
+	return nil
+}
+
+// TODO (paul) : client "regular" might not be a good name to use
+func (c *Client) clientRegularHandshakeBuilder(buf []byte) error {
+	// Protocol ID for the regular handshake
+	c.hs.duplex.Absorb([]byte(ProtocolName))
+
+	n, err := writeClientHello(c.hs, buf)
+	if err != nil {
+		return err
+	}
+	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
+	if err != nil {
+		return err
+	}
+	c.setHSDeadline()
+
+	n, _, _, _, err = c.underlyingConn.ReadMsgUDP(buf, nil)
+	if err != nil {
+		return err
+	}
+	logrus.Debugf("client: recv %x", buf[:n])
+	if n < 4 {
+		return ErrInvalidMessage
+	}
+	shn, err := readServerHello(c.hs, buf)
+	if err != nil {
+		return err
+	}
+	if shn != n {
+		return fmt.Errorf("server hello too short. recevied %d bytes, SH only %d", n, shn)
+	}
+
+	c.hs.RekeyFromSqueeze(ProtocolName)
+
+	// Client Ack
+	n, err = c.hs.writeClientAck(buf)
+	if err != nil {
+		return err
+	}
+
+	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
+	if err != nil {
+		return err
+	}
+	c.setHSDeadline()
+
+	// Server Auth
+	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(buf, nil)
+	if err != nil {
+		return err
+	}
+	logrus.Debugf("clinet: sa msgLen: %d", msgLen)
+
+	n, err = c.hs.readServerAuth(buf[:msgLen])
+	if err != nil {
+		return err
+	}
+	if n != msgLen {
+		logrus.Debugf("got sa packet of %d, only read %d", msgLen, n)
+		return ErrInvalidMessage
+	}
+
+	// Client Auth
+	n, err = c.hs.writeClientAuth(buf)
+	if err != nil {
+		return err
+	}
+	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
+	if err != nil {
+		logrus.Errorf("client: unable to send client auth: %s", err)
+		return err
+	}
+	return nil
+}
+
+func (c *Client) clientHiddenHandshakeBuilder(buf []byte) error {
+	// Protocol ID for the hidden handshake
+	c.hs.duplex.Absorb([]byte(HiddenProtocolName))
+
+	c.hs.RekeyFromSqueeze(HiddenProtocolName)
+
+	// TODO(paul): TO CHANGE here pass the server public static key
+	pubKeyBytes, err := os.ReadFile("containers/id_server.pub")
+	if err != nil {
+		logrus.Fatalf("could not read public key file: %s", err)
+	}
+	pubKey, err := keys.ParseDHPublicKey(string(pubKeyBytes))
+	if err != nil {
+		logrus.Errorf("client: unable to parse the server public key file: %s", err)
+		return err
+	}
+
+	n, err := c.hs.writeClientRequestHidden(buf, pubKey)
+
+	if err != nil {
+		return err
+	}
+	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
+	if err != nil {
+		logrus.Errorf("client: unable to make a hidden request: %s", err)
+		return err
+	}
+
+	// Server Response hidden
+	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(buf, nil)
+	if err != nil {
+		return err
+	}
+	logrus.Debugf("client: Server response hidden msgLen: %d", msgLen)
+
+	n, err = c.hs.readServerResponseHidden(buf[:msgLen])
+	if err != nil {
+		return err
+	}
+	if n != msgLen {
+		logrus.Debugf("client: Server response hidden packet of %d, only read %d", msgLen, n)
+		return ErrInvalidMessage
+	}
 
 	return nil
 }
