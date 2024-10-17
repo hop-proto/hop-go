@@ -208,19 +208,19 @@ func (c *Client) clientHandshakeLocked() error {
 			return err
 		}
 
-		// Server Request hidden
+		// Server Response hidden
 		msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(buf, nil)
 		if err != nil {
 			return err
 		}
-		logrus.Debugf("client: Server request hidden msgLen: %d", msgLen)
+		logrus.Debugf("client: Server response hidden msgLen: %d", msgLen)
 
-		n, err = c.hs.readServerRequestHidden(buf[:msgLen])
+		n, err = c.hs.readServerResponseHidden(buf[:msgLen])
 		if err != nil {
 			return err
 		}
 		if n != msgLen {
-			logrus.Debugf("client: Server request hidden packet of %d, only read %d", msgLen, n)
+			logrus.Debugf("client: Server response hidden packet of %d, only read %d", msgLen, n)
 			return ErrInvalidMessage
 		}
 

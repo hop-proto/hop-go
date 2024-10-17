@@ -219,7 +219,7 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 	return length, err
 }
 
-func (s *Server) writeServerRequestHidden(hs *HandshakeState, b []byte) (int, error) {
+func (s *Server) writeServerResponseHidden(hs *HandshakeState, b []byte) (int, error) {
 	c, err := s.config.GetCertificate(ClientHandshakeInfo{
 		ServerName: certs.HiddenName("hidden-handshake"),
 	})
@@ -304,7 +304,7 @@ func (s *Server) writeServerRequestHidden(hs *HandshakeState, b []byte) (int, er
 	return pos, nil
 }
 
-func (hs *HandshakeState) readServerRequestHidden(b []byte) (int, error) {
+func (hs *HandshakeState) readServerResponseHidden(b []byte) (int, error) {
 
 	minLength := HeaderLen + SessionIDLen + DHLen + 2*MacLen
 
