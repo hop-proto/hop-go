@@ -54,7 +54,7 @@ func (hs *HandshakeState) writeClientRequestHidden(b []byte, serverPublicKey *ke
 	logrus.Debugf("client: es: %x", secret)
 	hs.duplex.Absorb(secret)
 
-	// Encrypted Certificates
+	// Encrypted Certificates (s)
 	if len(hs.leaf) == 0 {
 		return pos, errors.New("client: client did not set leaf certificate")
 	}
@@ -268,7 +268,7 @@ func (s *Server) writeServerResponseHidden(hs *HandshakeState, b []byte) (int, e
 	logrus.Debugf("server: ee: %x", secret)
 	hs.duplex.Absorb(secret)
 
-	// Server Certificates
+	// Server Certificates (s)
 	encCerts, err := EncryptCertificates(&hs.duplex, c.RawLeaf, c.RawIntermediate)
 	if err != nil {
 		return pos, err
