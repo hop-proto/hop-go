@@ -59,8 +59,6 @@ type HandshakeState struct {
 	parsedLeaf *certs.Certificate
 
 	remoteAddr *net.UDPAddr
-
-	isHidden bool
 }
 
 func (hs *HandshakeState) writeCookie(b []byte) (int, error) {
