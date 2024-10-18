@@ -2,6 +2,8 @@ package hopclient
 
 import (
 	"github.com/sirupsen/logrus"
+	"hop.computer/hop/keys"
+	"os"
 
 	"hop.computer/hop/certs"
 	"hop.computer/hop/config"
@@ -43,4 +45,21 @@ func (c *HopClient) loadCAFiles(store *certs.Store) {
 		store.AddCertificate(cert)
 		logrus.Debugf("client: loaded cert with fingerprint: %x", cert.Fingerprint)
 	}
+}
+
+// TODO (paul) check if this is the right place to put this function or in another file
+func loadServerPublicKey(serverPublicKeyPath string) (*keys.PublicKey, error) {
+
+	pubKeyBytes, err := os.ReadFile(serverPublicKeyPath)
+	if err != nil {
+		logrus.Errorf("could not read public key file: %s", err)
+		return nil, err
+	}
+	pubKey, err := keys.ParseDHPublicKey(string(pubKeyBytes))
+	if err != nil {
+		logrus.Errorf("client: unable to parse the server public key file: %s", err)
+		return nil, err
+	}
+	logrus.Debugf("client: paul finish: %x", pubKey)
+	return pubKey, nil
 }

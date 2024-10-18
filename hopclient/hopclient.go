@@ -137,6 +137,14 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		return c.getAuthorization(verifyConfig)
 	}
 
+	// TODO (paul): we can add an if condition for not reading the key if it is not set
+	// Read the serverPublicKey
+	serverPublicKey, err := loadServerPublicKey(hc.ServerPublicKey)
+	if err != nil {
+		logrus.Errorf("client: unable to load the server public key file: %s", err)
+		serverPublicKey = nil
+	}
+
 	// Host block overrides global block. Set overrides Unset. Certificate
 	// overrides AutoSelfSign.
 	var leafFile string
@@ -171,9 +179,10 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		copy(public[:], bc.Public[:]) // TODO(baumanl): resolve public key type awkwardness
 		leaf = loadLeaf(leafFile, autoSelfSign, &public, hc.HostURL())
 		authenticator = core.AgentAuthenticator{
-			BoundClient:  bc,
-			VerifyConfig: verifyConfig,
-			Leaf:         leaf,
+			BoundClient:     bc,
+			VerifyConfig:    verifyConfig,
+			Leaf:            leaf,
+			ServerPublicKey: serverPublicKey,
 		}
 		logrus.Info("leaf: ", leaf)
 	} else {
@@ -187,9 +196,10 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		leaf = loadLeaf(leafFile, autoSelfSign, &keypair.Public, hc.HostURL())
 		logrus.Infof("no agent running")
 		authenticator = core.InMemoryAuthenticator{
-			X25519KeyPair: keypair,
-			VerifyConfig:  verifyConfig,
-			Leaf:          leaf,
+			X25519KeyPair:   keypair,
+			VerifyConfig:    verifyConfig,
+			Leaf:            leaf,
+			ServerPublicKey: serverPublicKey,
 		}
 	}
 	c.authenticator = authenticator
@@ -274,9 +284,10 @@ func (c *HopClient) Close() error {
 func (c *HopClient) startUnderlying(address string, authenticator core.Authenticator) error {
 	// TODO(dadrian): Update this once the authenticator interface is set.
 	transportConfig := transport.ClientConfig{
-		Exchanger: authenticator,
-		Verify:    authenticator.GetVerifyConfig(),
-		Leaf:      authenticator.GetLeaf(),
+		Exchanger:       authenticator,
+		Verify:          authenticator.GetVerifyConfig(),
+		Leaf:            authenticator.GetLeaf(),
+		ServerPublickey: authenticator.GetServerPublicKey(),
 	}
 	var err error
 	var dialer net.Dialer

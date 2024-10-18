@@ -2,6 +2,7 @@
 Key = "containers/id_client.pem"
 Certificate = "containers/id_client.cert"
 CAFiles = ["containers/CAFiles/intermediate.cert", "containers/CAFiles/root.cert"]
+ServerPublicKey = "containers/id_server.pub"
 
 [[Hosts]]
 Patterns = ["127.0.0.1"]

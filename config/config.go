@@ -60,6 +60,7 @@ type HostConfigOptional struct {
 	ServerName       *string
 	ServerIPv4       *string
 	ServerIPv6       *string
+	ServerPublicKey  *string
 	Certificate      *string
 	Cmd              *string // what command to run on connect
 	DisableAgent     *bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
@@ -85,6 +86,7 @@ type HostConfig struct {
 	ServerName       string // expected name on server cert
 	ServerIPv4       string
 	ServerIPv6       string
+	ServerPublicKey  string
 	Certificate      string
 	Cmd              string // what command to run on connect
 	DisableAgent     bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
@@ -176,6 +178,9 @@ func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
 	if other.DataTimeout != 0 {
 		hc.DataTimeout = other.DataTimeout
 	}
+	if other.ServerPublicKey != nil {
+		hc.ServerPublicKey = other.ServerPublicKey
+	}
 }
 
 func (hc *HostConfigOptional) Unwrap() *HostConfig {
@@ -236,6 +241,9 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	}
 	if hc.DataTimeout != 0 {
 		newHC.DataTimeout = time.Duration(hc.DataTimeout) * time.Second
+	}
+	if hc.ServerPublicKey != nil {
+		newHC.ServerPublicKey = *hc.ServerPublicKey
 	}
 	return &newHC
 }
