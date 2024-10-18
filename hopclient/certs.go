@@ -1,12 +1,13 @@
 package hopclient
 
 import (
-	"github.com/sirupsen/logrus"
-	"hop.computer/hop/keys"
 	"os"
+
+	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/certs"
 	"hop.computer/hop/config"
+	"hop.computer/hop/keys"
 	"hop.computer/hop/transport"
 )
 
