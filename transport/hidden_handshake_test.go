@@ -2,19 +2,20 @@ package transport
 
 import (
 	"context"
-	"hop.computer/hop/agent"
-	"hop.computer/hop/certs"
-	"hop.computer/hop/common"
 	"net"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/sirupsen/logrus"
+
 	"go.uber.org/goleak"
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
 
+	"hop.computer/hop/agent"
+	"hop.computer/hop/certs"
+	"hop.computer/hop/common"
 	"hop.computer/hop/keys"
 )
 

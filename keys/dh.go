@@ -6,13 +6,14 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"io"
 	"io/fs"
 	"os"
 	"strings"
 
 	"golang.org/x/crypto/curve25519"
+
+	"github.com/sirupsen/logrus"
 )
 
 // PublicKey is a 32-byte array
