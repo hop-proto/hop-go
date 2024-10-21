@@ -248,7 +248,6 @@ func (s *Server) writeServerResponseHidden(hs *HandshakeState, b []byte) (int, e
 	b = b[HeaderLen:]
 	pos += HeaderLen
 
-	// TODO (paul): check if there is any session ID at this point of the handshake
 	copy(b, hs.sessionID[:])
 	logrus.Debugf("server: session ID %x", hs.sessionID[:])
 	hs.duplex.Absorb(b[:SessionIDLen])

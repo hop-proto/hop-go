@@ -221,7 +221,6 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 		}
 		return nil
 
-	// TODO (paul) verify if the errors can disclose a server in hidden mode
 	case MessageTypeClientRequestHidden:
 		logrus.Debug("server: receiving a hidden client request to handle")
 		n, hs, err := s.handleClientRequestHidden(rawRead[:msgLen])

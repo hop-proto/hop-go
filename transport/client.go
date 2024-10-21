@@ -178,14 +178,13 @@ func (c *Client) clientHandshakeLocked() error {
 	logrus.Debugf("client: public ephemeral: %x", c.hs.ephemeral.Public)
 
 	// TODO (paul) handle dynamic hidden mode
-
 	if c.hs.isHidden {
 		err := c.clientHiddenHandshakeBuilder(buf)
 		if err != nil {
 			return err
 		}
 	} else {
-		err := c.clientRegularHandshakeBuilder(buf)
+		err := c.clientDiscoverableHandshakeBuilder(buf)
 		if err != nil {
 			return err
 		}
@@ -218,8 +217,7 @@ func (c *Client) clientHandshakeLocked() error {
 	return nil
 }
 
-// TODO (paul) : client "regular" might not be a good name to use
-func (c *Client) clientRegularHandshakeBuilder(buf []byte) error {
+func (c *Client) clientDiscoverableHandshakeBuilder(buf []byte) error {
 	// Protocol ID for the regular handshake
 	c.hs.duplex.Absorb([]byte(ProtocolName))
 
