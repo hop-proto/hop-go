@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,7 +12,6 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/common"
-	"hop.computer/hop/keys"
 )
 
 // UDPLike interface standardizes Reliable channels and UDPConn.
@@ -177,10 +175,9 @@ func (c *Client) clientHandshakeLocked() error {
 
 	logrus.Debugf("client: public ephemeral: %x", c.hs.ephemeral.Public)
 
-	// TODO (paul) handle dynamic hidden mode
-	c.hs.isHidden = false
+	if c.config.ServerPublicKey != nil {
+		logrus.Debug("---------- HIDDEN HANDSHAKE MODE -------------")
 
-	if c.hs.isHidden {
 		err := c.clientHiddenHandshakeBuilder(buf)
 		if err != nil {
 			return err
@@ -298,19 +295,7 @@ func (c *Client) clientHiddenHandshakeBuilder(buf []byte) error {
 
 	c.hs.RekeyFromSqueeze(HiddenProtocolName)
 
-	// TODO (paul): TO CHANGE here pass the server public static key
-	pubKeyBytes, err := os.ReadFile("containers/id_server.pub")
-
-	if err != nil {
-		logrus.Fatalf("could not read public key file: %s", err)
-	}
-	pubKey, err := keys.ParseDHPublicKey(string(pubKeyBytes))
-	if err != nil {
-		logrus.Errorf("client: unable to parse the server public key file: %s", err)
-		return err
-	}
-
-	n, err := c.hs.writeClientRequestHidden(buf, pubKey)
+	n, err := c.hs.writeClientRequestHidden(buf, c.config.ServerPublicKey)
 
 	if err != nil {
 		return err
@@ -336,6 +321,8 @@ func (c *Client) clientHiddenHandshakeBuilder(buf []byte) error {
 		logrus.Debugf("client: Server response hidden packet of %d, only read %d", msgLen, n)
 		return ErrInvalidMessage
 	}
+
+	c.hs.isHiddenHSCompleted = true
 
 	return nil
 }

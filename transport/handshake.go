@@ -60,7 +60,8 @@ type HandshakeState struct {
 
 	remoteAddr *net.UDPAddr
 
-	isHidden bool
+	// To track if the handshake is completed in hidden mode
+	isHiddenHSCompleted bool
 }
 
 func (hs *HandshakeState) writeCookie(b []byte) (int, error) {

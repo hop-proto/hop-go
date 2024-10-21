@@ -247,6 +247,7 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 			return err
 		}
 		logrus.Debug("server: finished handshake!")
+		hs.isHiddenHSCompleted = true
 
 	default:
 		// If the message is authenticated, this will closed the connection

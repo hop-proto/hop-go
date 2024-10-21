@@ -51,6 +51,7 @@ type ClientConfig struct {
 	HSTimeout          time.Duration
 	HSDeadline         time.Time
 	KeepAlive          time.Duration
+	ServerPublicKey    *keys.PublicKey
 }
 
 func (c *ClientConfig) maxBufferedPackets() int {
