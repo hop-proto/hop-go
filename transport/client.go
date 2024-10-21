@@ -178,6 +178,8 @@ func (c *Client) clientHandshakeLocked() error {
 	logrus.Debugf("client: public ephemeral: %x", c.hs.ephemeral.Public)
 
 	// TODO (paul) handle dynamic hidden mode
+	c.hs.isHidden = false
+
 	if c.hs.isHidden {
 		err := c.clientHiddenHandshakeBuilder(buf)
 		if err != nil {
@@ -296,8 +298,9 @@ func (c *Client) clientHiddenHandshakeBuilder(buf []byte) error {
 
 	c.hs.RekeyFromSqueeze(HiddenProtocolName)
 
-	// TODO(paul): TO CHANGE here pass the server public static key
+	// TODO (paul): TO CHANGE here pass the server public static key
 	pubKeyBytes, err := os.ReadFile("containers/id_server.pub")
+
 	if err != nil {
 		logrus.Fatalf("could not read public key file: %s", err)
 	}
