@@ -175,6 +175,8 @@ func (c *Client) clientHandshakeLocked() error {
 
 	logrus.Debugf("client: public ephemeral: %x", c.hs.ephemeral.Public)
 
+	isClientHiddenHS := false
+
 	if c.config.ServerPublicKey != nil {
 		logrus.Debug("---------- HIDDEN HANDSHAKE MODE -------------")
 
@@ -182,6 +184,7 @@ func (c *Client) clientHandshakeLocked() error {
 		if err != nil {
 			return err
 		}
+		isClientHiddenHS = true
 	} else {
 		err := c.clientDiscoverableHandshakeBuilder(buf)
 		if err != nil {
@@ -200,6 +203,7 @@ func (c *Client) clientHandshakeLocked() error {
 	c.ss.writeKey = &c.ss.clientToServerKey
 	c.hs = nil
 	c.dialAddr = nil
+	c.ss.isHiddenHS = isClientHiddenHS
 
 	// Set deadline of 0 to make the connection not timeout
 	// Data timeouts are handled by the Tube Muxer
