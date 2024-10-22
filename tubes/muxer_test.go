@@ -80,7 +80,7 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 }
 
 func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
-	// Each muxer can create exactly 127 Unreliable tubes and 128 Reliable tubes
+	// Each muxer can create exactly 128 Unreliable tubes and 128 Reliable tubes
 	// The server creates even numbered tubes. The client creates odd numbered tubes
 	m1, m2, stop := makeMuxers(odds, t)
 
@@ -124,14 +124,7 @@ func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
 		}
 	}
 
-	// Since muxer2 handles keep alives, it can only create 127 unreliable tubes
-	// Tube 0 is reserved for keep alives
-	var numTubes int
-	if rel {
-		numTubes = 128
-	} else {
-		numTubes = 127
-	}
+	numTubes := 128
 
 	prevID = -1
 	for i := 0; i < numTubes; i++ {
