@@ -322,8 +322,6 @@ func (c *Client) clientHiddenHandshakeBuilder(buf []byte) error {
 		return ErrInvalidMessage
 	}
 
-	c.hs.isHiddenHSCompleted = true
-
 	return nil
 }
 

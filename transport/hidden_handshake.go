@@ -24,7 +24,7 @@ func (hs *HandshakeState) writeClientRequestHidden(b []byte, serverPublicKey *ke
 	length := HeaderLen + DHLen + encCertLen + MacLen + TimestampLen + MacLen
 
 	if len(b) < length {
-		return 0, ErrBufOverflow
+		return 0, ErrBufUnderflow
 	}
 
 	pos := 0

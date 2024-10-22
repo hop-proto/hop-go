@@ -59,9 +59,6 @@ type HandshakeState struct {
 	parsedLeaf *certs.Certificate
 
 	remoteAddr *net.UDPAddr
-
-	// To track if the handshake is completed in hidden mode
-	isHiddenHSCompleted bool
 }
 
 func (hs *HandshakeState) writeCookie(b []byte) (int, error) {
