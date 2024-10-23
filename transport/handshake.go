@@ -354,9 +354,9 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	b = b[MacLen:]
 
 	// Parse the certificate
-	leaf, _, err := hs.certificateParser(rawLeaf, rawIntermediate)
+	leaf, _, err := hs.certificateParserAndVerifier(rawLeaf, rawIntermediate)
 	if err != nil {
-		logrus.Debugf("client: error parsing certificates: %s", err)
+		logrus.Debugf("client: error parsing server certificates: %s", err)
 		return 0, err
 	}
 
@@ -473,10 +473,11 @@ func readVector(src []byte) (int, []byte, error) {
 	return vecLen, src[2:end], nil
 }
 
-func (hs *HandshakeState) certificateParser(rawLeaf []byte, rawIntermediate []byte) (certs.Certificate, certs.Certificate, error) {
+func (hs *HandshakeState) certificateParserAndVerifier(rawLeaf []byte, rawIntermediate []byte) (certs.Certificate, certs.Certificate, error) {
 	// Parse the certificate
-	opts := certs.VerifyOptions{
-		Name: hs.certVerify.Name,
+	opts := certs.VerifyOptions{}
+	if hs.certVerify != nil {
+		opts.Name = hs.certVerify.Name
 	}
 	leaf := certs.Certificate{}
 	intermediate := certs.Certificate{}
@@ -500,18 +501,34 @@ func (hs *HandshakeState) certificateParser(rawLeaf []byte, rawIntermediate []by
 		opts.PresentedIntermediate = &intermediate
 	}
 
-	if !hs.certVerify.InsecureSkipVerify {
-		logrus.Debug("performing certificate validation")
-		err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
-		if err != nil {
-			logrus.Errorf("failed to verify certificate: %s", err)
-			return leaf, intermediate, err
+	// TODO(baumanl): enable more general cert verify callback?
+	// TODO(baumanl): if certVerify is nil then no verification happens --> okay default?
+
+	if hs.certVerify != nil && !hs.certVerify.InsecureSkipVerify {
+		// try authkeys first if enabled
+		logrus.Debug("Beginning authentication")
+		var errAuthkeys error
+		if hs.certVerify.AuthKeysAllowed {
+			logrus.Debug("Authkeys are allowed. attempting to validate self-signed cert")
+			errAuthkeys = hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
 		}
-		logrus.Debug("leaf verification successful")
+		if !hs.certVerify.AuthKeysAllowed || errAuthkeys != nil {
+			logrus.Debug("performing certificate validation")
+			err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
+			if err != nil {
+				logrus.Errorf("failed to verify certificate: %s", err)
+				return leaf, intermediate, err
+			}
+			logrus.Debug("Leaf verification successful")
+			logrus.Infof("Used certificate verification to authenticate")
+		} else {
+			logrus.Info("Used an authorized key to authenticate")
+		}
 	} else {
 		logrus.Debug("InsecureSkipVerify set. Not verifying server certificate")
 	}
-	if hs.certVerify.AddVerifyCallback != nil {
+
+	if hs.certVerify != nil && hs.certVerify.AddVerifyCallback != nil {
 		logrus.Debug("additional verify callback check enabled. running...")
 		if err := hs.certVerify.AddVerifyCallback(&leaf); err != nil {
 			logrus.Debugf("additional verify callback returned an error: %v", err.Error())

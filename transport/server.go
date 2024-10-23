@@ -415,60 +415,14 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	}
 	x = x[MacLen:]
 	pos += MacLen
+
 	// Parse certificates
-	opts := certs.VerifyOptions{}
-	if hs.certVerify != nil {
-		opts.Name = hs.certVerify.Name
-	}
-	leaf := certs.Certificate{}
-	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
+	leaf, _, err := hs.certificateParserAndVerifier(rawLeaf, rawIntermediate)
 	if err != nil {
+		logrus.Debugf("server: error parsing client certificates: %s", err)
 		return pos, nil, err
 	}
-	if int(leafLen) != len(rawLeaf) {
-		return pos, nil, errors.New("extra bytes after leaf certificate")
-	}
 	hs.parsedLeaf = &leaf
-
-	intermediate := certs.Certificate{}
-	if len(rawIntermediate) > 0 {
-		intermediateLen, err := intermediate.ReadFrom(bytes.NewBuffer(rawIntermediate))
-		if err != nil {
-			return pos, nil, err
-		}
-		if int(intermediateLen) != len(rawIntermediate) {
-			return pos, nil, errors.New("extra bytes after intermediate certificate")
-		}
-		opts.PresentedIntermediate = &intermediate
-	}
-
-	// TODO(baumanl): enable more general cert verify callback?
-	// TODO(baumanl): if certVerify is nil then no verification happens --> okay default?
-
-	// skips all verification if certVerify nil or explicitly disabled
-	if hs.certVerify != nil && !hs.certVerify.InsecureSkipVerify {
-		logrus.Debug("server: beginning client authentication")
-		// try authkeys first if enabled
-		var errAuthkeys error
-		if hs.certVerify.AuthKeysAllowed {
-			logrus.Debug("server: authkeys are allowed. attempting to validate self-signed cert")
-			errAuthkeys = hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
-		}
-		if !hs.certVerify.AuthKeysAllowed || errAuthkeys != nil {
-			// Certificate Verification
-			logrus.Debug("server: attempting cert validation")
-			err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
-			if err != nil { // cert verifification failed
-				logrus.Errorf("server: client authentication failed")
-				return pos, nil, err
-			}
-			logrus.Infof("server: client used certificate verification to authenticate")
-		} else {
-			logrus.Info("server: client used an authorized key to authenticate")
-		}
-	} else {
-		logrus.Debug("server: certVerify nil or InsecureSkipVerify set. skipping all client authentication")
-	}
 
 	hs.se, err = hs.ephemeral.DH(leaf.PublicKey[:])
 	if err != nil {

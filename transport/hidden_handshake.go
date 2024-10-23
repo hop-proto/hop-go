@@ -167,9 +167,9 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 	b = b[MacLen:]
 
 	// Parse certificates
-	leaf, _, err := hs.certificateParser(rawLeaf, rawIntermediate)
+	leaf, _, err := hs.certificateParserAndVerifier(rawLeaf, rawIntermediate)
 	if err != nil {
-		logrus.Debugf("client: error parsing certificates: %s", err)
+		logrus.Debugf("server: error parsing client certificates: %s", err)
 		return 0, err
 	}
 	hs.parsedLeaf = &leaf
@@ -363,9 +363,9 @@ func (hs *HandshakeState) readServerResponseHidden(b []byte) (int, error) {
 	b = b[MacLen:]
 
 	// Parse certificates
-	leaf, _, err := hs.certificateParser(rawLeaf, rawIntermediate)
+	leaf, _, err := hs.certificateParserAndVerifier(rawLeaf, rawIntermediate)
 	if err != nil {
-		logrus.Debugf("client: error parsing certificates: %s", err)
+		logrus.Debugf("client: error parsing server certificates: %s", err)
 		return 0, err
 	}
 	hs.parsedLeaf = &leaf
