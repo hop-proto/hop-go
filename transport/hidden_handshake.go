@@ -166,7 +166,7 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 	}
 	b = b[MacLen:]
 
-	// TODO add the parsing verification
+	// TODO (paul) Add the parsing verification "certificateParser"?
 	// Parse certificates
 	leaf := certs.Certificate{}
 
@@ -367,7 +367,7 @@ func (hs *HandshakeState) readServerResponseHidden(b []byte) (int, error) {
 	}
 	b = b[MacLen:]
 
-	// TODO add the parsing verification
+	// TODO (paul): add the parsing verification as above
 	// Parse certificates
 	leaf := certs.Certificate{}
 

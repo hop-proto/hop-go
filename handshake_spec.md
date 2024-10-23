@@ -412,7 +412,7 @@ enc_data = ''.join([nonce, enc_data])
 counter +=1
 ```
 
-### WIP: Hidden Server Flow
+### Hidden Server Flow
 
 ---
 
@@ -424,23 +424,44 @@ Client->Server: Transport Data [0x6]
 Server->Client: Transport Data [0x6]
 ```
 
-TODO(dadrian): Implement and update docs
-
 ### Message Structures
 
 ---
 
-#### Client Auth Message
-TODO: also out of date (need client certs)
+##### Client Auth Message
+
 ---
 
-|   type $:=$ 0x7 (1 byte)    |  Protocol Version (1 byte)  |
-| :-------------------------: | :-------------------------: |
-| reserved $:= 0^2$ (2 bytes) | client ephemeral (32 bytes) |
-|  client static (32 bytes)   |       tag (16 bytes)        |
-|    Timestamp (12 bytes)     |       mac (16 bytes)        |
+|      type $:=$ 0x8 (1 byte)       |          Protocol Version (1 byte)          |       Certs Len $:= 0^2$ (2 bytes)        |
+|:---------------------------------:|:-------------------------------------------:|:-----------------------------------------:|
+|                                   |         Client Ephemeral (32 bytes)         |                                           |
+| Client Leaf Certificate (* bytes) |                                             | Client Intermediate Certificate (* bytes) |
+|                                   | Client Static Authentication Tag (16 bytes) |                                           |
+|                                   |             Timestamp (8 bytes)             |                                           |
+|                                   |               MAC (16 bytes)                |                                           |
 
 ##### Client Auth Construction
+
+---
+
+TODO check the protocol ID in the code and here
+
+```python
+# server’s static key is cached from a previous discoverable mode handshake, or distributed out-of-band
+protocolID = “noise_IK_cyclist_keccak_C512”
+duplex = Cyclist()
+duplex.absorb(protocolID)
+duplex.absorb([type + protocol + reserved])
+duplex.absorb(ClientEphemeral)
+duplex.absorb(DH(es))
+ClientEncCerts = duplex.encrypt(certificates)
+tag = duplex.squeeze()
+duplex.absorb(ss)
+timestamp = duplex.encrypt(time.Now().Unix())
+mac = duplex.squeeze()
+```
+
+##### Server Logic
 
 ---
 
@@ -448,48 +469,35 @@ TODO: also out of date (need client certs)
 protocolID = “noise_IK_cyclist_keccak_C512”
 duplex = Cyclist()
 duplex.absorb(protocolID)
-duplex.absorb([type + protocol + reserved +  ephemeral])
+duplex.absorb([type + protocol + reserved])
+duplex.absorb(ClientEphemeral)
 duplex.absorb(DH(es))
-static = duplex.encrypt(s)
+certificates = duplex.decrypt(ClientEncCerts)
 tag = duplex.squeeze()
+# verify tag
+# verify certs, extract client static
 duplex.absorb(ss)
-timestamp = duplex.encrypt(TAI64N())
+timestamp = duplex.decrypt(time.Now().Unix())
 mac = duplex.squeeze()
 ```
 
-- Timestamp: [TAI64N](https://cr.yp.to/libtai/tai64.html)
-  - 8 bytes (seconds) || 4 bytes (nanoseconds)
-  - Necessary to prevent replay of Client Hello to trigger server response.
-
-##### Server Logic
-
----
-
-```python
-protocolID = “noise_IK_cyclist”
-duplex = Cyclist()
-duplex.absorb(protocolID)
-duplex.absorb([type + protocol + reserved + ephemeral])
-duplex.absorb(DH(es))
-static = duplex.decrypt(s, tag)
-duplex.absorb(ss)
-timestamp = duplex.decrypt(TAI64N(), mac)
-```
-
-- Is the static a static of a valid client?
+- Is the static a static of a valid client? (what do we consider as a valid client?)
 - Is the timestamp greater than the last timestamp seen from the last valid handshake from the client?
-- Search up certificate related to serverID for that serverID type
+- Search up certificate related to serverID for that serverID type (not implemented yet -> server will loop in the SNI to find the corresponding key)
 
 #### Server Auth Message
 
 ---
 
-|   type $:=$ 0x8 (1 byte)   |   Leaf Certificate Bytes (2 bytes)   |
-| :------------------------: | :----------------------------------: |
-|  reserved $:= 0$ (1 byte)  |                                      |
-|    SessionID (4 bytes)     | Server Ephemeral $:= e_s$ (32 bytes) |
-| Leaf Certificate (* bytes) |  Intermediate Certificate (* bytes)  |
-|       tag (16 bytes)       |            mac (16 bytes)            |
+
+|      type $:=$ 0x8 (1 byte)       |       Reserved $:= 0$ (1 byte)       |       Certs Len $:= 0^2$ (2 bytes)        |
+|:---------------------------------:|:------------------------------------:|:-----------------------------------------:|
+|                                   |         SessionID (4 bytes)          |                                           |
+|                                   |     Server Ephemeral (32 bytes)      |                                           |
+| Server Leaf Certificate (* bytes) |                                      | Server Intermediate Certificate (* bytes) |
+|                                   | Server Authentication Tag (16 bytes) |                                           |
+|                                   |            MAC (16 bytes)            |                                           |
+
 
 ##### Server Auth Construction
 
@@ -497,9 +505,11 @@ timestamp = duplex.decrypt(TAI64N(), mac)
 
 ```python
 # Continuing from duplex prior
-duplex.absorb([type + reserved + sessionID])
+duplex.absorb([type + reserved + Certs Len])
+duplex.absorb(SessionID)
+duplex.absorb(ServerEphemeral)
 duplex.absorb(DH(ee))
-certificates = duplex.encrypt(certificates)
+ServerEncCerts = duplex.encrypt(certificates)
 tag = duplex.squeeze()
 duplex.absorb(DH(se))
 mac = duplex.squeeze()
@@ -511,15 +521,19 @@ mac = duplex.squeeze()
 
 ```python
 # Continuing from duplex prior
-duplex.absorb([type + reserved + sessionID])
+duplex.absorb([type + reserved + Certs Len])
+duplex.absorb(SessionID)
+duplex.absorb(ServerEphemeral)
 duplex.absorb(DH(ee))
-certificates = duplex.decrypt(certificates, tag)
+certificates = duplex.decrypt(ServerEncCerts)
+tag = duplex.squeeze()
+# verify tag
+# verify certs, extract server static
 duplex.absorb(DH(se))
 mac = duplex.squeeze()
 ```
 
-- Are the certificates valid?
-- Is the mac the same?
+- Are the certificates valid? (TODO paul)
 
 #### Transport Message
 
