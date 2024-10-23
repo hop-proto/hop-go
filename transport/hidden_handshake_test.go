@@ -19,8 +19,6 @@ import (
 	"hop.computer/hop/keys"
 )
 
-// TODO (paul): similar to the handshake tests -> improve for the hidden handshake specificities
-
 // +checklocksignore
 func TestClientServerCompatibilityHiddenHandshake(t *testing.T) {
 	defer goleak.VerifyNone(t)
@@ -57,6 +55,8 @@ func TestClientServerCompatibilityHiddenHandshake(t *testing.T) {
 	assert.Check(t, cmp.Equal(c.ss.serverToClientKey, ss.serverToClientKey))
 	assert.Check(t, c.ss.clientToServerKey != zero)
 	assert.Check(t, c.ss.serverToClientKey != zero)
+	assert.Equal(t, c.ss.isHiddenHS, true)
+	assert.Equal(t, ss.isHiddenHS, true)
 
 	assert.NilError(t, s.Close())
 	assert.NilError(t, c.Close())
@@ -101,10 +101,8 @@ func TestClientServerHiddenHSWithAgent(t *testing.T) {
 	go httpServer.Serve(sock)
 	defer httpServer.Close()
 
-	//aconn, err := net.Dial("tcp", sock.Addr().String())
 	assert.NilError(t, err)
 	logrus.Infof("dialing %s", sock.Addr().String())
-	//logrus.Infof("aconn %s", aconn.RemoteAddr().String())
 
 	// Connect to the agent
 	ac := agent.Client{
@@ -133,9 +131,11 @@ func TestClientServerHiddenHSWithAgent(t *testing.T) {
 
 	assert.NilError(t, err)
 
+	// Hidden mode serverPublic key reading
 	serverPublicKey, err := keys.ReadDHKeyFromPubFile("testdata/leaf.pub")
 	assert.NilError(t, err)
 
+	// adding the serverPublicKey to the client config enabling the hiddenHS
 	c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{
 		Verify:          *verifyConfig,
 		Exchanger:       bc,
@@ -157,4 +157,73 @@ func TestClientServerHiddenHSWithAgent(t *testing.T) {
 	assert.Check(t, cmp.Equal(c.ss.serverToClientKey, ss.serverToClientKey))
 	assert.Check(t, c.ss.clientToServerKey != zero)
 	assert.Check(t, c.ss.serverToClientKey != zero)
+	assert.Equal(t, c.ss.isHiddenHS, true)
+	assert.Equal(t, ss.isHiddenHS, true)
+
+	assert.NilError(t, s.Close())
+	assert.NilError(t, c.Close())
+}
+
+func TestClientHelloHiddenLength(t *testing.T) {
+	buf := make([]byte, 65535)
+	hs := new(HandshakeState)
+	hs.duplex.InitializeEmpty()
+	hs.ephemeral.Generate()
+	hs.RekeyFromSqueeze(HiddenProtocolName)
+
+	keyPair := keys.X25519KeyPair{}
+	keyPair.Generate()
+	hs.static = &keyPair
+
+	leaf, err := certs.ReadCertificatePEMFile("testdata/leaf.pem")
+	assert.NilError(t, err)
+	intermediate, err := certs.ReadCertificatePEMFile("testdata/intermediate.pem")
+	assert.NilError(t, err)
+	hs.leaf, err = leaf.Marshal()
+	assert.NilError(t, err)
+	hs.intermediate, err = intermediate.Marshal()
+	assert.NilError(t, err)
+	encCertLen := EncryptedCertificatesLength(hs.leaf[:], hs.intermediate[:])
+
+	expectedLength := HeaderLen + DHLen + encCertLen + MacLen + TimestampLen + MacLen
+
+	currentLength, err := hs.writeClientRequestHidden(buf, &keyPair.Public)
+	assert.Check(t, cmp.Equal(expectedLength, currentLength))
+	assert.NilError(t, err)
+}
+
+// This test stands for being sure that an HS without server public key
+// does not go through a hidden HS
+// +checklocksignore
+func TestClientServerDiscoverableHandshake(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	logrus.SetLevel(logrus.TraceLevel)
+
+	pc, err := net.ListenPacket("udp", "localhost:0")
+	assert.NilError(t, err)
+
+	sc, vc := newTestServerConfig(t)
+	s, err := NewServer(pc.(*net.UDPConn), *sc)
+	assert.NilError(t, err)
+	go s.Serve()
+
+	// initialisation of a ClientConfig without the serverPublic key to go for a discoverable HS
+	ckp, leaf := newClientAuth(t)
+	clientConfig := ClientConfig{
+		Verify:    *vc,
+		Exchanger: ckp,
+		Leaf:      leaf,
+	}
+	c, err := Dial("udp", s.Addr().String(), clientConfig)
+	assert.NilError(t, err)
+
+	_, err = s.AcceptTimeout(time.Millisecond * 100)
+	assert.NilError(t, err)
+
+	ss := s.fetchSession(c.ss.sessionID)
+	assert.Equal(t, c.ss.isHiddenHS, false)
+	assert.Equal(t, ss.isHiddenHS, false)
+
+	assert.NilError(t, s.Close())
+	assert.NilError(t, c.Close())
 }
