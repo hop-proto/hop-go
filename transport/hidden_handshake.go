@@ -150,7 +150,7 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 
 	// Client Encrypted Certificates
 	encCerts := b[:encCertsLen]
-	rawLeaf, _, err := DecryptCertificates(&hs.duplex, encCerts)
+	rawLeaf, rawIntermediate, err := DecryptCertificates(&hs.duplex, encCerts)
 	if err != nil {
 		logrus.Debugf("server: unable to decrypt certificates: %s", err)
 		return 0, err
@@ -166,16 +166,11 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 	}
 	b = b[MacLen:]
 
-	// TODO (paul) Add the parsing verification "certificateParser"?
 	// Parse certificates
-	leaf := certs.Certificate{}
-
-	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
+	leaf, _, err := hs.certificateParser(rawLeaf, rawIntermediate)
 	if err != nil {
+		logrus.Debugf("client: error parsing certificates: %s", err)
 		return 0, err
-	}
-	if int(leafLen) != len(rawLeaf) {
-		return 0, errors.New("extra bytes after leaf certificate")
 	}
 	hs.parsedLeaf = &leaf
 
@@ -367,16 +362,11 @@ func (hs *HandshakeState) readServerResponseHidden(b []byte) (int, error) {
 	}
 	b = b[MacLen:]
 
-	// TODO (paul): add the parsing verification as above
 	// Parse certificates
-	leaf := certs.Certificate{}
-
-	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
+	leaf, _, err := hs.certificateParser(rawLeaf, rawIntermediate)
 	if err != nil {
+		logrus.Debugf("client: error parsing certificates: %s", err)
 		return 0, err
-	}
-	if int(leafLen) != len(rawLeaf) {
-		return 0, errors.New("extra bytes after leaf certificate")
 	}
 	hs.parsedLeaf = &leaf
 
