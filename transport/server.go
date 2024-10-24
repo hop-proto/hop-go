@@ -204,7 +204,7 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 			return err
 		}
 		logrus.Debug("server: finishHandshake")
-		if err := s.finishHandshake(hs); err != nil {
+		if err := s.finishHandshake(hs, false); err != nil {
 			return err
 		}
 		logrus.Debug("server: finished handshake!")
@@ -243,12 +243,10 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 			return err
 		}
 		logrus.Debug("server: finishHandshake hidden mode")
-		if err := s.finishHandshake(hs); err != nil {
+		if err := s.finishHandshake(hs, true); err != nil {
 			return err
 		}
 		logrus.Debug("server: finished handshake!")
-		ss := s.fetchSessionLocked(hs.sessionID)
-		ss.isHiddenHS = true
 
 	default:
 		// If the message is authenticated, this will closed the connection
@@ -560,7 +558,7 @@ func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
 	return scratchHS, nil
 }
 
-func (s *Server) finishHandshake(hs *HandshakeState) error {
+func (s *Server) finishHandshake(hs *HandshakeState, isHidden bool) error {
 	s.m.Lock()
 	defer s.m.Unlock()
 
@@ -585,6 +583,8 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	}
 	ss.readKey = &ss.clientToServerKey
 	ss.writeKey = &ss.serverToClientKey
+
+	ss.isHiddenHS = isHidden
 
 	ss.handle = newHandleForSession(s.udpConn, ss, hs.parsedLeaf, s.config.maxBufferedPacketsPerConnection())
 	ss.handleState = established
