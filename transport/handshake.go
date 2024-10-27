@@ -237,9 +237,9 @@ func readServerHello(hs *HandshakeState, b []byte) (int, error) {
 
 // RekeyFromSqueeze squeezes out KeyLen bytes and then re-initializes the duplex
 // using the new key.
-func (hs *HandshakeState) RekeyFromSqueeze(usedProtocolName string) {
+func (hs *HandshakeState) RekeyFromSqueeze(protocolName string) {
 	hs.duplex.Squeeze(hs.handshakeKey[:])
-	hs.duplex.Initialize(hs.handshakeKey[:], []byte(usedProtocolName), nil)
+	hs.duplex.Initialize(hs.handshakeKey[:], []byte(protocolName), nil)
 }
 
 // EncryptSNI encrypts the name to a buffer. The encrypted length is always
