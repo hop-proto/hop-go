@@ -180,13 +180,13 @@ func (c *Client) clientHandshakeLocked() error {
 	if c.config.ServerPublicKey != nil {
 		logrus.Debug("---------- HIDDEN HANDSHAKE MODE -------------")
 
-		err := c.clientHiddenHandshakeBuilder(buf)
+		err := c.beginHiddenHandshake(buf)
 		if err != nil {
 			return err
 		}
 		isClientHiddenHS = true
 	} else {
-		err := c.clientDiscoverableHandshakeBuilder(buf)
+		err := c.beginDiscoverableHandshake(buf)
 		if err != nil {
 			return err
 		}
@@ -220,7 +220,7 @@ func (c *Client) clientHandshakeLocked() error {
 	return nil
 }
 
-func (c *Client) clientDiscoverableHandshakeBuilder(buf []byte) error {
+func (c *Client) beginDiscoverableHandshake(buf []byte) error {
 	// Protocol ID for the regular handshake
 	c.hs.duplex.Absorb([]byte(ProtocolName))
 
@@ -293,7 +293,7 @@ func (c *Client) clientDiscoverableHandshakeBuilder(buf []byte) error {
 	return nil
 }
 
-func (c *Client) clientHiddenHandshakeBuilder(buf []byte) error {
+func (c *Client) beginHiddenHandshake(buf []byte) error {
 	// Protocol ID for the hidden handshake
 	c.hs.duplex.Absorb([]byte(HiddenProtocolName))
 
