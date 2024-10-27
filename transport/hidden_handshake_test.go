@@ -19,7 +19,6 @@ import (
 	"hop.computer/hop/keys"
 )
 
-// +checklocksignore
 func TestClientServerCompatibilityHiddenHandshake(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	logrus.SetLevel(logrus.TraceLevel)
@@ -62,7 +61,6 @@ func TestClientServerCompatibilityHiddenHandshake(t *testing.T) {
 	assert.NilError(t, c.Close())
 }
 
-// +checklocksignore
 func TestClientServerHiddenHSWithAgent(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
@@ -194,7 +192,6 @@ func TestClientHelloHiddenLength(t *testing.T) {
 
 // This test stands for being sure that an HS without server public key
 // does not go through a hidden HS
-// +checklocksignore
 func TestClientServerDiscoverableHandshake(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	logrus.SetLevel(logrus.TraceLevel)
