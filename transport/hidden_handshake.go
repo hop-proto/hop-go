@@ -178,7 +178,7 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 		c = cert
 		vhostName, err := s.config.GetCertName(cert)
 		if err != nil {
-			logrus.Debugf("server: unable to retreive sni: %s", err)
+			logrus.Debugf("server: unable to retrieve sni: %s", err)
 			continue // Skip to the next certificate on error
 		}
 		hs.sni = certs.RawStringName(vhostName)
@@ -248,7 +248,7 @@ func (s *Server) writeServerResponseHidden(hs *HandshakeState, b []byte) (int, e
 		ServerName: hs.sni,
 	})
 
-	if c == nil {
+	if err != nil {
 		logrus.Debugf("server: hidden mode no cert found in hs")
 		return 0, ErrInvalidMessage
 	}
