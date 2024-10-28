@@ -9,7 +9,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
 )
 
@@ -122,49 +121,69 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 		return 0, ErrUnsupportedVersion
 	}
 
-	// Header
-	hs.duplex.Absorb(b[:HeaderLen])
-	b = b[HeaderLen:]
-
-	// Client Ephemeral
-	copy(hs.remoteEphemeral[:], b[:DHLen])
-	hs.duplex.Absorb(b[:DHLen])
-	b = b[DHLen:]
-
-	c, err := s.config.GetCertificate(ClientHandshakeInfo{
-		ServerName: certs.HiddenName("hidden-handshake"),
-	})
+	certList, err := s.config.GetCertificate(ClientHandshakeInfo{}, true)
 
 	if err != nil {
 		return 0, err
 	}
 
-	// DH (es)
-	hs.es, err = c.Exchanger.Agree(hs.remoteEphemeral[:])
-	if err != nil {
-		logrus.Debugf("server: unable to calculate es: %s", err)
-		return 0, err
-	}
-	logrus.Debugf("server: es: %x", hs.es)
-	hs.duplex.Absorb(hs.es)
+	var (
+		rawLeaf, rawIntermediate []byte
+		c                        *Certificate
+	)
+	bufCopy := make([]byte, len(b))
 
-	// Client Encrypted Certificates
-	encCerts := b[:encCertsLen]
-	rawLeaf, rawIntermediate, err := DecryptCertificates(&hs.duplex, encCerts)
-	if err != nil {
-		logrus.Debugf("server: unable to decrypt certificates: %s", err)
-		return 0, err
-	}
-	b = b[encCertsLen:]
+	for _, cert := range certList {
+		// Copy buffer for processing
+		copy(bufCopy, b)
 
-	// Tag (Client Static Auth Tag)
-	hs.duplex.Squeeze(hs.macBuf[:])
-	logrus.Debugf("server: calculated hidden client request tag: %x", hs.macBuf)
-	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
-		logrus.Debugf("server: hidden client request tag mismatch, got %x, wanted %x", b[:MacLen], hs.macBuf)
+		// Absorb Header
+		hs.duplex.Absorb(bufCopy[:HeaderLen])
+		bufCopy = bufCopy[HeaderLen:]
+
+		// Handle Client Ephemeral Key
+		copy(hs.remoteEphemeral[:], bufCopy[:DHLen])
+		hs.duplex.Absorb(bufCopy[:DHLen])
+		bufCopy = bufCopy[DHLen:]
+
+		// Derive DH (es)
+		hs.es, err = cert.Exchanger.Agree(hs.remoteEphemeral[:])
+		if err != nil {
+			logrus.Debugf("server: unable to calculate es: %s", err)
+			continue // Proceed to the next certificate on error
+		}
+		logrus.Debugf("server: es: %x", hs.es)
+		hs.duplex.Absorb(hs.es)
+
+		// Decrypt Client Encrypted Certificates
+		encCerts := bufCopy[:encCertsLen]
+		rawLeaf, rawIntermediate, err = DecryptCertificates(&hs.duplex, encCerts)
+		if err != nil {
+			logrus.Debugf("server: unable to decrypt certificates: %s", err)
+			continue // Skip to the next certificate on error
+		}
+		bufCopy = bufCopy[encCertsLen:]
+
+		// Validate Tag (Client Static Auth Tag)
+		hs.duplex.Squeeze(hs.macBuf[:])
+		logrus.Debugf("server: calculated hidden client request tag: %x", hs.macBuf)
+		if !bytes.Equal(hs.macBuf[:], bufCopy[:MacLen]) {
+			logrus.Debugf("server: hidden client request tag mismatch, got %x, wanted %x", bufCopy[:MacLen], hs.macBuf)
+			continue // Tag mismatch, move to the next certificate
+		}
+		bufCopy = bufCopy[MacLen:]
+
+		c = cert
+		break
+	}
+
+	if c == nil {
+		logrus.Debugf("server: No valid certificate found")
 		return 0, ErrInvalidMessage
 	}
-	b = b[MacLen:]
+
+	hs.hiddenExtractedCert = c
+	copy(b, bufCopy)
 
 	// Parse certificates
 	leaf, _, err := hs.certificateParserAndVerifier(rawLeaf, rawIntermediate)
@@ -191,14 +210,14 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 		return 0, ErrInvalidMessage
 	}
 
-	timeBytes := binary.BigEndian.Uint64(decryptedTimestamp[0:TimestampLen])
+	timeBytes := binary.BigEndian.Uint64(decryptedTimestamp[:TimestampLen])
 	now := time.Now().Unix()
 
 	// TODO (paul) 5 sec is a way too long, evaluate the time need for a connection
 	// TODO (paul) what is considered a reasonable time range for a timestamp to prevent replay attack?
 	// Time comparison to prevent replay attacks
 	if timeBytes > uint64(now) || now-int64(timeBytes) > 5 {
-		logrus.Debugf("server: hidden client request timestamp too long")
+		logrus.Debugf("server: hidden client request timestamp doen't match")
 		return 0, ErrInvalidMessage
 	}
 
@@ -216,12 +235,12 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 }
 
 func (s *Server) writeServerResponseHidden(hs *HandshakeState, b []byte) (int, error) {
-	c, err := s.config.GetCertificate(ClientHandshakeInfo{
-		ServerName: certs.HiddenName("hidden-handshake"),
-	})
 
-	if err != nil {
-		return 0, err
+	c := hs.hiddenExtractedCert
+
+	if c == nil {
+		logrus.Debugf("server: hidden mode no cert found in hs")
+		return 0, ErrInvalidMessage
 	}
 
 	encCertLen := EncryptedCertificatesLength(c.RawLeaf, c.RawIntermediate)

@@ -109,24 +109,29 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	udpConn := pktConn.(*net.UDPConn)
 	logrus.Infof("listening at %s", udpConn.LocalAddr())
 
-	getCert := func(info transport.ClientHandshakeInfo) (*transport.Certificate, error) {
+	// This function returns a list of certificates for the hidden mode to determine the vhost associated with the static key.
+	getCerts := func(info transport.ClientHandshakeInfo, isHidden bool) ([]*transport.Certificate, error) {
+		var certificates []*transport.Certificate
+
 		if h := vhosts.Match(info.ServerName); h != nil {
-			return &h.Certificate, nil
+			certificates = append(certificates, &h.Certificate)
 		}
-		// TODO (paul): When the server is in hidden mode, the server takes its first stored certificate
-		// Another method, that can be implemented is "finding certificate from Client computed DH" or adding a SNI field in the frame
-		// For now the assumption is made for being the first one
-		if info.ServerName.Type == certs.TypeHidden {
-			if len(vhosts) > 0 {
-				return &vhosts[0].Certificate, nil
+
+		if isHidden {
+			for _, vhost := range vhosts {
+				certificates = append(certificates, &vhost.Certificate)
 			}
-			return nil, fmt.Errorf("no certificates available for hidden services")
 		}
-		return nil, fmt.Errorf("%v did not match a host block", info.ServerName)
+
+		if len(certificates) == 0 {
+			return nil, fmt.Errorf("server name %v did not match any host block", info.ServerName)
+		}
+
+		return certificates, nil
 	}
 
 	tconf := transport.ServerConfig{
-		GetCertificate:   getCert,
+		GetCertificate:   getCerts,
 		HandshakeTimeout: sc.HandshakeTimeout,
 		ClientVerify:     &transport.VerifyConfig{},
 	}

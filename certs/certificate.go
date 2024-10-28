@@ -117,7 +117,6 @@ const (
 	TypeDNSName     IDType = 0x01
 	TypeIPv4Address IDType = 0x02
 	TypeIPv6Address IDType = 0x03
-	TypeHidden      IDType = 0x04
 )
 
 // Name is a UTF-8 label and an IDType. It can be encoded to an IDBlock.
@@ -140,14 +139,6 @@ func RawStringName(label string) Name {
 	return Name{
 		Label: []byte(label),
 		Type:  TypeRaw,
-	}
-}
-
-// HiddenName returns a Name with Type set to TypeHidden and the provided label.
-func HiddenName(label string) Name {
-	return Name{
-		Label: []byte(label),
-		Type:  TypeHidden,
 	}
 }
 
