@@ -309,11 +309,9 @@ func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 }
 
 func (s *Server) writeServerAuth(b []byte, hs *HandshakeState) (int, error) {
-	certList, err := s.config.GetCertificate(ClientHandshakeInfo{
+	c, err := s.config.GetCertificate(ClientHandshakeInfo{
 		ServerName: hs.sni,
-	}, false)
-	// When isHidden is set to false, only one cert is in the certList
-	c := certList[0]
+	})
 
 	if err != nil {
 		return 0, err
@@ -760,8 +758,17 @@ func (s *Server) init() error {
 			RawIntermediate: intermediate.Bytes(),
 			Exchanger:       s.config.KeyPair,
 		}
-		s.config.GetCertificate = func(info ClientHandshakeInfo, isHidden bool) ([]*Certificate, error) {
+		s.config.GetCertificate = func(ClientHandshakeInfo) (*Certificate, error) {
+			return c, nil
+		}
+
+		s.config.GetCertList = func() ([]*Certificate, error) {
 			return []*Certificate{c}, nil
+		}
+
+		s.config.GetCertName = func(cert *Certificate) (string, error) {
+			// "" works but does not make sens -> where is it init?
+			return "", nil
 		}
 	}
 

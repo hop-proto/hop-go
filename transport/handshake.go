@@ -56,8 +56,7 @@ type HandshakeState struct {
 	leaf, intermediate []byte
 
 	// Parsed certs
-	parsedLeaf          *certs.Certificate
-	hiddenExtractedCert *Certificate
+	parsedLeaf *certs.Certificate
 
 	remoteAddr *net.UDPAddr
 }

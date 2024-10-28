@@ -101,7 +101,9 @@ type ServerConfig struct {
 
 	ClientVerify *VerifyConfig
 
-	GetCertificate func(info ClientHandshakeInfo, isHidden bool) ([]*Certificate, error)
+	GetCertificate func(ClientHandshakeInfo) (*Certificate, error)
+	GetCertList    func() ([]*Certificate, error)
+	GetCertName    func(cert *Certificate) (string, error)
 }
 
 func (c *ServerConfig) maxPendingConnections() int {

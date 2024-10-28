@@ -9,6 +9,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
 )
 
@@ -121,10 +122,11 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 		return 0, ErrUnsupportedVersion
 	}
 
-	certList, err := s.config.GetCertificate(ClientHandshakeInfo{}, true)
+	certList, err := s.config.GetCertList()
 
 	if err != nil {
-		return 0, err
+		logrus.Debugf("server: unable to get cert list hidden mode, %s", err)
+		return 0, ErrInvalidMessage
 	}
 
 	var (
@@ -174,6 +176,13 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 		bufCopy = bufCopy[MacLen:]
 
 		c = cert
+		vhostName, err := s.config.GetCertName(cert)
+		if err != nil {
+			logrus.Debugf("server: unable to retreive sni: %s", err)
+			continue // Skip to the next certificate on error
+		}
+		hs.sni = certs.RawStringName(vhostName)
+
 		break
 	}
 
@@ -182,7 +191,6 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 		return 0, ErrInvalidMessage
 	}
 
-	hs.hiddenExtractedCert = c
 	copy(b, bufCopy)
 
 	// Parse certificates
@@ -236,7 +244,9 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 
 func (s *Server) writeServerResponseHidden(hs *HandshakeState, b []byte) (int, error) {
 
-	c := hs.hiddenExtractedCert
+	c, err := s.config.GetCertificate(ClientHandshakeInfo{
+		ServerName: hs.sni,
+	})
 
 	if c == nil {
 		logrus.Debugf("server: hidden mode no cert found in hs")
