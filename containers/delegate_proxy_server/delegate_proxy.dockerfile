@@ -1,4 +1,4 @@
-FROM golang:1.19
+FROM golang:1.23
 
 RUN mkdir -p /etc/hopd
 COPY ./CAFiles/root.cert /etc/hopd/root.cert
