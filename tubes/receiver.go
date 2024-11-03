@@ -37,10 +37,21 @@ type receiver struct {
 	log *logrus.Entry
 }
 
-func (r *receiver) init() {
+func newReceiver(log *logrus.Entry) *receiver {
+	r := &receiver{
+		dataReady:   common.NewDeadlineChan[struct{}](1),
+		buffer:      new(bytes.Buffer),
+		fragments:   make(PriorityQueue, 0),
+		windowSize:  windowSize,
+		windowStart: 1,
+		log:         log.WithField("receiver", ""),
+	}
+
 	r.m.Lock()
 	defer r.m.Unlock()
 	heap.Init(&r.fragments)
+
+	return r
 }
 
 func (r *receiver) getAck() uint32 {

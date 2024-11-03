@@ -39,7 +39,7 @@ type Reliable struct {
 	localAddr  net.Addr
 	remoteAddr net.Addr
 	sender     *sender
-	recvWindow receiver
+	recvWindow *receiver
 	sendQueue  chan []byte
 	// +checklocks:l
 	tubeState    state
