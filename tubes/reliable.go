@@ -38,7 +38,7 @@ type Reliable struct {
 	id         byte
 	localAddr  net.Addr
 	remoteAddr net.Addr
-	sender     sender
+	sender     *sender
 	recvWindow receiver
 	sendQueue  chan []byte
 	// +checklocks:l

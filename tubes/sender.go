@@ -84,6 +84,24 @@ type sender struct {
 	log *logrus.Entry
 }
 
+func newSender(log *logrus.Entry) *sender {
+	return &sender{
+		ackNo:   1,
+		frameNo: 1,
+		buffer:  make([]byte, 0),
+		// finSent defaults to false
+		frameDataLengths: make(map[uint32]uint16),
+		RTOTicker:        time.NewTicker(retransmitOffset),
+		RTO:              retransmitOffset,
+		windowSize:       windowSize,
+		endRetransmit:    make(chan struct{}, 1),
+		windowOpen:       make(chan struct{}, 1),
+		sendQueue:        make(chan *frame),
+		retransmitEnded:  make(chan struct{}, 1),
+		log:              log.WithField("sender", ""),
+	}
+}
+
 func (s *sender) unAckedFramesRemaining() int {
 	s.l.Lock()
 	defer s.l.Unlock()
