@@ -42,7 +42,8 @@ type Reliable struct {
 	recvWindow *receiver
 	sendQueue  chan []byte
 	// +checklocks:l
-	tubeState    state
+	tubeState state
+	// +checklocks:l
 	lastAckTimer *time.Timer
 	lastAckSent  atomic.Uint32
 	closed       chan struct{}
@@ -101,24 +102,67 @@ func (r *Reliable) initiate(req bool) {
 	r.sender.Start()
 }
 
+func (r *Reliable) sendOneFrame(pkt *frame) {
+	pkt.tubeID = r.id
+	pkt.ackNo = r.recvWindow.getAck()
+	r.lastAckSent.Store(pkt.ackNo)
+	pkt.flags.ACK = true
+	pkt.flags.REL = true
+	r.sendQueue <- pkt.toBytes()
+
+	if common.Debug {
+		r.log.WithFields(logrus.Fields{
+			"frameno": pkt.frameNo,
+			"ackno":   pkt.ackNo,
+			"ack":     pkt.flags.ACK,
+			"fin":     pkt.flags.FIN,
+			"dataLen": pkt.dataLength,
+		}).Trace("sent packet")
+	}
+}
+
 // send continuously reads packet from the sends and hands them to the muxer
 func (r *Reliable) send() {
-	for pkt := range r.sender.sendQueue {
-		pkt.tubeID = r.id
-		pkt.ackNo = r.recvWindow.getAck()
-		r.lastAckSent.Store(pkt.ackNo)
-		pkt.flags.ACK = true
-		pkt.flags.REL = true
-		r.sendQueue <- pkt.toBytes()
+	var pkt *frame
+	ok := true
+	for ok {
+		select {
+		case <-r.sender.RTOTicker.C:
+			r.log.Trace("retransmitting")
+			r.sender.l.Lock()
+			var numFrames int
+			// Get the minimum of s.windowSize and maxFragTransPerRTO
+			if maxFragTransPerRTO > int(r.sender.windowSize) {
+				numFrames = int(r.sender.windowSize)
+			} else {
+				numFrames = maxFragTransPerRTO
+			}
 
-		if common.Debug {
-			r.log.WithFields(logrus.Fields{
-				"frameno": pkt.frameNo,
-				"ackno":   pkt.ackNo,
-				"ack":     pkt.flags.ACK,
-				"fin":     pkt.flags.FIN,
-				"dataLen": pkt.dataLength,
-			}).Trace("sent packet")
+			// Clamp value to avoid going out of bounds
+			if numFrames > len(r.sender.frames) {
+				numFrames = len(r.sender.frames)
+			}
+			if numFrames < 0 {
+				numFrames = 0
+			}
+
+			for i := 0; i < numFrames; i++ {
+				r.sendOneFrame(r.sender.frames[i])
+				r.sender.unacked++
+			}
+
+			if common.Debug {
+				r.log.WithFields(logrus.Fields{
+					"num sent": numFrames,
+				}).Trace("fillWindow called")
+			}
+
+			r.sender.l.Unlock()
+		case pkt, ok = <-r.sender.sendQueue:
+			if !ok {
+				break
+			}
+			r.sendOneFrame(pkt)
 		}
 	}
 	r.log.Debug("send ended")

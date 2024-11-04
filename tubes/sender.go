@@ -77,7 +77,6 @@ type sender struct {
 	// signals that more data be sent
 	windowOpen chan struct{}
 
-	// +checklocks:l
 	sendQueue chan *frame
 
 	// logging context
@@ -96,7 +95,7 @@ func newSender(log *logrus.Entry) *sender {
 		windowSize:       windowSize,
 		endRetransmit:    make(chan struct{}, 1),
 		windowOpen:       make(chan struct{}, 1),
-		sendQueue:        make(chan *frame),
+		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
 		retransmitEnded:  make(chan struct{}, 1),
 		log:              log.WithField("sender", ""),
 	}
@@ -235,8 +234,12 @@ func (s *sender) fillWindow(rto bool, startIndex int) {
 	}
 
 	for i := 0; i < numFrames; i++ {
-		s.sendQueue <- s.frames[startIndex+i]
+		pkt := s.frames[startIndex+i]
 		s.unacked++
+
+		s.l.Unlock()
+		s.sendQueue <- pkt
+		s.l.Lock()
 	}
 
 	if common.Debug {
@@ -282,7 +285,6 @@ func (s *sender) stopRetransmit() {
 // Start begins the retransmit loop
 func (s *sender) Start() {
 	s.closed.Store(false)
-	go s.retransmit()
 }
 
 // Close stops the sender and causes future writes to return io.EOF

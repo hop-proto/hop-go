@@ -458,6 +458,22 @@ func (m *Muxer) receiver() {
 	}
 }
 
+// this is a helper function for m.Stop().
+func closeTubeHelper(t Tube, log *logrus.Entry, wg *sync.WaitGroup) {
+	wg.Add(1)
+	go func(v Tube) { //parallelized closing tubes because other side may close them in a different order
+		defer wg.Done()
+		v.getLog().Info("Closing tube: ", v.GetID())
+		err := v.Close()
+		if err != nil && err != io.EOF {
+			// Tried to close tube in bad state. Nothing to do
+			log.Errorf("tube %d closed with error: %s", v.GetID(), err)
+			return
+		}
+		v.WaitForClose()
+	}(t)
+}
+
 // Stop ensures all the muxer tubes are closed. Calls to Stop are idempotent.
 // If a call to Stop is make while another call to stop is ongoing, the second
 // call with block until the first call has finish. Stop returns two errors:
@@ -492,26 +508,11 @@ func (m *Muxer) Stop() (sendErr error, recvErr error) {
 
 	wg := sync.WaitGroup{}
 
-	closeTube := func(t Tube) {
-		wg.Add(1)
-		go func(v Tube) { //parallelized closing tubes because other side may close them in a different order
-			defer wg.Done()
-			v.getLog().Info("Closing tube: ", v.GetID())
-			err := v.Close()
-			if err != nil && err != io.EOF {
-				// Tried to close tube in bad state. Nothing to do
-				m.log.Errorf("tube %d closed with error: %s", v.GetID(), err)
-				return
-			}
-			v.WaitForClose()
-		}(t)
-	}
-
 	for _, v := range m.reliableTubes {
-		closeTube(v)
+		closeTubeHelper(v, m.log, &wg)
 	}
 	for _, v := range m.unreliableTubes {
-		closeTube(v)
+		closeTubeHelper(v, m.log, &wg)
 	}
 
 	m.state.Store(muxerStopping)
