@@ -125,6 +125,25 @@ func (r *Reliable) sendOneFrame(pkt *frame) {
 	}
 }
 
+func (r *Reliable) sendOneFrame(pkt *frame) {
+	pkt.tubeID = r.id
+	pkt.ackNo = r.recvWindow.getAck()
+	r.lastAckSent.Store(pkt.ackNo)
+	pkt.flags.ACK = true
+	pkt.flags.REL = true
+	r.sendQueue <- pkt.toBytes()
+
+	if common.Debug {
+		r.log.WithFields(logrus.Fields{
+			"frameno": pkt.frameNo,
+			"ackno":   pkt.ackNo,
+			"ack":     pkt.flags.ACK,
+			"fin":     pkt.flags.FIN,
+			"dataLen": pkt.dataLength,
+		}).Trace("sent packet")
+	}
+}
+
 // send continuously reads packet from the sends and hands them to the muxer
 func (r *Reliable) send() {
 	var pkt *frame
