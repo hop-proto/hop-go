@@ -51,6 +51,7 @@ authgrant-chain-dev: ## launch three containers
 
 .PHONY: serve-dev
 serve-dev: ## launch a container running the server with code mounted in
-	make -C hack serve-dev
+	docker compose -f ./containers/docker-compose.yml build hopd-dev
+	docker compose -f ./containers/docker-compose.yml up hop-server
 
 
