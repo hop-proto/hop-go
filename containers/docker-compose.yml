@@ -1,13 +1,20 @@
+networks:
+  default:
+    
 services:
+
+  # Base image for other containers
   hopd-dev:
     build:
-      tags: [hopd-dev]
+      tags: 
+        - hopd-dev
       context: ..
       dockerfile: ./containers/hopd-dev.dockerfile
     
+  # Basic server for hopping into
   hop-server:
     image: hopd-dev
-    command: /app/hopd -V -C /etc/hopd/config.toml
+    command: hopd -V
     ports:
       - "7777:77/udp"
     volumes:
@@ -16,6 +23,53 @@ services:
       - ./id_server.pem:/etc/hopd/id_hop.pem
       - ./id_server.pub:/etc/hopd/id_hop.pub
       - ./id_server.cert:/etc/hopd/id_hop.cert
-      - ./server_dev_config:/etc/hopd/config.toml
+      - ./server_dev_config:/etc/hopd/config
       - ./id_client.pub:/root/.hop/authorized_keys
 
+  delegate:
+    image: hopd-dev
+    command: hopd -V
+    ports:
+      - "8888:77/udp"
+    networks:
+      default:
+        aliases:
+          - delegate.com
+    volumes:
+      - ./CAFiles/root.cert:/etc/hopd/root.cert
+      - ./CAFiles/root.cert:/root/.hop/root.cert
+      - ./CAFiles/intermediate.cert:/etc/hopd/intermediate.cert
+      - ./CAFiles/intermediate.cert:/root/.hop/intermediate.cert
+
+      - ./delegate_proxy_server/id_server.pem:/etc/hopd/id_hop.pem
+      - ./delegate_proxy_server/id_server.pub:/etc/hopd/id_hop.pub
+      - ./delegate_proxy_server/id_server.cert:/etc/hopd/id_hop.cert
+      - ./delegate_proxy_server/delegate_proxy_server_config:/etc/hopd/config
+
+      - ./delegate_client/delegate_config:/root/.hop/config
+      # using certs for authentication, but authorized keys for user authorization still
+      - ./principal_client/id_client.pub:/root/.hop/authorized_keys
+
+  target:
+    image: hopd-dev
+    command: hopd -V
+    ports:
+      - "9999:77/udp"
+    networks:
+      default:
+        aliases:
+          - target.com
+    volumes:
+      - ./CAFiles/root.cert:/etc/hopd/root.cert
+      - ./CAFiles/root.cert:/root/.hop/root.cert
+      - ./CAFiles/intermediate.cert:/etc/hopd/intermediate.cert
+      - ./CAFiles/intermediate.cert:/root/.hop/intermediate.cert
+
+      - ./target_server/id_server.pem:/etc/hopd/id_hop.pem
+      - ./target_server/id_server.pub:/etc/hopd/id_hop.pub
+      - ./target_server/id_server.cert:/etc/hopd/id_hop.cert
+      - ./target_server/target_server_config:/etc/hopd/config
+
+      # using certs for authentication, but authorized keys for user authorization still
+      - ./principal_client/id_client.pub:/root/.hop/authorized_keys
+      - ./delegate_client/delegate_config:/root/.hop/config

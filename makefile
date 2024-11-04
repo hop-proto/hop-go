@@ -43,7 +43,8 @@ cred-gen: ## generates credentials for container tests
 
 .PHONY: authgrant-dev
 authgrant-dev: ## launch two containers
-	make -C hack authgrant-dev
+	docker compose -f ./containers/docker-compose.yml build hopd-dev
+	docker compose -f ./containers/docker-compose.yml up --detach target delegate
 
 .PHONY: authgrant-chain-dev
 authgrant-chain-dev: ## launch three containers
@@ -52,6 +53,6 @@ authgrant-chain-dev: ## launch three containers
 .PHONY: serve-dev
 serve-dev: ## launch a container running the server with code mounted in
 	docker compose -f ./containers/docker-compose.yml build hopd-dev
-	docker compose -f ./containers/docker-compose.yml up hop-server
+	docker compose -f ./containers/docker-compose.yml up --detach hop-server
 
 
