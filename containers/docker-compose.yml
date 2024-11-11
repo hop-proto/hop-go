@@ -15,6 +15,7 @@ services:
   hop-server:
     image: hopd-dev
     command: hopd -V
+    hostname: example.com
     ports:
       - "7777:77/udp"
     volumes:
@@ -35,6 +36,7 @@ services:
       default:
         aliases:
           - delegate.com
+    hostname: delegate.com
     volumes:
       - ./CAFiles/root.cert:/etc/hopd/root.cert
       - ./CAFiles/root.cert:/home/user/.hop/root.cert
@@ -59,6 +61,7 @@ services:
       default:
         aliases:
           - target.com
+    hostname: target.com
     volumes:
       - ./CAFiles/root.cert:/etc/hopd/root.cert
       - ./CAFiles/root.cert:/home/user/.hop/root.cert
@@ -83,6 +86,7 @@ services:
       default:
         aliases:
           - third.com
+    hostname: third.com
     volumes:
       - ./CAFiles/root.cert:/etc/hopd/root.cert
       - ./CAFiles/intermediate.cert:/etc/hopd/intermediate.cert
