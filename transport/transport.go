@@ -60,10 +60,7 @@ func PeekSession(msg []byte) (out SessionID, err error) {
 // and Zone.
 func EqualUDPAddress(a, b *net.UDPAddr) bool {
 	if a == nil || b == nil {
-		if a == b {
-			return true
-		}
-		return false
+		return a == b
 	}
 	if a.Port != b.Port {
 		return false
