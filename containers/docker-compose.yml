@@ -73,3 +73,27 @@ services:
       # using certs for authentication, but authorized keys for user authorization still
       - ./principal_client/id_client.pub:/root/.hop/authorized_keys
       - ./delegate_client/delegate_config:/root/.hop/config
+
+  third:
+    image: hopd-dev
+    command: hopd -V
+    ports:
+      - "6666:77/udp"
+    networks:
+      default:
+        aliases:
+          - third.com
+    volumes:
+      - ./CAFiles/root.cert:/etc/hopd/root.cert
+      - ./CAFiles/intermediate.cert:/etc/hopd/intermediate.cert
+      - ./third_server/id_server.pem:/etc/hopd/id_hop.pem
+
+      - ./third_server/id_server.pub:/etc/hopd/id_hop.pub
+      - ./third_server/id_server.cert:/etc/hopd/id_hop.cert
+      - ./third_server/third_server_config:/etc/hopd/config
+
+      - ./principal_client/id_client.pub:/root/.hop/authorized_keys
+
+      - ./hop:/root/hop
+      - ./CAFiles/root.cert:/root/.hop/root.cert
+      - ./CAFiles/intermediate.cert:/root/.hop/intermediate.cert
