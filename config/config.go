@@ -321,7 +321,7 @@ func GetClient(path string) (*ClientConfig, error) {
 	var userConfig ClientConfig
 	var userConfigErr error
 	if path == "" {
-		path = filepath.Join(UserDirectory(), "config")
+		path = filepath.Join(UserDirectory(), "config.toml")
 	}
 	_, userConfigErr = loadClientConfigFromFile(&userConfig, path)
 	return &userConfig, userConfigErr
@@ -334,7 +334,7 @@ func GetServer(path string) (*ServerConfig, error) {
 	var serverConfig ServerConfig
 	var serverConfigErr error
 	if path == "" {
-		path = filepath.Join(ServerDirectory(), "config")
+		path = filepath.Join(ServerDirectory(), "config.toml")
 	}
 	_, serverConfigErr = loadServerConfigFromFile(&serverConfig, path)
 	return &serverConfig, serverConfigErr

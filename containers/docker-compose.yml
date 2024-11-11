@@ -18,13 +18,8 @@ services:
     ports:
       - "7777:77/udp"
     volumes:
-      - ./CAFiles/root.cert:/etc/hopd/root.cert
-      - ./CAFiles/intermediate.cert:/etc/hopd/intermediate.cert
-      - ./id_server.pem:/etc/hopd/id_hop.pem
-      - ./id_server.pub:/etc/hopd/id_hop.pub
-      - ./id_server.cert:/etc/hopd/id_hop.cert
-      - ./server_dev_config:/etc/hopd/config
-      - ./id_client.pub:/root/.hop/authorized_keys
+      - ./dev_server/hopd:/etc/hopd
+      - ./dev_server/dot_hop:/root/.hop
 
   delegate:
     image: hopd-dev
@@ -44,9 +39,9 @@ services:
       - ./delegate_proxy_server/id_server.pem:/etc/hopd/id_hop.pem
       - ./delegate_proxy_server/id_server.pub:/etc/hopd/id_hop.pub
       - ./delegate_proxy_server/id_server.cert:/etc/hopd/id_hop.cert
-      - ./delegate_proxy_server/delegate_proxy_server_config:/etc/hopd/config
+      - ./delegate_proxy_server/delegate_proxy_server_config.toml:/etc/hopd/config.toml
 
-      - ./delegate_client/delegate_config:/root/.hop/config
+      - ./delegate_client/delegate_config.toml:/root/.hop/config.toml
       # using certs for authentication, but authorized keys for user authorization still
       - ./principal_client/id_client.pub:/root/.hop/authorized_keys
 
@@ -68,11 +63,11 @@ services:
       - ./target_server/id_server.pem:/etc/hopd/id_hop.pem
       - ./target_server/id_server.pub:/etc/hopd/id_hop.pub
       - ./target_server/id_server.cert:/etc/hopd/id_hop.cert
-      - ./target_server/target_server_config:/etc/hopd/config
+      - ./target_server/target_server_config.toml:/etc/hopd/config.toml
 
       # using certs for authentication, but authorized keys for user authorization still
       - ./principal_client/id_client.pub:/root/.hop/authorized_keys
-      - ./delegate_client/delegate_config:/root/.hop/config
+      - ./delegate_client/delegate_config.toml:/root/.hop/config.toml
 
   third:
     image: hopd-dev
@@ -90,7 +85,7 @@ services:
 
       - ./third_server/id_server.pub:/etc/hopd/id_hop.pub
       - ./third_server/id_server.cert:/etc/hopd/id_hop.cert
-      - ./third_server/third_server_config:/etc/hopd/config
+      - ./third_server/third_server_config.toml:/etc/hopd/config.toml
 
       - ./principal_client/id_client.pub:/root/.hop/authorized_keys
 
