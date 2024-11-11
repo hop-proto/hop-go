@@ -1,6 +1,6 @@
 [Global]
 IsDelegate = true
-CAFiles = ["/root/.hop/intermediate.cert", "/root/.hop/root.cert"]
+CAFiles = ["/home/user/.hop/intermediate.cert", "/home/user/.hop/root.cert"]
 
 
 [[Hosts]]

@@ -3,7 +3,9 @@ FROM golang:1.23
 WORKDIR /app
 
 RUN apt-get update -y
-RUN apt-get install -y delve
+RUN apt-get install -y delve sudo
+
+RUN useradd -m user -s /bin/bash -g sudo -p "" 
 
 # Download dependencies. Doing it here means we don't neet
 # to download them again whenever we rebuild the image
