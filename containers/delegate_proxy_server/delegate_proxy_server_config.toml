@@ -4,5 +4,5 @@ Key = "/etc/hopd/id_hop.pem"
 Certificate = "/etc/hopd/id_hop.cert"
 CAFiles = [ "/etc/hopd/intermediate.cert" , "/etc/hopd/root.cert"]
 
-Users = ["root"]
+Users = ["user"]
 EnableAuthgrants = true

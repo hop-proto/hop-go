@@ -1,20 +1,19 @@
 FROM golang:1.23
 
-RUN mkdir -p /etc/hopd
-
-COPY ./CAFiles/root.cert /etc/hopd/root.cert
-COPY ./CAFiles/intermediate.cert /etc/hopd/intermediate.cert
-
-COPY id_server.pem /etc/hopd/id_hop.pem
-RUN chmod 600 /etc/hopd/id_hop.pem
-COPY id_server.pub /etc/hopd/id_hop.pub
-COPY id_server.cert /etc/hopd/id_hop.cert
-COPY ./server_dev_config /etc/hopd/config
-
-COPY id_client.pub /root/.hop/authorized_keys
-
-RUN apt-get update
-RUN apt-get install -y rsync
-
 WORKDIR /app
-CMD ./containers/hopd-wrapper.sh
+
+RUN apt-get update -y
+RUN apt-get install -y delve sudo
+
+RUN useradd -m user -s /bin/bash -g sudo -p "" 
+
+# Download dependencies. Doing it here means we don't neet
+# to download them again whenever we rebuild the image
+COPY go.mod .
+COPY go.sum .
+RUN go mod download
+
+# Copy go code into the image and build it
+COPY . .
+RUN go build -o /bin/hopd -tags debug hop.computer/hop/cmd/hopd
+RUN go build -o /bin/hop -tags debug hop.computer/hop/cmd/hop
