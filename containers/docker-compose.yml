@@ -1,5 +1,8 @@
+name: hop-servers
+
 networks:
   default:
+    driver: bridge
     
 services:
 
