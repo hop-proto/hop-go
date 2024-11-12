@@ -30,8 +30,8 @@ func makePacket(frameNo uint32, b []byte) *frame {
 func TestReceiveWindow(t *testing.T) {
 	recvWindow := newReceiver(&logrus.Entry{})
 
-	dataLength := 1000
-	packetLength := 5
+	dataLength := 1024
+	packetLength := 8
 	testData := make([]byte, dataLength)
 	n, err := rand.Read(testData)
 	assert.Equal(t, n, dataLength)
