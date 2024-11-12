@@ -267,6 +267,7 @@ func (s *sender) sendFin() error {
 	s.frameDataLengths[pkt.frameNo] = 0
 	s.frameNo++
 	s.frames = append(s.frames, &pkt)
-	s.fillWindow(false, len(s.frames)-1)
+	s.sendQueue <- &pkt
+	s.unacked++
 	return nil
 }
