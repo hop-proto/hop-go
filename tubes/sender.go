@@ -65,15 +65,6 @@ type sender struct {
 	// +checklocks:l
 	deadline time.Time
 
-	// signals the retransmit goroutine to stop
-	endRetransmit chan struct{}
-
-	// indicates that the retransmit goroutine has stopped
-	retransmitEnded chan struct{}
-
-	// ensures that stopRetransmit is called only once
-	stopRetransmitCalled atomic.Bool
-
 	// signals that more data be sent
 	windowOpen chan struct{}
 
@@ -93,10 +84,8 @@ func newSender(log *logrus.Entry) *sender {
 		RTOTicker:        time.NewTicker(retransmitOffset),
 		RTO:              retransmitOffset,
 		windowSize:       windowSize,
-		endRetransmit:    make(chan struct{}, 1),
 		windowOpen:       make(chan struct{}, 1),
 		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
-		retransmitEnded:  make(chan struct{}, 1),
 		log:              log.WithField("sender", ""),
 	}
 }
@@ -249,49 +238,33 @@ func (s *sender) fillWindow(rto bool, startIndex int) {
 	}
 }
 
-func (s *sender) retransmit() {
-	stop := false
-	for !stop {
-		select {
-		case <-s.RTOTicker.C:
-			s.l.Lock()
-			if len(s.frames) != 0 {
-				s.log.Trace("retransmitting")
-				s.fillWindow(true, 0)
-			}
-			s.l.Unlock()
-		case <-s.windowOpen:
-			s.l.Lock()
-			s.log.Trace("window open. filling")
-			s.fillWindow(false, 0)
-			s.l.Unlock()
-		case <-s.endRetransmit:
-			s.log.Debug("ending retransmit loop")
-			stop = true
-		}
-	}
-	close(s.retransmitEnded)
-}
-
-// stopRetransmit signals the retransmit goroutine to stop
-func (s *sender) stopRetransmit() {
-	if !s.stopRetransmitCalled.CompareAndSwap(false, true) {
-		return
-	}
-	close(s.endRetransmit)
-	<-s.retransmitEnded
-}
-
-// Start begins the retransmit loop
-func (s *sender) Start() {
-	s.closed.Store(false)
-}
+// func (s *sender) retransmit() {
+// 	stop := false
+// 	for !stop {
+// 		select {
+// 		case <-s.RTOTicker.C:
+// 			s.l.Lock()
+// 			if len(s.frames) != 0 {
+// 				s.log.Trace("retransmitting")
+// 				s.fillWindow(true, 0)
+// 			}
+// 			s.l.Unlock()
+// 		case <-s.windowOpen:
+// 			s.l.Lock()
+// 			s.log.Trace("window open. filling")
+// 			s.fillWindow(false, 0)
+// 			s.l.Unlock()
+// 		case <-s.endRetransmit:
+// 			s.log.Debug("ending retransmit loop")
+// 			stop = true
+// 		}
+// 	}
+// 	close(s.retransmitEnded)
+// }
 
 // Close stops the sender and causes future writes to return io.EOF
 func (s *sender) Close() error {
 	if s.closed.CompareAndSwap(false, true) {
-		s.stopRetransmit()
-
 		s.l.Lock()
 		defer s.l.Unlock()
 		close(s.sendQueue)

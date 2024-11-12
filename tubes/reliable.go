@@ -99,7 +99,7 @@ func (r *Reliable) initiate(req bool) {
 	}
 
 	go r.send()
-	r.sender.Start()
+	r.sender.closed.Store(false)
 }
 
 func (r *Reliable) sendOneFrame(pkt *frame) {
@@ -250,7 +250,6 @@ func (r *Reliable) receive(pkt *frame) error {
 // +checklocks:r.l
 func (r *Reliable) enterLastAckState() {
 	r.tubeState = lastAck
-	r.sender.stopRetransmit()
 	r.lastAckTimer = time.AfterFunc(2*retransmitOffset, func() {
 		r.l.Lock()
 		defer r.l.Unlock()
