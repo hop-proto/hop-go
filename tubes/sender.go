@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,31 +14,23 @@ import (
 
 type sender struct {
 	// The acknowledgement number sent from the other end of the connection.
-	// +checklocks:l
 	ackNo uint64
 
-	// +checklocks:l
-	frameNo uint32
-	// +checklocks:l
+	frameNo    uint32
 	windowSize uint16
 
 	// The number of packets sent but not acked
-	// +checklocks:l
 	unacked uint16
 
-	// +checklocks:l
-	finSent bool
-	// +checklocks:l
+	finSent    bool
 	finFrameNo uint32
 
 	closed atomic.Bool
 	// The buffer of unacknowledged tube frames that will be retransmitted if necessary.
-	// +checklocks:l
 	frames []*frame
 
 	// Different frames can have different data lengths -- we need to know how
 	// to update the buffer when frames are acknowledged.
-	// +checklocks:l
 	frameDataLengths map[uint32]uint16
 
 	// The current buffer of unacknowledged bytes from the sender.
@@ -49,20 +40,14 @@ type sender struct {
 	//	(2) the append() function when write() is called will periodically clean up the unused
 	//	memory in the front of the slice by reallocating the buffer array.
 	// TODO(hosono) ideally, we would have a maximum buffer size beyond with reads would block
-	// +checklocks:l
 	buffer []byte
-
-	// The lock controls all fields of the sender.
-	l sync.Mutex
 
 	// Retransmission TimeOut.
 	RTOTicker *time.Ticker
 
-	// +checklocks:l
 	RTO time.Duration
 
 	// the time after which writes will expire
-	// +checklocks:l
 	deadline time.Time
 
 	// signals that more data be sent
@@ -91,14 +76,10 @@ func newSender(log *logrus.Entry) *sender {
 }
 
 func (s *sender) unAckedFramesRemaining() int {
-	s.l.Lock()
-	defer s.l.Unlock()
 	return len(s.frames)
 }
 
 func (s *sender) write(b []byte) (int, error) {
-	s.l.Lock()
-	defer s.l.Unlock()
 	if !s.deadline.IsZero() && time.Now().After(s.deadline) {
 		return 0, os.ErrDeadlineExceeded
 	}
@@ -133,9 +114,6 @@ func (s *sender) write(b []byte) (int, error) {
 }
 
 func (s *sender) recvAck(ackNo uint32) error {
-	s.l.Lock()
-	defer s.l.Unlock()
-
 	oldAckNo := s.ackNo
 	newAckNo := uint64(ackNo)
 	if newAckNo < s.ackNo && (newAckNo+(1<<32)-s.ackNo <= uint64(s.windowSize)) { // wrap around
@@ -180,13 +158,6 @@ func (s *sender) recvAck(ackNo uint32) error {
 }
 
 func (s *sender) sendEmptyPacket() {
-	s.l.Lock()
-	defer s.l.Unlock()
-	s.sendEmptyPacketLocked()
-}
-
-// +checklocks:s.l
-func (s *sender) sendEmptyPacketLocked() {
 	if s.closed.Load() {
 		return
 	}
@@ -198,9 +169,7 @@ func (s *sender) sendEmptyPacketLocked() {
 	s.sendQueue <- pkt
 }
 
-// rto is true if the window is filled due to a retransmission timeout and false otherwise
-// +checklocks:s.l
-func (s *sender) fillWindow(rto bool, startIndex int) {
+func (s *sender) framesToSend(rto bool, startIndex int) int {
 	// TODO(hosono) this is a mess because there's no builtin min or clamp functions
 	var numFrames int
 	if rto {
@@ -221,14 +190,17 @@ func (s *sender) fillWindow(rto bool, startIndex int) {
 	if numFrames < 0 {
 		numFrames = 0
 	}
+	return numFrames
+}
+
+// rto is true if the window is filled due to a retransmission timeout and false otherwise
+func (s *sender) fillWindow(rto bool, startIndex int) {
+	numFrames := s.framesToSend(rto, startIndex)
 
 	for i := 0; i < numFrames; i++ {
 		pkt := s.frames[startIndex+i]
 		s.unacked++
-
-		s.l.Unlock()
 		s.sendQueue <- pkt
-		s.l.Lock()
 	}
 
 	if common.Debug {
@@ -265,8 +237,6 @@ func (s *sender) fillWindow(rto bool, startIndex int) {
 // Close stops the sender and causes future writes to return io.EOF
 func (s *sender) Close() error {
 	if s.closed.CompareAndSwap(false, true) {
-		s.l.Lock()
-		defer s.l.Unlock()
 		close(s.sendQueue)
 
 		return nil
@@ -275,8 +245,6 @@ func (s *sender) Close() error {
 }
 
 func (s *sender) sendFin() error {
-	s.l.Lock()
-	defer s.l.Unlock()
 	if s.finSent {
 		return io.EOF
 	}
