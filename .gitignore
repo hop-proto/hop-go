@@ -3,6 +3,7 @@
 .vscode
 .cache
 app/authorized_keys
+app/known_hosts
 cmd/hop/hop
 cmd/hopd/hopd
 cmd/hop-keygen/hop-keygen

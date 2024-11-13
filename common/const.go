@@ -9,6 +9,10 @@ const (
 	// keys for a user. It is stored inside the ConfigDirectory.
 	AuthorizedKeysFile = "authorized_keys"
 
+	// KnownHostsFile is the name of the file that stores each host key associated
+	// to its IP and hostname. It is stored inside the ConfigDirectory.
+	KnownHostsFile = "known_hosts"
+
 	// DefaultKeyFile is the name of the key file used by the client when none
 	// are specified the config file.
 	DefaultKeyFile = "id_hop.pem"
