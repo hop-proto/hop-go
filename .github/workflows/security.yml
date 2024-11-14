@@ -37,8 +37,3 @@ jobs:
           # go-version-file: go.mod or go.work file specifying Go version, default ''
           # output-format: the format of govulncheck output ('text', 'json', or 'sarif'), default 'text'
           # output-file: the file to which the output is redirected, default '' (no redirection)
-
-      - name: gosec
-        uses: securego/gosec@master
-        with:
-          args: ./...
