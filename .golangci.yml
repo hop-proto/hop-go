@@ -113,6 +113,7 @@ issues:
   exclude-use-default: false
   exclude:
     - G104 # 'Errors unhandled. (gosec)
+    - G115 #  Integer overflow (gosec)
     - G204 # Subprocess launched with variable (gosec)
     - G301 # Expect directory permissions to be 0750 or less (gosec)
     - G302 # Expect file permissions to be 0600 or less (gosec)
