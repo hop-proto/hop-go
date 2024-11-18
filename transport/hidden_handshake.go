@@ -191,14 +191,14 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 		return 0, ErrInvalidMessage
 	}
 
-	timeBytes := binary.BigEndian.Uint64(decryptedTimestamp[0:TimestampLen])
+	timeBytes := binary.BigEndian.Uint64(decryptedTimestamp[:TimestampLen])
 	now := time.Now().Unix()
 
 	// TODO (paul) 5 sec is a way too long, evaluate the time need for a connection
 	// TODO (paul) what is considered a reasonable time range for a timestamp to prevent replay attack?
 	// Time comparison to prevent replay attacks
 	if timeBytes > uint64(now) || now-int64(timeBytes) > 5 {
-		logrus.Debugf("server: hidden client request timestamp too long")
+		logrus.Debugf("server: hidden client request timestamp doen't match")
 		return 0, ErrInvalidMessage
 	}
 

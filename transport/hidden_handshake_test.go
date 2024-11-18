@@ -192,7 +192,7 @@ func TestClientHelloHiddenLength(t *testing.T) {
 
 // This test stands for being sure that an HS without server public key
 // does not go through a hidden HS
-func TestClientServerDiscoverableHandshake(t *testing.T) {
+func TestClientServerHiddenHandshakeWithoutStaticKey(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	logrus.SetLevel(logrus.TraceLevel)
 
@@ -224,3 +224,5 @@ func TestClientServerDiscoverableHandshake(t *testing.T) {
 	assert.NilError(t, s.Close())
 	assert.NilError(t, c.Close())
 }
+
+// TODO (paul): write a test to ensure the multiple vhosts in hidden mode
