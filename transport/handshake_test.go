@@ -93,7 +93,7 @@ func TestClientServerHSWithAgent(t *testing.T) {
 	}
 	logrus.Infof("listening on %s", sock.Addr().String())
 
-	httpServer := http.Server{}
+	httpServer := http.Server{ReadTimeout: 1 * time.Second}
 	httpServer.Handler = as
 	go httpServer.Serve(sock)
 	defer httpServer.Close()
