@@ -9,7 +9,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
 )
 
@@ -131,9 +130,7 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 	hs.duplex.Absorb(b[:DHLen])
 	b = b[DHLen:]
 
-	c, err := s.config.GetCertificate(ClientHandshakeInfo{
-		ServerName: certs.HiddenName("hidden-handshake"),
-	})
+	c, err := s.config.GetCertificate(ClientHandshakeInfo{})
 
 	if err != nil {
 		return 0, err
@@ -216,9 +213,7 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 }
 
 func (s *Server) writeServerResponseHidden(hs *HandshakeState, b []byte) (int, error) {
-	c, err := s.config.GetCertificate(ClientHandshakeInfo{
-		ServerName: certs.HiddenName("hidden-handshake"),
-	})
+	c, err := s.config.GetCertificate(ClientHandshakeInfo{})
 
 	if err != nil {
 		return 0, err

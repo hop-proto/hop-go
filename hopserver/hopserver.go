@@ -110,19 +110,18 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	logrus.Infof("listening at %s", udpConn.LocalAddr())
 
 	getCert := func(info transport.ClientHandshakeInfo) (*transport.Certificate, error) {
-		if h := vhosts.Match(info.ServerName); h != nil {
+
+		serverName := string(info.ServerName.Label)
+
+		if sc.HiddenModeVHostName != "" && serverName == "" {
+			serverName = sc.HiddenModeVHostName
+		}
+
+		if h := vhosts.Match(serverName); h != nil {
 			return &h.Certificate, nil
 		}
-		// TODO (paul): When the server is in hidden mode, the server takes its first stored certificate
-		// Another method, that can be implemented is "finding certificate from Client computed DH" or adding a SNI field in the frame
-		// For now the assumption is made for being the first one
-		if info.ServerName.Type == certs.TypeHidden {
-			if len(vhosts) > 0 {
-				return &vhosts[0].Certificate, nil
-			}
-			return nil, fmt.Errorf("no certificates available for hidden services")
-		}
-		return nil, fmt.Errorf("%v did not match a host block", info.ServerName)
+
+		return nil, fmt.Errorf("%v did not match a host block", serverName)
 	}
 
 	tconf := transport.ServerConfig{
@@ -382,10 +381,10 @@ func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fa
 //
 // TODO(dadrian)[2022-02-26]: This only does raw string matching, it needs to
 // have some way to disambiguate name types.
-func (vhosts VirtualHosts) Match(name certs.Name) *VirtualHost {
+func (vhosts VirtualHosts) Match(name string) *VirtualHost {
 	for i := range vhosts {
-		logrus.Infof("pattern, in: %q, %s", vhosts[i].Pattern, string(name.Label))
-		if glob.Glob(vhosts[i].Pattern, string(name.Label)) {
+		logrus.Infof("pattern, in: %q, %s", vhosts[i].Pattern, name)
+		if glob.Glob(vhosts[i].Pattern, name) {
 			return &vhosts[i]
 		}
 	}
