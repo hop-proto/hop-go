@@ -121,6 +121,8 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	getAllowedCerts := func() ([]*transport.Certificate, error) {
 		var certificates []*transport.Certificate
 
+		// vhosts.Match is based on patterns and can be "*".
+		// If the configuration has more HiddenModeVHostNames than vhosts return
 		if len(sc.HiddenModeVHostNames) > len(vhosts) {
 			return nil, fmt.Errorf("number of server Hidden Mode VHost Names exceed the number of current vhosts")
 		}
