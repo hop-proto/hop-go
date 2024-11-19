@@ -761,6 +761,9 @@ func (s *Server) init() error {
 		s.config.GetCertificate = func(ClientHandshakeInfo) (*Certificate, error) {
 			return c, nil
 		}
+		s.config.GetCertList = func() ([]*Certificate, error) {
+			return []*Certificate{c}, nil
+		}
 	}
 
 	s.cookieLock.Lock()
