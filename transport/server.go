@@ -761,15 +761,6 @@ func (s *Server) init() error {
 		s.config.GetCertificate = func(ClientHandshakeInfo) (*Certificate, error) {
 			return c, nil
 		}
-
-		s.config.GetCertList = func() ([]*Certificate, error) {
-			return []*Certificate{c}, nil
-		}
-
-		s.config.GetCertName = func(cert *Certificate) (string, error) {
-			// "" works but does not make sens -> where is it init?
-			return "", nil
-		}
 	}
 
 	s.cookieLock.Lock()

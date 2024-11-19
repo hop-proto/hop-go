@@ -110,17 +110,21 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	udpConn := pktConn.(*net.UDPConn)
 	logrus.Infof("listening at %s", udpConn.LocalAddr())
 
-	// This function returns a list of certificates for the hidden mode to determine the vhost associated with the static key.
 	getCert := func(info transport.ClientHandshakeInfo) (*transport.Certificate, error) {
-		if h := vhosts.Match(info.ServerName); h != nil {
+		if h := vhosts.Match(string(info.ServerName.Label)); h != nil {
 			return &h.Certificate, nil
 		}
 		return nil, fmt.Errorf("%v did not match a host block", info.ServerName)
 	}
-	getAllCerts := func() ([]*transport.Certificate, error) {
+
+	// This function returns a list of certificates for the hidden mode to determine the vhost associated with the static key.
+	getAllowedCerts := func() ([]*transport.Certificate, error) {
 		var certificates []*transport.Certificate
-		for _, vhost := range vhosts {
-			certificates = append(certificates, &vhost.Certificate)
+		for _, vhostName := range sc.HiddenModeVHostNames {
+			if h := vhosts.Match(vhostName); h != nil {
+				certificates = append(certificates, &h.Certificate)
+			}
+
 		}
 		if len(certificates) == 0 {
 			return nil, fmt.Errorf("no certificate found on the server")
@@ -140,7 +144,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		GetCertificate:   getCert,
 		HandshakeTimeout: sc.HandshakeTimeout,
 		ClientVerify:     &transport.VerifyConfig{},
-		GetCertList:      getAllCerts,
+		GetCertList:      getAllowedCerts,
 		GetCertName:      getVHostName,
 	}
 
@@ -395,10 +399,10 @@ func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fa
 //
 // TODO(dadrian)[2022-02-26]: This only does raw string matching, it needs to
 // have some way to disambiguate name types.
-func (vhosts VirtualHosts) Match(name certs.Name) *VirtualHost {
+func (vhosts VirtualHosts) Match(name string) *VirtualHost {
 	for i := range vhosts {
-		logrus.Infof("pattern, in: %q, %s", vhosts[i].Pattern, string(name.Label))
-		if glob.Glob(vhosts[i].Pattern, string(name.Label)) {
+		logrus.Infof("pattern, in: %q, %s", vhosts[i].Pattern, name)
+		if glob.Glob(vhosts[i].Pattern, name) {
 			return &vhosts[i]
 		}
 	}
