@@ -176,8 +176,8 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 		bufCopy = bufCopy[MacLen:]
 
 		c = cert
-		vhostName, err := s.config.GetCertName(cert)
-		if err != nil {
+		vhostName := cert.HostName
+		if vhostName == "" {
 			logrus.Debugf("server: unable to retrieve sni: %s", err)
 			continue // Skip to the next certificate on error
 		}

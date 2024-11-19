@@ -103,7 +103,6 @@ type ServerConfig struct {
 
 	GetCertificate func(ClientHandshakeInfo) (*Certificate, error)
 	GetCertList    func() ([]*Certificate, error)
-	GetCertName    func(cert *Certificate) (string, error)
 }
 
 func (c *ServerConfig) maxPendingConnections() int {

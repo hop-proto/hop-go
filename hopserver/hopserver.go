@@ -120,8 +120,14 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	// This function returns a list of certificates for the hidden mode to determine the vhost associated with the static key.
 	getAllowedCerts := func() ([]*transport.Certificate, error) {
 		var certificates []*transport.Certificate
+
+		if len(sc.HiddenModeVHostNames) > len(vhosts) {
+			return nil, fmt.Errorf("number of server Hidden Mode VHost Names exceed the number of current vhosts")
+		}
+
 		for _, vhostName := range sc.HiddenModeVHostNames {
 			if h := vhosts.Match(vhostName); h != nil {
+				h.Certificate.HostName = vhostName
 				certificates = append(certificates, &h.Certificate)
 			}
 
@@ -133,19 +139,11 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		return certificates, nil
 	}
 
-	getVHostName := func(cert *transport.Certificate) (string, error) {
-		if h := vhosts.Equal(cert); h != nil {
-			return h.Pattern, nil // Access the Pattern field for the vhost name
-		}
-		return "", fmt.Errorf("no matching vhost found for the certificate")
-	}
-
 	tconf := transport.ServerConfig{
 		GetCertificate:   getCert,
 		HandshakeTimeout: sc.HandshakeTimeout,
 		ClientVerify:     &transport.VerifyConfig{},
 		GetCertList:      getAllowedCerts,
-		GetCertName:      getVHostName,
 	}
 
 	// serverConfig options inform verify config settings
