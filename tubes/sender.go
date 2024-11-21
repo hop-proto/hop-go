@@ -1,7 +1,6 @@
 package tubes
 
 import (
-	"errors"
 	"io"
 	"os"
 	"sync/atomic"
@@ -28,10 +27,6 @@ type sender struct {
 	closed atomic.Bool
 	// The buffer of unacknowledged tube frames that will be retransmitted if necessary.
 	frames []*frame
-
-	// Different frames can have different data lengths -- we need to know how
-	// to update the buffer when frames are acknowledged.
-	frameDataLengths map[uint32]uint16
 
 	// The current buffer of unacknowledged bytes from the sender.
 	// A byte slice works well here because:
@@ -65,13 +60,12 @@ func newSender(log *logrus.Entry) *sender {
 		frameNo: 1,
 		buffer:  make([]byte, 0),
 		// finSent defaults to false
-		frameDataLengths: make(map[uint32]uint16),
-		RTOTicker:        time.NewTicker(retransmitOffset),
-		RTO:              retransmitOffset,
-		windowSize:       windowSize,
-		windowOpen:       make(chan struct{}, 1),
-		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
-		log:              log.WithField("sender", ""),
+		RTOTicker:  time.NewTicker(retransmitOffset),
+		RTO:        retransmitOffset,
+		windowSize: windowSize,
+		windowOpen: make(chan struct{}, 1),
+		sendQueue:  make(chan *frame, 1024), // TODO(hosono) make this size 0
+		log:        log.WithField("sender", ""),
 	}
 }
 
@@ -101,7 +95,6 @@ func (s *sender) write(b []byte) (int, error) {
 			data:       s.buffer[:dataLength],
 		}
 
-		s.frameDataLengths[pkt.frameNo] = dataLength
 		s.frameNo++
 		s.buffer = s.buffer[dataLength:]
 		s.frames = append(s.frames, &pkt)
@@ -123,14 +116,6 @@ func (s *sender) recvAck(ackNo uint32) error {
 	windowOpen := s.ackNo < newAckNo
 
 	for s.ackNo < newAckNo {
-		_, ok := s.frameDataLengths[uint32(s.ackNo)]
-		if !ok {
-			if common.Debug {
-				s.log.WithField("ackNo", s.ackNo).Debug("data length missing for frame")
-			}
-			return errors.New("no data length")
-		}
-		delete(s.frameDataLengths, uint32(s.ackNo))
 		s.ackNo++
 		s.unacked--
 		s.frames = s.frames[1:]
@@ -264,7 +249,6 @@ func (s *sender) sendFin() error {
 	s.finFrameNo = pkt.frameNo
 	s.log.WithField("frameNo", pkt.frameNo).Debug("queueing FIN packet")
 
-	s.frameDataLengths[pkt.frameNo] = 0
 	s.frameNo++
 	s.frames = append(s.frames, &pkt)
 	s.sendQueue <- &pkt
