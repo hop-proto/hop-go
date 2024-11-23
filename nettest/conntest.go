@@ -101,6 +101,7 @@ func testBasicIO(t *testing.T, c1, c2 net.Conn) {
 	}()
 
 	if got := <-dataCh; !bytes.Equal(got, want) {
+		panic("whoops")
 		t.Error("transmitted data differs")
 	}
 }

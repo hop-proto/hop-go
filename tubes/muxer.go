@@ -256,6 +256,7 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 		tubeState:  created,
 		initRecv:   make(chan struct{}),
 		initDone:   make(chan struct{}),
+		stopSend:   make(chan struct{}, 1),
 		sendDone:   make(chan struct{}),
 		closed:     make(chan struct{}, 1),
 		recvWindow: newReceiver(tubeLog),

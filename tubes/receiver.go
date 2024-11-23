@@ -23,7 +23,7 @@ type receiver struct {
 	// +checklocks:m
 	windowStart uint64
 	// +checklocks:m
-	windowSize uint16
+	windowSize uint64
 
 	closed atomic.Bool
 	m      sync.Mutex
@@ -44,6 +44,7 @@ func newReceiver(log *logrus.Entry) *receiver {
 		fragments:   make(PriorityQueue, 0),
 		windowSize:  windowSize,
 		windowStart: 1,
+		ackNo:       1,
 		log:         log.WithField("receiver", ""),
 	}
 
@@ -60,7 +61,7 @@ func (r *receiver) getAck() uint32 {
 	return uint32(r.ackNo)
 }
 
-func (r *receiver) getWindowSize() uint16 {
+func (r *receiver) getWindowSize() uint64 {
 	r.m.Lock()
 	defer r.m.Unlock()
 	return r.windowSize
@@ -87,7 +88,7 @@ func (r *receiver) processIntoBuffer() bool {
 			})
 		}
 
-		if r.windowStart != frag.priority {
+		if r.windowStart < frag.priority {
 			// This packet cannot be added to the buffer yet.
 			if common.Debug {
 				log.Trace("cannot process packet into buffer yet")
@@ -97,13 +98,24 @@ func (r *receiver) processIntoBuffer() bool {
 				break
 			}
 		} else {
-			if frag.FIN {
+			fin = frag.FIN
+			if frag.FIN && !r.closed.Load() {
 				r.closed.Store(true)
-				fin = true
+				r.ackNo++
 			}
+
+			// Discard bytes already in the buffer
+			if frag.priority < r.windowStart {
+				diff := r.windowStart - frag.priority
+				if diff > uint64(len(frag.value)) {
+					continue
+				}
+				frag.value = frag.value[diff:]
+			}
+
 			r.buffer.Write(frag.value)
-			r.windowStart++
-			r.ackNo++
+			r.windowStart += uint64(len(frag.value))
+			r.ackNo += uint64(len(frag.value))
 			if common.Debug {
 				log.Trace("processing packet")
 			}
@@ -205,7 +217,7 @@ func (r *receiver) receive(p *frame) (bool, error) {
 	}
 
 	windowStart := r.windowStart
-	windowEnd := r.windowStart + uint64(uint32(r.windowSize))
+	windowEnd := r.windowStart + r.windowSize
 	frameNo := r.unwrapFrameNo(p.frameNo)
 
 	var log *logrus.Entry

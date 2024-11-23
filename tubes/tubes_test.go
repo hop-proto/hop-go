@@ -81,7 +81,7 @@ func makeConn(odds float64, rel bool, t testing.TB) (t1, t2 net.Conn, stop func(
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		muxer1 = newMuxer(c1, 4*retransmitOffset, false, logrus.WithFields(logrus.Fields{
+		muxer1 = newMuxer(c1, 0, false, logrus.WithFields(logrus.Fields{
 			"muxer": "m1",
 			"test":  t.Name(),
 		}))
@@ -89,7 +89,7 @@ func makeConn(odds float64, rel bool, t testing.TB) (t1, t2 net.Conn, stop func(
 	}()
 	go func() {
 		defer wg.Done()
-		muxer2 = newMuxer(c2, 4*retransmitOffset, true, logrus.WithFields(logrus.Fields{
+		muxer2 = newMuxer(c2, 0, true, logrus.WithFields(logrus.Fields{
 			"muxer": "m2",
 			"test":  t.Name(),
 		}))

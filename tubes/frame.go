@@ -18,6 +18,7 @@ type initiateFrame struct {
 	data       []byte
 	dataLength uint16
 	flags      frameFlags
+	// The actual window size is this number bitshifted up by 4
 	windowSize uint16
 }
 

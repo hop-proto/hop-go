@@ -70,6 +70,22 @@ func TestReceiveWindow(t *testing.T) {
 	assert.Equal(t, n, dataLength)
 	assert.NilError(t, err)
 	assert.Equal(t, string(testData), string(readData))
+	assert.Equal(t, recvWindow.ackNo, uint64(dataLength))
+}
+
+func TestFinAckNo(t *testing.T) {
+	recv := newReceiver(&logrus.Entry{})
+	data := []byte("hello world")
+	pkt := makePacket(1, data)
+	_, err := recv.receive(pkt)
+	assert.NilError(t, err)
+
+	pkt = makePacket(uint32(len(data))+1, []byte{})
+	pkt.flags.FIN = true
+	_, err = recv.receive(pkt)
+	assert.NilError(t, err)
+
+	assert.Equal(t, recv.ackNo, uint64(len(data)+2))
 }
 
 func TestUnwrap(t *testing.T) {

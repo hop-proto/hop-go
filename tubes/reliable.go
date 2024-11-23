@@ -50,6 +50,7 @@ type Reliable struct {
 	closed       chan struct{}
 	initRecv     chan struct{}
 	initDone     chan struct{}
+	stopSend     chan struct{}
 	sendDone     chan struct{}
 	l            sync.Mutex
 	log          *logrus.Entry
@@ -73,7 +74,7 @@ func (r *Reliable) initiate(req bool) {
 			data:       []byte{},
 			dataLength: 0,
 			frameNo:    0,
-			windowSize: r.recvWindow.getWindowSize(),
+			windowSize: uint16(r.recvWindow.getWindowSize() >> 4),
 			flags: frameFlags{
 				REQ:  req,
 				RESP: !req,
@@ -104,6 +105,16 @@ func (r *Reliable) initiate(req bool) {
 	r.l.Lock() // required for checklocks
 	r.sender.closed.Store(false)
 	r.l.Unlock()
+}
+
+// +checklocks:r.l
+func (r *Reliable) sendEmptyFrame() {
+	pkt := &frame{
+		dataLength: 0,
+		frameNo:    uint32(r.sender.frameNo),
+		data:       []byte{},
+	}
+	r.sendOneFrame(pkt)
 }
 
 func (r *Reliable) sendOneFrame(pkt *frame) {
@@ -146,36 +157,30 @@ func (r *Reliable) sendOneFrame(pkt *frame) {
 
 // send continuously reads packet from the sends and hands them to the muxer
 func (r *Reliable) send() {
-	var pkt *frame
 	ok := true
 	for ok {
 		select {
 		case <-r.sender.RTOTicker.C:
 			r.l.Lock()
-
-			numFrames := r.sender.framesToSend(true, 0)
-
-			r.log.WithField("numFrames", numFrames).Trace("retransmitting")
-			for i := 0; i < numFrames; i++ {
-				r.sendOneFrame(r.sender.frames[i])
-				r.sender.unacked++
+			pkts := r.sender.pktsToSend()
+			for _, pkt := range pkts {
+				r.sendOneFrame(pkt)
 			}
-
 			r.l.Unlock()
+			if len(pkts) > 0 {
+
+				r.log.WithField("numPackets", len(pkts)).Debug("rto ticker")
+			}
 		case <-r.sender.windowOpen:
+			r.log.Debug("window open")
 			r.l.Lock()
-			numFrames := r.sender.framesToSend(false, 0)
-			r.log.WithField("numFrames", numFrames).Trace("window open")
-			for i := 0; i < numFrames; i++ {
-				r.sendOneFrame(r.sender.frames[i])
-				r.sender.unacked++
+			pkts := r.sender.pktsToSend()
+			for _, pkt := range pkts {
+				r.sendOneFrame(pkt)
 			}
 			r.l.Unlock()
-		case pkt, ok = <-r.sender.sendQueue:
-			if !ok {
-				break
-			}
-			r.sendOneFrame(pkt)
+		case <-r.stopSend:
+			ok = false
 		}
 	}
 	r.log.Debug("send ended")
@@ -218,7 +223,7 @@ func (r *Reliable) receive(pkt *frame) error {
 	}
 
 	// Handle ACK of FIN frame
-	if pkt.flags.ACK && r.tubeState != initiated && r.sender.unAckedFramesRemaining() == 0 {
+	if pkt.flags.ACK && r.tubeState != initiated && r.sender.unackedBytes() == 0 {
 		switch r.tubeState {
 		case finWait1:
 			r.tubeState = finWait2
@@ -233,6 +238,7 @@ func (r *Reliable) receive(pkt *frame) error {
 	}
 
 	// Handle FIN frame
+	// TODO(hosono) I think checking finProcesses is not needed
 	if (pkt.flags.FIN && r.recvWindow.closed.Load()) || finProcessed {
 		switch r.tubeState {
 		case initiated:
@@ -243,18 +249,18 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.log.Debug("got FIN packet. going from finWait1 to closing")
 		case finWait2:
 			r.log.Debug("got FIN packet. going from finWait2 to closed")
-			r.sender.sendEmptyPacket()
+			r.sendEmptyFrame()
 			r.enterClosedState()
 		}
 		if r.tubeState != closed {
 			r.log.Trace("sending ACK of FIN")
-			r.sender.sendEmptyPacket()
+			r.sendEmptyFrame()
 		}
 	}
 
 	// ACK every data packet
 	if pkt.dataLength > 0 && r.tubeState != closed && !pkt.flags.FIN {
-		r.sender.sendEmptyPacket()
+		r.sendEmptyFrame()
 	}
 
 	return err
@@ -283,6 +289,7 @@ func (r *Reliable) enterClosedState() {
 	r.recvWindow.Close()
 	if r.tubeState != created {
 		r.l.Unlock()
+		r.stopSend <- struct{}{}
 		<-r.sendDone
 		r.l.Lock()
 	}
@@ -309,10 +316,15 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		r.recvWindow.m.Lock()
 		r.recvWindow.ackNo = 1
 		r.recvWindow.m.Unlock()
-		r.log.Debug("INITIATED!")
+
+		// Set window size for sender
+		r.sender.ackNo = uint64(pkt.windowSize) << 4
+		r.sender.ackNo = 1
+
 		r.tubeState = initiated
-		r.sender.recvAck(1)
 		close(r.initRecv)
+		r.log.Debug("INITIATED!")
+
 	}
 
 	if pkt.flags.REQ && r.tubeState != closed {
@@ -322,7 +334,7 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 			data:       []byte{},
 			dataLength: 0,
 			frameNo:    0,
-			windowSize: r.recvWindow.getWindowSize(),
+			windowSize: uint16(r.recvWindow.getWindowSize() >> 4),
 			flags: frameFlags{
 				REQ:  false,
 				RESP: true,
@@ -366,7 +378,16 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 		return 0, io.EOF
 	}
 
-	return r.sender.write(b)
+	n, err = r.sender.write(b)
+	if err != nil {
+		return
+	}
+	pkts := r.sender.pktsToSend()
+	for _, pkt := range pkts {
+		r.sendOneFrame(pkt)
+	}
+
+	return
 }
 
 // WriteMsgUDP implements the UDPLike interface.
@@ -428,7 +449,10 @@ func (r *Reliable) Close() (err error) {
 	r.SetReadDeadline(time.Now())
 	r.sender.deadline = time.Now()
 
-	return r.sender.sendFin()
+	finPkt := r.sender.setFin()
+	r.sendOneFrame(finPkt)
+
+	return nil
 }
 
 // WaitForInit blocks until the Tube is initiated
