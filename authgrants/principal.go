@@ -2,9 +2,9 @@ package authgrants
 
 import (
 	"fmt"
-	"net"
-
 	"github.com/sirupsen/logrus"
+	"hop.computer/hop/dialogue"
+	"net"
 
 	"hop.computer/hop/certs"
 	"hop.computer/hop/core"
@@ -30,6 +30,7 @@ type principalInstance struct {
 	setUpTargetConn setUpTargetConnCallback
 }
 
+// TODO (paul) start of the principale instance
 // StartPrincipalInstance creates and runs a new principal instance. errors if su is nil. Caller responsible for closing delegateConn
 func StartPrincipalInstance(dc net.Conn, ci CheckIntentCallback, su setUpTargetConnCallback) error {
 	if su == nil {
@@ -87,6 +88,25 @@ func (p *principalInstance) handleIntentRequest() error {
 
 // returns error if issue sending conf or denial
 func (p *principalInstance) doIntentRequestChecks(i Intent) error {
+
+	authgrantModel := dialogue.AuthgrantModel{
+		Intent:      "",
+		DelegateSNI: "",
+		TargetSNI:   string(i.TargetSNI.Label),
+		TargetUser:  i.TargetUsername,
+		StartTime:   i.StartTime,
+		EndTime:     i.ExpTime,
+	}
+
+	questionAuth, err := dialogue.GetAuthgrantInput(authgrantModel)
+	if err != nil {
+		logrus.Debugf("client: can't get user input authgrant")
+	}
+	if !questionAuth {
+		logrus.Error("principal: intent refusal from user")
+		return WriteIntentDenied(p.delegateConn, fmt.Sprintf("principal: intent refusal from user"))
+	}
+
 	targURL := i.TargetURL()
 	if p.targetConnected && p.targetInfo != targURL {
 		return WriteIntentDenied(p.delegateConn, "principal: received intent request for different target")
@@ -115,7 +135,7 @@ func (p *principalInstance) doIntentRequestChecks(i Intent) error {
 		p.checkIntent(i, p.targetCert)
 	}
 
-	err := WriteIntentCommunication(p.targetConn, i)
+	err = WriteIntentCommunication(p.targetConn, i)
 	if err != nil {
 		logrus.Error("principal: error writing intent communication")
 		return WriteIntentDenied(p.delegateConn, fmt.Sprintf("principal: error sending intent comm: %s", err))
