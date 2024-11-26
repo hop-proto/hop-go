@@ -162,7 +162,7 @@ func (r *Reliable) send() {
 		select {
 		case <-r.sender.RTOTicker.C:
 			r.l.Lock()
-			pkts := r.sender.pktsToSend()
+			pkts := r.sender.pktsToSend(true)
 			for _, pkt := range pkts {
 				r.sendOneFrame(pkt)
 			}
@@ -174,7 +174,7 @@ func (r *Reliable) send() {
 		case <-r.sender.windowOpen:
 			r.log.Debug("window open")
 			r.l.Lock()
-			pkts := r.sender.pktsToSend()
+			pkts := r.sender.pktsToSend(false)
 			for _, pkt := range pkts {
 				r.sendOneFrame(pkt)
 			}
@@ -269,12 +269,12 @@ func (r *Reliable) receive(pkt *frame) error {
 // +checklocks:r.l
 func (r *Reliable) enterLastAckState() {
 	r.tubeState = lastAck
-	r.lastAckTimer = time.AfterFunc(2*retransmitOffset, func() {
-		r.l.Lock()
-		defer r.l.Unlock()
-		r.log.Warn("timer expired without getting ACK of FIN. going from lastAck to closed")
-		r.enterClosedState()
-	})
+	// r.lastAckTimer = time.AfterFunc(2*retransmitOffset, func() {
+	// 	r.l.Lock()
+	// 	defer r.l.Unlock()
+	// 	r.log.Warn("timer expired without getting ACK of FIN. going from lastAck to closed")
+	// 	r.enterClosedState()
+	// })
 }
 
 // +checklocks:r.l
@@ -318,7 +318,7 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		r.recvWindow.m.Unlock()
 
 		// Set window size for sender
-		r.sender.ackNo = uint64(pkt.windowSize) << 4
+		r.sender.windowSize = uint64(pkt.windowSize) << 4
 		r.sender.ackNo = 1
 
 		r.tubeState = initiated
@@ -382,7 +382,7 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 	if err != nil {
 		return
 	}
-	pkts := r.sender.pktsToSend()
+	pkts := r.sender.pktsToSend(false)
 	for _, pkt := range pkts {
 		r.sendOneFrame(pkt)
 	}

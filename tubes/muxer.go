@@ -520,21 +520,21 @@ func (m *Muxer) Stop() (sendErr error, recvErr error) {
 	m.m.Unlock()
 
 	// If tubes do not correctly close after some time, assume they never will and force them to close.
-	time.AfterFunc(muxerTimeout, func() {
-		if m.state.Load() == muxerStopped {
-			return
-		}
-		m.m.Lock()
-		for _, v := range m.reliableTubes {
-			go func(r *Reliable) {
-				r.l.Lock()
-				defer r.l.Unlock()
-				r.getLog().Error("Timed out. Forcing close")
-				r.enterClosedState()
-			}(v)
-		}
-		m.m.Unlock()
-	})
+	// time.AfterFunc(muxerTimeout, func() {
+	// 	if m.state.Load() == muxerStopped {
+	// 		return
+	// 	}
+	// 	m.m.Lock()
+	// 	for _, v := range m.reliableTubes {
+	// 		go func(r *Reliable) {
+	// 			r.l.Lock()
+	// 			defer r.l.Unlock()
+	// 			r.getLog().Error("Timed out. Forcing close")
+	// 			r.enterClosedState()
+	// 		}(v)
+	// 	}
+	// 	m.m.Unlock()
+	// })
 
 	// Wait for all tubes to close
 	wg.Wait()

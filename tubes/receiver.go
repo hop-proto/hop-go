@@ -83,6 +83,7 @@ func (r *receiver) processIntoBuffer() bool {
 		if common.Debug {
 			log = r.log.WithFields(logrus.Fields{
 				"window start": r.windowStart,
+				"length":       len(frag.value),
 				"frameNo":      frag.priority,
 				"fin":          frag.FIN,
 			})
@@ -116,8 +117,11 @@ func (r *receiver) processIntoBuffer() bool {
 			r.buffer.Write(frag.value)
 			r.windowStart += uint64(len(frag.value))
 			r.ackNo += uint64(len(frag.value))
+			if r.ackNo > 1<<20+2 {
+				panic("ackno too big!!")
+			}
 			if common.Debug {
-				log.Trace("processing packet")
+				log.WithField("new windowStart", r.windowStart).Trace("processing packet")
 			}
 		}
 	}
@@ -152,7 +156,7 @@ func (r *receiver) read(buf []byte) (int, error) {
 }
 
 /* Checks if frame is in bounds of receive window. */
-func frameInBounds(wS uint64, wE uint64, f uint64) bool {
+func frameInBounds(wS, wE, f uint64) bool {
 	if wS < wE { // contiguous:  ------WS+++++++WE------
 		if f > wE || f < wS {
 			return false
@@ -219,6 +223,16 @@ func (r *receiver) receive(p *frame) (bool, error) {
 	windowStart := r.windowStart
 	windowEnd := r.windowStart + r.windowSize
 	frameNo := r.unwrapFrameNo(p.frameNo)
+
+	if frameNo < windowStart && frameNo+uint64(p.dataLength) > windowStart && uint64(len(p.data)) > windowStart-frameNo {
+		r.log.WithField("old frameNo", frameNo).Debug("truncating packet")
+
+		p.data = p.data[windowStart-frameNo:]
+		p.dataLength -= uint16(windowStart - frameNo)
+		frameNo = windowStart
+		p.frameNo = uint32(frameNo)
+
+	}
 
 	var log *logrus.Entry
 	if common.Debug {

@@ -24,6 +24,9 @@ type sender struct {
 	// this also equal len of buffer + bufSeqNo
 	frameNo uint64
 
+	// The highest sequence number in flight
+	inFlightSeqNo uint64
+
 	// The window size of the remote host
 	windowSize uint64
 
@@ -58,10 +61,11 @@ type sender struct {
 
 func newSender(log *logrus.Entry) *sender {
 	return &sender{
-		ackNo:    1,
-		frameNo:  1,
-		bufSeqNo: 1,
-		buffer:   &bytes.Buffer{},
+		ackNo:         1,
+		frameNo:       1,
+		bufSeqNo:      1,
+		inFlightSeqNo: 1,
+		buffer:        &bytes.Buffer{},
 		// finSent defaults to false
 		RTOTicker:  time.NewTicker(retransmitOffset),
 		RTO:        retransmitOffset,
@@ -71,11 +75,31 @@ func newSender(log *logrus.Entry) *sender {
 	}
 }
 
-func (s *sender) unackedBytes() uint64 {
-	return s.frameNo - s.ackNo
+func (s *sender) checkInvariants() {
+	if uint64(s.buffer.Len())+s.bufSeqNo != s.frameNo {
+		panic("buffer, frameno, bufseqno")
+	}
+	if s.inFlightSeqNo > s.frameNo {
+		panic("inflight greater than framno")
+	}
+	if s.finSent {
+		if s.frameNo != s.finSeqNo {
+			panic("fin send with bad frameNo")
+		}
+	}
+	if s.ackNo > s.frameNo {
+		panic("ackno more than frameno")
+	}
 }
 
+func (s *sender) unackedBytes() uint64 {
+	return s.inFlightSeqNo - s.ackNo
+}
+
+// write writes data into the internal buffer returning the relevant error
+// if something has gone wrong. It does not write data to the network
 func (s *sender) write(b []byte) (int, error) {
+	s.checkInvariants()
 	if !s.deadline.IsZero() && time.Now().After(s.deadline) {
 		return 0, os.ErrDeadlineExceeded
 	}
@@ -87,10 +111,15 @@ func (s *sender) write(b []byte) (int, error) {
 	s.frameNo += uint64(n)
 
 	s.RTOTicker.Reset(s.RTO)
+	s.checkInvariants()
 	return n, nil
 }
 
 func (s *sender) recvAck(ackNo uint32) error {
+	s.checkInvariants()
+	if ackNo > 1<<20+2 {
+		panic("recvAck too big")
+	}
 	oldAckNo := s.ackNo
 	newAckNo := uint64(ackNo)
 	if newAckNo < s.ackNo && (newAckNo+(1<<32)-s.ackNo <= s.windowSize) { // wrap around
@@ -120,19 +149,36 @@ func (s *sender) recvAck(ackNo uint32) error {
 		}).Trace("updated ackNo")
 	}
 
+	s.checkInvariants()
 	return nil
 }
 
 // Returns an array of frames to send
-func (s *sender) pktsToSend() []*frame {
-	toSend := windowSize
-	if toSend > uint64(s.buffer.Len()) {
-		toSend = uint64(s.buffer.Len())
+// rto is true if this is a retransmission
+func (s *sender) pktsToSend(rto bool) []*frame {
+	s.checkInvariants()
+	data := s.buffer.Bytes()
+	dataSeqNo := s.bufSeqNo
+	if !rto {
+		if s.inFlightSeqNo-s.bufSeqNo < uint64(len(data)) {
+			data = data[s.inFlightSeqNo-s.bufSeqNo:]
+			dataSeqNo = s.inFlightSeqNo
+		} else {
+			data = data[0:0]
+		}
+	}
+
+	var toSend uint64 = windowSize
+	if toSend > uint64(len(data)) {
+		toSend = uint64(len(data))
 	}
 
 	numPkts := toSend / uint64(MaxFrameDataLength)
 	if numPkts*uint64(MaxFrameDataLength) != toSend {
 		numPkts += 1
+	}
+	if numPkts == 0 && s.finSent {
+		numPkts = 1
 	}
 
 	pkts := make([]*frame, numPkts)
@@ -145,8 +191,8 @@ func (s *sender) pktsToSend() []*frame {
 		}
 		pkt := &frame{
 			dataLength: uint16(dataLength),
-			frameNo:    uint32(s.bufSeqNo + nSent),
-			data:       append([]byte{}, s.buffer.Bytes()[:dataLength]...),
+			frameNo:    uint32(dataSeqNo + nSent),
+			data:       append([]byte{}, data[:dataLength]...),
 		}
 		pkt.flags.FIN = s.bufSeqNo+nSent+dataLength == s.finSeqNo
 		nSent += dataLength
@@ -157,11 +203,13 @@ func (s *sender) pktsToSend() []*frame {
 	if common.Debug {
 		s.log.WithFields(logrus.Fields{
 			"bytes sent": nSent,
-		}).Trace("fillWindow called")
+			"toSend":     toSend,
+		}).Trace("pktsToSend called")
 	}
 
 // Close stops the sender and causes future writes to return io.EOF
 func (s *sender) Close() error {
+	s.checkInvariants()
 	if s.closed.CompareAndSwap(false, true) {
 		return nil
 	}
@@ -169,9 +217,9 @@ func (s *sender) Close() error {
 }
 
 func (s *sender) setFin() *frame {
+	s.checkInvariants()
 	if !s.finSent {
 		s.finSeqNo = s.frameNo
-		s.frameNo++
 	}
 	s.finSent = true
 
@@ -188,5 +236,6 @@ func (s *sender) setFin() *frame {
 	}
 	s.log.WithField("frameNo", pkt.frameNo).Debug("queueing FIN packet")
 
+	s.checkInvariants()
 	return pkt
 }

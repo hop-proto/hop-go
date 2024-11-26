@@ -34,7 +34,7 @@ const maxBufferedPackets = 1000
 const retransmitOffset = 100 * time.Millisecond
 
 // the number of packets in the window for reliable tubes
-const windowSize uint64 = 1 << 18
+const windowSize uint64 = 1 << 21
 
 // TODO(hosono) choose this time
 // amount of time to wait for all all tubes to close when muxer is stopping
