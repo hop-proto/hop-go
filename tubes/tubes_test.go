@@ -237,7 +237,6 @@ func reliable(t *testing.T) {
 			CloseTest(1.0, true, false, t)
 		})
 		t.Run("BadConnection", func(t *testing.T) {
-			// TODO don't skip this
 			CloseTest(0.5, true, true, t)
 		})
 	})

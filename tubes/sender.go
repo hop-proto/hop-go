@@ -195,30 +195,6 @@ func (s *sender) fillWindow(rto bool, startIndex int) {
 	}
 }
 
-// func (s *sender) retransmit() {
-// 	stop := false
-// 	for !stop {
-// 		select {
-// 		case <-s.RTOTicker.C:
-// 			s.l.Lock()
-// 			if len(s.frames) != 0 {
-// 				s.log.Trace("retransmitting")
-// 				s.fillWindow(true, 0)
-// 			}
-// 			s.l.Unlock()
-// 		case <-s.windowOpen:
-// 			s.l.Lock()
-// 			s.log.Trace("window open. filling")
-// 			s.fillWindow(false, 0)
-// 			s.l.Unlock()
-// 		case <-s.endRetransmit:
-// 			s.log.Debug("ending retransmit loop")
-// 			stop = true
-// 		}
-// 	}
-// 	close(s.retransmitEnded)
-// }
-
 // Close stops the sender and causes future writes to return io.EOF
 func (s *sender) Close() error {
 	if s.closed.CompareAndSwap(false, true) {
