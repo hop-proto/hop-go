@@ -1,8 +1,11 @@
 package hopclient
 
 import (
+	"bufio"
 	"fmt"
 	"net"
+	"os"
+	"strings"
 	"sync"
 
 	"hop.computer/hop/authgrants"
@@ -72,6 +75,13 @@ func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable, pq *ptPro
 	var psubclient *principalSubclient
 	var err error
 
+	/*
+		if !askForConfirmation() {
+			logrus.Error("paul: Authgrant not accepted")
+			delTube.Close()
+			return
+		}*/
+
 	// read unreliable tube id
 	tubeID, err := authgrants.ReadUnreliableProxyID(delTube)
 	if err != nil {
@@ -110,8 +120,24 @@ func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable, pq *ptPro
 
 	logrus.Info("starting principal instance")
 
+	// TODO (link ag)
+	/*
+		c.ExecTube.Redirect()
+
+		c.ExecTube.Restore()
+		logrus.SetOutput(os.Stdout)
+		r := c.ExecTube.Redirect()
+		scanner := bufio.NewScanner(r)
+		logrus.Debugf("i scan %v", scanner)
+
+		logrus.SetOutput(io.Discard)
+		delTube.Close()
+		c.ExecTube.Raw()
+		c.ExecTube.Resume()*/
+
+	// Example dialogue function
+	//c.ExecTube.Redirect()
 	authgrants.StartPrincipalInstance(delTube, ci, setup)
-	delTube.Close()
 
 	if psubclient != nil {
 		logrus.Info("principal: closing subclient with target.")
@@ -191,4 +217,22 @@ func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable, ve
 
 func (c *HopClient) newAuthgrantTube() (*tubes.Reliable, error) {
 	return c.TubeMuxer.CreateReliableTube(common.AuthGrantTube)
+}
+
+func askForConfirmation() bool {
+	message := "You are about to connect to a new server through the authgrant process. Do you agree? yes/no (press Enter to proceed):"
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println(message)
+
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(strings.ToLower(input))
+
+	if input == "yes" || input == "" {
+		return true
+	} else if input == "no" {
+		return false
+	} else {
+		fmt.Println("Invalid input. Please enter 'yes', 'no', or press Enter.")
+		return askForConfirmation()
+	}
 }

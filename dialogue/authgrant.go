@@ -3,6 +3,9 @@ package dialogue
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -91,13 +94,51 @@ func (m AuthgrantModel) View() string {
 // GetAuthgrantInput displays the relevant information about an authgrant
 // to the user. It returns a boolean indicating if they chose to accept the
 // authgrant or not and an error is any occurred
-func GetAuthgrantInput(mod AuthgrantModel) (bool, error) {
 
-	m, err := tea.NewProgram(mod).Run()
+var lock sync.Mutex
+
+// Define a custom reader that ignores any input
+type NoOpReader struct {
+	r io.Reader
+}
+
+// Implement the Read method for NoOpReader
+func (n *NoOpReader) Read(p []byte) (nBytes int, err error) {
+	// Read data but do not actually store it anywhere (ignore it)
+	return n.r.Read(p)
+}
+
+// Clear the input buffer by reading any remaining data in the input stream
+func clearInputBuffer(r io.Reader) error {
+	buffer := make([]byte, 1024) // Buffer size to read input
+	for {
+		// Try to read from the input
+		n, err := r.Read(buffer)
+		if n == 0 && err == io.EOF {
+			// No more data to read, exit
+			break
+		}
+		if err != nil && err != io.EOF {
+			// Handle any errors encountered while reading
+			return err
+		}
+		// If we read data (n > 0), just discard it
+	}
+	return nil
+}
+
+func GetAuthgrantInput(mod AuthgrantModel) (bool, error) {
+	keyHandler := os.Stdin
+
+	m, err := tea.NewProgram(mod, tea.WithInput(keyHandler)).Run()
+	if err != nil {
+		return false, err
+	}
+
+	err = clearInputBuffer(keyHandler)
 	if err != nil {
 		return false, err
 	}
 
 	return m.(AuthgrantModel).accept, nil
-
 }

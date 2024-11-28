@@ -56,6 +56,7 @@ func main() {
 		logrus.Error(err)
 		return
 	}
+	// TODO (link ag)
 	err = client.Start()
 	if err != nil {
 		logrus.Error(err)

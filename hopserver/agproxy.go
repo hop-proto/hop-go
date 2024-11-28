@@ -117,6 +117,7 @@ func (p *agProxy) serve() {
 			continue
 		}
 		p.proxyWG.Add(1)
+		// TODO (link ag)
 		go p.checkAndProxy(c)
 	}
 }

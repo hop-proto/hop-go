@@ -4,13 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
-	"net"
-	"net/http"
-	"sync"
-
 	"github.com/sirupsen/logrus"
-
 	"hop.computer/hop/agent"
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/certs"
@@ -23,6 +17,10 @@ import (
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
 	"hop.computer/hop/userauth"
+	"io/fs"
+	"net"
+	"net/http"
+	"sync"
 )
 
 // HopClient holds state for client's perspective of session. It is not safe to
@@ -234,6 +232,7 @@ func (c *HopClient) Start() error {
 	}
 
 	// handle incoming tubes
+	// TODO (link ag)
 	go c.HandleTubes()
 	c.Wait() // client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
 	c.Close()
@@ -247,6 +246,7 @@ func (c *HopClient) Wait() {
 
 // Close explicitly closes down hop session (usually used after PF is down and can be terminated)
 func (c *HopClient) Close() error {
+	// TODO here
 	defer logrus.Info("client done waiting!")
 	if c.ExecTube != nil {
 		c.ExecTube.Restore()
@@ -330,6 +330,7 @@ func (c *HopClient) startExecTube() error {
 		logrus.Error(err)
 		return err
 	}
+	// TODO get auth grant here
 	c.ExecTube, err = codex.NewExecTube(c.hostconfig.Cmd, c.hostconfig.UsePty, codexTube, winSizeTube, &c.wg)
 	if err == nil {
 		c.wg.Add(1)
@@ -342,8 +343,10 @@ func (c *HopClient) startExecTube() error {
 	return err
 }
 
+// TODO (paul): I don't understand what it is used for
 // HandleTubes handles incoming tube requests to the client
 func (c *HopClient) HandleTubes() {
+	logrus.Debugf("PAUL JE SUIS LA")
 	//TODO(baumanl): figure out responses to different tube types/what all should be allowed
 
 	proxyQueue := newPTProxyTubeQueue()
@@ -356,7 +359,9 @@ func (c *HopClient) HandleTubes() {
 		logrus.Infof("ACCEPTED NEW TUBE OF TYPE: %v. Reliable? %t, ID %d", t.Type(), t.IsReliable(), t.GetID())
 
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
+			// TODO (link ag)
 			go c.newPrincipalInstanceSetup(r, proxyQueue)
+
 		} else if u, ok := t.(*tubes.Unreliable); ok && u.Type() == common.PrincipalProxyTube && c.hostconfig.IsPrincipal {
 			// add to map and signal waiting processes
 			proxyQueue.lock.Lock()
@@ -368,6 +373,7 @@ func (c *HopClient) HandleTubes() {
 			panic("client RemotePFTubes: unimplemented")
 		} else {
 			// Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
+			// TODO (paul): authgrant
 			e := t.Close()
 			if e != nil {
 				logrus.Errorf("Error closing tube: %v", e)

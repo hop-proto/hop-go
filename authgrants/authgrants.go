@@ -29,6 +29,21 @@ type AuthgrantMapSync struct {
 	agLock sync.Mutex
 }
 
+/*
+map[string]map[keys.PublicKey][]Authgrant
+
+{
+    "userA": {
+        PublicKey1: [Authgrant1, Authgrant2],
+        PublicKey2: [Authgrant3]
+    },
+    "userB": {
+        PublicKey3: [Authgrant4, Authgrant5],
+        PublicKey4: [Authgrant6]
+    }
+}
+*/
+
 // NewAuthgrantMapSync creates a new map
 func NewAuthgrantMapSync() *AuthgrantMapSync {
 	return &AuthgrantMapSync{

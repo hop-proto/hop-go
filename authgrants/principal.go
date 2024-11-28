@@ -83,11 +83,6 @@ func (p *principalInstance) handleIntentRequest() error {
 		return err
 	}
 	logrus.Info("principal: read an ir")
-	return p.doIntentRequestChecks(i)
-}
-
-// returns error if issue sending conf or denial
-func (p *principalInstance) doIntentRequestChecks(i Intent) error {
 
 	authgrantModel := dialogue.AuthgrantModel{
 		Intent:      "",
@@ -106,6 +101,12 @@ func (p *principalInstance) doIntentRequestChecks(i Intent) error {
 		logrus.Error("principal: intent refusal from user")
 		return WriteIntentDenied(p.delegateConn, fmt.Sprintf("principal: intent refusal from user"))
 	}
+
+	return p.doIntentRequestChecks(i)
+}
+
+// returns error if issue sending conf or denial
+func (p *principalInstance) doIntentRequestChecks(i Intent) error {
 
 	targURL := i.TargetURL()
 	if p.targetConnected && p.targetInfo != targURL {
@@ -135,7 +136,7 @@ func (p *principalInstance) doIntentRequestChecks(i Intent) error {
 		p.checkIntent(i, p.targetCert)
 	}
 
-	err = WriteIntentCommunication(p.targetConn, i)
+	err := WriteIntentCommunication(p.targetConn, i)
 	if err != nil {
 		logrus.Error("principal: error writing intent communication")
 		return WriteIntentDenied(p.delegateConn, fmt.Sprintf("principal: error sending intent comm: %s", err))

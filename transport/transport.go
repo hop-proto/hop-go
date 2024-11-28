@@ -59,6 +59,9 @@ func PeekSession(msg []byte) (out SessionID, err error) {
 // EqualUDPAddress returns true if the two net.UDPAddrs have the same IP, Port,
 // and Zone.
 func EqualUDPAddress(a, b *net.UDPAddr) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
 	if a.Port != b.Port {
 		return false
 	}

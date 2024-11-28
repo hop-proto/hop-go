@@ -7,20 +7,39 @@ replace github.com/BurntSushi/toml => github.com/drebelsky/toml v0.0.2
 require (
 	github.com/AstromechZA/etcpwdparse v0.0.0-20170319193008-f0e5f0779716
 	github.com/BurntSushi/toml v1.2.0
+	github.com/charmbracelet/bubbletea v1.2.0
+	github.com/charmbracelet/lipgloss v1.0.0
 	github.com/creack/pty v1.1.18
 	github.com/docker/docker v20.10.14+incompatible
 	github.com/docker/go-connections v0.4.0
-	github.com/mattn/go-isatty v0.0.14
+	github.com/go-piv/piv-go v1.11.0
+	github.com/mattn/go-isatty v0.0.20
+	github.com/pkg/errors v0.9.1
 	github.com/sbinet/pstree v0.3.0
 	github.com/sirupsen/logrus v1.8.1
-	github.com/pkg/errors v0.9.1
 	goji.io v2.0.2+incompatible
 	golang.org/x/crypto v0.0.0-20220427172511-eb4f295cb31f
 	golang.org/x/exp v0.0.0-20221215174704-0915cd710c24
-	golang.org/x/net v0.0.0-20220425223048-2871e0cb64e4
-	golang.org/x/sys v0.1.0
+	golang.org/x/sys v0.26.0
 	golang.org/x/term v0.0.0-20220411215600-e5f449aeb171
 	gotest.tools v2.2.0+incompatible
+)
+
+require (
+	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
+	github.com/charmbracelet/x/ansi v0.4.5 // indirect
+	github.com/charmbracelet/x/term v0.2.0 // indirect
+	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
+	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
+	github.com/mattn/go-localereader v0.0.1 // indirect
+	github.com/mattn/go-runewidth v0.0.16 // indirect
+	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
+	github.com/muesli/cancelreader v0.2.2 // indirect
+	github.com/muesli/termenv v0.15.2 // indirect
+	github.com/rivo/uniseg v0.4.7 // indirect
+	golang.org/x/net v0.0.0-20220425223048-2871e0cb64e4 // indirect
+	golang.org/x/sync v0.8.0 // indirect
+	golang.org/x/text v0.3.8 // indirect
 )
 
 require (
@@ -41,7 +60,7 @@ require (
 	github.com/opencontainers/image-spec v1.0.3-0.20211202183452-c5a74bcca799 // indirect
 	github.com/opencontainers/runc v1.1.1 // indirect
 	go.opencensus.io v0.23.0 // indirect
-	go.uber.org/goleak v1.2.0 // indirect
+	go.uber.org/goleak v1.2.0
 	google.golang.org/genproto v0.0.0-20220426171045-31bebdecfb46 // indirect
 	google.golang.org/grpc v1.46.0 // indirect
 	google.golang.org/protobuf v1.28.0 // indirect

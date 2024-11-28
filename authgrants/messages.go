@@ -15,6 +15,7 @@ import (
 	"hop.computer/hop/core"
 )
 
+// TODO (paul) big file gathering the Authgrant HS
 // Authgrant Message Types:
 // IntentRequest: Delegate -> Principal
 // IntentCommunication: Principal -> Target

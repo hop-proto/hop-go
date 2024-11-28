@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -72,6 +73,7 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 	var e error
 	var termEnv string
 	var size *pty.Winsize
+	logrus.Debugf("PAUL je passe par ici")
 	if usePty {
 		termEnv = os.Getenv("TERM")
 		size, _ = pty.GetsizeFull(os.Stdin) // ignoring the error is okay here because then size is set to nil
@@ -127,6 +129,11 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 		w:     w,
 	}
 
+	go func() {
+		_, err := io.Copy(ex.w, os.Stdin)
+		ex.w.CloseWithError(err)
+	}()
+
 	go func(ex *ExecTube) {
 		defer wg.Done()
 		_, err := io.Copy(os.Stdout, ex.tube) // read bytes from tube to os.Stdout
@@ -143,7 +150,7 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 	}(&ex)
 
 	go func(ex *ExecTube) {
-		io.Copy(tube, os.Stdin)
+		io.Copy(tube, ex.r)
 		tube.Close()
 	}(&ex)
 
@@ -263,6 +270,7 @@ func Server(tube *tubes.Reliable, f *os.File) {
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
+		// TODO (paul) check where it comes from
 		_, e := io.Copy(f, tube)
 		logrus.Info("io.Copy(f, tube) stopped with error: ", e)
 		wg.Done()
@@ -274,13 +282,31 @@ func Server(tube *tubes.Reliable, f *os.File) {
 
 // Resume makes sure the input is piped to the exec tube
 func (e *ExecTube) Resume() {
-	e.redir = false
+	e.redir = false // Explicitly set redirection off
+	go func() {
+		reader := bufio.NewReader(os.Stdin)
+		for {
+			// Read from stdin
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				logrus.Errorf("error reading stdin: %s", err)
+				e.w.CloseWithError(err)
+				return
+			}
+			// Write to tube
+			_, err = e.w.Write([]byte(line))
+			if err != nil {
+				logrus.Errorf("error writing to tube: %s", err)
+				return
+			}
+		}
+	}()
 }
 
-// Redirect redirects os.Stdin to a pipe and returns the read end
-func (e *ExecTube) Redirect() *io.PipeReader {
+// Redirect stops piping stdin to the exec tube
+func (e *ExecTube) Redirect() {
 	e.redir = true
-	return e.r
+	e.w.Close()
 }
 
 // Restore returns the terminal to regular state

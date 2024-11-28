@@ -66,6 +66,7 @@ func (d *delegateInstance) sendIntentRequests() error {
 	if oneApproved {
 		return nil
 	}
+	// TODO here block
 	return fmt.Errorf("delegate: no intent requests confirmed")
 
 }
