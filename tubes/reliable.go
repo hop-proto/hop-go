@@ -38,11 +38,13 @@ type Reliable struct {
 	id         byte
 	localAddr  net.Addr
 	remoteAddr net.Addr
-	sender     sender
-	recvWindow receiver
+	// +checklocks:l
+	sender     *sender
+	recvWindow *receiver
 	sendQueue  chan []byte
 	// +checklocks:l
-	tubeState    state
+	tubeState state
+	// +checklocks:l
 	lastAckTimer *time.Timer
 	lastAckSent  atomic.Uint32
 	closed       chan struct{}
@@ -98,27 +100,63 @@ func (r *Reliable) initiate(req bool) {
 	}
 
 	go r.send()
-	r.sender.Start()
+
+	r.l.Lock() // required for checklocks
+	r.sender.closed.Store(false)
+	r.l.Unlock()
+}
+
+func (r *Reliable) sendOneFrame(pkt *frame) {
+	pkt.tubeID = r.id
+	pkt.ackNo = r.recvWindow.getAck()
+	r.lastAckSent.Store(pkt.ackNo)
+	pkt.flags.ACK = true
+	pkt.flags.REL = true
+	r.sendQueue <- pkt.toBytes()
+
+	if common.Debug {
+		r.log.WithFields(logrus.Fields{
+			"frameno": pkt.frameNo,
+			"ackno":   pkt.ackNo,
+			"ack":     pkt.flags.ACK,
+			"fin":     pkt.flags.FIN,
+			"dataLen": pkt.dataLength,
+		}).Trace("sent packet")
+	}
 }
 
 // send continuously reads packet from the sends and hands them to the muxer
 func (r *Reliable) send() {
-	for pkt := range r.sender.sendQueue {
-		pkt.tubeID = r.id
-		pkt.ackNo = r.recvWindow.getAck()
-		r.lastAckSent.Store(pkt.ackNo)
-		pkt.flags.ACK = true
-		pkt.flags.REL = true
-		r.sendQueue <- pkt.toBytes()
+	var pkt *frame
+	ok := true
+	for ok {
+		select {
+		case <-r.sender.RTOTicker.C:
+			r.l.Lock()
 
-		if common.Debug {
-			r.log.WithFields(logrus.Fields{
-				"frameno": pkt.frameNo,
-				"ackno":   pkt.ackNo,
-				"ack":     pkt.flags.ACK,
-				"fin":     pkt.flags.FIN,
-				"dataLen": pkt.dataLength,
-			}).Trace("sent packet")
+			numFrames := r.sender.framesToSend(true, 0)
+
+			r.log.WithField("numFrames", numFrames).Trace("retransmitting")
+			for i := 0; i < numFrames; i++ {
+				r.sendOneFrame(r.sender.frames[i])
+				r.sender.unacked++
+			}
+
+			r.l.Unlock()
+		case <-r.sender.windowOpen:
+			r.l.Lock()
+			numFrames := r.sender.framesToSend(false, 0)
+			r.log.WithField("numFrames", numFrames).Trace("window open")
+			for i := 0; i < numFrames; i++ {
+				r.sendOneFrame(r.sender.frames[i])
+				r.sender.unacked++
+			}
+			r.l.Unlock()
+		case pkt, ok = <-r.sender.sendQueue:
+			if !ok {
+				break
+			}
+			r.sendOneFrame(pkt)
 		}
 	}
 	r.log.Debug("send ended")
@@ -206,7 +244,6 @@ func (r *Reliable) receive(pkt *frame) error {
 // +checklocks:r.l
 func (r *Reliable) enterLastAckState() {
 	r.tubeState = lastAck
-	r.sender.stopRetransmit()
 	r.lastAckTimer = time.AfterFunc(2*retransmitOffset, func() {
 		r.l.Lock()
 		defer r.l.Unlock()
@@ -226,7 +263,9 @@ func (r *Reliable) enterClosedState() {
 	r.sender.Close()
 	r.recvWindow.Close()
 	if r.tubeState != created {
+		r.l.Unlock()
 		<-r.sendDone
+		r.l.Lock()
 	}
 	close(r.closed)
 	r.tubeState = closed
@@ -367,7 +406,8 @@ func (r *Reliable) Close() (err error) {
 	}
 
 	// Cancel all pending read and write operations
-	r.SetDeadline(time.Now())
+	r.SetReadDeadline(time.Now())
+	r.sender.deadline = time.Now()
 
 	return r.sender.sendFin()
 }
@@ -433,8 +473,8 @@ func (r *Reliable) SetReadDeadline(t time.Time) error {
 // All write operations past the deadline will return an error.
 func (r *Reliable) SetWriteDeadline(t time.Time) error {
 	<-r.initDone
-	r.sender.l.Lock()
-	defer r.sender.l.Unlock()
+	r.l.Lock()
+	defer r.l.Unlock()
 	r.sender.deadline = t
 	return nil
 }

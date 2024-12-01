@@ -1,15 +1,12 @@
 package tubes
 
 import (
-	"bytes"
 	"crypto/rand"
 	mathRand "math/rand"
 	"sync"
 	"testing"
 
 	"gotest.tools/assert"
-
-	"hop.computer/hop/common"
 
 	"github.com/sirupsen/logrus"
 )
@@ -31,18 +28,10 @@ func makePacket(frameNo uint32, b []byte) *frame {
 
 /* Tests that the receive window can handle highly concurrent and out of order packet receipts */
 func TestReceiveWindow(t *testing.T) {
-	recvWindow := receiver{
-		dataReady:   common.NewDeadlineChan[struct{}](1),
-		buffer:      new(bytes.Buffer),
-		fragments:   make(PriorityQueue, 0),
-		windowSize:  200,
-		windowStart: 1,
-		log:         logrus.WithField("receiver", "test"),
-	}
-	recvWindow.init()
+	recvWindow := newReceiver(&logrus.Entry{})
 
-	dataLength := 1000
-	packetLength := 5
+	dataLength := 1024
+	packetLength := 8
 	testData := make([]byte, dataLength)
 	n, err := rand.Read(testData)
 	assert.Equal(t, n, dataLength)

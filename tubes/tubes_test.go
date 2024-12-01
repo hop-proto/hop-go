@@ -247,7 +247,6 @@ func reliable(t *testing.T) {
 
 	mp := nettest.MakePipe(f)
 	t.Run("Nettest", func(t *testing.T) {
-		t.Skip() // TODO(hosono) fix these tests
 		nettest.TestConn(t, mp)
 	})
 
@@ -276,7 +275,6 @@ func unreliable(t *testing.T) {
 	}
 	mp := nettest.MakePipe(f)
 	t.Run("Nettest", func(t *testing.T) {
-		t.Skip() // TODO(hosono) fix this test
 		nettest.TestConn(t, mp)
 	})
 }
