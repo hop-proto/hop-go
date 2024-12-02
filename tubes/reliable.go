@@ -143,6 +143,10 @@ func (r *Reliable) send() {
 				r.sender.unacked++
 			}
 
+			// Back off rtt since we failed to get an ACK
+			r.sender.RTT *= 2
+			r.sender.RTOTicker.Reset((r.sender.RTT / 8) * 9)
+
 			r.l.Unlock()
 		case <-r.sender.windowOpen:
 			r.l.Lock()
