@@ -43,9 +43,7 @@ type sender struct {
 	buffer []byte
 
 	// Retransmission TimeOut.
-	RTOTicker *time.Ticker
-
-	RTO time.Duration
+	RetransmitTicker *time.Ticker
 
 	// RTT is the estimate of the round trip time to the remote host
 	RTT time.Duration
@@ -68,18 +66,23 @@ func newSender(log *logrus.Entry) *sender {
 		frameNo: 1,
 		buffer:  make([]byte, 0),
 		// finSent defaults to false
-		RTOTicker:  time.NewTicker(retransmitOffset),
-		RTO:        retransmitOffset,
-		RTT:        333 * time.Millisecond,
-		windowSize: windowSize,
-		windowOpen: make(chan struct{}, 1),
-		sendQueue:  make(chan *frame, 1024), // TODO(hosono) make this size 0
-		log:        log.WithField("sender", ""),
+		RetransmitTicker: time.NewTicker(initialRTT),
+		RTT:              initialRTT,
+		windowSize:       windowSize,
+		windowOpen:       make(chan struct{}, 1),
+		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
+		log:              log.WithField("sender", ""),
 	}
 }
 
 func (s *sender) unAckedFramesRemaining() int {
 	return len(s.frames)
+}
+
+// Reset the retransmission timer to 9/8 of the measured RTT
+// 9/8 comes from RFC 9002 section 6.1.2
+func (s *sender) resetRetransmitTicker() {
+	s.RetransmitTicker.Reset((s.RTT / 8) * 9)
 }
 
 func (s *sender) write(b []byte) (int, error) {
@@ -121,13 +124,13 @@ func (s *sender) write(b []byte) (int, error) {
 		s.frames[startFrame+i].Time = time.Now()
 	}
 
-	s.RTOTicker.Reset(s.RTO)
+	s.resetRetransmitTicker()
 	return len(b), nil
 }
 
 func (s *sender) recvAck(ackNo uint32) error {
 	// Stop the ticker since we're about to do a new RTT measurement.
-	s.RTOTicker.Stop()
+	s.RetransmitTicker.Stop()
 
 	oldAckNo := s.ackNo
 	newAckNo := uint64(ackNo)
@@ -141,15 +144,20 @@ func (s *sender) recvAck(ackNo uint32) error {
 		if !s.frames[0].Time.Equal(time.Time{}) && ackNo == s.frames[0].frame.frameNo+1 {
 			oldRTT := s.RTT
 			measuredRTT := time.Since(s.frames[0].Time)
+
+			// This formula comes from RFC 9002 section 5.3
 			s.RTT = (s.RTT/8)*7 + measuredRTT/8
-			if s.RTT < time.Millisecond {
-				s.RTT = time.Millisecond
+
+			if s.RTT < minRTT {
+				s.RTT = minRTT
 			}
-			s.log.WithFields(logrus.Fields{
-				"oldRTT":      oldRTT,
-				"measuredRTT": measuredRTT,
-				"newRTT":      s.RTT,
-			}).Warn("updated rtt")
+			if common.Debug {
+				s.log.WithFields(logrus.Fields{
+					"oldRTT":      oldRTT,
+					"measuredRTT": measuredRTT,
+					"newRTT":      s.RTT,
+				}).Trace("updated rtt")
+			}
 		}
 		s.ackNo++
 		s.unacked--
@@ -173,7 +181,7 @@ func (s *sender) recvAck(ackNo uint32) error {
 		}
 	}
 
-	s.RTOTicker.Reset((s.RTT / 8) * 9)
+	s.resetRetransmitTicker()
 
 	return nil
 }

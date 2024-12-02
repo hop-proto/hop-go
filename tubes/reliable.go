@@ -82,7 +82,7 @@ func (r *Reliable) initiate(req bool) {
 				FIN:  false,
 			},
 		}
-		ticker := time.NewTicker(retransmitOffset)
+		ticker := time.NewTicker(initialRTT)
 		for notInit {
 			r.sendQueue <- p.toBytes()
 			select {
@@ -131,7 +131,7 @@ func (r *Reliable) send() {
 	ok := true
 	for ok {
 		select {
-		case <-r.sender.RTOTicker.C:
+		case <-r.sender.RetransmitTicker.C:
 			r.l.Lock()
 
 			numFrames := r.sender.framesToSend(true, 0)
@@ -145,7 +145,7 @@ func (r *Reliable) send() {
 
 			// Back off rtt since we failed to get an ACK
 			r.sender.RTT *= 2
-			r.sender.RTOTicker.Reset((r.sender.RTT / 8) * 9)
+			r.sender.resetRetransmitTicker()
 
 			r.l.Unlock()
 		case <-r.sender.windowOpen:

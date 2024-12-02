@@ -29,9 +29,14 @@ const MaxFrameDataLength uint16 = 32768
 // maximum number of packet an unreliable tube will buffer
 const maxBufferedPackets = 1000
 
-// amount of time before retransmitting packets
-// TODO(hosono) implement RTT measurements to dynamically adjust this
-const retransmitOffset = 100 * time.Millisecond
+// The initial value of the round trip time used for reliable tubes
+// From RFC 9002 section 6.2.2
+const initialRTT = 333 * time.Millisecond
+
+// The minimum value that a Reliable tube will use for its RTT.
+// If the measured RTT is ever lower than minRTT, it is clamped to minRTT
+// From RFC 9002 section 6.2.1 (kGranularity)
+const minRTT = time.Millisecond
 
 // the maximum number of packets to retransmit per rto
 // even if the window is larger, no more packets will be transmitted

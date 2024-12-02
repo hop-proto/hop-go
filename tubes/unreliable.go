@@ -87,7 +87,7 @@ func (u *Unreliable) initiate(req bool) {
 	// RESP init frames are generated in receiveInitiatePkt
 	if req {
 		notInit := true
-		ticker := time.NewTicker(retransmitOffset)
+		ticker := time.NewTicker(initialRTT)
 		for notInit {
 			p := u.makeInitFrame(req)
 			u.sendQueue <- p.toBytes()
