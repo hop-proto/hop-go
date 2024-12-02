@@ -138,7 +138,8 @@ func (r *Reliable) send() {
 
 			r.log.WithField("numFrames", numFrames).Trace("retransmitting")
 			for i := 0; i < numFrames; i++ {
-				r.sendOneFrame(r.sender.frames[i])
+				r.sendOneFrame(r.sender.frames[i].frame)
+				r.sender.frames[i].Time = time.Now()
 				r.sender.unacked++
 			}
 
@@ -148,7 +149,8 @@ func (r *Reliable) send() {
 			numFrames := r.sender.framesToSend(false, 0)
 			r.log.WithField("numFrames", numFrames).Trace("window open")
 			for i := 0; i < numFrames; i++ {
-				r.sendOneFrame(r.sender.frames[i])
+				r.sendOneFrame(r.sender.frames[i].frame)
+				r.sender.frames[i].Time = time.Now()
 				r.sender.unacked++
 			}
 			r.l.Unlock()
