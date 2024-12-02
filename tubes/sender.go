@@ -138,10 +138,13 @@ func (s *sender) recvAck(ackNo uint32) error {
 	windowOpen := s.ackNo < newAckNo
 
 	for s.ackNo < newAckNo {
-		if ackNo == s.frames[0].frame.frameNo+1 {
+		if !s.frames[0].Time.Equal(time.Time{}) && ackNo == s.frames[0].frame.frameNo+1 {
 			oldRTT := s.RTT
 			measuredRTT := time.Since(s.frames[0].Time)
 			s.RTT = (s.RTT/8)*7 + measuredRTT/8
+			if s.RTT < time.Millisecond {
+				s.RTT = time.Millisecond
+			}
 			s.log.WithFields(logrus.Fields{
 				"oldRTT":      oldRTT,
 				"measuredRTT": measuredRTT,

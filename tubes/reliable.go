@@ -246,7 +246,7 @@ func (r *Reliable) receive(pkt *frame) error {
 // +checklocks:r.l
 func (r *Reliable) enterLastAckState() {
 	r.tubeState = lastAck
-	r.lastAckTimer = time.AfterFunc(2*retransmitOffset, func() {
+	r.lastAckTimer = time.AfterFunc(4*r.sender.RTT, func() {
 		r.l.Lock()
 		defer r.l.Unlock()
 		r.log.Warn("timer expired without getting ACK of FIN. going from lastAck to closed")
