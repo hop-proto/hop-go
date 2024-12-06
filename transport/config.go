@@ -51,6 +51,7 @@ type ClientConfig struct {
 	HSTimeout          time.Duration
 	HSDeadline         time.Time
 	KeepAlive          time.Duration
+	ServerPublicKey    *keys.PublicKey
 }
 
 func (c *ClientConfig) maxBufferedPackets() int {
@@ -101,6 +102,7 @@ type ServerConfig struct {
 	ClientVerify *VerifyConfig
 
 	GetCertificate func(ClientHandshakeInfo) (*Certificate, error)
+	GetCertList    func() ([]*Certificate, error)
 }
 
 func (c *ServerConfig) maxPendingConnections() int {

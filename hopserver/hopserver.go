@@ -1,6 +1,7 @@
 package hopserver
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -110,16 +111,41 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	logrus.Infof("listening at %s", udpConn.LocalAddr())
 
 	getCert := func(info transport.ClientHandshakeInfo) (*transport.Certificate, error) {
-		if h := vhosts.Match(info.ServerName); h != nil {
+		if h := vhosts.Match(string(info.ServerName.Label)); h != nil {
 			return &h.Certificate, nil
 		}
 		return nil, fmt.Errorf("%v did not match a host block", info.ServerName)
+	}
+
+	// This function returns a list of certificates for the hidden mode to determine the vhost associated with the static key.
+	getAllowedCerts := func() ([]*transport.Certificate, error) {
+		var certificates []*transport.Certificate
+
+		// vhosts.Match is based on patterns and can be "*".
+		// If the configuration has more HiddenModeVHostNames than vhosts: return
+		if len(sc.HiddenModeVHostNames) > len(vhosts) {
+			return nil, fmt.Errorf("number of server Hidden Mode VHost Names exceed the number of current vhosts")
+		}
+
+		for _, vhostName := range sc.HiddenModeVHostNames {
+			if h := vhosts.Match(vhostName); h != nil {
+				h.Certificate.HostName = vhostName
+				certificates = append(certificates, &h.Certificate)
+			}
+
+		}
+		if len(certificates) == 0 {
+			return nil, fmt.Errorf("no certificate found on the server")
+		}
+
+		return certificates, nil
 	}
 
 	tconf := transport.ServerConfig{
 		GetCertificate:   getCert,
 		HandshakeTimeout: sc.HandshakeTimeout,
 		ClientVerify:     &transport.VerifyConfig{},
+		GetCertList:      getAllowedCerts,
 	}
 
 	// serverConfig options inform verify config settings
@@ -373,10 +399,20 @@ func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fa
 //
 // TODO(dadrian)[2022-02-26]: This only does raw string matching, it needs to
 // have some way to disambiguate name types.
-func (vhosts VirtualHosts) Match(name certs.Name) *VirtualHost {
+func (vhosts VirtualHosts) Match(name string) *VirtualHost {
 	for i := range vhosts {
-		logrus.Infof("pattern, in: %q, %s", vhosts[i].Pattern, string(name.Label))
-		if glob.Glob(vhosts[i].Pattern, string(name.Label)) {
+		logrus.Infof("pattern, in: %q, %s", vhosts[i].Pattern, name)
+		if glob.Glob(vhosts[i].Pattern, name) {
+			return &vhosts[i]
+		}
+	}
+	return nil
+}
+
+func (vhosts VirtualHosts) Equal(cert *transport.Certificate) *VirtualHost {
+	for i := range vhosts {
+		if bytes.Equal(vhosts[i].Certificate.RawLeaf, cert.RawLeaf) &&
+			bytes.Equal(vhosts[i].Certificate.RawIntermediate, cert.RawIntermediate) {
 			return &vhosts[i]
 		}
 	}

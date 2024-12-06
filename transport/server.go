@@ -204,7 +204,7 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 			return err
 		}
 		logrus.Debug("server: finishHandshake")
-		if err := s.finishHandshake(hs); err != nil {
+		if err := s.finishHandshake(hs, false); err != nil {
 			return err
 		}
 		logrus.Debug("server: finished handshake!")
@@ -220,6 +220,34 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 			return err
 		}
 		return nil
+
+	case MessageTypeClientRequestHidden:
+		logrus.Debug("server: receiving a hidden client request to handle")
+		n, hs, err := s.handleClientRequestHidden(rawRead[:msgLen])
+		if err != nil {
+			logrus.Debugf("server: unable to handle client hidden request: %s", err)
+			return err
+		}
+		if n != msgLen {
+			logrus.Debug("server: client hidden request had extra data")
+			return ErrInvalidMessage
+		}
+
+		s.setHandshakeState(addr, hs)
+		n, err = s.writeServerResponseHidden(hs, handshakeWriteBuf)
+		logrus.Debugf("server: sh %x", handshakeWriteBuf[:n])
+		if err := s.writePacket(handshakeWriteBuf[:n], addr); err != nil {
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		logrus.Debug("server: finishHandshake hidden mode")
+		if err := s.finishHandshake(hs, true); err != nil {
+			return err
+		}
+		logrus.Debug("server: finished handshake!")
+
 	default:
 		// If the message is authenticated, this will closed the connection
 		// TODO(dadrian)[2023-09-09]: Make this explicit
@@ -284,6 +312,7 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState) (int, error) {
 	c, err := s.config.GetCertificate(ClientHandshakeInfo{
 		ServerName: hs.sni,
 	})
+
 	if err != nil {
 		return 0, err
 	}
@@ -385,60 +414,14 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	}
 	x = x[MacLen:]
 	pos += MacLen
+
 	// Parse certificates
-	opts := certs.VerifyOptions{}
-	if hs.certVerify != nil {
-		opts.Name = hs.certVerify.Name
-	}
-	leaf := certs.Certificate{}
-	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
+	leaf, _, err := hs.certificateParserAndVerifier(rawLeaf, rawIntermediate)
 	if err != nil {
+		logrus.Debugf("server: error parsing client certificates: %s", err)
 		return pos, nil, err
 	}
-	if int(leafLen) != len(rawLeaf) {
-		return pos, nil, errors.New("extra bytes after leaf certificate")
-	}
 	hs.parsedLeaf = &leaf
-
-	intermediate := certs.Certificate{}
-	if len(rawIntermediate) > 0 {
-		intermediateLen, err := intermediate.ReadFrom(bytes.NewBuffer(rawIntermediate))
-		if err != nil {
-			return pos, nil, err
-		}
-		if int(intermediateLen) != len(rawIntermediate) {
-			return pos, nil, errors.New("extra bytes after intermediate certificate")
-		}
-		opts.PresentedIntermediate = &intermediate
-	}
-
-	// TODO(baumanl): enable more general cert verify callback?
-	// TODO(baumanl): if certVerify is nil then no verification happens --> okay default?
-
-	// skips all verification if certVerify nil or explicitly disabled
-	if hs.certVerify != nil && !hs.certVerify.InsecureSkipVerify {
-		logrus.Debug("server: beginning client authentication")
-		// try authkeys first if enabled
-		var errAuthkeys error
-		if hs.certVerify.AuthKeysAllowed {
-			logrus.Debug("server: authkeys are allowed. attempting to validate self-signed cert")
-			errAuthkeys = hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
-		}
-		if !hs.certVerify.AuthKeysAllowed || errAuthkeys != nil {
-			// Certificate Verification
-			logrus.Debug("server: attempting cert validation")
-			err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
-			if err != nil { // cert verifification failed
-				logrus.Errorf("server: client authentication failed")
-				return pos, nil, err
-			}
-			logrus.Infof("server: client used certificate verification to authenticate")
-		} else {
-			logrus.Info("server: client used an authorized key to authenticate")
-		}
-	} else {
-		logrus.Debug("server: certVerify nil or InsecureSkipVerify set. skipping all client authentication")
-	}
 
 	hs.se, err = hs.ephemeral.DH(leaf.PublicKey[:])
 	if err != nil {
@@ -576,7 +559,7 @@ func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
 	return scratchHS, nil
 }
 
-func (s *Server) finishHandshake(hs *HandshakeState) error {
+func (s *Server) finishHandshake(hs *HandshakeState, isHidden bool) error {
 	s.m.Lock()
 	defer s.m.Unlock()
 
@@ -602,6 +585,8 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 	ss.readKey = &ss.clientToServerKey
 	ss.writeKey = &ss.serverToClientKey
 
+	ss.isHiddenHS = isHidden
+
 	ss.handle = newHandleForSession(s.udpConn, ss, hs.parsedLeaf, s.config.maxBufferedPacketsPerConnection())
 	ss.handleState = established
 
@@ -614,6 +599,26 @@ func (s *Server) finishHandshake(hs *HandshakeState) error {
 		ss.closeLocked()
 	}
 	return nil
+}
+
+// +checklocks:s.serveLock
+func (s *Server) handleClientRequestHidden(b []byte) (int, *HandshakeState, error) {
+	hs := &HandshakeState{}
+	hs.duplex.InitializeEmpty()
+	hs.ephemeral.Generate()
+
+	hs.duplex.Absorb([]byte(HiddenProtocolName))
+	hs.RekeyFromSqueeze(HiddenProtocolName)
+
+	n, err := s.readClientRequestHidden(hs, b)
+
+	if err != nil {
+		return n, nil, err
+	}
+	if n != len(b) {
+		return n, nil, ErrInvalidMessage
+	}
+	return n, hs, nil
 }
 
 // +checklocks:s.m
@@ -755,6 +760,9 @@ func (s *Server) init() error {
 		}
 		s.config.GetCertificate = func(ClientHandshakeInfo) (*Certificate, error) {
 			return c, nil
+		}
+		s.config.GetCertList = func() ([]*Certificate, error) {
+			return []*Certificate{c}, nil
 		}
 	}
 

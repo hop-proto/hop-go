@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/curve25519"
+
+	"github.com/sirupsen/logrus"
 )
 
 // PublicKey is a 32-byte array
@@ -155,4 +157,18 @@ func ParseDHPublicKey(encoded string) (*PublicKey, error) {
 	out := new(PublicKey)
 	copy(out[:], b)
 	return out, nil
+}
+
+func ReadDHKeyFromPubFile(serverPublicKeyPath string) (*PublicKey, error) {
+	pubKeyBytes, err := os.ReadFile(serverPublicKeyPath)
+	if err != nil {
+		logrus.Errorf("could not read public key file: %s", err)
+		return nil, err
+	}
+	pubKey, err := ParseDHPublicKey(string(pubKeyBytes))
+	if err != nil {
+		logrus.Errorf("client: unable to parse the server public key file: %s", err)
+		return nil, err
+	}
+	return pubKey, nil
 }

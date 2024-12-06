@@ -33,7 +33,8 @@ type ServerConfig struct {
 	AutoSelfSign  *bool
 	ListenAddress string
 
-	Names []NameConfig
+	Names                []NameConfig
+	HiddenModeVHostNames []string
 
 	HandshakeTimeout time.Duration
 	DataTimeout      time.Duration

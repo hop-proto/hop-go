@@ -169,12 +169,61 @@ func (c *Client) clientHandshakeLocked() error {
 	}
 	c.hs.static = c.config.Exchanger
 	c.hs.certVerify = &c.config.Verify
-	c.hs.duplex.Absorb([]byte(ProtocolName))
 
 	// TODO(dadrian): This should be allocated smaller
 	buf := make([]byte, 65535)
 
 	logrus.Debugf("client: public ephemeral: %x", c.hs.ephemeral.Public)
+
+	isClientHiddenHS := false
+
+	if c.config.ServerPublicKey != nil {
+		logrus.Debug("---------- HIDDEN HANDSHAKE MODE -------------")
+
+		err := c.beginHiddenHandshake(buf)
+		if err != nil {
+			return err
+		}
+		isClientHiddenHS = true
+	} else {
+		err := c.beginDiscoverableHandshake(buf)
+		if err != nil {
+			return err
+		}
+	}
+	c.setHSDeadline()
+
+	c.ss = new(SessionState)
+	c.ss.sessionID = c.hs.sessionID
+	c.ss.remoteAddr = c.hs.remoteAddr
+	if err := c.hs.deriveFinalKeys(&c.ss.clientToServerKey, &c.ss.serverToClientKey); err != nil {
+		return err
+	}
+	c.ss.readKey = &c.ss.serverToClientKey
+	c.ss.writeKey = &c.ss.clientToServerKey
+	c.hs = nil
+	c.dialAddr = nil
+	c.ss.isHiddenHS = isClientHiddenHS
+
+	// Set deadline of 0 to make the connection not timeout
+	// Data timeouts are handled by the Tube Muxer
+	//
+	// TODO(dadrian)[2023-09-10]: This shouldn't happen here. The Dialer or
+	// DialContext functions should take a timeout or something like that. Also
+	// we should have a DialContext.
+	c.underlyingConn.SetReadDeadline(time.Time{})
+	c.ss.handle = newHandleForSession(c.underlyingConn, c.ss, c.config.Leaf, c.config.maxBufferedPackets())
+	c.state.Store(clientStateOpen)
+	c.wg.Add(1)
+	go c.listen()
+
+	return nil
+}
+
+func (c *Client) beginDiscoverableHandshake(buf []byte) error {
+	// Protocol ID for the regular handshake
+	c.hs.duplex.Absorb([]byte(ProtocolName))
+
 	n, err := writeClientHello(c.hs, buf)
 	if err != nil {
 		return err
@@ -201,7 +250,7 @@ func (c *Client) clientHandshakeLocked() error {
 		return fmt.Errorf("server hello too short. recevied %d bytes, SH only %d", n, shn)
 	}
 
-	c.hs.RekeyFromSqueeze()
+	c.hs.RekeyFromSqueeze(ProtocolName)
 
 	// Client Ack
 	n, err = c.hs.writeClientAck(buf)
@@ -241,30 +290,41 @@ func (c *Client) clientHandshakeLocked() error {
 		logrus.Errorf("client: unable to send client auth: %s", err)
 		return err
 	}
-	c.setHSDeadline()
+	return nil
+}
 
-	c.ss = new(SessionState)
-	c.ss.sessionID = c.hs.sessionID
-	c.ss.remoteAddr = c.hs.remoteAddr
-	if err := c.hs.deriveFinalKeys(&c.ss.clientToServerKey, &c.ss.serverToClientKey); err != nil {
+func (c *Client) beginHiddenHandshake(buf []byte) error {
+	// Protocol ID for the hidden handshake
+	c.hs.duplex.Absorb([]byte(HiddenProtocolName))
+
+	c.hs.RekeyFromSqueeze(HiddenProtocolName)
+
+	n, err := c.hs.writeClientRequestHidden(buf, c.config.ServerPublicKey)
+
+	if err != nil {
 		return err
 	}
-	c.ss.readKey = &c.ss.serverToClientKey
-	c.ss.writeKey = &c.ss.clientToServerKey
-	c.hs = nil
-	c.dialAddr = nil
+	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
+	if err != nil {
+		logrus.Errorf("client: unable to make a hidden request: %s", err)
+		return err
+	}
 
-	// Set deadline of 0 to make the connection not timeout
-	// Data timeouts are handled by the Tube Muxer
-	//
-	// TODO(dadrian)[2023-09-10]: This shouldn't happen here. The Dialer or
-	// DialContext functions should take a timeout or something like that. Also
-	// we should have a DialContext.
-	c.underlyingConn.SetReadDeadline(time.Time{})
-	c.ss.handle = newHandleForSession(c.underlyingConn, c.ss, c.config.Leaf, c.config.maxBufferedPackets())
-	c.state.Store(clientStateOpen)
-	c.wg.Add(1)
-	go c.listen()
+	// Server Response hidden
+	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(buf, nil)
+	if err != nil {
+		return err
+	}
+	logrus.Debugf("client: Server response hidden msgLen: %d", msgLen)
+
+	n, err = c.hs.readServerResponseHidden(buf[:msgLen])
+	if err != nil {
+		return err
+	}
+	if n != msgLen {
+		logrus.Debugf("client: Server response hidden packet of %d, only read %d", msgLen, n)
+		return ErrInvalidMessage
+	}
 
 	return nil
 }

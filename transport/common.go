@@ -12,6 +12,7 @@ import (
 
 // ProtocolName is the string representation of the parameters used in this version
 const ProtocolName = "hop_NN_XX_cyclist_keccak_p1600_12"
+const HiddenProtocolName = "hop_IK_cyclist_keccak_C512"
 
 // Version is the protocol version being used. Only one version is supported.
 const Version byte = 0x01
@@ -28,6 +29,7 @@ const (
 	SNILen       = 256
 	SessionIDLen = 4
 	CounterLen   = 8
+	TimestampLen = 8
 )
 
 // MaxTotalPacketSize is MaxUDPPacketSize minus bytes used by Ethernet frames and Wifi frames.
@@ -89,13 +91,15 @@ type MessageType byte
 
 // MessageType constants for each type of handshake and transport message.
 const (
-	MessageTypeClientHello MessageType = 0x01
-	MessageTypeServerHello MessageType = 0x02
-	MessageTypeClientAck   MessageType = 0x03
-	MessageTypeServerAuth  MessageType = 0x04
-	MessageTypeClientAuth  MessageType = 0x05
-	MessageTypeTransport   MessageType = 0x10
-	MessageTypeControl     MessageType = 0x80
+	MessageTypeClientHello          MessageType = 0x01
+	MessageTypeServerHello          MessageType = 0x02
+	MessageTypeClientAck            MessageType = 0x03
+	MessageTypeServerAuth           MessageType = 0x04
+	MessageTypeClientAuth           MessageType = 0x05
+	MessageTypeClientRequestHidden  MessageType = 0x08
+	MessageTypeServerResponseHidden MessageType = 0x09
+	MessageTypeTransport            MessageType = 0x10
+	MessageTypeControl              MessageType = 0x80
 )
 
 // ControlMessage specifies the bytes that indicate different control messages.

@@ -49,6 +49,7 @@ type HandshakeState struct {
 	ee []byte
 	es []byte
 	se []byte
+	ss []byte
 
 	// Certificate Stuff
 	certVerify         *VerifyConfig
@@ -236,9 +237,9 @@ func readServerHello(hs *HandshakeState, b []byte) (int, error) {
 
 // RekeyFromSqueeze squeezes out KeyLen bytes and then re-initializes the duplex
 // using the new key.
-func (hs *HandshakeState) RekeyFromSqueeze() {
+func (hs *HandshakeState) RekeyFromSqueeze(protocolName string) {
 	hs.duplex.Squeeze(hs.handshakeKey[:])
-	hs.duplex.Initialize(hs.handshakeKey[:], []byte(ProtocolName), nil)
+	hs.duplex.Initialize(hs.handshakeKey[:], []byte(protocolName), nil)
 }
 
 // EncryptSNI encrypts the name to a buffer. The encrypted length is always
@@ -315,6 +316,7 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 		return 0, ErrInvalidMessage
 	}
 	// TODO(dadrian): Should we just get this out of UDP packet length?
+	// TODO (paul): This goes wrong if the value stored is over 65535 behave like a modulo
 	encryptedCertLen := (int(b[2]) << 8) + int(b[3])
 	logrus.Debugf("client: got encrypted cert length %d", encryptedCertLen)
 	fullLength := minLength + encryptedCertLen
@@ -352,48 +354,10 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	b = b[MacLen:]
 
 	// Parse the certificate
-	opts := certs.VerifyOptions{
-		Name: hs.certVerify.Name,
-	}
-	leaf := certs.Certificate{}
-	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
+	leaf, _, err := hs.certificateParserAndVerifier(rawLeaf, rawIntermediate)
 	if err != nil {
+		logrus.Debugf("client: error parsing server certificates: %s", err)
 		return 0, err
-	}
-	if int(leafLen) != len(rawLeaf) {
-		return 0, errors.New("extra bytes after leaf certificate")
-	}
-
-	intermediate := certs.Certificate{}
-	if len(rawIntermediate) > 0 {
-		intermediateLen, err := intermediate.ReadFrom(bytes.NewBuffer(rawIntermediate))
-		if err != nil {
-			return 0, err
-		}
-		if int(intermediateLen) != len(rawIntermediate) {
-			return 0, errors.New("extra bytes after intermediate certificate")
-		}
-		opts.PresentedIntermediate = &intermediate
-	}
-
-	if !hs.certVerify.InsecureSkipVerify {
-		logrus.Debug("client: performing server certificate validation")
-		err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
-		if err != nil {
-			logrus.Errorf("client: failed to verify certificate: %s", err)
-			return 0, err
-		}
-		logrus.Debug("client: leaf verification successful")
-	} else {
-		logrus.Debug("client: InsecureSkipVerify set. Not verifying server certificate")
-	}
-	if hs.certVerify.AddVerifyCallback != nil {
-		logrus.Debug("client: additional verify callback check enabled. running...")
-		if err := hs.certVerify.AddVerifyCallback(&leaf); err != nil {
-			logrus.Debugf("client: additional verify callback returned an error: %v", err.Error())
-			return 0, err
-		}
-		logrus.Debug("client: additional verify callback successful")
 	}
 
 	// DH
@@ -507,4 +471,71 @@ func readVector(src []byte) (int, []byte, error) {
 		return 0, nil, ErrBufUnderflow
 	}
 	return vecLen, src[2:end], nil
+}
+
+func (hs *HandshakeState) certificateParserAndVerifier(rawLeaf []byte, rawIntermediate []byte) (certs.Certificate, certs.Certificate, error) {
+	// Parse the certificate
+	opts := certs.VerifyOptions{}
+	if hs.certVerify != nil {
+		opts.Name = hs.certVerify.Name
+	}
+	leaf := certs.Certificate{}
+	intermediate := certs.Certificate{}
+
+	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
+	if err != nil {
+		return leaf, intermediate, err
+	}
+	if int(leafLen) != len(rawLeaf) {
+		return leaf, intermediate, errors.New("extra bytes after leaf certificate")
+	}
+
+	if len(rawIntermediate) > 0 {
+		intermediateLen, err := intermediate.ReadFrom(bytes.NewBuffer(rawIntermediate))
+		if err != nil {
+			return leaf, intermediate, err
+		}
+		if int(intermediateLen) != len(rawIntermediate) {
+			return leaf, intermediate, errors.New("extra bytes after intermediate certificate")
+		}
+		opts.PresentedIntermediate = &intermediate
+	}
+
+	// TODO(baumanl): enable more general cert verify callback?
+	// TODO(baumanl): if certVerify is nil then no verification happens --> okay default?
+
+	if hs.certVerify != nil && !hs.certVerify.InsecureSkipVerify {
+		// try authkeys first if enabled
+		logrus.Debug("Beginning authentication")
+		var errAuthkeys error
+		if hs.certVerify.AuthKeysAllowed {
+			logrus.Debug("Authkeys are allowed. attempting to validate self-signed cert")
+			errAuthkeys = hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
+		}
+		if !hs.certVerify.AuthKeysAllowed || errAuthkeys != nil {
+			logrus.Debug("performing certificate validation")
+			err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
+			if err != nil {
+				logrus.Errorf("failed to verify certificate: %s", err)
+				return leaf, intermediate, err
+			}
+			logrus.Debug("Leaf verification successful")
+			logrus.Infof("Used certificate verification to authenticate")
+		} else {
+			logrus.Info("Used an authorized key to authenticate")
+		}
+	} else {
+		logrus.Debug("InsecureSkipVerify set. Not verifying server certificate")
+	}
+
+	if hs.certVerify != nil && hs.certVerify.AddVerifyCallback != nil {
+		logrus.Debug("additional verify callback check enabled. running...")
+		if err := hs.certVerify.AddVerifyCallback(&leaf); err != nil {
+			logrus.Debugf("additional verify callback returned an error: %v", err.Error())
+			return leaf, intermediate, err
+		}
+		logrus.Debug("additional verify callback successful")
+	}
+
+	return leaf, intermediate, err
 }
