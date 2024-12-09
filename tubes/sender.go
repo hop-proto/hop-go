@@ -25,8 +25,13 @@ type sender struct {
 	finFrameNo uint32
 
 	closed atomic.Bool
-	// The buffer of unacknowledged tube frames that will be retransmitted if necessary.
-	frames []*frame
+
+	// The buffer of unacknowledged tube frames that will be retransmitted if necessary
+	// along with the time when they were sent
+	frames []struct {
+		*frame
+		time.Time
+	}
 
 	// The current buffer of unacknowledged bytes from the sender.
 	// A byte slice works well here because:
@@ -38,9 +43,10 @@ type sender struct {
 	buffer []byte
 
 	// Retransmission TimeOut.
-	RTOTicker *time.Ticker
+	RetransmitTicker *time.Ticker
 
-	RTO time.Duration
+	// RTT is the estimate of the round trip time to the remote host
+	RTT time.Duration
 
 	// the time after which writes will expire
 	deadline time.Time
@@ -60,17 +66,23 @@ func newSender(log *logrus.Entry) *sender {
 		frameNo: 1,
 		buffer:  make([]byte, 0),
 		// finSent defaults to false
-		RTOTicker:  time.NewTicker(retransmitOffset),
-		RTO:        retransmitOffset,
-		windowSize: windowSize,
-		windowOpen: make(chan struct{}, 1),
-		sendQueue:  make(chan *frame, 1024), // TODO(hosono) make this size 0
-		log:        log.WithField("sender", ""),
+		RetransmitTicker: time.NewTicker(initialRTT),
+		RTT:              initialRTT,
+		windowSize:       windowSize,
+		windowOpen:       make(chan struct{}, 1),
+		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
+		log:              log.WithField("sender", ""),
 	}
 }
 
 func (s *sender) unAckedFramesRemaining() int {
 	return len(s.frames)
+}
+
+// Reset the retransmission timer to 9/8 of the measured RTT
+// 9/8 comes from RFC 9002 section 6.1.2
+func (s *sender) resetRetransmitTicker() {
+	s.RetransmitTicker.Reset((s.RTT / 8) * 9)
 }
 
 func (s *sender) write(b []byte) (int, error) {
@@ -97,16 +109,29 @@ func (s *sender) write(b []byte) (int, error) {
 
 		s.frameNo++
 		s.buffer = s.buffer[dataLength:]
-		s.frames = append(s.frames, &pkt)
+		s.frames = append(s.frames, struct {
+			*frame
+			time.Time
+		}{&pkt, time.Time{}})
 	}
 
-	s.fillWindow(false, startFrame)
+	numFrames := s.framesToSend(false, startFrame)
 
-	s.RTOTicker.Reset(s.RTO)
+	for i := 0; i < numFrames; i++ {
+		pkt := s.frames[startFrame+i]
+		s.unacked++
+		s.sendQueue <- pkt.frame
+		s.frames[startFrame+i].Time = time.Now()
+	}
+
+	s.resetRetransmitTicker()
 	return len(b), nil
 }
 
 func (s *sender) recvAck(ackNo uint32) error {
+	// Stop the ticker since we're about to do a new RTT measurement.
+	s.RetransmitTicker.Stop()
+
 	oldAckNo := s.ackNo
 	newAckNo := uint64(ackNo)
 	if newAckNo < s.ackNo && (newAckNo+(1<<32)-s.ackNo <= uint64(s.windowSize)) { // wrap around
@@ -116,6 +141,24 @@ func (s *sender) recvAck(ackNo uint32) error {
 	windowOpen := s.ackNo < newAckNo
 
 	for s.ackNo < newAckNo {
+		if !s.frames[0].Time.Equal(time.Time{}) && ackNo == s.frames[0].frame.frameNo+1 {
+			oldRTT := s.RTT
+			measuredRTT := time.Since(s.frames[0].Time)
+
+			// This formula comes from RFC 9002 section 5.3
+			s.RTT = (s.RTT/8)*7 + measuredRTT/8
+
+			if s.RTT < minRTT {
+				s.RTT = minRTT
+			}
+			if common.Debug {
+				s.log.WithFields(logrus.Fields{
+					"oldRTT":      oldRTT,
+					"measuredRTT": measuredRTT,
+					"newRTT":      s.RTT,
+				}).Trace("updated rtt")
+			}
+		}
 		s.ackNo++
 		s.unacked--
 		s.frames = s.frames[1:]
@@ -130,7 +173,6 @@ func (s *sender) recvAck(ackNo uint32) error {
 
 	// Only fill the window if new space has really opened up
 	if windowOpen {
-		s.RTOTicker.Reset(s.RTO)
 		select {
 		case s.windowOpen <- struct{}{}:
 			break
@@ -138,6 +180,8 @@ func (s *sender) recvAck(ackNo uint32) error {
 			break
 		}
 	}
+
+	s.resetRetransmitTicker()
 
 	return nil
 }
@@ -178,23 +222,6 @@ func (s *sender) framesToSend(rto bool, startIndex int) int {
 	return numFrames
 }
 
-// rto is true if the window is filled due to a retransmission timeout and false otherwise
-func (s *sender) fillWindow(rto bool, startIndex int) {
-	numFrames := s.framesToSend(rto, startIndex)
-
-	for i := 0; i < numFrames; i++ {
-		pkt := s.frames[startIndex+i]
-		s.unacked++
-		s.sendQueue <- pkt
-	}
-
-	if common.Debug {
-		s.log.WithFields(logrus.Fields{
-			"num sent": numFrames,
-		}).Trace("fillWindow called")
-	}
-}
-
 // Close stops the sender and causes future writes to return io.EOF
 func (s *sender) Close() error {
 	if s.closed.CompareAndSwap(false, true) {
@@ -226,7 +253,10 @@ func (s *sender) sendFin() error {
 	s.log.WithField("frameNo", pkt.frameNo).Debug("queueing FIN packet")
 
 	s.frameNo++
-	s.frames = append(s.frames, &pkt)
+	s.frames = append(s.frames, struct {
+		*frame
+		time.Time
+	}{&pkt, time.Time{}})
 	s.sendQueue <- &pkt
 	s.unacked++
 	return nil

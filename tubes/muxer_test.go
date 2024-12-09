@@ -36,7 +36,7 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 
 	go func() {
 		defer wg.Done()
-		m1 = newMuxer(c1, 4*retransmitOffset, false, logrus.WithFields(logrus.Fields{
+		m1 = newMuxer(c1, time.Second, false, logrus.WithFields(logrus.Fields{
 			"muxer": "m1",
 			"test":  t.Name(),
 		}))
@@ -44,7 +44,7 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 	}()
 	go func() {
 		defer wg.Done()
-		m2 = newMuxer(c2, 4*retransmitOffset, true, logrus.WithFields(logrus.Fields{
+		m2 = newMuxer(c2, time.Second, true, logrus.WithFields(logrus.Fields{
 			"muxer": "m2",
 			"test":  t.Name(),
 		}))

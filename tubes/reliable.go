@@ -82,7 +82,7 @@ func (r *Reliable) initiate(req bool) {
 				FIN:  false,
 			},
 		}
-		ticker := time.NewTicker(retransmitOffset)
+		ticker := time.NewTicker(initialRTT)
 		for notInit {
 			r.sendQueue <- p.toBytes()
 			select {
@@ -131,16 +131,21 @@ func (r *Reliable) send() {
 	ok := true
 	for ok {
 		select {
-		case <-r.sender.RTOTicker.C:
+		case <-r.sender.RetransmitTicker.C:
 			r.l.Lock()
 
 			numFrames := r.sender.framesToSend(true, 0)
 
 			r.log.WithField("numFrames", numFrames).Trace("retransmitting")
 			for i := 0; i < numFrames; i++ {
-				r.sendOneFrame(r.sender.frames[i])
+				r.sendOneFrame(r.sender.frames[i].frame)
+				r.sender.frames[i].Time = time.Now()
 				r.sender.unacked++
 			}
+
+			// Back off rtt since we failed to get an ACK
+			r.sender.RTT *= 2
+			r.sender.resetRetransmitTicker()
 
 			r.l.Unlock()
 		case <-r.sender.windowOpen:
@@ -148,7 +153,8 @@ func (r *Reliable) send() {
 			numFrames := r.sender.framesToSend(false, 0)
 			r.log.WithField("numFrames", numFrames).Trace("window open")
 			for i := 0; i < numFrames; i++ {
-				r.sendOneFrame(r.sender.frames[i])
+				r.sendOneFrame(r.sender.frames[i].frame)
+				r.sender.frames[i].Time = time.Now()
 				r.sender.unacked++
 			}
 			r.l.Unlock()
@@ -244,7 +250,7 @@ func (r *Reliable) receive(pkt *frame) error {
 // +checklocks:r.l
 func (r *Reliable) enterLastAckState() {
 	r.tubeState = lastAck
-	r.lastAckTimer = time.AfterFunc(2*retransmitOffset, func() {
+	r.lastAckTimer = time.AfterFunc(4*r.sender.RTT, func() {
 		r.l.Lock()
 		defer r.l.Unlock()
 		r.log.Warn("timer expired without getting ACK of FIN. going from lastAck to closed")
