@@ -131,20 +131,32 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 		defer wg.Done()
 		_, err := io.Copy(os.Stdout, ex.tube) // read bytes from tube to os.Stdout
 		if err != nil {
-			logrus.Errorf("codex: error copying from tube to stdout: %s", err)
+			logrus.Errorf("Error copying from pipe reader to stdout: %v", err)
 		}
 		if oldState != nil {
 			term.Restore(int(os.Stdin.Fd()), oldState)
 		}
-		logrus.Info("Stopped io.Copy(os.Stdout, tube)")
 		ex.tube.Close()
-		logrus.Info("closed tube")
-
+		logrus.Debugf("Finished copying from pipe reader to stdout")
 	}(&ex)
 
 	go func(ex *ExecTube) {
-		io.Copy(tube, os.Stdin)
-		tube.Close()
+		defer wg.Done()
+		_, err := io.Copy(ex.tube, ex.r) // Copy data from pipe reader to tube
+		if err != nil {
+			logrus.Errorf("Error copying from pipe reader to tube: %v", err)
+		}
+		ex.tube.Close()
+		logrus.Debugf("Finished copying from pipe reader to tube")
+	}(&ex)
+
+	go func(ex *ExecTube) {
+		_, err := io.Copy(ex.w, os.Stdin) // Copy stdin to pipe writer
+		if err != nil {
+			logrus.Errorf("Error copying from stdin to pipe writer: %v", err)
+		}
+		logrus.Debugf("Finished copying from stdin to pipe writer")
+		ex.w.Close()
 	}(&ex)
 
 	return &ex, nil
