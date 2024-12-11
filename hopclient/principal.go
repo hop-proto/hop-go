@@ -110,7 +110,7 @@ func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable, pq *ptPro
 
 	logrus.Info("starting principal instance")
 
-	authgrants.StartPrincipalInstance(delTube, ci, setup)
+	authgrants.StartPrincipalInstance(delTube, ci, setup, c.hostconfig)
 	delTube.Close()
 
 	if psubclient != nil {

@@ -2,12 +2,11 @@ package authgrants
 
 import (
 	"fmt"
-	"net"
-
 	"github.com/sirupsen/logrus"
-
 	"hop.computer/hop/certs"
+	"hop.computer/hop/config"
 	"hop.computer/hop/core"
+	"net"
 )
 
 // AdditionalVerifyCallback represents a function that is called mid
@@ -28,10 +27,12 @@ type principalInstance struct {
 
 	checkIntent     CheckIntentCallback
 	setUpTargetConn setUpTargetConnCallback
+
+	hostConfig *config.HostConfig
 }
 
 // StartPrincipalInstance creates and runs a new principal instance. errors if su is nil. Caller responsible for closing delegateConn
-func StartPrincipalInstance(dc net.Conn, ci CheckIntentCallback, su setUpTargetConnCallback) error {
+func StartPrincipalInstance(dc net.Conn, ci CheckIntentCallback, su setUpTargetConnCallback, hostConfig *config.HostConfig) error {
 	if su == nil {
 		return fmt.Errorf("principal: must provide non-nil set up target function")
 	}
@@ -40,6 +41,7 @@ func StartPrincipalInstance(dc net.Conn, ci CheckIntentCallback, su setUpTargetC
 		delegateConn:    dc,
 		checkIntent:     ci,
 		setUpTargetConn: su,
+		hostConfig:      hostConfig,
 	}
 
 	if ci == nil {
@@ -82,6 +84,21 @@ func (p *principalInstance) handleIntentRequest() error {
 		return err
 	}
 	logrus.Info("principal: read an ir")
+
+	/*
+		// The dialogue should be starts here to bock or not the intent requests
+		// All info for the dialogue are stored in the following variables
+		authgrantModel := dialogue.AuthgrantModel{
+			Intent:      "",
+			DelegateSNI: p.hostConfig.ServerName,
+			TargetSNI:   string(i.TargetSNI.Label),
+			TargetUser:  i.TargetUsername,
+			StartTime:   i.StartTime,
+			EndTime:     i.ExpTime,
+		}
+		questionAuth, err := dialogue.GetAuthgrantInput(authgrantModel)
+	*/
+
 	return p.doIntentRequestChecks(i)
 }
 
