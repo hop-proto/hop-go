@@ -1,6 +1,9 @@
 package main
 
 import (
+	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 
 	"github.com/BurntSushi/toml"
@@ -11,6 +14,11 @@ import (
 )
 
 func main() {
+
+	go func() {
+		log.Println(http.ListenAndServe("localhost:7070", nil))
+	}()
+
 	f, err := flags.ParseClientArgs(os.Args)
 	if err != nil {
 		logrus.Error(err)

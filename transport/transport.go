@@ -96,10 +96,12 @@ func (ss *SessionState) readCounter(b []byte) (count uint64) {
 	return
 }
 
+// TODO (paul) (this is 9% time)
 func (ss *SessionState) writePacketLocked(conn UDPLike, msgType MessageType, in []byte, key *[KeyLen]byte) error {
 	length := HeaderLen + SessionIDLen + CounterLen + len(in) + TagLen
 	ss.rawWrite.Reset()
 	if ss.rawWrite.Cap() < length {
+		// TODO (paul) here is the bottleneck
 		ss.rawWrite.Grow(length)
 	}
 
@@ -147,6 +149,7 @@ func (ss *SessionState) writePacketLocked(conn UDPLike, msgType MessageType, in 
 	return nil
 }
 
+// TODO (paul) (this is 26% time)
 func (ss *SessionState) readPacketLocked(plaintext, pkt []byte, key *[KeyLen]byte) (int, MessageType, error) {
 	plaintextLen := PlaintextLen(len(pkt))
 	ciphertextLen := plaintextLen + TagLen

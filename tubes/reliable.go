@@ -45,14 +45,15 @@ type Reliable struct {
 	// +checklocks:l
 	tubeState state
 	// +checklocks:l
-	lastAckTimer *time.Timer
-	lastAckSent  atomic.Uint32
-	closed       chan struct{}
-	initRecv     chan struct{}
-	initDone     chan struct{}
-	sendDone     chan struct{}
-	l            sync.Mutex
-	log          *logrus.Entry
+	lastAckTimer    *time.Timer
+	lastAckSent     atomic.Uint32
+	closed          chan struct{}
+	initRecv        chan struct{}
+	initDone        chan struct{}
+	sendDone        chan struct{}
+	l               sync.Mutex
+	log             *logrus.Entry
+	ackFrameNumbers []uint32
 }
 
 // Reliable implements net.Conn
@@ -68,9 +69,10 @@ func (r *Reliable) initiate(req bool) {
 
 	if req {
 		p := initiateFrame{
-			tubeID:     r.id,
-			tubeType:   r.tType,
-			data:       []byte{},
+			tubeID:   r.id,
+			tubeType: r.tType,
+			data:     []byte{},
+			// Here we have a frame no -> 0 while new sender starts with 1
 			dataLength: 0,
 			frameNo:    0,
 			windowSize: r.recvWindow.getWindowSize(),
@@ -239,12 +241,20 @@ func (r *Reliable) receive(pkt *frame) error {
 		}
 	}
 
+	// TODO (paul) why would we send ack for every packet?
 	// ACK every data packet
 	if pkt.dataLength > 0 && r.tubeState != closed && !pkt.flags.FIN {
 		r.sender.sendEmptyPacket()
 	}
 
 	return err
+}
+
+func (r *Reliable) flushAcks() {
+	if len(r.ackFrameNumbers) > 0 {
+		//r.sender.sendEmptyPacket(r.ackFrameNumbers)
+		r.ackFrameNumbers = r.ackFrameNumbers[:0]
+	}
 }
 
 // +checklocks:r.l
@@ -353,6 +363,7 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 		return 0, io.EOF
 	}
 
+	// TODO (paul) check this
 	return r.sender.write(b)
 }
 

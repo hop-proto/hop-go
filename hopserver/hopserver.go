@@ -255,6 +255,7 @@ func (s *HopServer) newSession(serverConn *transport.Handle) {
 		Timeout: s.config.DataTimeout,
 		Log:     logrus.WithField("muxer", "server"),
 	}
+	// TODO (paul) are we creating a new session?
 	sess := &hopSession{
 		transportConn: serverConn,
 		// TODO(hosono) add logging context to server

@@ -1,6 +1,6 @@
 .PHONY: install clean
 CC ?= gcc
-CCFLAGS ?= -I/usr/include/lua5.2
+CCFLAGS ?= -I/opt/homebrew/Cellar/lua/5.4.7/include/lua5.4
 INSTALL_DIR ?= ~/.local/lib/wireshark/plugins
 EXTENSION ?= so
 

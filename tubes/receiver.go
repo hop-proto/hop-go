@@ -3,11 +3,12 @@ package tubes
 import (
 	"bytes"
 	"container/heap"
+	"encoding/binary"
+	"fmt"
+	"github.com/sirupsen/logrus"
 	"io"
 	"sync"
 	"sync/atomic"
-
-	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/common"
 )
@@ -217,6 +218,9 @@ func (r *receiver) receive(p *frame) (bool, error) {
 		})
 	}
 
+	// TODO (paul) to put back
+	//logrus.Debugf("N° %v, start %v, end %v", frameNo, windowStart, windowEnd)
+
 	if (p.dataLength > 0 || p.flags.FIN) && frameInBounds(windowStart, windowEnd, frameNo) {
 		heap.Push(&r.fragments, &pqItem{
 			value:    p.data,
@@ -242,6 +246,38 @@ func (r *receiver) receive(p *frame) (bool, error) {
 
 	fin := r.processIntoBuffer()
 	return fin, nil
+}
+
+func (r *receiver) processAckData(data []byte) error {
+	if len(data)%4 != 0 {
+		return fmt.Errorf("invalid ACK data length: %d", len(data))
+	}
+
+	for i := 0; i < len(data); i += 4 {
+		ackFrameNo := binary.BigEndian.Uint32(data[i : i+4])
+		if ackFrameNo >= uint32(r.windowStart) {
+			r.windowStart = uint64(ackFrameNo) + 1
+		}
+	}
+
+	// Optionally clean up acknowledged fragments from the queue
+	r.cleanupFragments()
+
+	if common.Debug {
+		r.log.WithField("newWindowStart", r.windowStart).Trace("updated window start from ACK")
+	}
+
+	return nil
+}
+
+func (r *receiver) cleanupFragments() {
+	for r.fragments.Len() > 0 {
+		item := r.fragments[0] // Access the smallest item directly
+		if item.priority >= r.windowStart {
+			break
+		}
+		heap.Pop(&r.fragments) // Remove outdated fragment
+	}
 }
 
 // Close causes future reads to return io.EOF

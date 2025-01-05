@@ -128,6 +128,15 @@ func (s *sender) write(b []byte) (int, error) {
 	return len(b), nil
 }
 
+func (s *sender) sendAckPacket(pkt *frame) {
+	if s.closed.Load() {
+		return
+	}
+
+	// Queue the ACK packet for sending
+	s.sendQueue <- pkt
+}
+
 func (s *sender) recvAck(ackNo uint32) error {
 	// Stop the ticker since we're about to do a new RTT measurement.
 	s.RetransmitTicker.Stop()
@@ -190,11 +199,23 @@ func (s *sender) sendEmptyPacket() {
 	if s.closed.Load() {
 		return
 	}
+
+	// Serialize frame numbers into the packet data
+	//ackData := make([]byte, 4*len(ackFrameNumbers))
+	/*
+		for i, frameNo := range ackFrameNumbers {
+			binary.BigEndian.PutUint32(ackData[i*4:(i+1)*4], frameNo)
+		}*/
+
 	pkt := &frame{
 		dataLength: 0,
 		frameNo:    s.frameNo,
 		data:       []byte{},
 	}
+
+	// TODO (paul) put back
+	//logrus.Debugf("I send a ack %v", pkt.frameNo)
+
 	s.sendQueue <- pkt
 }
 

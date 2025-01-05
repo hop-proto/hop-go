@@ -38,6 +38,7 @@ type TranscriptEntry struct {
 	ExplicitDecrypt bool
 }
 
+// TODO (paul) exessive usage
 var reTranscript = regexp.MustCompile(`([\w-]+)\[(\d*)\]:(.*)$`)
 
 // ParseTestTranscript parses a transcript from a reference implementation for

@@ -3,7 +3,7 @@ FROM golang:1.23
 WORKDIR /app
 
 RUN apt-get update -y
-RUN apt-get install -y delve sudo
+RUN apt-get install -y delve sudo rsync
 
 RUN useradd -m user -s /bin/bash -g sudo -p "" 
 
