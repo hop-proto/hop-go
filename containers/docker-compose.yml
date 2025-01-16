@@ -109,7 +109,7 @@ services:
   pf_service:
     image: python:3.9-slim
     container_name: pf_service
-    command: python -m http.server 8080
+    command: python -m http.server 8080 --bind 0.0.0.0
     ports:
       - "8080:8080"
     networks:

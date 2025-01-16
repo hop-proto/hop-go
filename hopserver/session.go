@@ -17,6 +17,7 @@ import (
 	"hop.computer/hop/common"
 	"hop.computer/hop/keys"
 	"hop.computer/hop/pkg/thunks"
+	"hop.computer/hop/portforwarding"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
 	"hop.computer/hop/userauth"
@@ -40,6 +41,8 @@ type hopSession struct {
 
 	usingAuthGrant    bool // true if client authenticated with authgrant
 	authorizedActions []authgrants.Authgrant
+
+	forward portforwarding.Forward
 }
 
 func (sess *hopSession) checkAuthorization() bool {
@@ -123,10 +126,10 @@ func (sess *hopSession) start() {
 			go sess.startCodex(r, r2)
 		case common.AuthGrantTube:
 			go sess.handleAgc(r)
-		case common.RemotePFTube:
-			panic("unimplemented: remote pf")
-		case common.LocalPFTube:
-			panic("unimplmented: local pf")
+		case common.PFControlTube:
+			go sess.startPF(r)
+		case common.PFTube:
+			go sess.handlePF(r)
 		case common.WinSizeTube:
 			go sess.startSizeTube(r)
 		default:
@@ -304,4 +307,12 @@ func (sess *hopSession) startSizeTube(ch *tubes.Reliable) {
 
 func (sess *hopSession) newAuthGrantTube() (*tubes.Reliable, error) {
 	return sess.tubeMuxer.CreateReliableTube(common.AuthGrantTube)
+}
+
+func (sess *hopSession) startPF(ch *tubes.Reliable) {
+	portforwarding.StartPF(ch, &sess.forward)
+}
+
+func (sess *hopSession) handlePF(ch *tubes.Reliable) {
+	portforwarding.HandlePF(ch, &sess.forward)
 }
