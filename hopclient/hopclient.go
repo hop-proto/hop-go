@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hop.computer/hop/portforwarding"
 	"io/fs"
 	"net"
 	"net/http"
@@ -46,6 +47,8 @@ type HopClient struct { // nolint:maligned
 
 	TubeMuxer *tubes.Muxer
 	ExecTube  *codex.ExecTube
+
+	forwardingTable *portforwarding.FwdMapping
 
 	hostconfig        *config.HostConfig
 	RawConfigFilePath string
@@ -233,6 +236,9 @@ func (c *HopClient) Start() error {
 		return ErrClientStartingExecTube
 	}
 
+	// TODO (paul): Add a condition to initiate port forwarding based on the client flags
+	go portforwarding.InitiatePFClient(c.hostconfig.RemoteFwds, c.TubeMuxer)
+
 	// handle incoming tubes
 	go c.HandleTubes()
 	c.Wait() // client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
@@ -364,8 +370,6 @@ func (c *HopClient) HandleTubes() {
 			proxyQueue.lock.Unlock()
 			proxyQueue.cv.Broadcast()
 			logrus.Infof("session muxer broadcasted that unreliable tube is here: %x", u.GetID())
-		} else if t.Type() == common.RemotePFTube {
-			panic("client RemotePFTubes: unimplemented")
 		} else {
 			// Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
 			e := t.Close()
