@@ -192,6 +192,7 @@ func StartPF(ch *tubes.Reliable, forward *Forward) {
 // and proxy the connection to the PF tube. The PFTube and
 // the established connections are closed in proxy.ReliableProxy
 func HandlePF(ch *tubes.Reliable, forward *Forward) {
+	logrus.Infof("PF: server handles a new port forwarding %v", forward.connect.addr)
 	conn, err := net.Dial("tcp", forward.connect.addr)
 	if err != nil {
 		logrus.Error("PF: couldn't connect to local addr: ", err)
@@ -199,10 +200,12 @@ func HandlePF(ch *tubes.Reliable, forward *Forward) {
 		return
 	}
 
+	// TODO (paul): after the second request sent by the client,
+	// there is a broken pipe between the pf service and the server
+	wg := proxy.ReliableProxy(conn, ch)
 	go func() {
-		if err := proxy.ReliableProxy(conn, ch); err != nil {
-			logrus.Errorf("PF: error in proxying: %v", err)
-		}
+		wg.Wait()
+		logrus.Infof("PF: Closing tube and connection to %v", forward.connect.addr)
 	}()
 }
 
@@ -260,11 +263,13 @@ func InitiatePFClient(remoteFwds *Forward, muxer *tubes.Muxer) {
 			log.Fatal(err)
 		}
 		logrus.Infof("Connection accepted from %s", local.RemoteAddr())
-		go func(conn net.Conn) {
-			proxy.ReliableProxy(conn, reliableProxyTube)
-		}(local)
-	}
 
+		wg := proxy.ReliableProxy(local, reliableProxyTube)
+		go func() {
+			wg.Wait()
+			logrus.Infof("PF: Closing tube and connection to %v", local.RemoteAddr())
+		}()
+	}
 }
 
 // TODO (paul) this function is not used, can be removed
