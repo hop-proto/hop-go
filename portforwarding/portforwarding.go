@@ -189,7 +189,8 @@ func StartPF(ch *tubes.Reliable, forward *Forward) {
 }
 
 // HandlePF create a connection with the requested service
-// and proxy the connection to the PF tube
+// and proxy the connection to the PF tube. The PFTube and
+// the established connections are closed in proxy.ReliableProxy
 func HandlePF(ch *tubes.Reliable, forward *Forward) {
 	conn, err := net.Dial("tcp", forward.connect.addr)
 	if err != nil {
@@ -198,13 +199,7 @@ func HandlePF(ch *tubes.Reliable, forward *Forward) {
 		return
 	}
 
-	// TODO (paul): close properly the connection
-	//defer conn.Close()
-
 	go func() {
-		// TODO (paul): close the connection
-		//defer ch.Close()
-
 		if err := proxy.ReliableProxy(conn, ch); err != nil {
 			logrus.Errorf("PF: error in proxying: %v", err)
 		}
@@ -222,8 +217,7 @@ func InitiatePFClient(remoteFwds *Forward, muxer *tubes.Muxer) {
 		return
 	}
 
-	// TODO (paul) close the connection
-	//defer pfControlTube.Close()
+	defer pfControlTube.Close()
 
 	byteAddr := toBytes(&remoteFwds.connect)
 	length := len(byteAddr)
@@ -250,17 +244,15 @@ func InitiatePFClient(remoteFwds *Forward, muxer *tubes.Muxer) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// TODO (paul): close the connection
-	//defer listener.Close()
+	defer listener.Close()
 
+	// There is no need to close the PFTube and the local connection
+	// as they are closed in proxy.ReliableProxy
 	reliableProxyTube, err := muxer.CreateReliableTube(common.PFTube)
 	if err != nil {
 		logrus.Errorf("PF: error making reliable PF tube with : %v", err)
 		return
 	}
-
-	// TODO (paul): close the connection
-	//defer reliableProxyTube.Close()
 
 	for {
 		local, err := listener.Accept()
@@ -269,8 +261,6 @@ func InitiatePFClient(remoteFwds *Forward, muxer *tubes.Muxer) {
 		}
 		logrus.Infof("Connection accepted from %s", local.RemoteAddr())
 		go func(conn net.Conn) {
-			// TODO (paul) close the connection
-			//defer conn.Close()
 			proxy.ReliableProxy(conn, reliableProxyTube)
 		}(local)
 	}
