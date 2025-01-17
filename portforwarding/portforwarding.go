@@ -188,13 +188,13 @@ func StartPF(ch *tubes.Reliable, forward *Forward) {
 	return
 }
 
-// HanlePF is a function server side to dial the remote service
-// and proxy it to the reliable tube initiated by the client
+// HandlePF create a connection with the requested service
+// and proxy the connection to the PF tube
 func HandlePF(ch *tubes.Reliable, forward *Forward) {
 	conn, err := net.Dial("tcp", forward.connect.addr)
 	if err != nil {
 		logrus.Error("PF: couldn't connect to local addr: ", err)
-		ch.Close() // Close the channel on error
+		ch.Close()
 		return
 	}
 
@@ -203,7 +203,7 @@ func HandlePF(ch *tubes.Reliable, forward *Forward) {
 
 	go func() {
 		// TODO (paul): close the connection
-		// defer ch.Close()
+		//defer ch.Close()
 
 		if err := proxy.ReliableProxy(conn, ch); err != nil {
 			logrus.Errorf("PF: error in proxying: %v", err)
@@ -388,7 +388,7 @@ func ParseForward(arg string) (forward *Forward, err error) {
 			logrus.Error("end less than or eq to 0")
 			return nil, ErrInvalidPFArgs
 		}
-		parts = append(parts, arg[1:end])
+		parts = append(parts, arg[0:end+1])
 		if arg[end+1] != ':' { //must be followed by a colon to have a port number at a minimum
 			logrus.Errorf("next char is not a colon: %v", arg)
 			return nil, ErrInvalidPFArgs
@@ -410,7 +410,7 @@ func ParseForward(arg string) (forward *Forward, err error) {
 			rawParts := strings.Split(arg[:start-1], ":")
 			parts = append(parts, rawParts...)
 		}
-		parts = append(parts, arg[start+1:end])
+		parts = append(parts, arg[start:end+1])
 		if arg[end+1] != ':' { //must be followed by a colon to have a port number at a minimum
 			return nil, ErrInvalidPFArgs
 		}
@@ -434,8 +434,8 @@ func ParseForward(arg string) (forward *Forward, err error) {
 		parts = parts[1:]
 	}
 	if checkPath(parts[len(parts)-1]) {
-		forward.listen.addr = parts[len(parts)-1]
-		forward.listen.netType = pfUNIX
+		forward.connect.addr = parts[len(parts)-1]
+		forward.connect.netType = pfUNIX
 		parts = parts[:len(parts)-1]
 	}
 	switch len(parts) {
