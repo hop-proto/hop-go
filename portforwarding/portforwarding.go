@@ -112,54 +112,7 @@ func writeFlags(w io.Writer, start, notify bool) (err error) {
 	return err
 }
 
-// TODO (paul): unused, can be removed
-func ClientLocalPF(local, remote *Addr, muxer *tubes.Muxer) {
-	// only supports tcp right now
-	ln, err := net.Listen("tcp", local.addr)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer ln.Close()
-
-	for {
-		conn, err := ln.Accept()
-
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		tube, err := muxer.CreateReliableTube(common.PFTube)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		tube.Write(toBytes(remote))
-
-		go func() {
-			io.Copy(conn, tube)
-			conn.Close()
-		}()
-		go func() {
-			io.Copy(tube, conn)
-			tube.Close()
-		}()
-	}
-}
-
 func StartPF(ch *tubes.Reliable, forward *Forward) {
-
-	/*
-		remote, err := readPacket(ch)
-		if nil != remote {
-			logrus.Debugf("paul this is the remote address, %v", remote.addr)
-		}
-		if err != nil {
-			ch.Write([]byte{failure})
-			ch.Close()
-			return
-		}
-
-	*/
 
 	local, err := readPacket(ch)
 
@@ -269,36 +222,6 @@ func InitiatePFClient(remoteFwds *Forward, muxer *tubes.Muxer) {
 			wg.Wait()
 			logrus.Infof("PF: Closing tube and connection to %v", local.RemoteAddr())
 		}()
-	}
-}
-
-// TODO (paul) this function is not used, can be removed
-func clientStartLocalPF(local *Addr, remote *Addr) {
-	listener, err := net.Listen("tcp", local.addr)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer listener.Close()
-	for {
-		// Like ssh -L by default, local connections are handled one at a time.
-		// While one local connection is active in runTunnel, others will be stuck
-		// dialing, waiting for this Accept.
-		_, err := listener.Accept()
-		if err != nil {
-			log.Fatal(err)
-		}
-		// Issue a dial to the remote server on our SSH client; here "localhost"
-		// refers to the remote server.
-		/*
-			tube, err := muxer.CreateReliableTube(common.PFTube)
-			if err != nil {
-				log.Fatal(err)
-			}
-			runTunnel(ln, rt)
-
-		*/
-		// TODO (paul) check why this tunnel is called 10 times
-		//fmt.Println("tunnel established with", local.addr)
 	}
 }
 
