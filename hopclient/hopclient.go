@@ -237,7 +237,13 @@ func (c *HopClient) Start() error {
 	}
 
 	// TODO (paul): Add a condition to initiate port forwarding based on the client flags
-	go portforwarding.InitiatePFClient(c.hostconfig.RemoteFwds, c.TubeMuxer)
+	// if -L then initiatePFClient
+	// if -R then initiate InitiatePFClientRemote
+	if c.hostconfig.RemoteFwds != nil {
+		go portforwarding.InitiatePFClientRemote(c.hostconfig.RemoteFwds, c.TubeMuxer)
+	} else if c.hostconfig.LocalFwds != nil {
+		go portforwarding.InitiatePFClient(c.hostconfig.LocalFwds, c.TubeMuxer)
+	}
 
 	// handle incoming tubes
 	go c.HandleTubes()
@@ -363,6 +369,8 @@ func (c *HopClient) HandleTubes() {
 
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
 			go c.newPrincipalInstanceSetup(r, proxyQueue)
+		} else if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.PFTube {
+			go portforwarding.HandlePF(r, c.hostconfig.RemoteFwds)
 		} else if u, ok := t.(*tubes.Unreliable); ok && u.Type() == common.PrincipalProxyTube && c.hostconfig.IsPrincipal {
 			// add to map and signal waiting processes
 			proxyQueue.lock.Lock()

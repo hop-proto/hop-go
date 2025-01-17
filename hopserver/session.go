@@ -296,7 +296,9 @@ func (sess *hopSession) newAuthGrantTube() (*tubes.Reliable, error) {
 }
 
 func (sess *hopSession) startPF(ch *tubes.Reliable) {
-	portforwarding.StartPF(ch, &sess.forward)
+	// TODO find a way of selecting a remote forwarding
+	// or a local forwarding
+	portforwarding.StartPFRemote(ch, sess.tubeMuxer)
 }
 
 func (sess *hopSession) handlePF(ch *tubes.Reliable) {
