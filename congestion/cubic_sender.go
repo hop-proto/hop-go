@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/quic-go/quic-go/internal/protocol"
-	"github.com/quic-go/quic-go/internal/utils"
-	"github.com/quic-go/quic-go/logging"
+	"hop.computer/hop/congestion/protocol"
 )
 
 const (
@@ -21,7 +19,7 @@ const (
 
 type cubicSender struct {
 	hybridSlowStart HybridSlowStart
-	rttStats        *utils.RTTStats
+	rttStats        *RTTStats
 	cubic           *Cubic
 	pacer           *pacer
 	clock           Clock
@@ -54,20 +52,19 @@ type cubicSender struct {
 	initialMaxCongestionWindow protocol.ByteCount
 
 	maxDatagramSize protocol.ByteCount
-
-	lastState logging.CongestionState
-	tracer    *logging.ConnectionTracer
 }
 
-var _ SendAlgorithm = &cubicSender{}
+var (
+	_ SendAlgorithm               = &cubicSender{}
+	_ SendAlgorithmWithDebugInfos = &cubicSender{}
+)
 
 // NewCubicSender makes a new cubic sender
 func NewCubicSender(
 	clock Clock,
-	rttStats *utils.RTTStats,
+	rttStats *RTTStats,
 	initialMaxDatagramSize protocol.ByteCount,
 	reno bool,
-	tracer *logging.ConnectionTracer,
 ) *cubicSender {
 	return newCubicSender(
 		clock,
@@ -76,18 +73,16 @@ func NewCubicSender(
 		initialMaxDatagramSize,
 		initialCongestionWindow*initialMaxDatagramSize,
 		protocol.MaxCongestionWindowPackets*initialMaxDatagramSize,
-		tracer,
 	)
 }
 
 func newCubicSender(
 	clock Clock,
-	rttStats *utils.RTTStats,
+	rttStats *RTTStats,
 	reno bool,
 	initialMaxDatagramSize,
 	initialCongestionWindow,
 	initialMaxCongestionWindow protocol.ByteCount,
-	tracer *logging.ConnectionTracer,
 ) *cubicSender {
 	c := &cubicSender{
 		rttStats:                   rttStats,
@@ -101,14 +96,9 @@ func newCubicSender(
 		cubic:                      NewCubic(clock),
 		clock:                      clock,
 		reno:                       reno,
-		tracer:                     tracer,
 		maxDatagramSize:            initialMaxDatagramSize,
 	}
 	c.pacer = newPacer(c.BandwidthEstimate)
-	if c.tracer != nil && c.tracer.UpdatedCongestionState != nil {
-		c.lastState = logging.CongestionStateSlowStart
-		c.tracer.UpdatedCongestionState(logging.CongestionStateSlowStart)
-	}
 	return c
 }
 
@@ -165,7 +155,6 @@ func (c *cubicSender) MaybeExitSlowStart() {
 		c.hybridSlowStart.ShouldExitSlowStart(c.rttStats.LatestRTT(), c.rttStats.MinRTT(), c.GetCongestionWindow()/c.maxDatagramSize) {
 		// exit slow start
 		c.slowStartThreshold = c.congestionWindow
-		c.maybeTraceStateChange(logging.CongestionStateCongestionAvoidance)
 	}
 }
 
@@ -192,7 +181,6 @@ func (c *cubicSender) OnCongestionEvent(packetNumber protocol.PacketNumber, lost
 		return
 	}
 	c.lastCutbackExitedSlowstart = c.InSlowStart()
-	c.maybeTraceStateChange(logging.CongestionStateRecovery)
 
 	if c.reno {
 		c.congestionWindow = protocol.ByteCount(float64(c.congestionWindow) * renoBeta)
@@ -221,7 +209,6 @@ func (c *cubicSender) maybeIncreaseCwnd(
 	// the current window.
 	if !c.isCwndLimited(priorInFlight) {
 		c.cubic.OnApplicationLimited()
-		c.maybeTraceStateChange(logging.CongestionStateApplicationLimited)
 		return
 	}
 	if c.congestionWindow >= c.maxCongestionWindow() {
@@ -230,11 +217,9 @@ func (c *cubicSender) maybeIncreaseCwnd(
 	if c.InSlowStart() {
 		// TCP slow start, exponential growth, increase by one for each ACK.
 		c.congestionWindow += c.maxDatagramSize
-		c.maybeTraceStateChange(logging.CongestionStateSlowStart)
 		return
 	}
 	// Congestion avoidance
-	c.maybeTraceStateChange(logging.CongestionStateCongestionAvoidance)
 	if c.reno {
 		// Classic Reno congestion avoidance.
 		c.numAckedPackets++
@@ -290,14 +275,6 @@ func (c *cubicSender) OnConnectionMigration() {
 	c.numAckedPackets = 0
 	c.congestionWindow = c.initialCongestionWindow
 	c.slowStartThreshold = c.initialMaxCongestionWindow
-}
-
-func (c *cubicSender) maybeTraceStateChange(new logging.CongestionState) {
-	if c.tracer == nil || c.tracer.UpdatedCongestionState == nil || new == c.lastState {
-		return
-	}
-	c.tracer.UpdatedCongestionState(new)
-	c.lastState = new
 }
 
 func (c *cubicSender) SetMaxDatagramSize(s protocol.ByteCount) {

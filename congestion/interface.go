@@ -1,20 +1,30 @@
-// Package congestion is adapted from quic-go, which is distributed under the MIT license
-// see https://github.com/quic-go/quic-go
+// Package congestion is copied from github.com/quic-go/quic-go/internal/congestion.
+// with slight modifications for compatibility
 package congestion
 
 import (
 	"time"
+
+	"hop.computer/hop/congestion/protocol"
 )
 
 // A SendAlgorithm performs congestion control
 type SendAlgorithm interface {
-	TimeUntilSend(bytesInFlight int64) time.Time
+	TimeUntilSend(bytesInFlight protocol.ByteCount) time.Time
 	HasPacingBudget(now time.Time) bool
-	OnPacketSent(sentTime time.Time, bytesInFlight int64, packetNumber int64, bytes int64, isRetransmittable bool)
-	CanSend(bytesInFlight int64) bool
+	OnPacketSent(sentTime time.Time, bytesInFlight protocol.ByteCount, packetNumber protocol.PacketNumber, bytes protocol.ByteCount, isRetransmittable bool)
+	CanSend(bytesInFlight protocol.ByteCount) bool
 	MaybeExitSlowStart()
-	OnPacketAcked(number int64, ackedBytes int64, priorInFlight int64, eventTime time.Time)
-	OnCongestionEvent(number int64, lostBytes int64, priorInFlight int64)
+	OnPacketAcked(number protocol.PacketNumber, ackedBytes protocol.ByteCount, priorInFlight protocol.ByteCount, eventTime time.Time)
+	OnCongestionEvent(number protocol.PacketNumber, lostBytes protocol.ByteCount, priorInFlight protocol.ByteCount)
 	OnRetransmissionTimeout(packetsRetransmitted bool)
-	SetMaxDatagramSize(int64)
+	SetMaxDatagramSize(protocol.ByteCount)
+}
+
+// A SendAlgorithmWithDebugInfos is a SendAlgorithm that exposes some debug infos
+type SendAlgorithmWithDebugInfos interface {
+	SendAlgorithm
+	InSlowStart() bool
+	InRecovery() bool
+	GetCongestionWindow() protocol.ByteCount
 }
