@@ -9,6 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/common"
+	"hop.computer/hop/congestion"
 )
 
 type sender struct {
@@ -33,6 +34,13 @@ type sender struct {
 		time.Time
 	}
 
+	// The algorithm for managing congestion control
+	congestion    congestion.SendAlgorithm
+	rttStats      *congestion.RTTStats
+	bytesInFlight int64
+	// The number of times a PTO has been sent without receiving an ack.
+	ptoCount int64
+
 	// The current buffer of unacknowledged bytes from the sender.
 	// A byte slice works well here because:
 	// 	(1) we need to accommodate resending fragments of potentially varying window sizes
@@ -42,17 +50,8 @@ type sender struct {
 	// TODO(hosono) ideally, we would have a maximum buffer size beyond with reads would block
 	buffer []byte
 
-	// Retransmission TimeOut.
-	RetransmitTicker *time.Ticker
-
-	// RTT is the estimate of the round trip time to the remote host
-	RTT time.Duration
-
 	// the time after which writes will expire
 	deadline time.Time
-
-	// signals that more data be sent
-	windowOpen chan struct{}
 
 	sendQueue chan *frame
 
@@ -61,28 +60,22 @@ type sender struct {
 }
 
 func newSender(log *logrus.Entry) *sender {
-	return &sender{
+	s := &sender{
 		ackNo:   1,
 		frameNo: 1,
 		buffer:  make([]byte, 0),
 		// finSent defaults to false
-		RetransmitTicker: time.NewTicker(initialRTT),
-		RTT:              initialRTT,
-		windowSize:       windowSize,
-		windowOpen:       make(chan struct{}, 1),
-		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
-		log:              log.WithField("sender", ""),
+		windowSize: windowSize,
+		sendQueue:  make(chan *frame, 1024), // TODO(hosono) make this size 0
+		log:        log.WithField("sender", ""),
+		rttStats:   &congestion.RTTStats{},
 	}
+	s.congestion = congestion.NewCubicSender(congestion.DefaultClock{}, s.rttStats, int64(MaxFrameDataLength), true)
+	return s
 }
 
 func (s *sender) unAckedFramesRemaining() int {
 	return len(s.frames)
-}
-
-// Reset the retransmission timer to 9/8 of the measured RTT
-// 9/8 comes from RFC 9002 section 6.1.2
-func (s *sender) resetRetransmitTicker() {
-	s.RetransmitTicker.Reset((s.RTT / 8) * 9)
 }
 
 func (s *sender) write(b []byte) (int, error) {
@@ -96,6 +89,7 @@ func (s *sender) write(b []byte) (int, error) {
 
 	startFrame := len(s.frames)
 
+	now := time.Now()
 	for len(s.buffer) > 0 {
 		dataLength := MaxFrameDataLength
 		if len(s.buffer) < int(dataLength) {
@@ -112,7 +106,7 @@ func (s *sender) write(b []byte) (int, error) {
 		s.frames = append(s.frames, struct {
 			*frame
 			time.Time
-		}{&pkt, time.Time{}})
+		}{&pkt, now})
 	}
 
 	numFrames := s.framesToSend(false, startFrame)
@@ -124,45 +118,52 @@ func (s *sender) write(b []byte) (int, error) {
 		s.frames[startFrame+i].Time = time.Now()
 	}
 
-	s.resetRetransmitTicker()
 	return len(b), nil
 }
 
-func (s *sender) recvAck(ackNo uint32) error {
-	// Stop the ticker since we're about to do a new RTT measurement.
-	s.RetransmitTicker.Stop()
+func (s *sender) getScaledPTO() time.Duration {
+	pto := s.rttStats.PTO(false) << s.ptoCount
+	if pto > maxPTODuration || pto <= 0 {
+		return maxPTODuration
+	}
+	return pto
+}
 
+func (s *sender) getPTOTime() time.Time {
+	if len(s.frames) == 0 {
+		return time.Time{}
+	}
+	return s.frames[len(s.frames)-1].Time.Add(s.getScaledPTO())
+}
+
+func (s *sender) setLossDetectionTimer(now time.Time) {
+	s.alarm = s.getPTOTime()
+}
+
+func (s *sender) recvAck(ackNo uint32) error {
 	oldAckNo := s.ackNo
 	newAckNo := uint64(ackNo)
 	if newAckNo < s.ackNo && (newAckNo+(1<<32)-s.ackNo <= uint64(s.windowSize)) { // wrap around
 		newAckNo = newAckNo + (1 << 32)
 	}
 
-	windowOpen := s.ackNo < newAckNo
-
+	now := time.Now()
+	if s.ackNo < newAckNo {
+		s.congestion.MaybeExitSlowStart()
+	}
 	for s.ackNo < newAckNo {
-		if !s.frames[0].Time.Equal(time.Time{}) && ackNo == s.frames[0].frame.frameNo+1 {
-			oldRTT := s.RTT
-			measuredRTT := time.Since(s.frames[0].Time)
-
-			// This formula comes from RFC 9002 section 5.3
-			s.RTT = (s.RTT/8)*7 + measuredRTT/8
-
-			if s.RTT < minRTT {
-				s.RTT = minRTT
-			}
-			if common.Debug {
-				s.log.WithFields(logrus.Fields{
-					"oldRTT":      oldRTT,
-					"measuredRTT": measuredRTT,
-					"newRTT":      s.RTT,
-				}).Trace("updated rtt")
-			}
-		}
+		pkt := s.frames[0].frame
+		sendTime := s.frames[0].Time
+		s.rttStats.UpdateRTT(now.Sub(sendTime), 0)
+		// TODO(hosono) unwrap frameno
+		s.congestion.OnPacketAcked(int64(pkt.frameNo), int64(pkt.dataLength), s.bytesInFlight, now)
+		s.bytesInFlight -= int64(s.frames[0].dataLength)
 		s.ackNo++
 		s.unacked--
 		s.frames = s.frames[1:]
 	}
+
+	s.ptoCount = 0
 
 	if common.Debug {
 		s.log.WithFields(logrus.Fields{
@@ -170,18 +171,6 @@ func (s *sender) recvAck(ackNo uint32) error {
 			"new ackNo": newAckNo,
 		}).Trace("updated ackNo")
 	}
-
-	// Only fill the window if new space has really opened up
-	if windowOpen {
-		select {
-		case s.windowOpen <- struct{}{}:
-			break
-		default:
-			break
-		}
-	}
-
-	s.resetRetransmitTicker()
 
 	return nil
 }

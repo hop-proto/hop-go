@@ -114,6 +114,9 @@ func (r *Reliable) sendOneFrame(pkt *frame) {
 	pkt.flags.REL = true
 	r.sendQueue <- pkt.toBytes()
 
+	r.sender.bytesInFlight += int64(pkt.dataLength)
+	r.sender.congestion.OnPacketSent(time.Now(), r.sender.bytesInFlight, int64(pkt.frameNo), int64(pkt.dataLength), true)
+
 	if common.Debug {
 		r.log.WithFields(logrus.Fields{
 			"frameno": pkt.frameNo,
@@ -128,42 +131,19 @@ func (r *Reliable) sendOneFrame(pkt *frame) {
 // send continuously reads packet from the sends and hands them to the muxer
 func (r *Reliable) send() {
 	var pkt *frame
+
 	ok := true
 	for ok {
-		select {
-		case <-r.sender.RetransmitTicker.C:
-			r.l.Lock()
-
-			numFrames := r.sender.framesToSend(true, 0)
-
-			r.log.WithField("numFrames", numFrames).Trace("retransmitting")
-			for i := 0; i < numFrames; i++ {
-				r.sendOneFrame(r.sender.frames[i].frame)
-				r.sender.frames[i].Time = time.Now()
-				r.sender.unacked++
-			}
-
-			// Back off rtt since we failed to get an ACK
-			r.sender.RTT *= 2
-			r.sender.resetRetransmitTicker()
-
-			r.l.Unlock()
-		case <-r.sender.windowOpen:
-			r.l.Lock()
-			numFrames := r.sender.framesToSend(false, 0)
-			r.log.WithField("numFrames", numFrames).Trace("window open")
-			for i := 0; i < numFrames; i++ {
-				r.sendOneFrame(r.sender.frames[i].frame)
-				r.sender.frames[i].Time = time.Now()
-				r.sender.unacked++
-			}
-			r.l.Unlock()
-		case pkt, ok = <-r.sender.sendQueue:
-			if !ok {
-				break
-			}
-			r.sendOneFrame(pkt)
+		pkt, ok = <-r.sender.sendQueue
+		if !ok {
+			break
 		}
+
+		now := time.Now()
+		if deadline := r.sender.congestion.TimeUntilSend(r.sender.bytesInFlight); deadline.After(now) {
+			<-time.NewTimer(deadline.Sub(now)).C
+		}
+		r.sendOneFrame(pkt)
 	}
 	r.log.Debug("send ended")
 	close(r.sendDone)
@@ -250,7 +230,7 @@ func (r *Reliable) receive(pkt *frame) error {
 // +checklocks:r.l
 func (r *Reliable) enterLastAckState() {
 	r.tubeState = lastAck
-	r.lastAckTimer = time.AfterFunc(4*r.sender.RTT, func() {
+	r.lastAckTimer = time.AfterFunc(4*r.sender.rttStats.LatestRTT(), func() {
 		r.l.Lock()
 		defer r.l.Unlock()
 		r.log.Warn("timer expired without getting ACK of FIN. going from lastAck to closed")
