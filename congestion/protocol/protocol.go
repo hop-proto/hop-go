@@ -12,12 +12,12 @@ type PacketNumber int64
 // InitialPacketSize is the initial (before Path MTU discovery) maximum packet size used.
 const InitialPacketSize = 1200
 
-const InvalidPacketNumber PacketNumber = -1
+const InvalidPacketNumber int64 = -1
 
 // MaxCongestionWindowPackets is the maximum congestion window in packet.
 const MaxCongestionWindowPackets = 10000
 
-const MaxByteCount = ByteCount(1<<62 - 1)
+const MaxByteCount int64 = 1<<62 - 1
 
 // MinPacingDelay is the minimum duration that is used for packet pacing
 // If the packet packing frequency is higher, multiple packets might be sent at once.

@@ -4,19 +4,17 @@ package congestion
 
 import (
 	"time"
-
-	"hop.computer/hop/congestion/protocol"
 )
 
 // A SendAlgorithm performs congestion control
 type SendAlgorithm interface {
-	TimeUntilSend(bytesInFlight protocol.ByteCount) time.Time
+	TimeUntilSend(bytesInFlight int64) time.Time
 	HasPacingBudget(now time.Time) bool
-	OnPacketSent(sentTime time.Time, bytesInFlight protocol.ByteCount, packetNumber protocol.PacketNumber, bytes protocol.ByteCount, isRetransmittable bool)
-	CanSend(bytesInFlight protocol.ByteCount) bool
+	OnPacketSent(sentTime time.Time, bytesInFlight int64, packetNumber int64, bytes int64, isRetransmittable bool)
+	CanSend(bytesInFlight int64) bool
 	MaybeExitSlowStart()
-	OnPacketAcked(number protocol.PacketNumber, ackedBytes protocol.ByteCount, priorInFlight protocol.ByteCount, eventTime time.Time)
-	OnCongestionEvent(number protocol.PacketNumber, lostBytes protocol.ByteCount, priorInFlight protocol.ByteCount)
+	OnPacketAcked(number int64, ackedBytes int64, priorInFlight int64, eventTime time.Time)
+	OnCongestionEvent(number int64, lostBytes int64, priorInFlight int64)
 	OnRetransmissionTimeout(packetsRetransmitted bool)
-	SetMaxDatagramSize(protocol.ByteCount)
+	SetMaxDatagramSize(int64)
 }

@@ -21,7 +21,7 @@ const (
 	cubeCongestionWindowScale = 410
 	cubeFactor                = 1 << cubeScale / cubeCongestionWindowScale / maxDatagramSize
 	// TODO: when re-enabling cubic, make sure to use the actual packet size here
-	maxDatagramSize = protocol.ByteCount(protocol.InitialPacketSize)
+	maxDatagramSize = int64(protocol.InitialPacketSize)
 )
 
 const defaultNumConnections = 1
@@ -47,22 +47,22 @@ type Cubic struct {
 	// Max congestion window used just before last loss event.
 	// Note: to improve fairness to other streams an additional back off is
 	// applied to this value if the new value is below our latest value.
-	lastMaxCongestionWindow protocol.ByteCount
+	lastMaxCongestionWindow int64
 
 	// Number of acked bytes since the cycle started (epoch).
-	ackedBytesCount protocol.ByteCount
+	ackedBytesCount int64
 
 	// TCP Reno equivalent congestion window in packets.
-	estimatedTCPcongestionWindow protocol.ByteCount
+	estimatedTCPcongestionWindow int64
 
 	// Origin point of cubic function.
-	originPointCongestionWindow protocol.ByteCount
+	originPointCongestionWindow int64
 
 	// Time to origin point of cubic function in 2^10 fractions of a second.
 	timeToOriginPoint uint32
 
 	// Last congestion window in packets computed by cubic function.
-	lastTargetCongestionWindow protocol.ByteCount
+	lastTargetCongestionWindow int64
 }
 
 // NewCubic returns a new Cubic instance
@@ -127,16 +127,16 @@ func (c *Cubic) OnApplicationLimited() {
 // CongestionWindowAfterPacketLoss computes a new congestion window to use after
 // a loss event. Returns the new congestion window in packets. The new
 // congestion window is a multiplicative decrease of our current window.
-func (c *Cubic) CongestionWindowAfterPacketLoss(currentCongestionWindow protocol.ByteCount) protocol.ByteCount {
+func (c *Cubic) CongestionWindowAfterPacketLoss(currentCongestionWindow int64) int64 {
 	if currentCongestionWindow+maxDatagramSize < c.lastMaxCongestionWindow {
 		// We never reached the old max, so assume we are competing with another
 		// flow. Use our extra back off factor to allow the other flow to go up.
-		c.lastMaxCongestionWindow = protocol.ByteCount(c.betaLastMax() * float32(currentCongestionWindow))
+		c.lastMaxCongestionWindow = int64(c.betaLastMax() * float32(currentCongestionWindow))
 	} else {
 		c.lastMaxCongestionWindow = currentCongestionWindow
 	}
 	c.epoch = time.Time{} // Reset time.
-	return protocol.ByteCount(float32(currentCongestionWindow) * c.beta())
+	return int64(float32(currentCongestionWindow) * c.beta())
 }
 
 // CongestionWindowAfterAck computes a new congestion window to use after a received ACK.
@@ -144,11 +144,11 @@ func (c *Cubic) CongestionWindowAfterPacketLoss(currentCongestionWindow protocol
 // follows a cubic function that depends on the time passed since last
 // packet loss.
 func (c *Cubic) CongestionWindowAfterAck(
-	ackedBytes protocol.ByteCount,
-	currentCongestionWindow protocol.ByteCount,
+	ackedBytes int64,
+	currentCongestionWindow int64,
 	delayMin time.Duration,
 	eventTime time.Time,
-) protocol.ByteCount {
+) int64 {
 	c.ackedBytesCount += ackedBytes
 
 	if c.epoch.IsZero() {
@@ -178,8 +178,8 @@ func (c *Cubic) CongestionWindowAfterAck(
 		offset = -offset
 	}
 
-	deltaCongestionWindow := protocol.ByteCount(cubeCongestionWindowScale*offset*offset*offset) * maxDatagramSize >> cubeScale
-	var targetCongestionWindow protocol.ByteCount
+	deltaCongestionWindow := cubeCongestionWindowScale * offset * offset * offset * maxDatagramSize >> cubeScale
+	var targetCongestionWindow int64
 	if elapsedTime > int64(c.timeToOriginPoint) {
 		targetCongestionWindow = c.originPointCongestionWindow + deltaCongestionWindow
 	} else {
@@ -193,7 +193,7 @@ func (c *Cubic) CongestionWindowAfterAck(
 	// congestion windows (less than 25), the formula below will
 	// increase slightly slower than linearly per estimated tcp window
 	// of bytes.
-	c.estimatedTCPcongestionWindow += protocol.ByteCount(float32(c.ackedBytesCount) * c.alpha() * float32(maxDatagramSize) / float32(c.estimatedTCPcongestionWindow))
+	c.estimatedTCPcongestionWindow += int64(float32(c.ackedBytesCount) * c.alpha() * float32(maxDatagramSize) / float32(c.estimatedTCPcongestionWindow))
 	c.ackedBytesCount = 0
 
 	// We have a new cubic congestion window.

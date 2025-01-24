@@ -3,8 +3,6 @@ package congestion
 import (
 	"math"
 	"time"
-
-	"hop.computer/hop/congestion/protocol"
 )
 
 // Bandwidth of a connection
@@ -20,6 +18,6 @@ const (
 )
 
 // BandwidthFromDelta calculates the bandwidth from a number of bytes and a time delta
-func BandwidthFromDelta(bytes protocol.ByteCount, delta time.Duration) Bandwidth {
+func BandwidthFromDelta(bytes int64, delta time.Duration) Bandwidth {
 	return Bandwidth(bytes) * Bandwidth(time.Second) / Bandwidth(delta) * BytesPerSecond
 }

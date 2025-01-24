@@ -10,8 +10,8 @@ const maxBurstSizePackets = 10
 
 // The pacer implements a token bucket pacing algorithm.
 type pacer struct {
-	budgetAtLastSent  protocol.ByteCount
-	maxDatagramSize   protocol.ByteCount
+	budgetAtLastSent  int64
+	maxDatagramSize   int64
 	lastSentTime      time.Time
 	adjustedBandwidth func() uint64 // in bytes/s
 }
@@ -33,7 +33,7 @@ func newPacer(getBandwidth func() Bandwidth) *pacer {
 	return p
 }
 
-func (p *pacer) SentPacket(sendTime time.Time, size protocol.ByteCount) {
+func (p *pacer) SentPacket(sendTime time.Time, size int64) {
 	budget := p.Budget(sendTime)
 	if size >= budget {
 		p.budgetAtLastSent = 0
@@ -43,20 +43,20 @@ func (p *pacer) SentPacket(sendTime time.Time, size protocol.ByteCount) {
 	p.lastSentTime = sendTime
 }
 
-func (p *pacer) Budget(now time.Time) protocol.ByteCount {
+func (p *pacer) Budget(now time.Time) int64 {
 	if p.lastSentTime.IsZero() {
 		return p.maxBurstSize()
 	}
-	budget := p.budgetAtLastSent + (protocol.ByteCount(p.adjustedBandwidth())*protocol.ByteCount(now.Sub(p.lastSentTime).Nanoseconds()))/1e9
+	budget := p.budgetAtLastSent + (int64(p.adjustedBandwidth())*now.Sub(p.lastSentTime).Nanoseconds())/1e9
 	if budget < 0 { // protect against overflows
 		budget = protocol.MaxByteCount
 	}
 	return min(p.maxBurstSize(), budget)
 }
 
-func (p *pacer) maxBurstSize() protocol.ByteCount {
+func (p *pacer) maxBurstSize() int64 {
 	return max(
-		protocol.ByteCount(uint64((protocol.MinPacingDelay+protocol.TimerGranularity).Nanoseconds())*p.adjustedBandwidth())/1e9,
+		int64(uint64((protocol.MinPacingDelay+protocol.TimerGranularity).Nanoseconds())*p.adjustedBandwidth())/1e9,
 		maxBurstSizePackets*p.maxDatagramSize,
 	)
 }
@@ -79,6 +79,6 @@ func (p *pacer) TimeUntilSend() time.Time {
 	return p.lastSentTime.Add(max(protocol.MinPacingDelay, time.Duration(d)*time.Nanosecond))
 }
 
-func (p *pacer) SetMaxDatagramSize(s protocol.ByteCount) {
+func (p *pacer) SetMaxDatagramSize(s int64) {
 	p.maxDatagramSize = s
 }
