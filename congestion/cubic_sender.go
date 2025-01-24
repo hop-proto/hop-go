@@ -54,10 +54,7 @@ type cubicSender struct {
 	maxDatagramSize protocol.ByteCount
 }
 
-var (
-	_ SendAlgorithm               = &cubicSender{}
-	_ SendAlgorithmWithDebugInfos = &cubicSender{}
-)
+var _ SendAlgorithm = &cubicSender{}
 
 // NewCubicSender makes a new cubic sender
 func NewCubicSender(
