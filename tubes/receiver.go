@@ -120,6 +120,8 @@ func (r *receiver) processIntoBuffer() bool {
 	return fin
 }
 
+// TODO (paul) do we need to read from the buffer even if
+// the packet is not stored / processed (out of bounds/not the right priority?
 func (r *receiver) read(buf []byte) (int, error) {
 	r.m.Lock()
 	if r.buffer.Len() == 0 && !r.closed.Load() {

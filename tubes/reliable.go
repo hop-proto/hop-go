@@ -45,14 +45,15 @@ type Reliable struct {
 	// +checklocks:l
 	tubeState state
 	// +checklocks:l
-	lastAckTimer *time.Timer
-	lastAckSent  atomic.Uint32
-	closed       chan struct{}
-	initRecv     chan struct{}
-	initDone     chan struct{}
-	sendDone     chan struct{}
-	l            sync.Mutex
-	log          *logrus.Entry
+	lastAckTimer  *time.Timer
+	lastAckSent   atomic.Uint32
+	lastFrameSent atomic.Uint32
+	closed        chan struct{}
+	initRecv      chan struct{}
+	initDone      chan struct{}
+	sendDone      chan struct{}
+	l             sync.Mutex
+	log           *logrus.Entry
 }
 
 // Reliable implements net.Conn
@@ -106,13 +107,26 @@ func (r *Reliable) initiate(req bool) {
 	r.l.Unlock()
 }
 
-func (r *Reliable) sendOneFrame(pkt *frame) {
+func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 	pkt.tubeID = r.id
-	pkt.ackNo = r.recvWindow.getAck()
-	r.lastAckSent.Store(pkt.ackNo)
-	pkt.flags.ACK = true
-	pkt.flags.REL = true
-	r.sendQueue <- pkt.toBytes()
+	newAckNo := r.recvWindow.getAck()
+	lastAckNo := r.lastAckSent.Load()
+	lastFrameNo := r.lastFrameSent.Load()
+
+	// Only send the ACK if either the new ACK is greater or the frame number is greater
+	// To not over send the same frame which will be dropped client side
+	// TODO (paul) I can't work or pingpong and retransmission
+	// do i need to ask for rentransmission ack bla bal?
+
+	if (pkt.dataLength == 0 && (newAckNo != lastAckNo || pkt.frameNo != lastFrameNo || retransmission)) || pkt.dataLength > 0 {
+		pkt.ackNo = newAckNo
+		r.lastAckSent.Store(newAckNo)
+		r.lastFrameSent.Store(pkt.frameNo) // Update the last frame sent
+		pkt.flags.ACK = true
+		pkt.flags.REL = true
+		r.sendQueue <- pkt.toBytes()
+		//logrus.Debugf("SendOneFrame (added to reliable.sendQueue) fno %v, and ack no %v", pkt.frameNo, pkt.ackNo)
+	}
 
 	if common.Debug {
 		r.log.WithFields(logrus.Fields{
@@ -131,6 +145,7 @@ func (r *Reliable) send() {
 	ok := true
 	for ok {
 		select {
+		// find a way of having a logic retransmit ticker time and logic
 		case <-r.sender.RetransmitTicker.C:
 			r.l.Lock()
 
@@ -138,31 +153,44 @@ func (r *Reliable) send() {
 
 			r.log.WithField("numFrames", numFrames).Trace("retransmitting")
 			for i := 0; i < numFrames; i++ {
-				r.sendOneFrame(r.sender.frames[i].frame)
-				r.sender.frames[i].Time = time.Now()
-				r.sender.unacked++
+				frameEntry := r.sender.frames[i]
+				// Only retransmit the timed out frames, however will be sent by the windowOpen
+				if frameEntry.queued == true {
+					//logrus.Debugf("retransmitting frame %v with ack %v", frameEntry.frame.frameNo, r.recvWindow.getAck())
+					r.sendOneFrame(frameEntry.frame, true)
+					frameEntry.Time = time.Now()
+				}
 			}
 
-			// Back off rtt since we failed to get an ACK
+			// Back off RTT if no ACKs were received
 			r.sender.RTT *= 2
 			r.sender.resetRetransmitTicker()
 
 			r.l.Unlock()
+
 		case <-r.sender.windowOpen:
 			r.l.Lock()
 			numFrames := r.sender.framesToSend(false, 0)
 			r.log.WithField("numFrames", numFrames).Trace("window open")
+
 			for i := 0; i < numFrames; i++ {
-				r.sendOneFrame(r.sender.frames[i].frame)
-				r.sender.frames[i].Time = time.Now()
-				r.sender.unacked++
+				frameEntry := r.sender.frames[i]
+				if !frameEntry.queued || frameEntry.Time.IsZero() {
+					//logrus.Debugf("window open, sending frame %v", frameEntry.frame.frameNo)
+					r.sendOneFrame(frameEntry.frame, false)
+					r.sender.frames[i].Time = time.Now()
+					r.sender.frames[i].queued = true
+					r.sender.unacked++
+				}
 			}
 			r.l.Unlock()
+
 		case pkt, ok = <-r.sender.sendQueue:
 			if !ok {
 				break
 			}
-			r.sendOneFrame(pkt)
+			//logrus.Debugf("I get this frame from my sendQueue: fno: %v, ackno %v, window start %v", pkt.frameNo, r.recvWindow.getAck(), r.recvWindow.windowStart)
+			r.sendOneFrame(pkt, false)
 		}
 	}
 	r.log.Debug("send ended")
@@ -197,6 +225,7 @@ func (r *Reliable) receive(pkt *frame) error {
 	}
 
 	// Pass the frame to the receive window
+	// TODO (paul) in the reliable tube, this is where the window is incremented and the ack no too
 	finProcessed, err := r.recvWindow.receive(pkt)
 
 	// Pass the frame to the sender
