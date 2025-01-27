@@ -14,6 +14,7 @@ var ErrMuxerStopping = errors.New("muxer is stopping")
 // ErrBadTubeState indicates an operation was performed when a tube was in a state where that operation is not valid
 var ErrBadTubeState = errors.New("tube in bad state")
 
+// TODO (paul) fix this error
 var errFrameOutOfBounds = errors.New("received data frame out of receive window bounds")
 
 // TODO(hosono) create a config struct to pass to the muxer to set these things
@@ -36,7 +37,7 @@ const initialRTT = 333 * time.Millisecond
 // The minimum value that a Reliable tube will use for its RTT.
 // If the measured RTT is ever lower than minRTT, it is clamped to minRTT
 // From RFC 9002 section 6.2.1 (kGranularity)
-const minRTT = time.Millisecond
+const minRTT = 10 * time.Millisecond
 
 // the maximum number of packets to retransmit per rto
 // even if the window is larger, no more packets will be transmitted
