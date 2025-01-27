@@ -64,6 +64,7 @@ func newSender(log *logrus.Entry) *sender {
 	return &sender{
 		ackNo:   1,
 		frameNo: 1,
+		unacked: 0,
 		buffer:  make([]byte, 0),
 		// finSent defaults to false
 		RetransmitTicker: time.NewTicker(initialRTT),
@@ -140,6 +141,8 @@ func (s *sender) recvAck(ackNo uint32) error {
 
 	windowOpen := s.ackNo < newAckNo
 
+	//logrus.Debugf("I received the ack, %v", ackNo)
+
 	for s.ackNo < newAckNo {
 		if !s.frames[0].Time.Equal(time.Time{}) && ackNo == s.frames[0].frame.frameNo+1 {
 			oldRTT := s.RTT
@@ -160,8 +163,14 @@ func (s *sender) recvAck(ackNo uint32) error {
 			}
 		}
 		s.ackNo++
-		s.unacked--
+		// to not block the retransmission if concurrency
+		s.frames[0].queued = false
 		s.frames = s.frames[1:]
+		if s.unacked > 0 {
+			s.unacked--
+		}
+
+		//logrus.Debugf("I am acknowledging the ack, %v, and I have unacked: %v, and my new ack now is : %v", newAckNo, s.unacked, s.ackNo)
 	}
 
 	if common.Debug {
@@ -175,6 +184,7 @@ func (s *sender) recvAck(ackNo uint32) error {
 	if windowOpen {
 		select {
 		case s.windowOpen <- struct{}{}:
+			//logrus.Debugf("I break the window on ack now, %v", newAckNo)
 			break
 		default:
 			break
@@ -219,6 +229,7 @@ func (s *sender) framesToSend(rto bool, startIndex int) int {
 	if numFrames < 0 {
 		numFrames = 0
 	}
+	//logrus.Debugf("len s.frames %v", len(s.frames))
 	return numFrames
 }
 

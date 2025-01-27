@@ -265,6 +265,7 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 		log:        tubeLog,
 	}
 	r.lastAckSent.Store(0)
+	r.lastFrameSent.Store(0)
 	r.sender.closed.Store(true)
 	m.addTube(r)
 	go r.initiate(req)
