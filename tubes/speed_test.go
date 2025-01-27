@@ -3,12 +3,14 @@ package tubes
 import (
 	"bytes"
 	"crypto/rand"
-	"github.com/sirupsen/logrus"
-	"gotest.tools/assert"
 	"io"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sirupsen/logrus"
+
+	"gotest.tools/assert"
 )
 
 func TestFileTransferSpeedReliableTubes(t *testing.T) {
