@@ -117,8 +117,9 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 	// To not over send the same frame which will be dropped client side
 	// TODO (paul) I can't work or pingpong and retransmission
 	// do i need to ask for rentransmission ack bla bal?
+	// TODO (paul) why the tube state 4 is not incrementing the ack of the frame n°
 
-	if (pkt.dataLength == 0 && (newAckNo != lastAckNo || pkt.frameNo != lastFrameNo || retransmission)) || pkt.dataLength > 0 {
+	if (pkt.dataLength == 0 && (newAckNo != lastAckNo || pkt.frameNo != lastFrameNo || retransmission)) || pkt.dataLength > 0 || r.tubeState == finWait1 {
 		pkt.ackNo = newAckNo
 		r.lastAckSent.Store(newAckNo)
 		r.lastFrameSent.Store(pkt.frameNo) // Update the last frame sent
@@ -146,27 +147,30 @@ func (r *Reliable) send() {
 	for ok {
 		select {
 		// find a way of having a logic retransmit ticker time and logic
-		case <-r.sender.RetransmitTicker.C:
-			r.l.Lock()
+		/*
+			case <-r.sender.RetransmitTicker.C:
+				r.l.Lock()
 
-			numFrames := r.sender.framesToSend(true, 0)
+				numFrames := r.sender.framesToSend(true, 0)
 
-			r.log.WithField("numFrames", numFrames).Trace("retransmitting")
-			for i := 0; i < numFrames; i++ {
-				frameEntry := r.sender.frames[i]
-				// Only retransmit the timed out frames, however will be sent by the windowOpen
-				if frameEntry.queued {
-					//logrus.Debugf("retransmitting frame %v with ack %v", frameEntry.frame.frameNo, r.recvWindow.getAck())
-					r.sendOneFrame(frameEntry.frame, true)
-					frameEntry.Time = time.Now()
+				r.log.WithField("numFrames", numFrames).Trace("retransmitting")
+				for i := 0; i < numFrames; i++ {
+					frameEntry := r.sender.frames[i]
+					// Only retransmit the timed out frames, however will be sent by the windowOpen
+					if frameEntry.queued {
+						//logrus.Debugf("retransmitting frame %v with ack %v", frameEntry.frame.frameNo, r.recvWindow.getAck())
+						r.sendOneFrame(frameEntry.frame, true)
+						frameEntry.Time = time.Now()
+					}
 				}
-			}
 
-			// Back off RTT if no ACKs were received
-			r.sender.RTT *= 2
-			r.sender.resetRetransmitTicker()
+				// Back off RTT if no ACKs were received
+				r.sender.RTT *= 2
+				r.sender.resetRetransmitTicker()
 
-			r.l.Unlock()
+				r.l.Unlock()
+
+		*/
 
 		case <-r.sender.windowOpen:
 			r.l.Lock()
