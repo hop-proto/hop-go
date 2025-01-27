@@ -16,8 +16,8 @@ import (
 func TestFileTransferSpeedReliableTubes(t *testing.T) {
 	logrus.SetOutput(io.Discard)
 
-	// fileSize := 128 << 20 // 128 MiB
-	fileSize := 1 << 30 // 128 MiB
+	fileSize := 128 << 20 // 128 MiB
+	//fileSize := 1 << 30 // 128 MiB
 	t.Logf("Transferring file size: %d bytes", fileSize)
 
 	t1, t2, stop, _, err := makeConn(1.0, true, t)
