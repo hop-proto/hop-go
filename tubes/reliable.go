@@ -115,11 +115,9 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 
 	// Only send the ACK if either the new ACK is greater or the frame number is greater
 	// To not over send the same frame which will be dropped client side
-	// TODO (paul) I can't work or pingpong and retransmission
-	// do i need to ask for rentransmission ack bla bal?
-	// TODO (paul) why the tube state 4 is not incrementing the ack of the frame n°
+	// TODO (paul) this condition is too long
 
-	if (pkt.dataLength == 0 && (newAckNo != lastAckNo || pkt.frameNo != lastFrameNo || retransmission)) || pkt.dataLength > 0 || r.tubeState == finWait1 {
+	if (pkt.dataLength == 0 && (newAckNo != lastAckNo || pkt.frameNo != lastFrameNo || retransmission || pkt.flags.FIN || pkt.flags.RESP)) || pkt.dataLength > 0 {
 		pkt.ackNo = newAckNo
 		r.lastAckSent.Store(newAckNo)
 		r.lastFrameSent.Store(pkt.frameNo) // Update the last frame sent
