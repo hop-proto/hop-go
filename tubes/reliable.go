@@ -174,11 +174,11 @@ func (r *Reliable) send() {
 
 			for i := 0; i < numFrames; i++ {
 				frameEntry := r.sender.frames[i]
-				if !frameEntry.queued || frameEntry.Time.IsZero() {
+				if frameEntry.queued == false {
 					//logrus.Debugf("window open, sending frame %v", frameEntry.frame.frameNo)
 					r.sendOneFrame(frameEntry.frame, false)
-					r.sender.frames[i].Time = time.Now()
-					r.sender.frames[i].queued = true
+					frameEntry.Time = time.Now()
+					frameEntry.queued = true
 					r.sender.unacked++
 				}
 			}

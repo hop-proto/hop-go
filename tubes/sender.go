@@ -123,6 +123,7 @@ func (s *sender) write(b []byte) (int, error) {
 		s.unacked++
 		s.sendQueue <- pkt.frame
 		s.frames[startFrame+i].Time = time.Now()
+		s.frames[startFrame+i].queued = true
 	}
 
 	s.resetRetransmitTicker()
@@ -164,7 +165,7 @@ func (s *sender) recvAck(ackNo uint32) error {
 		}
 		s.ackNo++
 		// to not block the retransmission if concurrency
-		s.frames[0].queued = false
+		//s.frames[0].queued = false
 		s.frames = s.frames[1:]
 		if s.unacked > 0 {
 			s.unacked--
