@@ -148,16 +148,21 @@ func (r *Reliable) send() {
 		case <-r.sender.RetransmitTicker.C:
 			r.l.Lock()
 
+			// when sending a file from c1 to c2, the retransmission of an ack is not possible on the point of view of the c2
+			// if the c1 mark it a ack and not the c2. The transmission is locked
 			numFrames := r.sender.framesToSend(true, 0)
 
 			r.log.WithField("numFrames", numFrames).Trace("retransmitting")
 			for i := 0; i < numFrames; i++ {
-				frameEntry := r.sender.frames[i]
 				// Only retransmit the timed out frames, however will be sent by the windowOpen
-				if frameEntry.queued {
+				if r.sender.frames[i].queued {
+					// Only retransmit the timed out frames, however will be sent by the windowOpen
+					r.log.WithFields(logrus.Fields{
+						"Frame N°": r.sender.frames[i].frame.frameNo,
+						"Ack N°":   r.recvWindow.getAck(),
+					}).Trace("Retransmission of")
 					//logrus.Debugf("retransmitting frame %v with ack %v", frameEntry.frame.frameNo, r.recvWindow.getAck())
-					r.sendOneFrame(frameEntry.frame, true)
-					frameEntry.Time = time.Now()
+					r.sendOneFrame(r.sender.frames[i].frame, true)
 				}
 			}
 
@@ -173,12 +178,11 @@ func (r *Reliable) send() {
 			r.log.WithField("numFrames", numFrames).Trace("window open")
 
 			for i := 0; i < numFrames; i++ {
-				frameEntry := r.sender.frames[i]
-				if frameEntry.queued == false {
+				if !r.sender.frames[i].queued {
 					//logrus.Debugf("window open, sending frame %v", frameEntry.frame.frameNo)
-					r.sendOneFrame(frameEntry.frame, false)
-					frameEntry.Time = time.Now()
-					frameEntry.queued = true
+					r.sendOneFrame(r.sender.frames[i].frame, false)
+					r.sender.frames[i].Time = time.Now()
+					r.sender.frames[i].queued = true
 					r.sender.unacked++
 				}
 			}
