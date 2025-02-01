@@ -3,24 +3,24 @@ package tubes
 import (
 	"bytes"
 	"crypto/rand"
+	"github.com/sirupsen/logrus"
 	"io"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/sirupsen/logrus"
 
 	"gotest.tools/assert"
 )
 
 func TestFileTransferSpeedReliableTubes(t *testing.T) {
 	logrus.SetOutput(io.Discard)
+	//logrus.SetLevel(logrus.TraceLevel)
 
 	fileSize := 128 << 20 // 128 MiB
 	//fileSize := 1 << 30 // 128 MiB
 	t.Logf("Transferring file size: %d bytes", fileSize)
 
-	t1, t2, stop, _, err := makeConn(1.0, true, t)
+	t1, t2, stop, _, err := makeConn(0.99, true, t)
 	assert.NilError(t, err)
 	defer stop()
 
@@ -71,6 +71,10 @@ func TestFileTransferSpeedReliableTubes(t *testing.T) {
 	throughput := float64(fileSize) / elapsed.Seconds() / (1 << 20)
 	t.Logf("Transfer completed in %v", elapsed)
 	t.Logf("Throughput: %.2f MB/s", throughput)
+
+	if !bytes.Equal(recvBuf.Bytes(), sendBuf) {
+		t.Error("transmitted data differs")
+	}
 }
 
 func chunkedCopy(w io.Writer, r io.Reader) error {
