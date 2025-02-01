@@ -35,6 +35,8 @@ type frameFlags struct {
 	ACK bool
 	// Flag to teardown tube.
 	FIN bool
+	// Flag to ask frame retransmission for packet loss
+	RTR bool
 }
 
 // The bit index for each of these flags.
@@ -44,6 +46,7 @@ const (
 	RELIdx  = 2
 	ACKIdx  = 3
 	FINIdx  = 4
+	RTRIdx  = 5
 )
 
 func flagsToMetaByte(p *frameFlags) byte {
@@ -63,6 +66,9 @@ func flagsToMetaByte(p *frameFlags) byte {
 	if p.FIN {
 		meta = meta | (1 << FINIdx)
 	}
+	if p.RTR {
+		meta = meta | (1 << RTRIdx)
+	}
 	return meta
 }
 
@@ -73,6 +79,7 @@ func metaToFlags(b byte) frameFlags {
 		REL:  b&(1<<RELIdx) != 0,
 		ACK:  b&(1<<ACKIdx) != 0,
 		FIN:  b&(1<<FINIdx) != 0,
+		RTR:  b&(1<<RTRIdx) != 0,
 	}
 	return flags
 }
