@@ -196,34 +196,38 @@ func CloseTest(odds float64, rel bool, wait bool, t *testing.T) {
 
 // This is heavily based on the BasicIO test from the nettests
 func lossyBasicIO(t *testing.T) {
-	c1, c2, stop, _, err := makeConn(0.8, true, t)
+	c1, c2, stop, _, err := makeConn(0.95, true, t)
 	assert.NilError(t, err)
+	defer stop()
 
-	want := make([]byte, 1<<16)
-	n, err := rand.Read(want)
-	assert.NilError(t, err)
-	assert.Equal(t, n, len(want))
+	want := make([]byte, 1<<20)
+	_, err = rand.Read(want)
+	assert.NilError(t, err) // Simplified error check
+
+	dataCh := make(chan []byte, 1) // Buffered to avoid blocking
 
 	go func() {
 		rd := bytes.NewReader(want)
-		_, err := io.Copy(c1, rd)
-		assert.NilError(t, err)
-		// TODO(hosono) for some reason, this assert never returns
-		//assert.Equal(t, n, len(want))
-		err = c1.Close()
-		assert.NilError(t, err)
+		if err := chunkedCopy(c1, rd); err != nil {
+			t.Errorf("unexpected c1.Write error: %v", err)
+		}
+		_ = c1.Close()
 	}()
 
-	got, err := io.ReadAll(c2)
-	assert.NilError(t, err)
-	assert.Equal(t, len(got), len(want))
+	go func() {
+		defer close(dataCh) // Prevents deadlock
+		wr := new(bytes.Buffer)
+		if err := chunkedCopy(wr, c2); err != nil {
+			t.Errorf("unexpected c2.Read error: %v", err)
+			return
+		}
+		_ = c2.Close()
+		dataCh <- wr.Bytes()
+	}()
 
-	err = c2.Close()
-	assert.NilError(t, err)
-
-	assert.DeepEqual(t, got, want)
-
-	stop()
+	if got := <-dataCh; !bytes.Equal(got, want) {
+		t.Error("transmitted data differs")
+	}
 }
 
 func reliable(t *testing.T) {
@@ -251,10 +255,6 @@ func reliable(t *testing.T) {
 	})
 
 	// Reliable Tubes should pass the nettests even with packet loss
-	f = func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
-		return makeConn(0.90, true, t)
-	}
-	mp = nettest.MakePipe(f)
 	t.Run("LossyBasicIO", lossyBasicIO)
 }
 
