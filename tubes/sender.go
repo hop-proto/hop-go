@@ -46,7 +46,8 @@ type sender struct {
 	RetransmitTicker *time.Ticker
 
 	// RTT is the estimate of the round trip time to the remote host
-	RTT time.Duration
+	RTT             time.Duration
+	RTTFrameCounter int
 
 	// the time after which writes will expire
 	deadline time.Time
@@ -69,6 +70,7 @@ func newSender(log *logrus.Entry) *sender {
 		// finSent defaults to false
 		RetransmitTicker: time.NewTicker(initialRTT),
 		RTT:              initialRTT,
+		RTTFrameCounter:  initialRTTCounter,
 		windowSize:       windowSize,
 		windowOpen:       make(chan struct{}, 1),
 		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
@@ -165,12 +167,19 @@ func (s *sender) recvAck(ackNo uint32) error {
 			}
 		}
 		s.ackNo++
+		s.RTTFrameCounter = initialRTTCounter
 		// to not block the retransmission if concurrency
 		//s.frames[0].queued = false
 		s.frames = s.frames[1:]
 		if s.unacked > 0 {
 			s.unacked--
 		}
+
+		s.log.WithFields(logrus.Fields{
+			"ack frame No": newAckNo,
+			"unacked":      s.unacked,
+			"new ack now":  s.ackNo,
+		}).Trace("I am acknowledging")
 
 		//logrus.Debugf("I am acknowledging the ack, %v, and I have unacked: %v, and my new ack now is : %v", newAckNo, s.unacked, s.ackNo)
 	}
@@ -210,14 +219,22 @@ func (s *sender) sendEmptyPacket() {
 	s.sendQueue <- pkt
 }
 
+// This function is sending from the queue the asked pack from the receiver
+func (s *sender) sendRtRPacket(rtrFrame *frame) {
+	if s.closed.Load() {
+		return
+	}
+
+	s.sendQueue <- rtrFrame
+}
+
 func (s *sender) framesToSend(rto bool, startIndex int) int {
 	// TODO(hosono) this is a mess because there's no builtin min or clamp functions
 	var numFrames int
 	if rto {
-		// Get the minimum of s.windowSize and maxFragTransPerRTO
-		if maxFragTransPerRTO > int(s.windowSize) {
-			numFrames = int(s.windowSize)
-		} else {
+		numFrames = s.RTTFrameCounter
+
+		if numFrames > maxFragTransPerRTO {
 			numFrames = maxFragTransPerRTO
 		}
 	} else {
