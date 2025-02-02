@@ -108,56 +108,33 @@ func (r *Reliable) initiate(req bool) {
 }
 
 func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
+	ackNo := r.recvWindow.getAck()
+	lastFrameNo := r.lastFrameSent.Load()
+	lastAckNo := r.lastAckSent.Load()
+
+	// Handle missing frame retransmission
 	if r.recvWindow.missingFrame {
-		lastFrameNo := r.lastFrameSent.Load()
-		rtrPkt := &frame{
-			dataLength: 0,
-			frameNo:    lastFrameNo,
-			data:       []byte{},
-		}
-		rtrPkt.flags.RTR = true
-		rtrPkt.flags.ACK = true
-		rtrPkt.tubeID = r.id
-		rtrPkt.ackNo = r.recvWindow.getAck()
-		rtrPkt.flags.REL = true
-		r.log.WithFields(logrus.Fields{
-			"Frame N°": rtrPkt.frameNo,
-			"Ack N°":   r.recvWindow.getAck(),
-		}).Trace("Retransmission of RTR ack")
-		r.sendQueue <- rtrPkt.toBytes()
+		r.sendRetransmissionAck(lastFrameNo, ackNo)
 		r.recvWindow.missingFrame = false
 	}
 
 	pkt.tubeID = r.id
-	newAckNo := r.recvWindow.getAck()
-	lastAckNo := r.lastAckSent.Load()
-	lastFrameNo := r.lastFrameSent.Load()
-	pkt.ackNo = newAckNo
+	pkt.ackNo = ackNo
 	pkt.flags.REL = true
 
 	if pkt.dataLength == 0 {
 		pkt.flags.ACK = true
 	}
 
-	// Only send the ACK if either the new ACK is greater or the frame number is greater
-	// To not over send the same frame which will be dropped client side
-	// TODO (paul) this condition is too long
+	// If the frame is an ACK, it should not
+	shouldSend := pkt.dataLength > 0 ||
+		(pkt.dataLength == 0 && (ackNo != lastAckNo || pkt.frameNo != lastFrameNo ||
+			retransmission || pkt.flags.FIN || pkt.flags.RESP))
 
-	/*
-		if rtr {
-			pkt.ackNo = newAckNo
-			pkt.flags.RTR = true
-			pkt.flags.REL = true
-			r.sendQueue <- pkt.toBytes()
-		} else
-	*/
-
-	if (pkt.dataLength == 0 && (newAckNo != lastAckNo || pkt.frameNo != lastFrameNo || retransmission || pkt.flags.FIN || pkt.flags.RESP || r.recvWindow.missingFrame)) || pkt.dataLength > 0 {
-		r.lastAckSent.Store(newAckNo)
-		r.lastFrameSent.Store(pkt.frameNo) // Update the last frame sent
-
+	if shouldSend {
 		r.sendQueue <- pkt.toBytes()
-		//logrus.Debugf("SendOneFrame (added to reliable.sendQueue) fno %v, and ack no %v", pkt.frameNo, pkt.ackNo)
+		r.lastAckSent.Store(ackNo)
+		r.lastFrameSent.Store(pkt.frameNo)
 	}
 
 	if common.Debug {
@@ -169,6 +146,24 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 			"dataLen": pkt.dataLength,
 		}).Trace("sent packet")
 	}
+}
+
+func (r *Reliable) sendRetransmissionAck(lastFrameNo, ackNo uint32) {
+	rtrPkt := &frame{
+		dataLength: 0,
+		frameNo:    lastFrameNo,
+		data:       []byte{},
+		flags:      frameFlags{RTR: true, ACK: true, REL: true},
+		tubeID:     r.id,
+		ackNo:      ackNo,
+	}
+
+	r.log.WithFields(logrus.Fields{
+		"Frame N°": rtrPkt.frameNo,
+		"Ack N°":   ackNo,
+	}).Trace("Retransmission of RTR ack")
+
+	r.sendQueue <- rtrPkt.toBytes()
 }
 
 // send continuously reads packet from the sends and hands them to the muxer
@@ -200,14 +195,15 @@ func (r *Reliable) send() {
 					}).Trace("Retransmission RTT")
 					//logrus.Debugf("retransmitting frame %v with ack %v", frameEntry.frame.frameNo, r.recvWindow.getAck())
 					r.sender.frames[i].flags.RTR = true
-					r.sendOneFrame(r.sender.frames[i].frame, true)
 					r.sender.frames[i].Time = time.Now()
+					r.sendOneFrame(r.sender.frames[i].frame, true)
 				}
 			}
 
 			// Back off RTT if no ACKs were received
 			//r.sender.RTT *= 2
 			r.sender.RTTFrameCounter++
+			// This add 1/9 to the rtt time
 			r.sender.resetRetransmitTicker()
 
 			r.l.Unlock()
@@ -218,16 +214,6 @@ func (r *Reliable) send() {
 			r.log.WithField("numFrames", numFrames).Trace("window open")
 
 			for i := 0; i < numFrames; i++ {
-				/*
-					if r.sender.frames[i].queued && i < maxFragTransPerRTOInWindow {
-						r.log.WithFields(logrus.Fields{
-							"frame No": r.sender.frames[i].frame.frameNo,
-							"unacked":  r.sender.unacked,
-						}).Trace("Window RTT")
-						r.sendOneFrame(r.sender.frames[i].frame, false)
-						r.sender.frames[i].Time = time.Now()
-					} else
-				*/
 				if !r.sender.frames[i].queued {
 					r.log.WithFields(logrus.Fields{
 						"frame No": r.sender.frames[i].frame.frameNo,
@@ -281,40 +267,45 @@ func (r *Reliable) receive(pkt *frame) error {
 	}
 
 	// Pass the frame to the receive window
-	// TODO (paul) in the reliable tube, this is where the window is incremented and the ack no too
+	// TODO (paul) put the logic below in a function
 
 	if pkt.flags.RTR {
 		if pkt.dataLength > 0 {
 			r.recvWindow.missingFrame = true
-		} else if pkt.ackNo != r.lastFrameSent.Load() {
-			numFrames := windowSize
-			if numFrames > len(r.sender.frames) {
-				numFrames = len(r.sender.frames)
-			}
-			for i := 0; i < numFrames; i++ {
-				// Only retransmit the timed out frames, however will be sent by the windowOpen
-				if r.sender.frames[i].queued && r.sender.frames[i].frameNo == pkt.ackNo {
-					// Only retransmit the timed out frames, however will be sent by the windowOpen
-					r.sender.log.WithFields(logrus.Fields{
-						"Frame N°": r.sender.frames[i].frameNo,
-					}).Trace("Retransmission of RTR pkt")
-					//logrus.Debugf("retransmitting frame %v with ack %v", frameEntry.frame.frameNo, r.recvWindow.getAck())
-					newPkt := r.sender.frames[i]
-					newPkt.Time = time.Now()
-					newPkt.tubeID = r.id
-					newPkt.ackNo = r.recvWindow.getAck()
-					newPkt.flags.REL = true
-					r.sendQueue <- newPkt.toBytes()
-					r.lastFrameSent.Store(newPkt.frameNo)
-					break
-				}
-				if r.sender.frames[i].frameNo > pkt.ackNo {
-					r.log.Debug("RTR ABORTED")
-					break
+		} else {
+			lastSentFrameNo := r.lastFrameSent.Load()
+			ackNo := pkt.ackNo
+
+			if ackNo != lastSentFrameNo {
+				numFrames := min(windowSize, len(r.sender.frames))
+
+				for i := 0; i < numFrames; i++ {
+					rtrFrame := &r.sender.frames[i]
+
+					if rtrFrame.frameNo == ackNo && rtrFrame.queued {
+						rtrFrame.Time = time.Now()
+						rtrFrame.tubeID = r.id
+						rtrFrame.ackNo = r.recvWindow.getAck()
+						rtrFrame.flags.REL = true
+
+						r.sender.log.WithFields(logrus.Fields{
+							"Frame N°": rtrFrame.frameNo,
+						}).Trace("Retransmission of RTR pkt")
+
+						r.sendQueue <- rtrFrame.toBytes()
+						r.lastFrameSent.Store(rtrFrame.frameNo)
+						// If the sender receive a RTR, that means it didn't retransmit fast enough with the ticker
+						r.sender.RTT /= 2
+						break
+					}
+
+					if rtrFrame.frameNo > ackNo {
+						r.log.Debug("RTR ABORTED: Frame not found in valid range")
+						break
+					}
 				}
 			}
 		}
-
 	}
 
 	finProcessed, err := r.recvWindow.receive(pkt)
@@ -323,22 +314,6 @@ func (r *Reliable) receive(pkt *frame) error {
 	if pkt.flags.ACK {
 		r.sender.recvAck(pkt.ackNo)
 	}
-
-	// TODO paul use a map instead of a list here
-	/*
-		if pkt.missingFrameNo != 0 {
-			r.log.Info("I send a missing frame")
-			for _, f := range r.sender.frames { // Efficient iteration over slice
-				if f.frame.frameNo == pkt.missingFrameNo {
-					select {
-					case r.sender.sendQueue <- f.frame: // Non-blocking send
-					default:
-						r.log.Warnf("sendQueue full, dropping frame %d", f.frame.frameNo) // Prevent deadlocks
-					}
-					break // Stop searching after finding the frame
-				}
-			}
-		}*/
 
 	// Handle ACK of FIN frame
 	if pkt.flags.ACK && r.tubeState != initiated && r.sender.unAckedFramesRemaining() == 0 {
