@@ -157,7 +157,7 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 		r.lastFrameSent.Store(pkt.frameNo) // Update the last frame sent
 
 		r.sendQueue <- pkt.toBytes()
-		logrus.Debugf("SendOneFrame (added to reliable.sendQueue) fno %v, and ack no %v", pkt.frameNo, pkt.ackNo)
+		//logrus.Debugf("SendOneFrame (added to reliable.sendQueue) fno %v, and ack no %v", pkt.frameNo, pkt.ackNo)
 	}
 
 	if common.Debug {
