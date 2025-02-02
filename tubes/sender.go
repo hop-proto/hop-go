@@ -219,15 +219,6 @@ func (s *sender) sendEmptyPacket() {
 	s.sendQueue <- pkt
 }
 
-// This function is sending from the queue the asked pack from the receiver
-func (s *sender) sendRtRPacket(rtrFrame *frame) {
-	if s.closed.Load() {
-		return
-	}
-
-	s.sendQueue <- rtrFrame
-}
-
 func (s *sender) framesToSend(rto bool, startIndex int) int {
 	// TODO(hosono) this is a mess because there's no builtin min or clamp functions
 	var numFrames int
