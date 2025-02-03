@@ -29,6 +29,7 @@ const (
 	finWait1  state = iota
 	finWait2  state = iota
 	closing   state = iota
+	timeWait  state = iota
 	closed    state = iota
 )
 
@@ -45,14 +46,14 @@ type Reliable struct {
 	// +checklocks:l
 	tubeState state
 	// +checklocks:l
-	lastAckTimer *time.Timer
-	lastAckSent  atomic.Uint32
-	closed       chan struct{}
-	initRecv     chan struct{}
-	initDone     chan struct{}
-	sendDone     chan struct{}
-	l            sync.Mutex
-	log          *logrus.Entry
+	timeWaitTimer *time.Timer
+	lastAckSent   atomic.Uint32
+	closed        chan struct{}
+	initRecv      chan struct{}
+	initDone      chan struct{}
+	sendDone      chan struct{}
+	l             sync.Mutex
+	log           *logrus.Entry
 }
 
 // Reliable implements net.Conn
@@ -130,19 +131,22 @@ func (r *Reliable) sendOneFrame(pkt *frame) {
 
 // send continuously reads packet from the sends and hands them to the muxer
 func (r *Reliable) send() {
-	var pkt *frame
-
-	ok := true
-	for ok {
-		pkt, ok = <-r.sender.sendQueue
-		if !ok {
-			break
+	for pkt := range r.sender.sendQueue {
+		if !pkt.flags.ACK {
+			r.l.Lock()
+			r.sender.onLossDetectionTimeout()
+			r.l.Unlock()
 		}
 
 		now := time.Now()
-		if deadline := r.sender.congestion.TimeUntilSend(r.sender.bytesInFlight); deadline.After(now) {
+
+		// Wait until we are allowed to send
+		deadline := r.sender.congestion.TimeUntilSend(r.sender.bytesInFlight)
+		if deadline.After(now) {
 			<-time.NewTimer(deadline.Sub(now)).C
 		}
+
+		r.sender.setLossDetectionTimer(now)
 		r.sendOneFrame(pkt)
 	}
 	r.log.Debug("send ended")
@@ -191,8 +195,8 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.tubeState = finWait2
 			r.log.Debug("got ACK of FIN packet. going from finWait1 to finWait2")
 		case closing:
-			r.log.Debug("got ACK of FIN packet. going from closing to closed")
-			r.enterClosedState()
+			r.log.Debug("got ACK of FIN packet. going from closing to timeWait")
+			r.enterTimeWaitState()
 		case lastAck:
 			r.log.Debug("got ACK of FIN packet. going from lastAck to closed")
 			r.enterClosedState()
@@ -209,9 +213,9 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.tubeState = closing
 			r.log.Debug("got FIN packet. going from finWait1 to closing")
 		case finWait2:
-			r.log.Debug("got FIN packet. going from finWait2 to closed")
+			r.log.Debug("got FIN packet. going from finWait2 to timeWait")
 			r.sender.sendEmptyPacket()
-			r.enterClosedState()
+			r.enterTimeWaitState()
 		}
 		if r.tubeState != closed {
 			r.log.Trace("sending ACK of FIN")
@@ -228,12 +232,12 @@ func (r *Reliable) receive(pkt *frame) error {
 }
 
 // +checklocks:r.l
-func (r *Reliable) enterLastAckState() {
-	r.tubeState = lastAck
-	r.lastAckTimer = time.AfterFunc(4*r.sender.rttStats.LatestRTT(), func() {
+func (r *Reliable) enterTimeWaitState() {
+	r.tubeState = timeWait
+	r.timeWaitTimer = time.AfterFunc(4*r.sender.rttStats.PTO(false), func() {
 		r.l.Lock()
 		defer r.l.Unlock()
-		r.log.Warn("timer expired without getting ACK of FIN. going from lastAck to closed")
+		r.log.Warn("Time Wait timer ended. going from timeWait to closed")
 		r.enterClosedState()
 	})
 }
@@ -243,8 +247,8 @@ func (r *Reliable) enterClosedState() {
 	if r.tubeState == closed {
 		return
 	}
-	if r.lastAckTimer != nil {
-		r.lastAckTimer.Stop()
+	if r.timeWaitTimer != nil {
+		r.timeWaitTimer.Stop()
 	}
 	r.sender.Close()
 	r.recvWindow.Close()
@@ -385,7 +389,6 @@ func (r *Reliable) Close() (err error) {
 	case closeWait:
 		r.tubeState = lastAck
 		r.log.Debug("call to close. going from closeWait to lastAck")
-		r.enterLastAckState()
 	default:
 		// In this case, Close() has already been called
 		return io.EOF

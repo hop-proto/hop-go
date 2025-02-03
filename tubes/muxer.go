@@ -118,7 +118,7 @@ func newMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 		state:           state,
 		stopped:         make(chan struct{}),
 		underlying:      msgConn,
-		timeout:         timeout,
+		timeout:         0,
 		log:             log,
 		readBuf:         make([]byte, 65535),
 		receiverErr:     make(chan error),
@@ -349,6 +349,7 @@ func (m *Muxer) Accept() (Tube, error) {
 func (m *Muxer) readMsg() (*frame, error) {
 	_, err := m.underlying.ReadMsg(m.readBuf)
 	if err != nil {
+		m.log.WithField("err", err).Warn("RECV ERROR!!!!!")
 		return nil, err
 	}
 
