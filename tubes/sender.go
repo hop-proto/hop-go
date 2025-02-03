@@ -12,11 +12,21 @@ import (
 	"hop.computer/hop/congestion"
 )
 
+// packet stores a sent frame along with the information
+// needed to track when it is loss and if it has been acknowledged
+type packet struct {
+	frame    *frame
+	sentTime time.Time
+	// frame stores the frameNo truncated to a uint32.
+	// This field is the unwrapped frame number
+	frameNo int64
+}
+
 type sender struct {
 	// The acknowledgement number sent from the other end of the connection.
 	ackNo uint64
 
-	frameNo    uint32
+	frameNo    int64
 	windowSize uint16
 
 	// The number of packets sent but not acked
@@ -29,10 +39,7 @@ type sender struct {
 
 	// The buffer of unacknowledged tube frames that will be retransmitted if necessary
 	// along with the time when they were sent
-	frames []struct {
-		*frame
-		time.Time
-	}
+	packets []packet
 
 	// The algorithm for managing congestion control
 	congestion    congestion.SendAlgorithm
@@ -40,6 +47,8 @@ type sender struct {
 	bytesInFlight int64
 	// The number of times a PTO has been sent without receiving an ack.
 	ptoCount int64
+
+	alarm time.Time
 
 	// The current buffer of unacknowledged bytes from the sender.
 	// A byte slice works well here because:
@@ -75,7 +84,7 @@ func newSender(log *logrus.Entry) *sender {
 }
 
 func (s *sender) unAckedFramesRemaining() int {
-	return len(s.frames)
+	return len(s.packets)
 }
 
 func (s *sender) write(b []byte) (int, error) {
@@ -87,8 +96,7 @@ func (s *sender) write(b []byte) (int, error) {
 	}
 	s.buffer = append(s.buffer, b...)
 
-	startFrame := len(s.frames)
-
+	startFrame := len(s.packets)
 	now := time.Now()
 	for len(s.buffer) > 0 {
 		dataLength := MaxFrameDataLength
@@ -97,25 +105,25 @@ func (s *sender) write(b []byte) (int, error) {
 		}
 		pkt := frame{
 			dataLength: dataLength,
-			frameNo:    s.frameNo,
+			frameNo:    uint32(s.frameNo),
 			data:       s.buffer[:dataLength],
 		}
 
-		s.frameNo++
 		s.buffer = s.buffer[dataLength:]
-		s.frames = append(s.frames, struct {
-			*frame
-			time.Time
-		}{&pkt, now})
+		s.packets = append(s.packets, packet{
+			&pkt,
+			now,
+			s.frameNo,
+		})
+		s.frameNo++
 	}
 
 	numFrames := s.framesToSend(false, startFrame)
 
 	for i := 0; i < numFrames; i++ {
-		pkt := s.frames[startFrame+i]
+		pkt := s.packets[startFrame+i]
 		s.unacked++
 		s.sendQueue <- pkt.frame
-		s.frames[startFrame+i].Time = time.Now()
 	}
 
 	return len(b), nil
@@ -130,10 +138,10 @@ func (s *sender) getScaledPTO() time.Duration {
 }
 
 func (s *sender) getPTOTime() time.Time {
-	if len(s.frames) == 0 {
+	if len(s.packets) == 0 {
 		return time.Time{}
 	}
-	return s.frames[len(s.frames)-1].Time.Add(s.getScaledPTO())
+	return s.packets[len(s.packets)-1].sentTime.Add(s.getScaledPTO())
 }
 
 func (s *sender) setLossDetectionTimer(now time.Time) {
@@ -152,15 +160,15 @@ func (s *sender) recvAck(ackNo uint32) error {
 		s.congestion.MaybeExitSlowStart()
 	}
 	for s.ackNo < newAckNo {
-		pkt := s.frames[0].frame
-		sendTime := s.frames[0].Time
+		pkt := s.packets[0].frame
+		sendTime := s.packets[0].sentTime
 		s.rttStats.UpdateRTT(now.Sub(sendTime), 0)
 		// TODO(hosono) unwrap frameno
 		s.congestion.OnPacketAcked(int64(pkt.frameNo), int64(pkt.dataLength), s.bytesInFlight, now)
-		s.bytesInFlight -= int64(s.frames[0].dataLength)
+		s.bytesInFlight -= int64(s.packets[0].frame.dataLength)
 		s.ackNo++
 		s.unacked--
-		s.frames = s.frames[1:]
+		s.packets = s.packets[1:]
 	}
 
 	s.ptoCount = 0
@@ -241,11 +249,12 @@ func (s *sender) sendFin() error {
 	s.finFrameNo = pkt.frameNo
 	s.log.WithField("frameNo", pkt.frameNo).Debug("queueing FIN packet")
 
+	s.packets = append(s.packets, packet {
+		*frame,
+		time.Time,
+	s.frameNo,
+	}
 	s.frameNo++
-	s.frames = append(s.frames, struct {
-		*frame
-		time.Time
-	}{&pkt, time.Time{}})
 	s.sendQueue <- &pkt
 	s.unacked++
 	return nil
