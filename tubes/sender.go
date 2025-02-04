@@ -52,7 +52,7 @@ type sender struct {
 	// The time when the last packet was sent.
 	lastPktTime time.Time
 
-	lossTimer *time.Timer
+	lossTimer time.Time
 
 	// The current buffer of unacknowledged bytes from the sender.
 	// A byte slice works well here because:
@@ -141,26 +141,25 @@ func (s *sender) write(b []byte) (int, error) {
 }
 
 func (s *sender) setLossDetectionTimer(now time.Time) {
-	if s.lossTimer != nil {
-		s.lossTimer.Stop()
+	if s.lossTimer.After(now) {
+		return
 	}
 
 	ptoTime := s.lastPktTime.Add(s.rttStats.PTO(false) * (1 << s.ptoCount))
-	s.log.WithField("ptoTime", ptoTime).Info("setting loss detection timer")
+	if common.Debug {
+		s.log.WithField("ptoTime", ptoTime).Trace("setting loss detection timer")
+	}
 	if ptoTime.After(now) {
-		s.lossTimer = time.AfterFunc(ptoTime.Sub(now), func() {
-			f := &frame{}
-			s.sendQueue <- f
-		})
-	} else {
-		s.lossTimer = nil
+		s.lossTimer = ptoTime
 	}
 }
 
 const timeThreshold = 9.0 / 8
 
 func (s *sender) onLossDetectionTimeout() {
-	s.log.Info("firing loss detection timer")
+	if common.Debug {
+		s.log.Trace("firing loss detection timer")
+	}
 	now := time.Now()
 	defer s.setLossDetectionTimer(now)
 
@@ -177,13 +176,17 @@ func (s *sender) onLossDetectionTimeout() {
 
 	for _, pkt := range s.packets {
 		if pkt.sentTime.Before(lostSendTime) {
-			s.log.WithField("frameNo", pkt.frame.frameNo).Trace("lost packet")
-
+			millis := lostSendTime.Sub(pkt.sentTime).Milliseconds()
+			s.log.WithFields(logrus.Fields{
+				"frameNo":    pkt.frame.frameNo,
+				"delay (ms)": millis,
+			}).Trace("lost packet")
 			// remove lost packet bytes from bytes in flight
 			s.bytesInFlight -= int64(pkt.frame.dataLength)
 
 			// Queue packet for retransmission
-			s.sendQueue <- pkt.frame
+			s.queuePacket(pkt, now)
+			s.unacked--
 
 			s.congestion.OnCongestionEvent(pkt.frameNo, int64(pkt.frame.dataLength), priorInFlight)
 		}
@@ -205,18 +208,24 @@ func (s *sender) recvAck(ackNo uint32) error {
 
 	}
 
+	sentTime := now
+
 	for s.ackNo < newAckNo {
-		pkt := s.packets[0].frame
-		sendTime := s.packets[0].sentTime
-		s.rttStats.UpdateRTT(now.Sub(sendTime), 0)
+		pkt := s.packets[0]
+		if pkt.sentTime.Before(sentTime) {
+			sentTime = pkt.sentTime
+		}
 		// TODO(hosono) unwrap frameno
-		s.congestion.OnPacketAcked(int64(pkt.frameNo), int64(pkt.dataLength), s.bytesInFlight, now)
+		s.congestion.OnPacketAcked(int64(pkt.frameNo), int64(pkt.frame.dataLength), s.bytesInFlight, now)
 		s.bytesInFlight -= int64(s.packets[0].frame.dataLength)
 		s.ackNo++
 		s.unacked--
 		s.packets = s.packets[1:]
 	}
 
+	if sentTime != now {
+		s.rttStats.UpdateRTT(now.Sub(sentTime), 0)
+	}
 	if common.Debug {
 		s.log.WithFields(logrus.Fields{
 			"old ackNo": oldAckNo,
@@ -266,9 +275,6 @@ func (s *sender) framesToSend(rto bool, startIndex int) int {
 // Close stops the sender and causes future writes to return io.EOF
 func (s *sender) Close() error {
 	if s.closed.CompareAndSwap(false, true) {
-		if s.lossTimer != nil {
-			s.lossTimer.Stop()
-		}
 		close(s.sendQueue)
 
 		return nil

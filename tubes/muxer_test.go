@@ -19,6 +19,9 @@ import (
 // odds is the probability that a given packet is sent.
 // Set odds to 1.0 to send all packet and 0.0 to send no packets
 func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
+	// Shorten the timeout to make the test faster
+	muxerTimeout = time.Second
+
 	var c1, c2 transport.MsgConn
 	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")
 	assert.NilError(t, err)

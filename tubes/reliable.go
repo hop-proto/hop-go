@@ -86,14 +86,15 @@ func (r *Reliable) initiate(req bool) {
 		ticker := time.NewTicker(initialRTT)
 		for notInit {
 			r.sendQueue <- p.toBytes()
+			r.l.Lock()
+			notInit = r.tubeState == created
+			r.l.Unlock()
 			select {
 			case <-ticker.C:
 				r.log.Info("init rto exceeded")
 				continue
 			case <-r.initRecv:
-				r.l.Lock()
-				notInit = r.tubeState == created
-				r.l.Unlock()
+				break
 			case <-r.closed:
 				return
 			}
@@ -101,6 +102,7 @@ func (r *Reliable) initiate(req bool) {
 	}
 
 	go r.send()
+	go r.lossDetector()
 
 	r.l.Lock() // required for checklocks
 	r.sender.closed.Store(false)
@@ -116,7 +118,7 @@ func (r *Reliable) sendOneFrame(pkt *frame) {
 	r.sendQueue <- pkt.toBytes()
 
 	r.sender.bytesInFlight += int64(pkt.dataLength)
-	r.sender.congestion.OnPacketSent(time.Now(), r.sender.bytesInFlight, int64(pkt.frameNo), int64(pkt.dataLength), true)
+	r.sender.congestion.OnPacketSent(time.Now(), r.sender.bytesInFlight, int64(pkt.frameNo), int64(pkt.dataLength), pkt.dataLength != 0)
 
 	if common.Debug {
 		r.log.WithFields(logrus.Fields{
@@ -129,15 +131,25 @@ func (r *Reliable) sendOneFrame(pkt *frame) {
 	}
 }
 
+func (r *Reliable) lossDetector() {
+	tick := time.NewTicker(50 * time.Millisecond)
+	for {
+		select {
+		case <-tick.C:
+			if r.sender.lossTimer.After(time.Now()) {
+				r.l.Lock()
+				r.sender.onLossDetectionTimeout()
+				r.l.Unlock()
+			}
+		case <-r.closed:
+			return
+		}
+	}
+}
+
 // send continuously reads packet from the sends and hands them to the muxer
 func (r *Reliable) send() {
 	for pkt := range r.sender.sendQueue {
-		if !pkt.flags.ACK {
-			r.l.Lock()
-			r.sender.onLossDetectionTimeout()
-			r.l.Unlock()
-		}
-
 		now := time.Now()
 
 		// Wait until we are allowed to send
@@ -247,18 +259,19 @@ func (r *Reliable) enterClosedState() {
 	if r.tubeState == closed {
 		return
 	}
+	oldState := r.tubeState
+	r.tubeState = closed
 	if r.timeWaitTimer != nil {
 		r.timeWaitTimer.Stop()
 	}
 	r.sender.Close()
 	r.recvWindow.Close()
-	if r.tubeState != created {
+	if oldState != created {
 		r.l.Unlock()
 		<-r.sendDone
 		r.l.Lock()
 	}
 	close(r.closed)
-	r.tubeState = closed
 }
 
 func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
