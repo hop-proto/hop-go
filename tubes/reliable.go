@@ -108,6 +108,7 @@ func (r *Reliable) initiate(req bool) {
 	r.l.Unlock()
 }
 
+// +checklocks:r.l
 func (r *Reliable) sendOneFrame(pkt *frame) {
 	pkt.tubeID = r.id
 	pkt.ackNo = r.recvWindow.getAck()
@@ -116,8 +117,12 @@ func (r *Reliable) sendOneFrame(pkt *frame) {
 	pkt.flags.REL = true
 	r.sendQueue <- pkt.toBytes()
 
-	r.sender.bytesInFlight += int64(pkt.dataLength)
-	r.sender.congestion.OnPacketSent(time.Now(), r.sender.bytesInFlight, int64(pkt.frameNo), int64(pkt.dataLength), pkt.dataLength != 0)
+	go func() {
+		r.l.Lock()
+		r.sender.bytesInFlight += int64(pkt.dataLength)
+		r.sender.congestion.OnPacketSent(time.Now(), r.sender.bytesInFlight, int64(pkt.frameNo), int64(pkt.dataLength), pkt.dataLength != 0)
+		r.l.Unlock()
+	}()
 
 	if common.Debug {
 		r.log.WithFields(logrus.Fields{
@@ -135,12 +140,12 @@ func (r *Reliable) lossDetector() {
 	for {
 		select {
 		case <-tick.C:
+			r.l.Lock()
 			var lossTime time.Time = r.sender.lossTimer.Load().(time.Time)
 			if lossTime.After(time.Now()) {
-				r.l.Lock()
 				r.sender.onLossDetectionTimeout()
-				r.l.Unlock()
 			}
+			r.l.Unlock()
 		case <-r.closed:
 			return
 		}
@@ -150,16 +155,20 @@ func (r *Reliable) lossDetector() {
 // send continuously reads packet from the sends and hands them to the muxer
 func (r *Reliable) send() {
 	for pkt := range r.sender.sendQueue {
+		r.l.Lock()
 		now := time.Now()
 
 		// Wait until we are allowed to send
 		deadline := r.sender.congestion.TimeUntilSend(r.sender.bytesInFlight)
 		if deadline.After(now) {
+			r.l.Unlock()
 			<-time.NewTimer(deadline.Sub(now)).C
+			r.l.Lock()
 		}
 
 		r.sender.setLossDetectionTimer(now)
 		r.sendOneFrame(pkt)
+		r.l.Unlock()
 	}
 	r.log.Debug("send ended")
 	close(r.sendDone)
