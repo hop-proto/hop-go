@@ -47,7 +47,7 @@ type sender struct {
 
 	// RTT is the estimate of the round trip time to the remote host
 	RTT             time.Duration
-	RTTFrameCounter int
+	RTRFrameCounter int
 
 	// the time after which writes will expire
 	deadline time.Time
@@ -70,7 +70,7 @@ func newSender(log *logrus.Entry) *sender {
 		// finSent defaults to false
 		RetransmitTicker: time.NewTicker(initialRTT),
 		RTT:              initialRTT,
-		RTTFrameCounter:  initialRTTCounter,
+		RTRFrameCounter:  initialRTTCounter,
 		windowSize:       windowSize,
 		windowOpen:       make(chan struct{}, 1),
 		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
@@ -167,7 +167,7 @@ func (s *sender) recvAck(ackNo uint32) error {
 			}
 		}
 		s.ackNo++
-		s.RTTFrameCounter = initialRTTCounter
+		s.RTRFrameCounter = initialRTTCounter
 		// to not block the retransmission if concurrency
 		//s.frames[0].queued = false
 		s.frames = s.frames[1:]
@@ -223,13 +223,14 @@ func (s *sender) framesToSend(rto bool, startIndex int) int {
 	// TODO(hosono) this is a mess because there's no builtin min or clamp functions
 	var numFrames int
 	if rto {
-		numFrames = s.RTTFrameCounter
+		numFrames = s.RTRFrameCounter
 
 		if numFrames > maxFragTransPerRTO {
 			numFrames = maxFragTransPerRTO
 		}
 	} else {
-		numFrames = int(s.windowSize) - int(s.unacked) - startIndex
+		//numFrames = int(s.windowSize) - int(s.unacked) - startIndex
+		numFrames = int(s.windowSize) - startIndex
 	}
 
 	// Clamp value to avoid going out of bounds

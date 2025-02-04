@@ -225,7 +225,9 @@ func (r *receiver) receive(p *frame) (bool, error) {
 		})
 	}
 
+	// TODO (paul) merge p.dataLength > 0 comparison in one variable
 	if (p.dataLength > 0 || p.flags.FIN) && frameInBounds(windowStart, windowEnd, frameNo) {
+		// TODO (paul) do we prevent duplicated fragments in the heap memory?
 		heap.Push(&r.fragments, &pqItem{
 			value:    p.data,
 			priority: frameNo,
