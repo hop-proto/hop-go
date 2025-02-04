@@ -193,14 +193,19 @@ func (r *Reliable) send() {
 				// We are sending frames that are 1, 2 or 3 avg, and they are likely to be in the queue. I don't want to block any edge case
 				// if r.sender.frames[i].queued {
 				// Only retransmit the timed out frames, however will be sent by the windowOpen
+				rttFrame := &r.sender.frames[i]
+
 				r.log.WithFields(logrus.Fields{
-					"Frame N°": r.sender.frames[i].frame.frameNo,
+					"Frame N°": rttFrame.frame.frameNo,
 					"Ack N°":   r.recvWindow.getAck(),
 				}).Trace("Retransmission RTT")
-				logrus.Debugf("RTT frame %v with ack %v", r.sender.frames[i].frame.frameNo, r.recvWindow.getAck())
-				r.sender.frames[i].flags.RTR = true
-				r.sender.frames[i].Time = time.Now()
-				r.sendOneFrame(r.sender.frames[i].frame, true)
+				logrus.Debugf("RTT frame %v with ack %v", rttFrame.frame.frameNo, r.recvWindow.getAck())
+
+				// To notify the receiver that one frame was not ack/lost and has needed to be rtr
+				rttFrame.flags.RTR = true
+
+				rttFrame.Time = time.Now()
+				r.sendOneFrame(rttFrame.frame, true)
 			}
 
 			// Back off RTT if no ACKs were received
@@ -216,20 +221,31 @@ func (r *Reliable) send() {
 			numFrames := r.sender.framesToSend(false, 0)
 			r.log.WithField("numFrames", numFrames).Trace("window open")
 
-			for i := 0; i < numFrames; i++ {
-				if !r.sender.frames[i].queued {
+			numSent := 0
+			start := 0
+
+			// To limit the window search to the end of the queued frames
+			if r.sender.unacked > windowSize/2 && numFrames < windowSize/4 {
+				start = windowSize / 2
+			}
+
+			for i := start; i < len(r.sender.frames) && numSent < numFrames; i++ {
+				windowFrame := &r.sender.frames[i]
+
+				if !windowFrame.queued {
 					r.log.WithFields(logrus.Fields{
-						"frame No": r.sender.frames[i].frame.frameNo,
+						"frame No": windowFrame.frame.frameNo,
 						"unacked":  r.sender.unacked,
 					}).Trace("Window sending")
-					r.sendOneFrame(r.sender.frames[i].frame, false)
-					r.sender.frames[i].Time = time.Now()
-					r.sender.frames[i].queued = true
-					r.sender.unacked++
 
-					// TODO (paul) this is not ideal
+					windowFrame.Time = time.Now()
+					windowFrame.queued = true
+					r.sendOneFrame(windowFrame.frame, false)
+					r.sender.unacked++
+					numSent++
 				}
 			}
+
 			r.l.Unlock()
 
 		case pkt, ok = <-r.sender.sendQueue:
@@ -296,7 +312,9 @@ func (r *Reliable) receive(pkt *frame) error {
 					}
 
 					if rtrFrame.frameNo == ackNo {
-						if rtrFrame.queued && rtrFrame.Time.Before(time.Now().Add(-r.sender.RTT)) {
+						// TODO (paul) if the network does not have a RTT, then it slows down everything
+						// && rtrFrame.Time.Before(time.Now().Add(-r.sender.RTT))
+						if rtrFrame.queued {
 							rtrFrame.Time = time.Now()
 							rtrFrame.tubeID = r.id
 							rtrFrame.ackNo = r.recvWindow.getAck()

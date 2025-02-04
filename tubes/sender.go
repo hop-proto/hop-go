@@ -229,8 +229,7 @@ func (s *sender) framesToSend(rto bool, startIndex int) int {
 			numFrames = maxFragTransPerRTO
 		}
 	} else {
-		//numFrames = int(s.windowSize) - int(s.unacked) - startIndex
-		numFrames = int(s.windowSize) - startIndex
+		numFrames = int(s.windowSize) - int(s.unacked) - startIndex
 	}
 
 	// Clamp value to avoid going out of bounds
