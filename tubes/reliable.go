@@ -94,7 +94,6 @@ func (r *Reliable) initiate(req bool) {
 				r.log.Info("init rto exceeded")
 				continue
 			case <-r.initRecv:
-				break
 			case <-r.closed:
 				return
 			}
@@ -136,7 +135,8 @@ func (r *Reliable) lossDetector() {
 	for {
 		select {
 		case <-tick.C:
-			if r.sender.lossTimer.After(time.Now()) {
+			var lossTime time.Time = r.sender.lossTimer.Load().(time.Time)
+			if lossTime.After(time.Now()) {
 				r.l.Lock()
 				r.sender.onLossDetectionTimeout()
 				r.l.Unlock()

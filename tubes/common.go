@@ -33,12 +33,6 @@ const maxBufferedPackets = 1000
 // From RFC 9002 section 6.2.2
 const initialRTT = 333 * time.Millisecond
 
-const maxPTODuration = 60 * time.Second
-
-// the maximum number of packets to retransmit per rto
-// even if the window is larger, no more packets will be transmitted
-const maxFragTransPerRTO = 50
-
 // the number of packets in the window for reliable tubes
 const windowSize = 128
 

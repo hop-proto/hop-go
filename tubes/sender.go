@@ -52,7 +52,7 @@ type sender struct {
 	// The time when the last packet was sent.
 	lastPktTime time.Time
 
-	lossTimer time.Time
+	lossTimer atomic.Value
 
 	// The current buffer of unacknowledged bytes from the sender.
 	// A byte slice works well here because:
@@ -83,8 +83,10 @@ func newSender(log *logrus.Entry) *sender {
 		log:         log.WithField("sender", ""),
 		rttStats:    &congestion.RTTStats{},
 		lastPktTime: time.Now(),
+		lossTimer:   atomic.Value{},
 	}
 	s.congestion = congestion.NewCubicSender(congestion.DefaultClock{}, s.rttStats, int64(MaxFrameDataLength), true)
+	s.lossTimer.Store(time.Time{})
 	return s
 }
 
@@ -141,7 +143,7 @@ func (s *sender) write(b []byte) (int, error) {
 }
 
 func (s *sender) setLossDetectionTimer(now time.Time) {
-	if s.lossTimer.After(now) {
+	if s.lossTimer.Load().(time.Time).After(now) {
 		return
 	}
 
@@ -150,7 +152,7 @@ func (s *sender) setLossDetectionTimer(now time.Time) {
 		s.log.WithField("ptoTime", ptoTime).Trace("setting loss detection timer")
 	}
 	if ptoTime.After(now) {
-		s.lossTimer = ptoTime
+		s.lossTimer.Store(ptoTime)
 	}
 }
 
@@ -216,7 +218,7 @@ func (s *sender) recvAck(ackNo uint32) error {
 			sentTime = pkt.sentTime
 		}
 		// TODO(hosono) unwrap frameno
-		s.congestion.OnPacketAcked(int64(pkt.frameNo), int64(pkt.frame.dataLength), s.bytesInFlight, now)
+		s.congestion.OnPacketAcked(pkt.frameNo, int64(pkt.frame.dataLength), s.bytesInFlight, now)
 		s.bytesInFlight -= int64(s.packets[0].frame.dataLength)
 		s.ackNo++
 		s.unacked--
@@ -251,14 +253,7 @@ func (s *sender) sendEmptyPacket() {
 func (s *sender) framesToSend(rto bool, startIndex int) int {
 	// TODO(hosono) this is a mess because there's no builtin min or clamp functions
 	var numFrames int
-	if rto {
-		// Get the minimum of s.windowSize and maxFragTransPerRTO
-		if maxFragTransPerRTO > int(s.windowSize) {
-			numFrames = int(s.windowSize)
-		} else {
-			numFrames = maxFragTransPerRTO
-		}
-	} else {
+	if !rto {
 		numFrames = int(s.windowSize) - int(s.unacked) - startIndex
 	}
 

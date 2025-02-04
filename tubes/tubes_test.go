@@ -199,7 +199,7 @@ func lossyBasicIO(t *testing.T) {
 	c1, c2, stop, _, err := makeConn(0.8, true, t)
 	assert.NilError(t, err)
 
-	want := make([]byte, 1<<16)
+	want := make([]byte, 1<<20)
 	n, err := rand.Read(want)
 	assert.NilError(t, err)
 	assert.Equal(t, n, len(want))
