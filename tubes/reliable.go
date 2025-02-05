@@ -193,25 +193,26 @@ func (r *Reliable) send() {
 				// We are sending frames that are 1, 2 or 3 avg, and they are likely to be in the queue. I don't want to block any edge case
 				// if r.sender.frames[i].queued {
 				// Only retransmit the timed out frames, however will be sent by the windowOpen
-				rttFrame := &r.sender.frames[i]
+				rtoFrame := &r.sender.frames[i]
+
+				// TODO (paul) don't retransmit the frame infinitly if flag FIN?
 
 				r.log.WithFields(logrus.Fields{
-					"Frame N°": rttFrame.frame.frameNo,
+					"Frame N°": rtoFrame.frame.frameNo,
 					"Ack N°":   r.recvWindow.getAck(),
-				}).Trace("Retransmission RTT")
-				logrus.Debugf("RTT frame %v with ack %v", rttFrame.frame.frameNo, r.recvWindow.getAck())
+				}).Trace("Retransmission RTO")
+				logrus.Debugf("RTO frame %v with ack %v", rtoFrame.frame.frameNo, r.recvWindow.getAck())
 
 				// To notify the receiver that one frame was not ack/lost and has needed to be rtr
-				rttFrame.flags.RTR = true
+				rtoFrame.flags.RTR = true
 
-				rttFrame.Time = time.Now()
-				r.sendOneFrame(rttFrame.frame, true)
+				rtoFrame.Time = time.Now()
+				r.sendOneFrame(rtoFrame.frame, true)
 			}
 
-			// Back off RTT if no ACKs were received
-			//r.sender.RTT *= 2
 			r.sender.RTRFrameCounter++
-			// This add 1/9 to the rtt time
+			// Back off RTT if no ACKs were received
+			r.sender.RTT *= 2
 			r.sender.resetRetransmitTicker()
 
 			r.l.Unlock()
@@ -224,7 +225,7 @@ func (r *Reliable) send() {
 			numSent := 0
 			start := 0
 
-			// To limit the window search to the end of the queued frames
+			// To limit the window search to the end of the queued frames for file transfers
 			if r.sender.unacked > windowSize/2 && numFrames < windowSize/4 {
 				start = windowSize / 2
 			}
@@ -327,11 +328,13 @@ func (r *Reliable) receive(pkt *frame) error {
 							r.sendQueue <- rtrFrame.toBytes()
 							r.lastFrameSent.Store(rtrFrame.frameNo)
 							logrus.Debugf("RTR PKT n°%v", rtrFrame.frameNo)
-							// If the sender receive a RTR, that means it didn't retransmit fast enough with the ticker
-							r.sender.RTT /= 2
-							if r.sender.RTT < minRTT {
-								r.sender.RTT = minRTT
-							}
+							/*
+								// If the sender receive a RTR, that means it didn't retransmit fast enough with the ticker
+								r.sender.RTT /= 2
+								if r.sender.RTT < minRTT {
+									r.sender.RTT = minRTT
+								}
+							*/
 						}
 						break
 					}
