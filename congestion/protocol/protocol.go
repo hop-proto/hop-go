@@ -25,4 +25,4 @@ const MaxByteCount int64 = 1<<62 - 1
 const MinPacingDelay = time.Millisecond
 
 // TimerGranularity is the smallest value that the loss detection timer can be set to.
-const TimerGranularity = 5 * time.Millisecond
+const TimerGranularity = time.Millisecond

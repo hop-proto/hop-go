@@ -189,6 +189,9 @@ func (s *sender) onLossDetectionTimeout() {
 			}).Trace("lost packet")
 			// remove lost packet bytes from bytes in flight
 			s.bytesInFlight -= int64(pkt.frame.dataLength)
+			if s.bytesInFlight < 0 {
+				s.bytesInFlight = 0
+			}
 
 			// Queue packet for retransmission
 			s.queuePacket(pkt, now)

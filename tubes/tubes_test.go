@@ -222,11 +222,11 @@ func lossyBasicIO(t *testing.T) {
 
 	got, err := io.ReadAll(c2)
 	assert.NilError(t, err)
-	assert.Equal(t, len(got), len(want))
 
 	err = c2.Close()
 	assert.NilError(t, err)
 
+	assert.Equal(t, len(got), len(want))
 	assert.DeepEqual(t, got, want)
 
 	stop()

@@ -255,7 +255,7 @@ func (r *Reliable) receive(pkt *frame) error {
 // +checklocks:r.l
 func (r *Reliable) enterTimeWaitState() {
 	r.tubeState = timeWait
-	r.timeWaitTimer = time.AfterFunc(4*r.sender.rttStats.PTO(false), func() {
+	r.timeWaitTimer = time.AfterFunc(3*r.sender.rttStats.PTO(false), func() {
 		r.l.Lock()
 		defer r.l.Unlock()
 		r.log.Warn("Time Wait timer ended. going from timeWait to closed")

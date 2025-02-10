@@ -349,7 +349,7 @@ func (m *Muxer) Accept() (Tube, error) {
 func (m *Muxer) readMsg() (*frame, error) {
 	_, err := m.underlying.ReadMsg(m.readBuf)
 	if err != nil {
-		m.log.WithField("err", err).Warn("RECV ERROR!!!!!")
+		m.log.WithField("err", err).Info("recv error")
 		return nil, err
 	}
 
