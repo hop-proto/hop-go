@@ -24,6 +24,7 @@ import (
 type ProbabalisticUDPMsgConn struct {
 	odds float64
 	net.UDPConn
+	Log *logrus.Entry
 }
 
 var _ transport.MsgConn = &ProbabalisticUDPMsgConn{}
@@ -33,6 +34,7 @@ func MakeUDPMsgConn(odds float64, underlying *net.UDPConn) *ProbabalisticUDPMsgC
 	return &ProbabalisticUDPMsgConn{
 		odds,
 		*underlying,
+		nil,
 	}
 }
 
@@ -55,6 +57,8 @@ func (c *ProbabalisticUDPMsgConn) WriteMsg(b []byte) (err error) {
 	}
 	if x < c.odds {
 		_, _, err = c.WriteMsgUDP(b, nil, nil)
+	} else if c.Log != nil {
+		c.Log.Info("dropping packet")
 	}
 	return
 }
@@ -86,6 +90,7 @@ func makeConn(odds float64, rel bool, t testing.TB) (t1, t2 net.Conn, stop func(
 			"test":  t.Name(),
 		}))
 		muxer1.log.WithField("addr", c1.LocalAddr()).Info("Created")
+		c1.(*ProbabalisticUDPMsgConn).Log = muxer1.log
 	}()
 	go func() {
 		defer wg.Done()
@@ -94,6 +99,7 @@ func makeConn(odds float64, rel bool, t testing.TB) (t1, t2 net.Conn, stop func(
 			"test":  t.Name(),
 		}))
 		muxer2.log.WithField("addr", c2.LocalAddr()).Info("Created")
+		c2.(*ProbabalisticUDPMsgConn).Log = muxer2.log
 	}()
 	wg.Wait()
 
@@ -238,7 +244,7 @@ func reliable(t *testing.T) {
 		})
 		t.Run("BadConnection", func(t *testing.T) {
 			t.Skip()
-			CloseTest(0.8, true, true, t)
+			CloseTest(0.8, true, false, t)
 		})
 	})
 

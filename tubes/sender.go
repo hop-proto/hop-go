@@ -143,7 +143,11 @@ func (s *sender) write(b []byte) (int, error) {
 }
 
 func (s *sender) setLossDetectionTimer(now time.Time) {
-	if s.lossTimer.Load().(time.Time).After(now) {
+	lossTime := s.lossTimer.Load().(time.Time)
+	if lossTime.After(now) {
+		if common.Debug {
+			s.log.WithField("lossTime", lossTime).Debug("not setting loss detection timer")
+		}
 		return
 	}
 
@@ -159,10 +163,10 @@ func (s *sender) setLossDetectionTimer(now time.Time) {
 const timeThreshold = 9.0 / 8
 
 func (s *sender) onLossDetectionTimeout() {
-	if common.Debug {
-		s.log.Trace("firing loss detection timer")
-	}
 	now := time.Now()
+	if common.Debug {
+		s.log.WithField("lossTime", s.lossTimer.Load().(time.Time)).Trace("firing loss detection timer")
+	}
 	defer s.setLossDetectionTimer(now)
 
 	maxRTT := float64(max(s.rttStats.LatestRTT(), s.rttStats.SmoothedRTT()))

@@ -142,7 +142,7 @@ func (r *Reliable) lossDetector() {
 		case <-tick.C:
 			r.l.Lock()
 			var lossTime time.Time = r.sender.lossTimer.Load().(time.Time)
-			if lossTime.After(time.Now()) {
+			if lossTime.Before(time.Now()) {
 				r.sender.onLossDetectionTimeout()
 			}
 			r.l.Unlock()
