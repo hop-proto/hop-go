@@ -5,11 +5,12 @@ import (
 	"container/heap"
 	"crypto/rand"
 	"encoding/binary"
-	"github.com/sirupsen/logrus"
 	"io"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sirupsen/logrus"
 
 	"gotest.tools/assert"
 )
