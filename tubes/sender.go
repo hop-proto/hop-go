@@ -123,9 +123,7 @@ func (s *sender) write(b []byte) (int, error) {
 
 	for i := 0; i < numFrames; i++ {
 		pkt := s.frames[startFrame+i]
-		s.unacked++
 		s.frames[startFrame+i].Time = time.Now()
-		s.frames[startFrame+i].queued = true
 		s.sendQueue <- pkt.frame
 	}
 

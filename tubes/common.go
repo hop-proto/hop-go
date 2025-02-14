@@ -37,10 +37,12 @@ const initialRTT = 333 * time.Millisecond
 // This number should be kept reasonably high to privilege RTR frames over RTT frames
 // If the measured RTT is ever lower than minRTT, it is clamped to minRTT
 // From RFC 9002 section 6.2.1 (kGranularity)
-const minRTT = 50 * time.Millisecond
+const minRTT = 10 * time.Millisecond
+
+const maxSendPace = 100 * time.Microsecond
 
 // the maximum number of packets to retransmit per rto
-const maxFragTransPerRTO = 5
+const maxFragTransPerRTO = 1
 
 const initialRTTCounter = 1
 
