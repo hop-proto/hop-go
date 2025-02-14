@@ -51,8 +51,7 @@ type sender struct {
 
 	// The time when the last packet was sent.
 	lastPktTime time.Time
-
-	lossTimer atomic.Value
+	lossTime    time.Time
 
 	// The current buffer of unacknowledged bytes from the sender.
 	// A byte slice works well here because:
@@ -83,10 +82,8 @@ func newSender(log *logrus.Entry) *sender {
 		log:         log.WithField("sender", ""),
 		rttStats:    &congestion.RTTStats{},
 		lastPktTime: time.Now(),
-		lossTimer:   atomic.Value{},
 	}
 	s.congestion = congestion.NewCubicSender(congestion.DefaultClock{}, s.rttStats, int64(MaxFrameDataLength), true)
-	s.lossTimer.Store(time.Time{})
 	return s
 }
 
@@ -95,6 +92,7 @@ func (s *sender) unAckedFramesRemaining() int {
 }
 
 func (s *sender) queuePacket(pkt packet, now time.Time) {
+	s.log.WithField("frameno", pkt.frameNo).Debug("queueing packet")
 	s.unacked++
 	s.sendQueue <- pkt.frame
 	s.setLossDetectionTimer(now)
@@ -132,10 +130,8 @@ func (s *sender) write(b []byte) (int, error) {
 		s.frameNo++
 	}
 
-	numFrames := s.framesToSend(false, startFrame)
-
-	for i := 0; i < numFrames; i++ {
-		pkt := s.packets[startFrame+i]
+	for i := startFrame; i < len(s.packets); i++ {
+		pkt := s.packets[i]
 		s.queuePacket(pkt, now)
 	}
 
@@ -143,20 +139,19 @@ func (s *sender) write(b []byte) (int, error) {
 }
 
 func (s *sender) setLossDetectionTimer(now time.Time) {
-	lossTime := s.lossTimer.Load().(time.Time)
-	if lossTime.After(now) {
+	if s.lossTime.After(now) {
 		if common.Debug {
-			s.log.WithField("lossTime", lossTime).Debug("not setting loss detection timer")
+			s.log.WithField("lossTime", s.lossTime).Debug("not setting loss detection timer")
 		}
 		return
 	}
 
 	ptoTime := s.lastPktTime.Add(s.rttStats.PTO(false) * (1 << s.ptoCount))
 	if common.Debug {
-		s.log.WithField("ptoTime", ptoTime).Trace("setting loss detection timer")
+		s.log.WithField("ptoTime", ptoTime).WithField("now", now).Trace("setting loss detection timer")
 	}
 	if ptoTime.After(now) {
-		s.lossTimer.Store(ptoTime)
+		s.lossTime = ptoTime
 	}
 }
 
@@ -165,7 +160,7 @@ const timeThreshold = 9.0 / 8
 func (s *sender) onLossDetectionTimeout() {
 	now := time.Now()
 	if common.Debug {
-		s.log.WithField("lossTime", s.lossTimer.Load().(time.Time)).Trace("firing loss detection timer")
+		s.log.WithField("lossTime", s.lossTime).WithField("now", now).Trace("firing loss detection timer")
 	}
 	defer s.setLossDetectionTimer(now)
 
@@ -192,12 +187,12 @@ func (s *sender) onLossDetectionTimeout() {
 			if s.bytesInFlight < 0 {
 				s.bytesInFlight = 0
 			}
+			s.congestion.OnCongestionEvent(pkt.frameNo, int64(pkt.frame.dataLength), priorInFlight)
 
 			// Queue packet for retransmission
 			s.queuePacket(pkt, now)
 			s.unacked--
 
-			s.congestion.OnCongestionEvent(pkt.frameNo, int64(pkt.frame.dataLength), priorInFlight)
 		}
 	}
 	s.ptoCount++
@@ -255,23 +250,6 @@ func (s *sender) sendEmptyPacket() {
 		data:       []byte{},
 	}
 	s.sendQueue <- pkt
-}
-
-func (s *sender) framesToSend(rto bool, startIndex int) int {
-	// TODO(hosono) this is a mess because there's no builtin min or clamp functions
-	var numFrames int
-	if !rto {
-		numFrames = int(s.windowSize) - int(s.unacked) - startIndex
-	}
-
-	// Clamp value to avoid going out of bounds
-	if numFrames+startIndex > len(s.packets) {
-		numFrames = len(s.packets) - startIndex
-	}
-	if numFrames < 0 {
-		numFrames = 0
-	}
-	return numFrames
 }
 
 // Close stops the sender and causes future writes to return io.EOF

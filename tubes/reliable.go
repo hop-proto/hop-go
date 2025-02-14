@@ -141,8 +141,7 @@ func (r *Reliable) lossDetector() {
 		select {
 		case <-tick.C:
 			r.l.Lock()
-			var lossTime time.Time = r.sender.lossTimer.Load().(time.Time)
-			if lossTime.Before(time.Now()) {
+			if r.sender.lossTime.Before(time.Now()) {
 				r.sender.onLossDetectionTimeout()
 			}
 			r.l.Unlock()
@@ -161,6 +160,10 @@ func (r *Reliable) send() {
 		// Wait until we are allowed to send
 		deadline := r.sender.congestion.TimeUntilSend(r.sender.bytesInFlight)
 		if deadline.After(now) {
+			r.log.WithFields(logrus.Fields{
+				"deadline": deadline,
+				"frameno":  pkt.frameNo,
+			}).Trace("delaying send")
 			r.l.Unlock()
 			<-time.NewTimer(deadline.Sub(now)).C
 			r.l.Lock()
@@ -302,7 +305,7 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		r.recvWindow.m.Lock()
 		r.recvWindow.ackNo = 1
 		r.recvWindow.m.Unlock()
-		r.log.Debug("INITIATED!")
+		r.log.WithField("now", time.Now()).Debug("INITIATED!")
 		r.tubeState = initiated
 		r.sender.recvAck(1)
 		close(r.initRecv)
