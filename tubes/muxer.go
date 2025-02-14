@@ -53,13 +53,13 @@ type Muxer struct {
 	unreliableTubes map[byte]*Unreliable
 
 	// All hop tubes write raw bytes for a tube packet to this golang chan.
-	sendQueue     chan []byte
-	priorityQueue chan []byte
-	state         atomic.Value
-	stopped       chan struct{}
-	underlying    transport.MsgConn
-	timeout       time.Duration
-	log           *logrus.Entry
+	sendQueue         chan []byte
+	prioritySendQueue chan []byte
+	state             atomic.Value
+	stopped           chan struct{}
+	underlying        transport.MsgConn
+	timeout           time.Duration
+	log               *logrus.Entry
 
 	senderErr chan error
 	sendErr   error
@@ -110,21 +110,21 @@ func newMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 	}
 	state := atomic.Value{}
 	mux := &Muxer{
-		idParity:        idParity,
-		reliableTubes:   make(map[byte]*Reliable),
-		unreliableTubes: make(map[byte]*Unreliable),
-		tubeQueue:       make(chan Tube, 128),
-		m:               sync.Mutex{},
-		sendQueue:       make(chan []byte),
-		priorityQueue:   make(chan []byte),
-		state:           state,
-		stopped:         make(chan struct{}),
-		underlying:      msgConn,
-		timeout:         timeout,
-		log:             log,
-		readBuf:         make([]byte, 65535),
-		receiverErr:     make(chan error),
-		senderErr:       make(chan error),
+		idParity:          idParity,
+		reliableTubes:     make(map[byte]*Reliable),
+		unreliableTubes:   make(map[byte]*Unreliable),
+		tubeQueue:         make(chan Tube, 128),
+		m:                 sync.Mutex{},
+		sendQueue:         make(chan []byte),
+		prioritySendQueue: make(chan []byte),
+		state:             state,
+		stopped:           make(chan struct{}),
+		underlying:        msgConn,
+		timeout:           timeout,
+		log:               log,
+		readBuf:           make([]byte, 65535),
+		receiverErr:       make(chan error),
+		senderErr:         make(chan error),
 	}
 
 	mux.state.Store(muxerRunning)
@@ -252,20 +252,20 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 		"tubeType": tType,
 	})
 	r := &Reliable{
-		id:            tubeID,
-		localAddr:     m.underlying.LocalAddr(),
-		remoteAddr:    m.underlying.RemoteAddr(),
-		tubeState:     created,
-		initRecv:      make(chan struct{}),
-		initDone:      make(chan struct{}),
-		sendDone:      make(chan struct{}),
-		closed:        make(chan struct{}, 1),
-		recvWindow:    newReceiver(tubeLog),
-		sender:        newSender(tubeLog),
-		sendQueue:     m.sendQueue,
-		priorityQueue: m.priorityQueue,
-		tType:         tType,
-		log:           tubeLog,
+		id:                tubeID,
+		localAddr:         m.underlying.LocalAddr(),
+		remoteAddr:        m.underlying.RemoteAddr(),
+		tubeState:         created,
+		initRecv:          make(chan struct{}),
+		initDone:          make(chan struct{}),
+		sendDone:          make(chan struct{}),
+		closed:            make(chan struct{}, 1),
+		recvWindow:        newReceiver(tubeLog),
+		sender:            newSender(tubeLog),
+		sendQueue:         m.sendQueue,
+		prioritySendQueue: m.prioritySendQueue,
+		tType:             tType,
+		log:               tubeLog,
 	}
 	r.lastAckSent.Store(0)
 	r.lastFrameSent.Store(0)
@@ -368,22 +368,15 @@ func (m *Muxer) readMsg() (*frame, error) {
 // underlying MsgConn. If an error occurs while sending data, sender will call
 // m.Stop in a new goroutine and the error will be reported by m.Stop
 func (m *Muxer) sender() {
-	ticker := time.NewTicker(maxSendPace)
-	defer ticker.Stop()
 	var err error
 	for {
 		select {
-		case rawBytes := <-m.priorityQueue:
+		case rawBytes := <-m.prioritySendQueue:
 			m.log.Debugf("I send via the priority queue")
 			err = m.underlying.WriteMsg(rawBytes)
 
 		case rawBytes := <-m.sendQueue:
-			<-ticker.C // Wait for pacing interval before sending
 			err = m.underlying.WriteMsg(rawBytes)
-			if err != nil {
-				m.log.Debugf("error send queue %v", err)
-				// Handle error (e.g., log or retry)
-			}
 		}
 
 		if err != nil {
@@ -395,6 +388,8 @@ func (m *Muxer) sender() {
 	}
 
 	// if we broke out of the loop, consume all packets so tubes can still close
+	for range m.prioritySendQueue {
+	}
 	for range m.sendQueue {
 	}
 
@@ -558,6 +553,7 @@ func (m *Muxer) Stop() (sendErr error, recvErr error) {
 	wg.Wait()
 	m.state.Store(muxerStopped)
 
+	close(m.prioritySendQueue)
 	close(m.sendQueue)
 	close(m.tubeQueue)
 
