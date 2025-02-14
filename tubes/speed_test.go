@@ -2,7 +2,9 @@ package tubes
 
 import (
 	"bytes"
+	"container/heap"
 	"crypto/rand"
+	"encoding/binary"
 	"github.com/sirupsen/logrus"
 	"io"
 	"sync"
@@ -13,14 +15,14 @@ import (
 )
 
 func TestFileTransferSpeedReliableTubes(t *testing.T) {
-	logrus.SetOutput(io.Discard)
-	//logrus.SetLevel(logrus.TraceLevel)
+	//logrus.SetOutput(io.Discard)
+	logrus.SetLevel(logrus.TraceLevel)
 
 	fileSize := 128 << 20 // 128 MiB
 	//fileSize := 1 << 30 // 128 MiB
 	t.Logf("Transferring file size: %d bytes", fileSize)
 
-	t1, t2, stop, _, err := makeConn(0.99, true, t)
+	t1, t2, stop, _, err := makeConn(0.95, true, t)
 	assert.NilError(t, err)
 	defer stop()
 
@@ -82,4 +84,83 @@ func chunkedCopy(w io.Writer, r io.Reader) error {
 	b := make([]byte, 1024)
 	_, err := io.CopyBuffer(struct{ io.Writer }{w}, struct{ io.Reader }{r}, b)
 	return err
+}
+
+func BenchmarkHeapPush(b *testing.B) {
+	pq := &PriorityQueue{}
+	heap.Init(pq)
+
+	for i := 0; i < b.N; i++ {
+		heap.Push(pq, &pqItem{priority: uint64(i)})
+	}
+}
+
+func BenchmarkHeapPop(b *testing.B) {
+	pq := &PriorityQueue{}
+	heap.Init(pq)
+	for i := 0; i < 1000000; i++ {
+		heap.Push(pq, &pqItem{priority: uint64(i)})
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if pq.Len() > 0 {
+			heap.Pop(pq)
+		}
+	}
+}
+
+func BenchmarkHeapThroughput(b *testing.B) {
+	packetSize := 1500
+	numPackets := b.N
+
+	pq := &PriorityQueue{}
+	heap.Init(pq)
+
+	startTime := time.Now()
+	windowStart := uint64(0) // Expected packet order
+
+	// Simulate receiving packets and pushing them into the heap
+	for i := 0; i < numPackets; i++ {
+		heap.Push(pq, &pqItem{
+			value:    make([]byte, packetSize),
+			priority: uint64(i),
+		})
+	}
+
+	bytesProcessed := 0
+	for pq.Len() > 0 {
+		// Generate a cryptographically secure random number
+		var randByte [8]byte
+		_, err := rand.Read(randByte[:]) // Read 8 random bytes
+		if err != nil {
+			b.Fatalf("Failed to generate random number: %v", err)
+		}
+		randomFloat := float64(binary.LittleEndian.Uint64(randByte[:])) / (1 << 64) // Convert to [0,1)
+
+		// Introduce 1% probability of popping out of order
+		if pq.Len() > 1 && randomFloat < 0.02 {
+			// Pop an extra item (out-of-order packet)
+			outOfOrderItem := heap.Pop(pq).(*pqItem)
+			heap.Push(pq, outOfOrderItem) // Push it back
+		}
+
+		item := heap.Pop(pq).(*pqItem)
+
+		// If out of order, push it back and wait for the correct packet
+		if item.priority > windowStart {
+			heap.Push(pq, item)
+			continue
+		}
+
+		// Process in-order packet
+		bytesProcessed += len(item.value)
+		windowStart++ // Move expected window forward
+	}
+
+	elapsedTime := time.Since(startTime).Seconds()
+	throughputMBps := float64(bytesProcessed) / elapsedTime / 1024 / 1024
+
+	b.ReportMetric(throughputMBps, "MB/sec")
+	b.ReportMetric(float64(bytesProcessed)/1024/1024, "MB")
 }

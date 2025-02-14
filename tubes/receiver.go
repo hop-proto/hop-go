@@ -32,8 +32,9 @@ type receiver struct {
 
 	dataReady *common.DeadlineChan[struct{}]
 	// +checklocks:m
-	buffer       *bytes.Buffer
-	missingFrame bool
+	buffer             *bytes.Buffer
+	missingFrame       bool
+	frameToSendCounter uint32
 
 	log *logrus.Entry
 }
@@ -97,11 +98,17 @@ func (r *receiver) processIntoBuffer() bool {
 			}
 			if frag.priority > r.windowStart {
 				heap.Push(&r.fragments, frag)
+				// To use it only when congested
 				r.missingFrame = true
+				frameToSend := frag.priority - r.windowStart
+				if frameToSend <= uint64(windowSize) {
+					r.frameToSendCounter = uint32(frameToSend)
+				}
 				r.log.WithFields(logrus.Fields{
 					"frag.priority": frag.priority,
 					"r.windowStart": r.windowStart,
 				}).Trace("cannot process packet")
+				logrus.Debugf("cannont process packet frag %v, windowstart %v, len %v", frag.priority, r.windowStart, oldLen)
 				break
 			}
 		} else {
@@ -112,6 +119,7 @@ func (r *receiver) processIntoBuffer() bool {
 			r.buffer.Write(frag.value)
 			r.windowStart++
 			r.ackNo++
+			r.frameToSendCounter = 0
 			if common.Debug {
 				log.Trace("processing packet")
 			}
@@ -226,7 +234,7 @@ func (r *receiver) receive(p *frame) (bool, error) {
 	}
 
 	// TODO (paul) merge p.dataLength > 0 comparison in one variable
-	if (p.dataLength > 0 || p.flags.FIN) && frameInBounds(windowStart, windowEnd, frameNo) {
+	if ((p.dataLength > 0 && !p.flags.ACK) || p.flags.FIN) && frameInBounds(windowStart, windowEnd, frameNo) {
 		// TODO (paul) do we prevent duplicated fragments in the heap memory?
 		heap.Push(&r.fragments, &pqItem{
 			value:    p.data,
@@ -238,7 +246,7 @@ func (r *receiver) receive(p *frame) (bool, error) {
 			log.Trace("in bounds frame")
 		}
 	} else {
-		if p.dataLength > 0 {
+		if p.dataLength > 0 && !p.flags.ACK {
 			if common.Debug {
 				log.Debug("out of bounds frame")
 			}

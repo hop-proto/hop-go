@@ -183,7 +183,7 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	//TODO(drebelsky): consider using reflection
 	newHC := HostConfig{
 		HandshakeTimeout: 15 * time.Second,
-		DataTimeout:      15 * time.Second,
+		DataTimeout:      3 * time.Second,
 	}
 	if hc.AgentURL != nil {
 		newHC.AgentURL = *hc.AgentURL
