@@ -605,7 +605,7 @@ func (r *Reliable) receiveRTRFrame(frame *frame) {
 		// with the current processing index
 		if !frame.flags.ACK && frame.dataLength > 0 {
 			frameCounter := r.recvWindow.frameToSendCounter
-			r.sendRetransmissionAck(frame.ackNo, ackNo, uint16(frameCounter))
+			r.sendRetransmissionAck(frame.ackNo, ackNo, frameCounter)
 
 		} else {
 
