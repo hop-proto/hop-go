@@ -46,8 +46,7 @@ type sender struct {
 	RetransmitTicker *time.Ticker
 
 	// RTT is the estimate of the round trip time to the remote host
-	RTT             time.Duration
-	RTRFrameCounter int
+	RTT time.Duration
 
 	// the time after which writes will expire
 	deadline time.Time
@@ -70,7 +69,6 @@ func newSender(log *logrus.Entry) *sender {
 		// finSent defaults to false
 		RetransmitTicker: time.NewTicker(initialRTT),
 		RTT:              initialRTT,
-		RTRFrameCounter:  initialRTTCounter,
 		windowSize:       windowSize,
 		windowOpen:       make(chan struct{}, 1),
 		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
@@ -143,8 +141,6 @@ func (s *sender) recvAck(ackNo uint32) error {
 
 	windowOpen := s.ackNo < newAckNo
 
-	//logrus.Debugf("I received the ack, %v", ackNo)
-
 	for s.ackNo < newAckNo {
 		if !s.frames[0].Time.Equal(time.Time{}) && ackNo == s.frames[0].frame.frameNo+1 {
 			oldRTT := s.RTT
@@ -165,9 +161,6 @@ func (s *sender) recvAck(ackNo uint32) error {
 			}
 		}
 		s.ackNo++
-		s.RTRFrameCounter = initialRTTCounter
-		// to not block the retransmission if concurrency
-		//s.frames[0].queued = false
 		s.frames = s.frames[1:]
 		if s.unacked > 0 {
 			s.unacked--
@@ -178,8 +171,6 @@ func (s *sender) recvAck(ackNo uint32) error {
 			"unacked":      s.unacked,
 			"new ack now":  s.ackNo,
 		}).Trace("I am acknowledging")
-
-		//logrus.Debugf("I am acknowledging the ack, %v, and I have unacked: %v, and my new ack now is : %v", newAckNo, s.unacked, s.ackNo)
 	}
 
 	if common.Debug {
@@ -221,11 +212,7 @@ func (s *sender) framesToSend(rto bool, startIndex int) int {
 	// TODO(hosono) this is a mess because there's no builtin min or clamp functions
 	var numFrames int
 	if rto {
-		numFrames = s.RTRFrameCounter
-
-		if numFrames > maxFragTransPerRTO {
-			numFrames = maxFragTransPerRTO
-		}
+		numFrames = maxFragTransPerRTO
 	} else {
 		numFrames = int(s.windowSize) - int(s.unacked) - startIndex
 	}
