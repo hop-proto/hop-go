@@ -207,7 +207,7 @@ func (r *Reliable) send() {
 				rtoFrame.flags.RTR = true
 				rtoFrame.Time = time.Now()
 
-				if !rtoFrame.queued {
+				if !rtoFrame.queued && rtoFrame.dataLength > 0 {
 					r.sender.unacked++
 					rtoFrame.queued = true
 				}
@@ -219,6 +219,7 @@ func (r *Reliable) send() {
 
 			// Back off RTT if no ACKs were received
 			r.sender.RTT *= 2
+			// TODO paul set the data timeout to infinite but if RTO > 15sec, close connection
 			r.sender.resetRetransmitTicker()
 
 			r.l.Unlock()
@@ -227,8 +228,6 @@ func (r *Reliable) send() {
 			r.l.Lock()
 			numFrames := r.sender.framesToSend(false, 0)
 			r.log.WithField("numFrames", numFrames).Trace("window open")
-
-			logrus.Debugf("Window open, numframes %v", numFrames)
 
 			numSent := 0
 
@@ -245,11 +244,10 @@ func (r *Reliable) send() {
 					windowFrame.queued = true
 					r.sender.unacked++
 
-					r.sendOneFrame(windowFrame.frame, false)
+					r.sender.sendQueue <- windowFrame.frame
 					numSent++
 				}
 			}
-
 			r.l.Unlock()
 
 		case pkt, ok = <-r.sender.sendQueue:
@@ -258,15 +256,7 @@ func (r *Reliable) send() {
 			}
 
 			// Do not block ACKs - Blocks frame transmission out of window open
-			inSenderWindow := int(pkt.frameNo) < int(r.sender.ackNo)+windowSize
-			if pkt.dataLength == 0 || (!pkt.queued && inSenderWindow) {
-				if pkt.dataLength > 0 {
-					r.sender.unacked++
-					pkt.queued = true
-				}
-
-				r.sendOneFrame(pkt, false)
-			}
+			r.sendOneFrame(pkt, false)
 		}
 	}
 	r.log.Debug("send ended")
