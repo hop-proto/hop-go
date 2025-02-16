@@ -120,9 +120,14 @@ func (s *sender) write(b []byte) (int, error) {
 	numFrames := s.framesToSend(false, startFrame)
 
 	for i := 0; i < numFrames; i++ {
-		pkt := s.frames[startFrame+i]
-		s.frames[startFrame+i].Time = time.Now()
-		s.sendQueue <- pkt.frame
+		pkt := &s.frames[startFrame+i]
+
+		if !pkt.queued {
+			pkt.Time = time.Now()
+			pkt.queued = true
+			s.unacked++
+			s.sendQueue <- pkt.frame
+		}
 	}
 
 	s.resetRetransmitTicker()
@@ -260,11 +265,24 @@ func (s *sender) sendFin() error {
 	s.log.WithField("frameNo", pkt.frameNo).Debug("queueing FIN packet")
 
 	s.frameNo++
+
+	// To properly close the receiver
+	addToSendQueue := false
+
+	if len(s.frames) == 0 {
+		pkt.queued = true
+		s.unacked++
+		addToSendQueue = true
+	}
+
 	s.frames = append(s.frames, struct {
 		*frame
 		time.Time
 	}{&pkt, time.Time{}})
-	s.sendQueue <- &pkt
-	s.unacked++
+
+	if addToSendQueue {
+		s.sendQueue <- &pkt
+	}
+
 	return nil
 }
