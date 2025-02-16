@@ -119,14 +119,12 @@ func (s *sender) write(b []byte) (int, error) {
 
 	numFrames := s.framesToSend(false, startFrame)
 
-	for i := 0; i < numFrames; i++ {
-		pkt := &s.frames[startFrame+i]
-
-		if !pkt.queued {
-			pkt.Time = time.Now()
-			pkt.queued = true
-			s.unacked++
-			s.sendQueue <- pkt.frame
+	if numFrames > 0 {
+		select {
+		case s.windowOpen <- struct{}{}:
+			break
+		default:
+			break
 		}
 	}
 

@@ -229,9 +229,9 @@ func (r *Reliable) send() {
 			numFrames := r.sender.framesToSend(false, 0)
 			r.log.WithField("numFrames", numFrames).Trace("window open")
 
-			numSent := 0
+			numQueued := 0
 
-			for i := 0; i < len(r.sender.frames) && numSent < numFrames; i++ {
+			for i := 0; i < len(r.sender.frames) && numQueued < numFrames; i++ {
 				windowFrame := &r.sender.frames[i]
 
 				if !windowFrame.queued {
@@ -245,7 +245,7 @@ func (r *Reliable) send() {
 					r.sender.unacked++
 
 					r.sender.sendQueue <- windowFrame.frame
-					numSent++
+					numQueued++
 				}
 			}
 			r.l.Unlock()
