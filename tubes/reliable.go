@@ -52,7 +52,8 @@ type Reliable struct {
 	initRecv      chan struct{}
 	initDone      chan struct{}
 	sendDone      chan struct{}
-	l             sync.Mutex
+	l             *sync.Mutex
+	senderCV      *sync.Cond
 	log           *logrus.Entry
 }
 
@@ -226,6 +227,7 @@ func (r *Reliable) receive(pkt *frame) error {
 	// Pass the frame to the sender
 	if pkt.flags.ACK {
 		r.sender.recvAck(pkt.ackNo)
+		r.senderCV.Broadcast()
 	}
 
 	// Handle ACK of FIN frame
@@ -369,13 +371,21 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 	r.l.Lock()
 	defer r.l.Unlock()
 
-	switch r.tubeState {
-	case created:
-		return 0, ErrBadTubeState
-	case initiated, closeWait:
-		break
-	default:
-		return 0, io.EOF
+	for {
+		switch r.tubeState {
+		case created:
+			return 0, ErrBadTubeState
+		case initiated, closeWait:
+			break
+		default:
+			return 0, io.EOF
+		}
+
+		if len(r.sender.packets) < maxBufferedPackets {
+			break
+		}
+
+		r.senderCV.Wait()
 	}
 
 	return r.sender.write(b)

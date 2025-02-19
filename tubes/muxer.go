@@ -262,8 +262,10 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 		sender:     newSender(tubeLog),
 		sendQueue:  m.sendQueue,
 		tType:      tType,
+		l:          &sync.Mutex{},
 		log:        tubeLog,
 	}
+	r.senderCV = sync.NewCond(r.l)
 	r.lastAckSent.Store(0)
 	r.sender.closed.Store(true)
 	m.addTube(r)
