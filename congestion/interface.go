@@ -18,3 +18,10 @@ type SendAlgorithm interface {
 	OnRetransmissionTimeout(packetsRetransmitted bool)
 	SetMaxDatagramSize(int64)
 }
+
+type SendAlgorithmWithDebugInfos interface {
+	SendAlgorithm
+	InSlowStart() bool
+	InRecovery() bool
+	GetCongestionWindow() int64
+}

@@ -117,12 +117,8 @@ func (r *Reliable) sendOneFrame(pkt *frame) {
 	pkt.flags.REL = true
 	r.sendQueue <- pkt.toBytes()
 
-	go func() {
-		r.l.Lock()
-		r.sender.bytesInFlight += int64(pkt.dataLength)
-		r.sender.congestion.OnPacketSent(time.Now(), r.sender.bytesInFlight, int64(pkt.frameNo), int64(pkt.dataLength), pkt.dataLength != 0)
-		r.l.Unlock()
-	}()
+	r.sender.bytesInFlight += int64(pkt.dataLength)
+	r.sender.congestion.OnPacketSent(time.Now(), r.sender.bytesInFlight, int64(pkt.frameNo), int64(pkt.dataLength), pkt.dataLength != 0)
 
 	if common.Debug {
 		r.log.WithFields(logrus.Fields{
@@ -153,24 +149,44 @@ func (r *Reliable) lossDetector() {
 
 // send continuously reads packet from the sends and hands them to the muxer
 func (r *Reliable) send() {
+	pktBuf := make([]*frame, 10)
 	for pkt := range r.sender.sendQueue {
 		r.l.Lock()
 		now := time.Now()
 
+		pktBuf[0] = pkt
+
 		// Wait until we are allowed to send
 		deadline := r.sender.congestion.TimeUntilSend(r.sender.bytesInFlight)
-		if deadline.After(now) {
+		if !r.sender.congestion.HasPacingBudget(now) && deadline.After(now.Add(1*time.Millisecond)) {
+			// if common.Debug {
 			r.log.WithFields(logrus.Fields{
-				"deadline": deadline,
-				"frameno":  pkt.frameNo,
+				"wait time (ms)": deadline.Sub(now).Milliseconds(),
+				"frameno":        pkt.frameNo,
 			}).Trace("delaying send")
+			// }
 			r.l.Unlock()
 			<-time.NewTimer(deadline.Sub(now)).C
 			r.l.Lock()
 		}
 
+	burstLoop:
+		for i := 1; i < 10; i++ {
+			select {
+			case pkt := <-r.sender.sendQueue:
+				pktBuf[i] = pkt
+			default:
+				break burstLoop
+			}
+		}
+
 		r.sender.setLossDetectionTimer(now)
-		r.sendOneFrame(pkt)
+		for i := 0; i < 10; i++ {
+			if pktBuf[i] != nil {
+				r.sendOneFrame(pktBuf[i])
+			}
+			pktBuf[i] = nil
+		}
 		r.l.Unlock()
 	}
 	r.log.Debug("send ended")

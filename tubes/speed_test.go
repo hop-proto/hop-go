@@ -1,16 +1,23 @@
 package tubes
 
 import (
+	"bytes"
 	"crypto/rand"
 	"io"
 	"sync"
 	"testing"
+	// "time"
 
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 )
 
 func BenchmarkReliable(b *testing.B) {
+	// logrus.SetLevel(logrus.TraceLevel)
+	// logrus.SetFormatter(&logrus.TextFormatter{
+	// TimestampFormat: time.RFC3339Nano,
+	// FullTimestamp:   true,
+	// })
 	logrus.SetOutput(io.Discard)
 
 	t1, t2, stop, _, err := makeConn(1.0, true, b)
@@ -19,7 +26,7 @@ func BenchmarkReliable(b *testing.B) {
 
 	wg := sync.WaitGroup{}
 
-	size := 1 << 22
+	size := 1 << 18
 	b.SetBytes(int64(size))
 	b.ReportAllocs()
 
@@ -32,13 +39,9 @@ func BenchmarkReliable(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		wg.Add(1)
 		go func() {
-			n := 0
-			for n < size {
-				nbytes, err := t1.Write(sendBuf[n:])
-				n = n + nbytes
-				assert.NilError(b, err)
-			}
-			assert.Equal(b, n, size)
+			n, err := io.CopyN(t1, bytes.NewReader(sendBuf), int64(size))
+			assert.NilError(b, err)
+			assert.Equal(b, n, int64(size))
 			wg.Done()
 		}()
 

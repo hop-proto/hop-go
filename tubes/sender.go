@@ -43,7 +43,7 @@ type sender struct {
 	packets []packet
 
 	// The algorithm for managing congestion control
-	congestion    congestion.SendAlgorithm
+	congestion    congestion.SendAlgorithmWithDebugInfos
 	rttStats      *congestion.RTTStats
 	bytesInFlight int64
 	// The number of times a PTO has been sent without receiving an ack.
@@ -55,10 +55,10 @@ type sender struct {
 
 	// The current buffer of unacknowledged bytes from the sender.
 	// A byte slice works well here because:
-	// 	(1) we need to accommodate resending fragments of potentially varying window sizes
-	// 	based on the receiving end, so being able to arbitrarily index from the front is important.
-	//	(2) the append() function when write() is called will periodically clean up the unused
-	//	memory in the front of the slice by reallocating the buffer array.
+	//         (1) we need to accommodate resending fragments of potentially varying window sizes
+	//         based on the receiving end, so being able to arbitrarily index from the front is important.
+	//        (2) the append() function when write() is called will periodically clean up the unused
+	//        memory in the front of the slice by reallocating the buffer array.
 	// TODO(hosono) ideally, we would have a maximum buffer size beyond with reads would block
 	buffer []byte
 
@@ -84,6 +84,7 @@ func newSender(log *logrus.Entry) *sender {
 		lastPktTime: time.Now(),
 	}
 	s.congestion = congestion.NewCubicSender(congestion.DefaultClock{}, s.rttStats, int64(MaxFrameDataLength), true)
+	s.congestion.SetMaxDatagramSize(int64(MaxFrameDataLength))
 	return s
 }
 
@@ -92,7 +93,9 @@ func (s *sender) unAckedFramesRemaining() int {
 }
 
 func (s *sender) queuePacket(pkt packet, now time.Time) {
-	s.log.WithField("frameno", pkt.frameNo).Debug("queueing packet")
+	if common.Debug {
+		s.log.WithField("frameno", pkt.frameNo).Debug("queueing packet")
+	}
 	s.unacked++
 	s.sendQueue <- pkt.frame
 	s.setLossDetectionTimer(now)
@@ -139,16 +142,24 @@ func (s *sender) write(b []byte) (int, error) {
 }
 
 func (s *sender) setLossDetectionTimer(now time.Time) {
+	log := s.log.WithFields(logrus.Fields{
+		"now":         now,
+		"lossTime":    s.lossTime,
+		"inSlowStart": s.congestion.InSlowStart(),
+		"inRecovery":  s.congestion.InRecovery(),
+		"congWin":     s.congestion.GetCongestionWindow(),
+		"rtt (ms)":    s.rttStats.LatestRTT().Milliseconds(),
+	})
 	if s.lossTime.After(now) {
 		if common.Debug {
-			s.log.WithField("lossTime", s.lossTime).Debug("not setting loss detection timer")
+			log.Debug("not setting loss detection timer")
 		}
 		return
 	}
 
 	ptoTime := s.lastPktTime.Add(s.rttStats.PTO(false) * (1 << s.ptoCount))
 	if common.Debug {
-		s.log.WithField("ptoTime", ptoTime).WithField("now", now).Trace("setting loss detection timer")
+		log.WithField("ptoTime", ptoTime).Trace("setting loss detection timer")
 	}
 	if ptoTime.After(now) {
 		s.lossTime = ptoTime
@@ -181,7 +192,7 @@ func (s *sender) onLossDetectionTimeout() {
 			s.log.WithFields(logrus.Fields{
 				"frameNo":    pkt.frame.frameNo,
 				"delay (ms)": millis,
-			}).Trace("lost packet")
+			}).Info("lost packet")
 			// remove lost packet bytes from bytes in flight
 			s.bytesInFlight -= int64(pkt.frame.dataLength)
 			if s.bytesInFlight < 0 {
@@ -209,7 +220,6 @@ func (s *sender) recvAck(ackNo uint32) error {
 	if s.ackNo < newAckNo {
 		s.congestion.MaybeExitSlowStart()
 		s.ptoCount = 0
-
 	}
 
 	sentTime := now
