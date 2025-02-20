@@ -6,18 +6,12 @@ import (
 	"io"
 	"sync"
 	"testing"
-	// "time"
 
 	"github.com/sirupsen/logrus"
 	"gotest.tools/assert"
 )
 
 func BenchmarkReliable(b *testing.B) {
-	// logrus.SetLevel(logrus.TraceLevel)
-	// logrus.SetFormatter(&logrus.TextFormatter{
-	// TimestampFormat: time.RFC3339Nano,
-	// FullTimestamp:   true,
-	// })
 	logrus.SetOutput(io.Discard)
 
 	t1, t2, stop, _, err := makeConn(1.0, true, b)
