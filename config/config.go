@@ -301,7 +301,7 @@ func UserDirectoryFor(username string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(u.HomeDir, common.UserConfigDirectory), nil
+	return filepath.Join(u.Homedir(), common.UserConfigDirectory), nil
 }
 
 // DefaultKeyPath returns UserDirectory()/id_hop.pem.
