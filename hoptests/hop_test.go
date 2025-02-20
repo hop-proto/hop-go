@@ -1,6 +1,7 @@
 package hoptests
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -425,7 +426,8 @@ func TestStartCmd(t *testing.T) {
 		s.AddClientToAuthorizedKeys(t, c)
 
 		// Modify client config with command to run
-		c.AddCmd("pwd")
+		testString := "Hello from hop tests!"
+		c.AddCmd(fmt.Sprintf("echo '%s'", testString))
 
 		s.StartTransport(t)
 		s.StartHopServer(t)
@@ -442,15 +444,12 @@ func TestStartCmd(t *testing.T) {
 
 		logrus.Info("CMD: ", c.Config.Cmd)
 
-		//_ = c.Client.Start()
-		// TODO(baumanl): this currently doesn't work because code execution
-		// is tied to standard case of having an attached terminal
-		//assert.NilError(t, err)
-
-		var err error
-		err = s.Server.Close()
+		err := c.Client.Start()
 		assert.NilError(t, err)
+
 		err = c.Client.Close()
+		assert.NilError(t, err)
+		err = s.Server.Close()
 		assert.NilError(t, err)
 	})
 }

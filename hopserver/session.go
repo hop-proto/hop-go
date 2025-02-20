@@ -203,9 +203,9 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 	//Default behavior is for command.Env to inherit parents environment unless given and explicit alternative.
 	//TODO(baumanl): These are minimal environment variables. SSH allows for more inheritance from client, but it gets complicated.
 	env := []string{
-		"USER=" + sess.user,
+		"USER=" + user.Username(),
 		"SHELL=" + user.Shell(),
-		"LOGNAME=" + sess.user,
+		"LOGNAME=" + user.Username(),
 		"HOME=" + user.Homedir(),
 		"TERM=" + termEnv,
 	}
@@ -249,9 +249,9 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 		c.Stdin = tube
 		c.Stdout = tube
 		c.Stderr = tube
-		err = c.Start()
+		err = thunks.StartCmd(c)
 		if err != nil {
-			logrus.Errorf("S: error running command %v", err)
+			logrus.Errorf("S: error running command: %v", err)
 			codex.SendFailure(tube, err)
 			return
 		}
