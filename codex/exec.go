@@ -22,8 +22,6 @@ type ExecTube struct {
 	tube  *tubes.Reliable
 	state *term.State
 	redir bool
-	r     *io.PipeReader
-	w     *io.PipeWriter
 }
 
 const (
@@ -118,13 +116,10 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 		}()
 	}
 
-	r, w := io.Pipe()
 	ex := ExecTube{
 		tube:  tube,
 		state: oldState,
 		redir: false,
-		r:     r,
-		w:     w,
 	}
 
 	go func(ex *ExecTube) {
@@ -270,17 +265,6 @@ func Server(tube *tubes.Reliable, f *os.File) {
 	_, e := io.Copy(tube, f)
 	logrus.Info("io.Copy(tube, f) stopped with error: ", e)
 	wg.Wait()
-}
-
-// Resume makes sure the input is piped to the exec tube
-func (e *ExecTube) Resume() {
-	e.redir = false
-}
-
-// Redirect redirects os.Stdin to a pipe and returns the read end
-func (e *ExecTube) Redirect() *io.PipeReader {
-	e.redir = true
-	return e.r
 }
 
 // Restore returns the terminal to regular state
