@@ -1,3 +1,4 @@
+// Package codex provides functions specific to code execution tubes
 package codex
 
 import (
@@ -21,7 +22,6 @@ import (
 type ExecTube struct {
 	tube  *tubes.Reliable
 	state *term.State
-	redir bool
 }
 
 const (
@@ -63,14 +63,23 @@ func getStatus(t *tubes.Reliable) error {
 	return errors.New(string(buf))
 }
 
+// Config is the options required to start an ExecTube
+type Config struct {
+	Cmd       string
+	UsePty    bool
+	Tube      *tubes.Reliable
+	WinTube   *tubes.Reliable
+	WaitGroup *sync.WaitGroup
+}
+
 // NewExecTube sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
 // Stores state in an ExecChan struct so stdin can be manipulated during authgrant process
-func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTube, error) {
+func NewExecTube(c Config) (*ExecTube, error) {
 	var oldState *term.State
 	var e error
 	var termEnv string
 	var size *pty.Winsize
-	if usePty {
+	if c.UsePty {
 		termEnv = os.Getenv("TERM")
 		size, _ = pty.GetsizeFull(os.Stdin) // ignoring the error is okay here because then size is set to nil
 		oldState, e = term.MakeRaw(int(os.Stdin.Fd()))
@@ -80,15 +89,15 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 	} else {
 		oldState = nil
 	}
-	msg := newExecInitMsg(usePty, cmd, termEnv, size)
-	_, e = tube.Write(msg.ToBytes())
+	msg := newExecInitMsg(c.UsePty, c.Cmd, termEnv, size)
+	_, e = c.Tube.Write(msg.ToBytes())
 	if e != nil {
 		logrus.Error(e)
 		return nil, e
 	}
 
 	//get confirmation that cmd started successfully before piping IO
-	err := getStatus(tube)
+	err := getStatus(c.Tube)
 	if err != nil {
 		if oldState != nil {
 			term.Restore(int(os.Stdin.Fd()), oldState)
@@ -97,18 +106,18 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 		return nil, err
 	}
 
-	if usePty {
-		logrus.WithField("winTubeID", winTube.GetID()).Debug("Starting winTube")
+	if c.UsePty {
+		logrus.WithField("winTubeID", c.WinTube.GetID()).Debug("Starting winTube")
 		// Send window size updates to window channel
 		go func() {
-			defer winTube.Close()
+			defer c.WinTube.Close()
 			ch := make(chan os.Signal, 1)
 			signal.Notify(ch, syscall.SIGWINCH)
 			b := make([]byte, 8)
 			for range ch {
 				if size, err := pty.GetsizeFull(os.Stdin); err == nil {
 					serializeSize(b, size)
-					if _, err = winTube.Write(b); err != nil {
+					if _, err = c.WinTube.Write(b); err != nil {
 						break
 					}
 				}
@@ -117,14 +126,13 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 	}
 
 	ex := ExecTube{
-		tube:  tube,
+		tube:  c.Tube,
 		state: oldState,
-		redir: false,
 	}
 
 	go func(ex *ExecTube) {
-		defer wg.Done()
-		_, err := io.Copy(os.Stdout, ex.tube) // read bytes from tube to os.Stdout
+		defer c.WaitGroup.Done()
+		_, err := io.Copy(os.Stdout, c.Tube) // read bytes from tube to os.Stdout
 		if err != nil {
 			logrus.Errorf("codex: error copying from tube to stdout: %s", err)
 		}
@@ -138,8 +146,8 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 	}(&ex)
 
 	go func(ex *ExecTube) {
-		io.Copy(tube, os.Stdin)
-		tube.Close()
+		io.Copy(c.Tube, os.Stdin)
+		c.Tube.Close()
 	}(&ex)
 
 	return &ex, nil

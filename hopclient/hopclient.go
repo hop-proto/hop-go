@@ -330,7 +330,14 @@ func (c *HopClient) startExecTube() error {
 		logrus.Error(err)
 		return err
 	}
-	c.ExecTube, err = codex.NewExecTube(c.hostconfig.Cmd, c.hostconfig.UsePty, codexTube, winSizeTube, &c.wg)
+	execConfig := codex.Config{
+		Cmd:       c.hostconfig.Cmd,
+		UsePty:    c.hostconfig.UsePty,
+		Tube:      codexTube,
+		WinTube:   winSizeTube,
+		WaitGroup: &c.wg,
+	}
+	c.ExecTube, err = codex.NewExecTube(execConfig)
 	if err == nil {
 		c.wg.Add(1)
 	} else {
