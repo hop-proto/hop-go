@@ -336,6 +336,8 @@ func (c *HopClient) startExecTube() error {
 		Tube:      codexTube,
 		WinTube:   winSizeTube,
 		WaitGroup: &c.wg,
+		InPipe:    c.hostconfig.Input,
+		OutPipe:   c.hostconfig.Output,
 	}
 	c.ExecTube, err = codex.NewExecTube(execConfig)
 	if err == nil {

@@ -24,6 +24,17 @@ type ExecTube struct {
 	state *term.State
 }
 
+// Config is the options required to start an ExecTube
+type Config struct {
+	Cmd       string
+	UsePty    bool
+	Tube      *tubes.Reliable
+	WinTube   *tubes.Reliable
+	WaitGroup *sync.WaitGroup
+	InPipe    io.Reader
+	OutPipe   io.Writer
+}
+
 const (
 	usePtyFlag  = 0x1
 	hasSizeFlag = 0x2
@@ -61,15 +72,6 @@ func getStatus(t *tubes.Reliable) error {
 	buf := make([]byte, binary.BigEndian.Uint16(elen))
 	io.ReadFull(t, buf)
 	return errors.New(string(buf))
-}
-
-// Config is the options required to start an ExecTube
-type Config struct {
-	Cmd       string
-	UsePty    bool
-	Tube      *tubes.Reliable
-	WinTube   *tubes.Reliable
-	WaitGroup *sync.WaitGroup
 }
 
 // NewExecTube sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
@@ -132,7 +134,7 @@ func NewExecTube(c Config) (*ExecTube, error) {
 
 	go func(ex *ExecTube) {
 		defer c.WaitGroup.Done()
-		_, err := io.Copy(os.Stdout, c.Tube) // read bytes from tube to os.Stdout
+		_, err := io.Copy(c.OutPipe, c.Tube) // read bytes from tube to os.Stdout
 		if err != nil {
 			logrus.Errorf("codex: error copying from tube to stdout: %s", err)
 		}
@@ -146,7 +148,7 @@ func NewExecTube(c Config) (*ExecTube, error) {
 	}(&ex)
 
 	go func(ex *ExecTube) {
-		io.Copy(c.Tube, os.Stdin)
+		io.Copy(c.Tube, c.InPipe)
 		c.Tube.Close()
 	}(&ex)
 

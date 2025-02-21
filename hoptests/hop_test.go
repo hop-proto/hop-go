@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"path"
 	"strconv"
 	"sync"
 	"testing"
@@ -192,16 +193,19 @@ func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
 	assert.NilError(t, err)
 
 	// TODO(baumanl): what should actual default values be here.
-	c.Config = &config.HostConfig{
-		Hostname:     h,
+	keyPath := path.Join("home", username, "/.hop/id_hop.pem")
+	truth := true
+	hc := config.HostConfigOptional{
+		Hostname:     &h,
 		Port:         port,
-		User:         username,
-		AutoSelfSign: true,
-		Key:          "home/" + username + "/.hop/id_hop.pem",
-		ServerName:   s.ServerName,
+		User:         &username,
+		AutoSelfSign: &truth,
+		Key:          &keyPath,
+		ServerName:   &s.ServerName,
 		CAFiles:      []string{"home/username/.hop/root.cert", "home/username/.hop/intermediate.cert"},
-		DataTimeout:  time.Second,
+		DataTimeout:  int(time.Second),
 	}
+	c.Config = hc.Unwrap()
 
 	rootBytes, _ := certs.EncodeCertificateToPEM(s.Root)
 	intermediateBytes, _ := certs.EncodeCertificateToPEM(s.Intermediate)

@@ -2,6 +2,8 @@
 package config
 
 import (
+	"io"
+	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -76,6 +78,8 @@ type HostConfigOptional struct {
 	UsePty           *bool
 	HandshakeTimeout int
 	DataTimeout      int
+	Input            *io.Reader
+	Output           *io.Writer
 }
 
 // HostConfig contains a definition of a host pattern in a client configuration
@@ -100,6 +104,10 @@ type HostConfig struct {
 	UsePty           bool
 	HandshakeTimeout time.Duration
 	DataTimeout      time.Duration
+	// The source from which data will be read and sent to the server
+	Input io.Reader
+	// The destination where data from the server will be written
+	Output io.Writer
 }
 
 // NameConfig defines the keys and certificates presented by the server for a
@@ -184,6 +192,8 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	newHC := HostConfig{
 		HandshakeTimeout: 15 * time.Second,
 		DataTimeout:      15 * time.Second,
+		Input:            os.Stdin,
+		Output:           os.Stdout,
 	}
 	if hc.AgentURL != nil {
 		newHC.AgentURL = *hc.AgentURL
@@ -237,6 +247,12 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	}
 	if hc.DataTimeout != 0 {
 		newHC.DataTimeout = time.Duration(hc.DataTimeout) * time.Second
+	}
+	if hc.Input != nil {
+		newHC.Input = *hc.Input
+	}
+	if hc.Output != nil {
+		newHC.Output = *hc.Output
 	}
 	return &newHC
 }
