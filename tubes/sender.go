@@ -128,7 +128,6 @@ func (s *sender) write(b []byte) (int, error) {
 		}
 	}
 
-	s.resetRetransmitTicker()
 	return len(b), nil
 }
 
