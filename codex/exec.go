@@ -26,13 +26,15 @@ type ExecTube struct {
 
 // Config is the options required to start an ExecTube
 type Config struct {
-	Cmd       string
-	UsePty    bool
-	Tube      *tubes.Reliable
-	WinTube   *tubes.Reliable
-	WaitGroup *sync.WaitGroup
-	InPipe    io.Reader
-	OutPipe   io.Writer
+	Cmd        string
+	UsePty     bool
+	StdinTube  *tubes.Reliable
+	StdoutTube *tubes.Reliable
+	WinTube    *tubes.Reliable
+	WaitGroup  *sync.WaitGroup
+
+	InPipe  io.Reader
+	OutPipe io.Writer
 }
 
 const (
@@ -92,14 +94,14 @@ func NewExecTube(c Config) (*ExecTube, error) {
 		oldState = nil
 	}
 	msg := newExecInitMsg(c.UsePty, c.Cmd, termEnv, size)
-	_, e = c.Tube.Write(msg.ToBytes())
+	_, e = c.StdinTube.Write(msg.ToBytes())
 	if e != nil {
 		logrus.Error(e)
 		return nil, e
 	}
 
 	//get confirmation that cmd started successfully before piping IO
-	err := getStatus(c.Tube)
+	err := getStatus(c.StdoutTube)
 	if err != nil {
 		if oldState != nil {
 			term.Restore(int(os.Stdin.Fd()), oldState)
@@ -128,13 +130,13 @@ func NewExecTube(c Config) (*ExecTube, error) {
 	}
 
 	ex := ExecTube{
-		tube:  c.Tube,
+		tube:  c.StdoutTube,
 		state: oldState,
 	}
 
 	go func(ex *ExecTube) {
 		defer c.WaitGroup.Done()
-		_, err := io.Copy(c.OutPipe, c.Tube) // read bytes from tube to os.Stdout
+		_, err := io.Copy(c.OutPipe, c.StdoutTube) // read bytes from tube to os.Stdout
 		if err != nil {
 			logrus.Errorf("codex: error copying from tube to stdout: %s", err)
 		}
@@ -148,8 +150,8 @@ func NewExecTube(c Config) (*ExecTube, error) {
 	}(&ex)
 
 	go func(ex *ExecTube) {
-		io.Copy(c.Tube, c.InPipe)
-		c.Tube.Close()
+		io.Copy(c.StdinTube, c.InPipe)
+		c.StdinTube.Close()
 	}(&ex)
 
 	return &ex, nil
@@ -262,17 +264,19 @@ func HandleSize(tube *tubes.Reliable, ptyFile *os.File) {
 }
 
 // Server deals with serverside code exec channel details like pty size, copies ch -> pty and pty -> ch
-func Server(tube *tubes.Reliable, f *os.File) {
-	defer tube.Close()
+func Server(stdinTube, stdoutTube *tubes.Reliable, f *os.File) {
+	defer stdinTube.Close()
+	defer stdoutTube.Close()
 	defer func() { _ = f.Close() }() // Best effort.
+
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
-		_, e := io.Copy(f, tube)
+		_, e := io.Copy(f, stdinTube)
 		logrus.Info("io.Copy(f, tube) stopped with error: ", e)
 		wg.Done()
 	}()
-	_, e := io.Copy(tube, f)
+	_, e := io.Copy(stdoutTube, f)
 	logrus.Info("io.Copy(tube, f) stopped with error: ", e)
 	wg.Wait()
 }

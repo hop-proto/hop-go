@@ -33,7 +33,7 @@ func lookupUser(username string) (*etcpwdparse.EtcPasswdEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	user, ok := cache.LookupUserByName("username")
+	user, ok := cache.LookupUserByName(username)
 	if !ok {
 		return nil, ErrUserNotFound
 	}

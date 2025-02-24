@@ -316,8 +316,14 @@ func (c *HopClient) startExecTube() error {
 	// Hop Session is tied to the life of this code execution tube if such a tube exists
 	// TODO(baumanl): provide support for Cmd in ClientConfig
 	logrus.Infof("Performing action: %v", c.hostconfig.Cmd)
-	codexTube, err := c.TubeMuxer.CreateReliableTube(common.ExecTube)
+	stdinTube, err := c.TubeMuxer.CreateReliableTube(common.ExecTube)
 	if err != nil {
+		logrus.Error(err)
+		return err
+	}
+	stdoutTube, err := c.TubeMuxer.CreateReliableTube(common.ExecTube)
+	if err != nil {
+		stdinTube.Close()
 		logrus.Error(err)
 		return err
 	}
@@ -326,24 +332,27 @@ func (c *HopClient) startExecTube() error {
 		winSizeTube, err = c.TubeMuxer.CreateReliableTube(common.WinSizeTube)
 	}
 	if err != nil {
-		codexTube.Close()
+		stdinTube.Close()
+		stdoutTube.Close()
 		logrus.Error(err)
 		return err
 	}
 	execConfig := codex.Config{
-		Cmd:       c.hostconfig.Cmd,
-		UsePty:    c.hostconfig.UsePty,
-		Tube:      codexTube,
-		WinTube:   winSizeTube,
-		WaitGroup: &c.wg,
-		InPipe:    c.hostconfig.Input,
-		OutPipe:   c.hostconfig.Output,
+		Cmd:        c.hostconfig.Cmd,
+		UsePty:     c.hostconfig.UsePty,
+		StdinTube:  stdinTube,
+		StdoutTube: stdoutTube,
+		WinTube:    winSizeTube,
+		WaitGroup:  &c.wg,
+		InPipe:     c.hostconfig.Input,
+		OutPipe:    c.hostconfig.Output,
 	}
 	c.ExecTube, err = codex.NewExecTube(execConfig)
 	if err == nil {
 		c.wg.Add(1)
 	} else {
-		codexTube.Close()
+		stdinTube.Close()
+		stdoutTube.Close()
 		if winSizeTube != nil {
 			winSizeTube.Close()
 		}

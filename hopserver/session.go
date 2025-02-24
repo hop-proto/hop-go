@@ -114,7 +114,13 @@ func (sess *hopSession) start() {
 		}
 		switch tube.Type() {
 		case common.ExecTube:
-			go sess.startCodex(r)
+			t2, err := sess.tubeMuxer.Accept()
+			r2, ok := t2.(*tubes.Reliable)
+			if err != nil || !ok {
+				sess.close()
+				return
+			}
+			go sess.startCodex(r, r2)
 		case common.AuthGrantTube:
 			go sess.handleAgc(r)
 		case common.RemotePFTube:
@@ -178,26 +184,39 @@ func getGroups(uid int) (groups []uint32) {
 	return
 }
 
-func (sess *hopSession) startCodex(tube *tubes.Reliable) {
-	cmd, termEnv, shell, size, _ := codex.GetCmd(tube)
+func (sess *hopSession) startCodex(t1, t2 *tubes.Reliable) {
+	var stdinTube *tubes.Reliable
+	var stdoutTube *tubes.Reliable
+	// We may have accepted the tubes in any order, so we need to check which one was created first
+	if t1.GetID() < t2.GetID() {
+		stdinTube = t1
+		stdoutTube = t2
+	} else {
+		stdinTube = t2
+		stdoutTube = t1
+	}
+	cmd, termEnv, shell, size, _ := codex.GetCmd(stdinTube)
 	principalSess := sess.ID
 	// if using an authgrant, check that the cmd is authorized
 	if sess.usingAuthGrant {
 		principalID, err := sess.checkCmd(cmd, shell)
 		if err != nil {
-			codex.SendFailure(tube, err)
+			codex.SendFailure(stdoutTube, err)
 			return
 		}
 		principalSess = principalID
 	}
 
-	logrus.Info("CMD: ", cmd)
+	logrus.WithFields(logrus.Fields{
+		"command": cmd,
+		"shell":   shell,
+	}).Info("starting code execution")
 	var err error
 	user, err := thunks.LookupUser(sess.user)
 	if err != nil {
 		err := errors.New("could not find entry for user " + sess.user)
 		logrus.Error(err)
-		codex.SendFailure(tube, err)
+		codex.SendFailure(stdoutTube, err)
 		return
 	}
 	//Default behavior is for command.Env to inherit parents environment unless given and explicit alternative.
@@ -240,19 +259,19 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 		sess.pty <- f
 		if err != nil {
 			logrus.Errorf("S: error starting pty %v", err)
-			codex.SendFailure(tube, err)
+			codex.SendFailure(stdoutTube, err)
 			return
 		}
 	} else {
 		// Signal nil to sess.pty so that window sizes don't indefinitely buffer
 		sess.pty <- nil
-		c.Stdin = tube
-		c.Stdout = tube
-		c.Stderr = tube
+		c.Stdin = stdinTube
+		c.Stdout = stdoutTube
+		c.Stderr = stdoutTube
 		err = thunks.StartCmd(c)
 		if err != nil {
 			logrus.Errorf("S: error running command: %v", err)
-			codex.SendFailure(tube, err)
+			codex.SendFailure(stdoutTube, err)
 			return
 		}
 	}
@@ -261,16 +280,18 @@ func (sess *hopSession) startCodex(tube *tubes.Reliable) {
 	pid := c.Process.Pid
 	sess.server.dpProxy.principals[int32(pid)] = principalSess
 
-	codex.SendSuccess(tube)
+	codex.SendSuccess(stdoutTube)
 	go func() {
 		c.Wait()
-		tube.Close()
+		logrus.Info("command done. closing tubes")
+		stdoutTube.Close()
+		stdinTube.Close()
 		logrus.Info("closed chan")
 	}()
 
 	if shell {
 		go func() {
-			codex.Server(tube, f)
+			codex.Server(stdinTube, stdoutTube, f)
 			logrus.Info("signaling done")
 			sess.close()
 		}()
