@@ -348,9 +348,7 @@ func (c *HopClient) startExecTube() error {
 		OutPipe:    c.hostconfig.Output,
 	}
 	c.ExecTube, err = codex.NewExecTube(execConfig)
-	if err == nil {
-		c.wg.Add(1)
-	} else {
+	if err != nil {
 		stdinTube.Close()
 		stdoutTube.Close()
 		if winSizeTube != nil {

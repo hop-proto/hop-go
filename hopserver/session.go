@@ -282,7 +282,7 @@ func (sess *hopSession) startCodex(t1, t2 *tubes.Reliable) {
 
 	codex.SendSuccess(stdoutTube)
 	go func() {
-		c.Wait()
+		c.Process.Wait()
 		logrus.Info("command done. closing tubes")
 		stdoutTube.Close()
 		stdinTube.Close()

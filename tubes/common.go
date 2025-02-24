@@ -47,4 +47,4 @@ const windowSize = 128
 
 // TODO(hosono) choose this time
 // amount of time to wait for all all tubes to close when muxer is stopping
-const muxerTimeout = time.Second
+const muxerTimeout = time.Minute

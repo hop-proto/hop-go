@@ -84,6 +84,7 @@ func NewExecTube(c Config) (*ExecTube, error) {
 	var termEnv string
 	var size *pty.Winsize
 	if c.UsePty {
+		logrus.Info("starting codex with pty")
 		termEnv = os.Getenv("TERM")
 		size, _ = pty.GetsizeFull(os.Stdin) // ignoring the error is okay here because then size is set to nil
 		oldState, e = term.MakeRaw(int(os.Stdin.Fd()))
@@ -91,6 +92,7 @@ func NewExecTube(c Config) (*ExecTube, error) {
 			logrus.Infof("C: error with terminal state: %v", e)
 		}
 	} else {
+		logrus.Info("starting codex with no pty")
 		oldState = nil
 	}
 	msg := newExecInitMsg(c.UsePty, c.Cmd, termEnv, size)
@@ -134,24 +136,33 @@ func NewExecTube(c Config) (*ExecTube, error) {
 		state: oldState,
 	}
 
+	c.WaitGroup.Add(2)
 	go func(ex *ExecTube) {
 		defer c.WaitGroup.Done()
 		_, err := io.Copy(c.OutPipe, c.StdoutTube) // read bytes from tube to os.Stdout
 		if err != nil {
 			logrus.Errorf("codex: error copying from tube to stdout: %s", err)
 		}
-		if oldState != nil {
-			term.Restore(int(os.Stdin.Fd()), oldState)
-		}
-		logrus.Info("Stopped io.Copy(os.Stdout, tube)")
+		logrus.Info("Stopped io.Copy(OutPipe, StdoutTube)")
 		ex.tube.Close()
-		logrus.Info("closed tube")
+		logrus.Info("closed stdout tube")
+		c.StdinTube.Close()
+		logrus.Info("closed stdin tube")
 
 	}(&ex)
 
 	go func(ex *ExecTube) {
-		io.Copy(c.StdinTube, c.InPipe)
+		defer c.WaitGroup.Done()
+		_, err := io.Copy(c.StdinTube, c.InPipe)
+		if err != nil {
+			logrus.Errorf("codex: error copying from stdin to tube: %s", err)
+		}
+		if oldState != nil {
+			term.Restore(int(os.Stdin.Fd()), oldState)
+		}
+		logrus.Info("Stopped io.Copy(StdinTube, InPipe)")
 		c.StdinTube.Close()
+		logrus.Info("closed stdin tube")
 	}(&ex)
 
 	return &ex, nil

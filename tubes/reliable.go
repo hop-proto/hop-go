@@ -2,6 +2,7 @@
 package tubes
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 	"net"
@@ -340,6 +341,7 @@ func (r *Reliable) Read(b []byte) (n int, err error) {
 
 // Write satisfies the net.Conn interface
 func (r *Reliable) Write(b []byte) (n int, err error) {
+	r.log.WithField("data", bytes.NewBuffer(append([]byte{}, b...)).String()).Info("Writing")
 	<-r.initDone
 	r.l.Lock()
 	defer r.l.Unlock()
