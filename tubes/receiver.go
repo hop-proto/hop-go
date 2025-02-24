@@ -69,6 +69,12 @@ func (r *receiver) getWindowSize() uint16 {
 	return r.windowSize
 }
 
+func (r *receiver) getFrameToSendCounter() uint16 {
+	r.m.Lock()
+	defer r.m.Unlock()
+	return r.frameToSendCounter
+}
+
 /*
 Processes window into buffer stream if the ordered fragments are ready (in order).
 Precondition: r.m mutex is held.
