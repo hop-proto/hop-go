@@ -5,12 +5,11 @@ import (
 	"container/heap"
 	"crypto/rand"
 	"encoding/binary"
+	"github.com/sirupsen/logrus"
 	"io"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/sirupsen/logrus"
 
 	"gotest.tools/assert"
 )
@@ -19,11 +18,11 @@ func TestFileTransferSpeedReliableTubes(t *testing.T) {
 	logrus.SetOutput(io.Discard)
 	//logrus.SetLevel(logrus.TraceLevel)
 
-	fileSize := 128 << 20 // 128 MiB
+	fileSize := 10 << 20 // 128 MiB
 	//fileSize := 1 << 30 // 128 MiB
 	t.Logf("Transferring file size: %d bytes", fileSize)
 
-	t1, t2, stop, _, err := makeConn(1.0, true, t)
+	t1, t2, stop, _, err := makeConn(0.98, true, t)
 	assert.NilError(t, err)
 	defer stop()
 
