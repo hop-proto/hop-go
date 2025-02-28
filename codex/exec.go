@@ -131,6 +131,13 @@ func NewExecTube(c Config) (*ExecTube, error) {
 		}()
 	}
 
+	if f, ok := c.InPipe.(*os.File); ok {
+		err := syscall.SetNonblock(int(f.Fd()), true)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	ex := ExecTube{
 		tube:  c.StdoutTube,
 		state: oldState,
