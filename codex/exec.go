@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/creack/pty"
+	"github.com/muesli/cancelreader"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/term"
 
@@ -131,11 +132,10 @@ func NewExecTube(c Config) (*ExecTube, error) {
 		}()
 	}
 
-	if f, ok := c.InPipe.(*os.File); ok {
-		err := syscall.SetNonblock(int(f.Fd()), true)
-		if err != nil {
-			return nil, err
-		}
+	inPipeCancelable, err := cancelreader.NewReader(c.InPipe)
+	if err != nil {
+		logrus.Errorf("could not create cancel reader %v", err)
+		return nil, err
 	}
 
 	ex := ExecTube{
@@ -154,13 +154,14 @@ func NewExecTube(c Config) (*ExecTube, error) {
 		ex.tube.Close()
 		logrus.Info("closed stdout tube")
 		c.StdinTube.Close()
+		inPipeCancelable.Cancel()
 		logrus.Info("closed stdin tube")
 
 	}(&ex)
 
 	go func(ex *ExecTube) {
 		defer c.WaitGroup.Done()
-		_, err := io.Copy(c.StdinTube, c.InPipe)
+		_, err := io.Copy(c.StdinTube, inPipeCancelable)
 		if err != nil {
 			logrus.Errorf("codex: error copying from stdin to tube: %s", err)
 		}
