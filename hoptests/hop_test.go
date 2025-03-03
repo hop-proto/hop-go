@@ -446,7 +446,6 @@ func TestStartCmd(t *testing.T) {
 		a := NewAgent(t)
 		a.AddClientKey(t, c)
 		a.Run(t)
-		defer a.Stop()
 
 		c.AddAgentConnToClient(t, a)
 
@@ -461,6 +460,8 @@ func TestStartCmd(t *testing.T) {
 		assert.NilError(t, err)
 		err = s.Server.Close()
 		assert.NilError(t, err)
+
+		a.Stop()
 
 		outString := output.String()
 		logrus.Info(outString)
