@@ -147,11 +147,11 @@ func NewExecTube(c Config) (*ExecTube, error) {
 	c.WaitGroup.Add(2)
 	go func(ex *ExecTube) {
 		defer c.WaitGroup.Done()
-		_, err := io.Copy(c.OutPipe, c.StdoutTube) // read bytes from tube to os.Stdout
+		n, err := io.Copy(c.OutPipe, c.StdoutTube) // read bytes from tube to os.Stdout
 		if err != nil {
 			logrus.Errorf("codex: error copying from tube to stdout: %s", err)
 		}
-		logrus.Info("Stopped io.Copy(OutPipe, StdoutTube)")
+		logrus.WithField("bytes", n).Info("Stopped io.Copy(OutPipe, StdoutTube)")
 		ex.tube.Close()
 		logrus.Info("closed stdout tube")
 		if inp, ok := inPipe.(cancelreader.CancelReader); ok {
