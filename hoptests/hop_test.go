@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"path"
 	"strconv"
 	"sync"
@@ -205,6 +206,7 @@ func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
 		ServerName:   &s.ServerName,
 		CAFiles:      []string{"home/username/.hop/root.cert", "home/username/.hop/intermediate.cert"},
 		DataTimeout:  int(time.Second),
+		Input:        os.Stdin,
 	}
 	c.Config = hc.Unwrap()
 

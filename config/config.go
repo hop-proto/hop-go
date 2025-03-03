@@ -78,8 +78,8 @@ type HostConfigOptional struct {
 	UsePty           *bool
 	HandshakeTimeout int
 	DataTimeout      int
-	Input            *io.Reader
-	Output           *io.Writer
+	Input            io.Reader
+	Output           io.Writer
 }
 
 // HostConfig contains a definition of a host pattern in a client configuration
@@ -249,10 +249,10 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 		newHC.DataTimeout = time.Duration(hc.DataTimeout) * time.Second
 	}
 	if hc.Input != nil {
-		newHC.Input = *hc.Input
+		newHC.Input = hc.Input
 	}
 	if hc.Output != nil {
-		newHC.Output = *hc.Output
+		newHC.Output = hc.Output
 	}
 	return &newHC
 }

@@ -132,10 +132,11 @@ func NewExecTube(c Config) (*ExecTube, error) {
 		}()
 	}
 
-	inPipeCancelable, err := cancelreader.NewReader(c.InPipe)
+	var inPipe io.Reader
+	inPipe, err = cancelreader.NewReader(c.InPipe)
 	if err != nil {
-		logrus.Errorf("could not create cancel reader %v", err)
-		return nil, err
+		logrus.Infof("could not create cancel reader %v", err)
+		inPipe = c.InPipe
 	}
 
 	ex := ExecTube{
@@ -153,15 +154,16 @@ func NewExecTube(c Config) (*ExecTube, error) {
 		logrus.Info("Stopped io.Copy(OutPipe, StdoutTube)")
 		ex.tube.Close()
 		logrus.Info("closed stdout tube")
-		c.StdinTube.Close()
-		inPipeCancelable.Cancel()
+		if inp, ok := inPipe.(cancelreader.CancelReader); ok {
+			inp.Cancel()
+		}
 		logrus.Info("closed stdin tube")
 
 	}(&ex)
 
 	go func(ex *ExecTube) {
 		defer c.WaitGroup.Done()
-		_, err := io.Copy(c.StdinTube, inPipeCancelable)
+		_, err := io.Copy(c.StdinTube, inPipe)
 		if err != nil {
 			logrus.Errorf("codex: error copying from stdin to tube: %s", err)
 		}
