@@ -434,7 +434,7 @@ func TestStartCmd(t *testing.T) {
 
 		// Modify client config with command to run
 		testString := "Hello from hop tests!"
-		c.AddCmd(fmt.Sprintf("echo -n '%s'", testString))
+		c.AddCmd(fmt.Sprintf("echo '%s'", testString))
 
 		output := &bytes.Buffer{}
 		c.Config.Output = output
@@ -464,6 +464,6 @@ func TestStartCmd(t *testing.T) {
 
 		outString := output.String()
 		logrus.Info(outString)
-		assert.Equal(t, outString, testString)
+		assert.Equal(t, outString, testString+"\n")
 	})
 }
