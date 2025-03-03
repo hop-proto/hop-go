@@ -336,7 +336,9 @@ func (r *Reliable) Read(b []byte) (n int, err error) {
 	}
 	r.l.Unlock()
 
-	return r.recvWindow.read(b)
+	n, err = r.recvWindow.read(b)
+	r.log.WithField("data", bytes.NewBuffer(append([]byte{}, b[:n]...)).String()).Info("Reading")
+	return n, err
 }
 
 // Write satisfies the net.Conn interface
