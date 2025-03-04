@@ -58,6 +58,7 @@ linters-settings:
           - github.com/docker/docker
           - github.com/docker/go-connections
           - github.com/mattn/go-isatty
+          - github.com/muesli/cancelreader
           - github.com/sbinet/pstree
           - github.com/sirupsen/logrus
           - github.com/pkg/errors

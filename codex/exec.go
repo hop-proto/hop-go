@@ -1,3 +1,4 @@
+// Package codex provides functions specific to code execution tubes
 package codex
 
 import (
@@ -11,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/creack/pty"
+	"github.com/muesli/cancelreader"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/term"
 
@@ -21,9 +23,19 @@ import (
 type ExecTube struct {
 	tube  *tubes.Reliable
 	state *term.State
-	redir bool
-	r     *io.PipeReader
-	w     *io.PipeWriter
+}
+
+// Config is the options required to start an ExecTube
+type Config struct {
+	Cmd        string
+	UsePty     bool
+	StdinTube  *tubes.Reliable
+	StdoutTube *tubes.Reliable
+	WinTube    *tubes.Reliable
+	WaitGroup  *sync.WaitGroup
+
+	InPipe  io.Reader
+	OutPipe io.Writer
 }
 
 const (
@@ -67,12 +79,13 @@ func getStatus(t *tubes.Reliable) error {
 
 // NewExecTube sets terminal to raw and makes ch -> os.Stdout and pipes stdin to the ch.
 // Stores state in an ExecChan struct so stdin can be manipulated during authgrant process
-func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.Reliable, wg *sync.WaitGroup) (*ExecTube, error) {
+func NewExecTube(c Config) (*ExecTube, error) {
 	var oldState *term.State
 	var e error
 	var termEnv string
 	var size *pty.Winsize
-	if usePty {
+	if c.UsePty {
+		logrus.Info("starting codex with pty")
 		termEnv = os.Getenv("TERM")
 		size, _ = pty.GetsizeFull(os.Stdin) // ignoring the error is okay here because then size is set to nil
 		oldState, e = term.MakeRaw(int(os.Stdin.Fd()))
@@ -80,17 +93,18 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 			logrus.Infof("C: error with terminal state: %v", e)
 		}
 	} else {
+		logrus.Info("starting codex with no pty")
 		oldState = nil
 	}
-	msg := newExecInitMsg(usePty, cmd, termEnv, size)
-	_, e = tube.Write(msg.ToBytes())
+	msg := newExecInitMsg(c.UsePty, c.Cmd, termEnv, size)
+	_, e = c.StdinTube.Write(msg.ToBytes())
 	if e != nil {
 		logrus.Error(e)
 		return nil, e
 	}
 
 	//get confirmation that cmd started successfully before piping IO
-	err := getStatus(tube)
+	err := getStatus(c.StdoutTube)
 	if err != nil {
 		if oldState != nil {
 			term.Restore(int(os.Stdin.Fd()), oldState)
@@ -99,18 +113,18 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 		return nil, err
 	}
 
-	if usePty {
-		logrus.WithField("winTubeID", winTube.GetID()).Debug("Starting winTube")
+	if c.UsePty {
+		logrus.WithField("winTubeID", c.WinTube.GetID()).Debug("Starting winTube")
 		// Send window size updates to window channel
 		go func() {
-			defer winTube.Close()
+			defer c.WinTube.Close()
 			ch := make(chan os.Signal, 1)
 			signal.Notify(ch, syscall.SIGWINCH)
 			b := make([]byte, 8)
 			for range ch {
 				if size, err := pty.GetsizeFull(os.Stdin); err == nil {
 					serializeSize(b, size)
-					if _, err = winTube.Write(b); err != nil {
+					if _, err = c.WinTube.Write(b); err != nil {
 						break
 					}
 				}
@@ -118,33 +132,47 @@ func NewExecTube(cmd string, usePty bool, tube *tubes.Reliable, winTube *tubes.R
 		}()
 	}
 
-	r, w := io.Pipe()
-	ex := ExecTube{
-		tube:  tube,
-		state: oldState,
-		redir: false,
-		r:     r,
-		w:     w,
+	var inPipe io.Reader
+	inPipe, err = cancelreader.NewReader(c.InPipe)
+	if err != nil {
+		logrus.Infof("could not create cancel reader %v", err)
+		inPipe = c.InPipe
 	}
 
+	ex := ExecTube{
+		tube:  c.StdoutTube,
+		state: oldState,
+	}
+
+	c.WaitGroup.Add(2)
 	go func(ex *ExecTube) {
-		defer wg.Done()
-		_, err := io.Copy(os.Stdout, ex.tube) // read bytes from tube to os.Stdout
+		defer c.WaitGroup.Done()
+		n, err := io.Copy(c.OutPipe, c.StdoutTube) // read bytes from tube to os.Stdout
 		if err != nil {
 			logrus.Errorf("codex: error copying from tube to stdout: %s", err)
 		}
-		if oldState != nil {
-			term.Restore(int(os.Stdin.Fd()), oldState)
-		}
-		logrus.Info("Stopped io.Copy(os.Stdout, tube)")
+		logrus.WithField("bytes", n).Info("Stopped io.Copy(OutPipe, StdoutTube)")
 		ex.tube.Close()
-		logrus.Info("closed tube")
+		logrus.Info("closed stdout tube")
+		if inp, ok := inPipe.(cancelreader.CancelReader); ok {
+			inp.Cancel()
+		}
+		logrus.Info("closed stdin tube")
 
 	}(&ex)
 
 	go func(ex *ExecTube) {
-		io.Copy(tube, os.Stdin)
-		tube.Close()
+		defer c.WaitGroup.Done()
+		_, err := io.Copy(c.StdinTube, inPipe)
+		if err != nil {
+			logrus.Errorf("codex: error copying from stdin to tube: %s", err)
+		}
+		if oldState != nil {
+			term.Restore(int(os.Stdin.Fd()), oldState)
+		}
+		logrus.Info("Stopped io.Copy(StdinTube, InPipe)")
+		c.StdinTube.Close()
+		logrus.Info("closed stdin tube")
 	}(&ex)
 
 	return &ex, nil
@@ -257,30 +285,21 @@ func HandleSize(tube *tubes.Reliable, ptyFile *os.File) {
 }
 
 // Server deals with serverside code exec channel details like pty size, copies ch -> pty and pty -> ch
-func Server(tube *tubes.Reliable, f *os.File) {
-	defer tube.Close()
+func Server(stdinTube, stdoutTube *tubes.Reliable, f *os.File) {
+	defer stdinTube.Close()
+	defer stdoutTube.Close()
 	defer func() { _ = f.Close() }() // Best effort.
+
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
-		_, e := io.Copy(f, tube)
+		_, e := io.Copy(f, stdinTube)
 		logrus.Info("io.Copy(f, tube) stopped with error: ", e)
 		wg.Done()
 	}()
-	_, e := io.Copy(tube, f)
+	_, e := io.Copy(stdoutTube, f)
 	logrus.Info("io.Copy(tube, f) stopped with error: ", e)
 	wg.Wait()
-}
-
-// Resume makes sure the input is piped to the exec tube
-func (e *ExecTube) Resume() {
-	e.redir = false
-}
-
-// Redirect redirects os.Stdin to a pipe and returns the read end
-func (e *ExecTube) Redirect() *io.PipeReader {
-	e.redir = true
-	return e.r
 }
 
 // Restore returns the terminal to regular state

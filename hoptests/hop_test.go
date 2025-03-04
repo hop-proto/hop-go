@@ -1,8 +1,12 @@
 package hoptests
 
 import (
+	"bytes"
+	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"path"
 	"strconv"
 	"sync"
 	"testing"
@@ -191,16 +195,20 @@ func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
 	assert.NilError(t, err)
 
 	// TODO(baumanl): what should actual default values be here.
-	c.Config = &config.HostConfig{
-		Hostname:     h,
+	keyPath := path.Join("home", username, "/.hop/id_hop.pem")
+	truth := true
+	hc := config.HostConfigOptional{
+		Hostname:     &h,
 		Port:         port,
-		User:         username,
-		AutoSelfSign: true,
-		Key:          "home/" + username + "/.hop/id_hop.pem",
-		ServerName:   s.ServerName,
+		User:         &username,
+		AutoSelfSign: &truth,
+		Key:          &keyPath,
+		ServerName:   &s.ServerName,
 		CAFiles:      []string{"home/username/.hop/root.cert", "home/username/.hop/intermediate.cert"},
-		DataTimeout:  time.Second,
+		DataTimeout:  int(time.Second),
+		Input:        os.Stdin,
 	}
+	c.Config = hc.Unwrap()
 
 	rootBytes, _ := certs.EncodeCertificateToPEM(s.Root)
 	intermediateBytes, _ := certs.EncodeCertificateToPEM(s.Intermediate)
@@ -425,7 +433,11 @@ func TestStartCmd(t *testing.T) {
 		s.AddClientToAuthorizedKeys(t, c)
 
 		// Modify client config with command to run
-		c.AddCmd("pwd")
+		testString := "Hello from hop tests!"
+		c.AddCmd(fmt.Sprintf("echo '%s'", testString))
+
+		output := &bytes.Buffer{}
+		c.Config.Output = output
 
 		s.StartTransport(t)
 		s.StartHopServer(t)
@@ -434,7 +446,7 @@ func TestStartCmd(t *testing.T) {
 		a := NewAgent(t)
 		a.AddClientKey(t, c)
 		a.Run(t)
-		defer a.Stop()
+		// defer a.Stop() would be the right way to use it
 
 		c.AddAgentConnToClient(t, a)
 
@@ -442,15 +454,19 @@ func TestStartCmd(t *testing.T) {
 
 		logrus.Info("CMD: ", c.Config.Cmd)
 
-		//_ = c.Client.Start()
-		// TODO(baumanl): this currently doesn't work because code execution
-		// is tied to standard case of having an attached terminal
-		//assert.NilError(t, err)
-
-		var err error
-		err = s.Server.Close()
+		err := c.Client.Start()
 		assert.NilError(t, err)
+
 		err = c.Client.Close()
 		assert.NilError(t, err)
+		err = s.Server.Close()
+		assert.NilError(t, err)
+
+		// To comply with GitHub concurrency happening in the tests
+		a.Stop()
+
+		outString := output.String()
+		logrus.Info(outString)
+		assert.Equal(t, outString, testString+"\n")
 	})
 }

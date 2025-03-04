@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/AstromechZA/etcpwdparse"
 	"github.com/creack/pty"
 	"github.com/sirupsen/logrus"
 
@@ -17,6 +16,7 @@ import (
 	"hop.computer/hop/codex"
 	"hop.computer/hop/common"
 	"hop.computer/hop/keys"
+	"hop.computer/hop/pkg/thunks"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
 	"hop.computer/hop/userauth"
@@ -114,7 +114,13 @@ func (sess *hopSession) start() {
 		}
 		switch tube.Type() {
 		case common.ExecTube:
-			go sess.startCodex(r)
+			t2, err := sess.tubeMuxer.Accept()
+			r2, ok := t2.(*tubes.Reliable)
+			if err != nil || !ok {
+				sess.close()
+				return
+			}
+			go sess.startCodex(r, r2)
 		case common.AuthGrantTube:
 			go sess.handleAgc(r)
 		case common.RemotePFTube:
@@ -178,109 +184,117 @@ func getGroups(uid int) (groups []uint32) {
 	return
 }
 
-func (sess *hopSession) startCodex(tube *tubes.Reliable) {
-	cmd, termEnv, shell, size, _ := codex.GetCmd(tube)
+func (sess *hopSession) startCodex(t1, t2 *tubes.Reliable) {
+	var stdinTube *tubes.Reliable
+	var stdoutTube *tubes.Reliable
+	// We may have accepted the tubes in any order, so we need to check which one was created first
+	if t1.GetID() < t2.GetID() {
+		stdinTube = t1
+		stdoutTube = t2
+	} else {
+		stdinTube = t2
+		stdoutTube = t1
+	}
+	cmd, termEnv, shell, size, _ := codex.GetCmd(stdinTube)
 	principalSess := sess.ID
 	// if using an authgrant, check that the cmd is authorized
 	if sess.usingAuthGrant {
 		principalID, err := sess.checkCmd(cmd, shell)
 		if err != nil {
-			codex.SendFailure(tube, err)
+			codex.SendFailure(stdoutTube, err)
 			return
 		}
 		principalSess = principalID
 	}
 
-	logrus.Info("CMD: ", cmd)
-	cache, err := etcpwdparse.NewLoadedEtcPasswdCache() //Best way to do this? should I load this only once and then just reload on misses? What if /etc/passwd modified between accesses?
+	logrus.WithFields(logrus.Fields{
+		"command": cmd,
+		"shell":   shell,
+	}).Info("starting code execution")
+	var err error
+	user, err := thunks.LookupUser(sess.user)
 	if err != nil {
-		err := errors.New("issue loading /etc/passwd")
-		logrus.Error(err)
-		codex.SendFailure(tube, err)
-		return
-	}
-	if user, ok := cache.LookupUserByName(sess.user); ok {
-		//Default behavior is for command.Env to inherit parents environment unless given and explicit alternative.
-		//TODO(baumanl): These are minimal environment variables. SSH allows for more inheritance from client, but it gets complicated.
-		env := []string{
-			"USER=" + sess.user,
-			"SHELL=" + user.Shell(),
-			"LOGNAME=" + user.Username(),
-			"HOME=" + user.Homedir(),
-			"TERM=" + termEnv,
-		}
-		var c *exec.Cmd
-		if cmd == "" {
-			//login(1) starts default shell for user and changes all privileges and environment variables
-			c = exec.Command("login", "-f", sess.user)
-		} else {
-			c = exec.Command(user.Shell(), "-c", cmd)
-			c.Dir = user.Homedir()
-			c.SysProcAttr = &syscall.SysProcAttr{}
-			c.SysProcAttr.Credential = &syscall.Credential{
-				Uid:    uint32(user.Uid()),
-				Gid:    uint32(user.Gid()),
-				Groups: getGroups(user.Uid()),
-			}
-		}
-		c.Env = env
-		logrus.Infof("Executing: %v", cmd)
-		var f *os.File
-		var err error
-
-		// lock principals map so can be updated with pid after starting process
-		sess.server.dpProxy.principalLock.Lock()
-		defer sess.server.dpProxy.principalLock.Unlock()
-
-		if shell {
-			if size != nil {
-				f, err = pty.StartWithSize(c, size)
-			} else {
-				f, err = pty.Start(c)
-			}
-			sess.pty <- f
-			if err != nil {
-				logrus.Errorf("S: error starting pty %v", err)
-				codex.SendFailure(tube, err)
-				return
-			}
-		} else {
-			// Signal nil to sess.pty so that window sizes don't indefinitely buffer
-			sess.pty <- nil
-			c.Stdin = tube
-			c.Stdout = tube
-			c.Stderr = tube
-			err = c.Start()
-			if err != nil {
-				logrus.Errorf("S: error running command %v", err)
-				codex.SendFailure(tube, err)
-				return
-			}
-		}
-
-		// update principals map.
-		pid := c.Process.Pid
-		sess.server.dpProxy.principals[int32(pid)] = principalSess
-
-		codex.SendSuccess(tube)
-		go func() {
-			c.Wait()
-			tube.Close()
-			logrus.Info("closed chan")
-		}()
-
-		if shell {
-			go func() {
-				codex.Server(tube, f)
-				logrus.Info("signaling done")
-				sess.close()
-			}()
-		}
-	} else {
 		err := errors.New("could not find entry for user " + sess.user)
 		logrus.Error(err)
-		codex.SendFailure(tube, err)
+		codex.SendFailure(stdoutTube, err)
 		return
+	}
+	//Default behavior is for command.Env to inherit parents environment unless given and explicit alternative.
+	//TODO(baumanl): These are minimal environment variables. SSH allows for more inheritance from client, but it gets complicated.
+	env := []string{
+		"USER=" + user.Username(),
+		"SHELL=" + user.Shell(),
+		"LOGNAME=" + user.Username(),
+		"HOME=" + user.Homedir(),
+		"TERM=" + termEnv,
+	}
+	var c *exec.Cmd
+	if cmd == "" {
+		//login(1) starts default shell for user and changes all privileges and environment variables
+		c = exec.Command("login", "-f", sess.user)
+	} else {
+		c = exec.Command(user.Shell(), "-c", cmd)
+		c.Dir = user.Homedir()
+		c.SysProcAttr = &syscall.SysProcAttr{}
+		c.SysProcAttr.Credential = &syscall.Credential{
+			Uid:    uint32(user.Uid()),
+			Gid:    uint32(user.Gid()),
+			Groups: getGroups(user.Uid()),
+		}
+	}
+	c.Env = env
+	logrus.Infof("Executing: %v", cmd)
+	var f *os.File
+
+	// lock principals map so can be updated with pid after starting process
+	sess.server.dpProxy.principalLock.Lock()
+	defer sess.server.dpProxy.principalLock.Unlock()
+
+	if shell {
+		if size != nil {
+			f, err = pty.StartWithSize(c, size)
+		} else {
+			f, err = pty.Start(c)
+		}
+		sess.pty <- f
+		if err != nil {
+			logrus.Errorf("S: error starting pty %v", err)
+			codex.SendFailure(stdoutTube, err)
+			return
+		}
+	} else {
+		// Signal nil to sess.pty so that window sizes don't indefinitely buffer
+		sess.pty <- nil
+		c.Stdin = stdinTube
+		c.Stdout = stdoutTube
+		c.Stderr = stdoutTube
+		err = thunks.StartCmd(c)
+		if err != nil {
+			logrus.Errorf("S: error running command: %v", err)
+			codex.SendFailure(stdoutTube, err)
+			return
+		}
+	}
+
+	// update principals map.
+	pid := c.Process.Pid
+	sess.server.dpProxy.principals[int32(pid)] = principalSess
+
+	codex.SendSuccess(stdoutTube)
+	go func() {
+		c.Process.Wait()
+		logrus.Info("command done. closing tubes")
+		stdoutTube.Close()
+		stdinTube.Close()
+		logrus.Info("closed chan")
+	}()
+
+	if shell {
+		go func() {
+			codex.Server(stdinTube, stdoutTube, f)
+			logrus.Info("signaling done")
+			sess.close()
+		}()
 	}
 }
 
