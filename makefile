@@ -35,7 +35,7 @@ debug:
 .PHONY: test
 test: ## test. To run with trace logging, add "-tags debug" to the arguments
 test:
-	go test -tags=debug -race ./... -timeout 4m
+	go test -race ./... -timeout 4m
 
 .PHONY: cred-gen
 cred-gen: ## generates credentials for container tests
