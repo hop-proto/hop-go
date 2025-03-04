@@ -130,7 +130,7 @@ func TestClientServerHiddenHSWithAgent(t *testing.T) {
 	assert.NilError(t, err)
 
 	// Hidden mode serverPublic key reading
-	serverPublicKey, err := keys.ReadDHKeyFromPubFile("testdata/leaf.pub")
+	serverKey, err := keys.ReadDHKeyFromPubFile("testdata/leaf.pub")
 	assert.NilError(t, err)
 
 	// adding the serverPublicKey to the client config enabling the hiddenHS
@@ -138,7 +138,7 @@ func TestClientServerHiddenHSWithAgent(t *testing.T) {
 		Verify:    *verifyConfig,
 		Exchanger: bc,
 		Leaf:      leaf,
-		ServerKey: serverPublicKey,
+		ServerKey: serverKey,
 	})
 	defer func() {
 		err := c.Close()
