@@ -1,13 +1,14 @@
 # TODO(drebelsky) includes, Include *.conf
 
 [Global]
+Key = "/path/to/key.pem"
+Certificate = "/path/to/cert.pem"
 CAFiles = ["/path/to/ca.pem", "/path/to/other.pem"]
 
 [[Hosts]]
 Patterns = ["example.localhost"]
-Key = "/path/to/key.pem"
-Certificate = "/path/to/cert.pem"
 AutoSelfSign = false
 Address = "127.0.0.1" # TODO(drebelsky) Address
 Hostname = "example.localhost"
 Port = 1234
+ServerKey = "/path/to/serverKey.pub"

@@ -13,17 +13,19 @@ func TestLoadClientConfig(t *testing.T) {
 	cert := "/path/to/cert.pem"
 	hostname := "example.localhost"
 	autoSelfSign := false
+	serverKey := "/path/to/serverKey.pub"
 	expected := &ClientConfig{
 		Global: HostConfigOptional{
-			CAFiles: []string{"/path/to/ca.pem", "/path/to/other.pem"},
+			CAFiles:     []string{"/path/to/ca.pem", "/path/to/other.pem"},
+			Key:         &key,
+			Certificate: &cert,
 		},
 		Hosts: []HostConfigOptional{{
 			Patterns:     []string{"example.localhost"},
-			Key:          &key,
-			Certificate:  &cert,
 			AutoSelfSign: &autoSelfSign,
 			Hostname:     &hostname,
 			Port:         1234,
+			ServerKey:    &serverKey,
 		}},
 	}
 	assert.DeepEqual(t, c, expected)
@@ -34,10 +36,13 @@ func TestLoadServerConfig(t *testing.T) {
 	assert.NilError(t, err)
 	ag := false
 	expected := &ServerConfig{
-		ListenAddress:    ":77",
-		Key:              "/etc/hopd/id_hop.pem",
-		Certificate:      "/etc/hopd/id_hop.cert",
-		EnableAuthgrants: &ag,
+		ListenAddress:        ":77",
+		Key:                  "/etc/hopd/id_hop.pem",
+		Certificate:          "/etc/hopd/id_hop.cert",
+		CAFiles:              []string{"/etc/hopd/intermediate.cert", "/etc/hopd/root.cert"},
+		EnableAuthgrants:     &ag,
+		Users:                []string{"user"},
+		HiddenModeVHostNames: []string{"example.com"},
 	}
 	assert.DeepEqual(t, c, expected)
 }
