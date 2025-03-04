@@ -36,10 +36,10 @@ func TestClientServerCompatibilityHiddenHandshake(t *testing.T) {
 
 	ckp, leaf := newClientAuth(t)
 	clientConfig := ClientConfig{
-		Verify:          *vc,
-		Exchanger:       ckp,
-		Leaf:            leaf,
-		ServerPublicKey: serverPublicKey,
+		Verify:    *vc,
+		Exchanger: ckp,
+		Leaf:      leaf,
+		ServerKey: serverPublicKey,
 	}
 	c, err := Dial("udp", s.Addr().String(), clientConfig)
 	assert.NilError(t, err)
@@ -135,10 +135,10 @@ func TestClientServerHiddenHSWithAgent(t *testing.T) {
 
 	// adding the serverPublicKey to the client config enabling the hiddenHS
 	c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{
-		Verify:          *verifyConfig,
-		Exchanger:       bc,
-		Leaf:            leaf,
-		ServerPublicKey: serverPublicKey,
+		Verify:    *verifyConfig,
+		Exchanger: bc,
+		Leaf:      leaf,
+		ServerKey: serverPublicKey,
 	})
 	defer func() {
 		err := c.Close()
