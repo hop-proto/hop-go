@@ -61,6 +61,7 @@ type HostConfigOptional struct {
 	AutoSelfSign     *bool
 	CAFiles          []string
 	ServerName       *string
+	ServerKey        *string
 	ServerIPv4       *string
 	ServerIPv6       *string
 	Certificate      *string
@@ -88,6 +89,7 @@ type HostConfig struct {
 	AutoSelfSign     bool
 	CAFiles          []string
 	ServerName       string // expected name on server cert
+	ServerKey        string // Server Public key to enable Hidden mode
 	ServerIPv4       string
 	ServerIPv6       string
 	Certificate      string
@@ -135,6 +137,9 @@ func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
 	hc.CAFiles = append(hc.CAFiles, other.CAFiles...)
 	if other.ServerName != nil {
 		hc.ServerName = other.ServerName
+	}
+	if other.ServerKey != nil {
+		hc.ServerKey = other.ServerKey
 	}
 	if other.ServerIPv4 != nil {
 		hc.ServerIPv4 = other.ServerIPv4
@@ -204,6 +209,9 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	newHC.CAFiles = hc.CAFiles
 	if hc.ServerName != nil {
 		newHC.ServerName = *hc.ServerName
+	}
+	if hc.ServerKey != nil {
+		newHC.ServerKey = *hc.ServerKey
 	}
 	if hc.Certificate != nil {
 		newHC.Certificate = *hc.Certificate

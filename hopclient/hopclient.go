@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -137,6 +138,21 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		return c.getAuthorization(verifyConfig)
 	}
 
+	var serverKey *keys.PublicKey
+	var err error
+
+	if hc.ServerKey != "" {
+		logrus.Infof("client: server Key loaded to complete Hidden Mode handshake")
+
+		serverKeyPath := combinators.StringOr(hc.ServerKey, config.DefaultKeyPath())
+		serverKey, err = loadServerPublicKey(serverKeyPath)
+
+		if err != nil {
+			logrus.Errorf("client: unable to load the server public key file: %v", err)
+			serverKey = nil
+		}
+	}
+
 	// Host block overrides global block. Set overrides Unset. Certificate
 	// overrides AutoSelfSign.
 	var leafFile string
@@ -174,6 +190,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 			BoundClient:  bc,
 			VerifyConfig: verifyConfig,
 			Leaf:         leaf,
+			ServerKey:    serverKey,
 		}
 		logrus.Info("leaf: ", leaf)
 	} else {
@@ -190,6 +207,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 			X25519KeyPair: keypair,
 			VerifyConfig:  verifyConfig,
 			Leaf:          leaf,
+			ServerKey:     serverKey,
 		}
 	}
 	c.authenticator = authenticator
@@ -277,6 +295,7 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 		Exchanger: authenticator,
 		Verify:    authenticator.GetVerifyConfig(),
 		Leaf:      authenticator.GetLeaf(),
+		ServerKey: authenticator.GetServerKey(),
 	}
 	var err error
 	var dialer net.Dialer
@@ -390,4 +409,19 @@ func (c *HopClient) HandleTubes() {
 			}
 		}
 	}
+}
+
+func loadServerPublicKey(serverKeyPath string) (*keys.PublicKey, error) {
+
+	keyBytes, err := os.ReadFile(serverKeyPath)
+	if err != nil {
+		logrus.Errorf("client: could not read server key file: %s", err)
+		return nil, err
+	}
+	pubKey, err := keys.ParseDHPublicKey(string(keyBytes))
+	if err != nil {
+		logrus.Errorf("client: unable to parse the server key file: %s", err)
+		return nil, err
+	}
+	return pubKey, nil
 }
