@@ -446,7 +446,7 @@ func TestStartCmd(t *testing.T) {
 		a := NewAgent(t)
 		a.AddClientKey(t, c)
 		a.Run(t)
-		defer a.Stop()
+		// defer a.Stop() would be the right way to use it
 
 		c.AddAgentConnToClient(t, a)
 
@@ -461,6 +461,9 @@ func TestStartCmd(t *testing.T) {
 		assert.NilError(t, err)
 		err = s.Server.Close()
 		assert.NilError(t, err)
+
+		// To comply with GitHub concurrency happening in the tests
+		a.Stop()
 
 		outString := output.String()
 		logrus.Info(outString)
