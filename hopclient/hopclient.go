@@ -48,8 +48,6 @@ type HopClient struct { // nolint:maligned
 	TubeMuxer *tubes.Muxer
 	ExecTube  *codex.ExecTube
 
-	forwardingTable *portforwarding.FwdMapping
-
 	hostconfig        *config.HostConfig
 	RawConfigFilePath string
 }
@@ -389,7 +387,8 @@ func (c *HopClient) HandleTubes() {
 
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
 			go c.newPrincipalInstanceSetup(r, proxyQueue)
-		} else if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.PFTube {
+		} else if r, ok := t.(*tubes.Unreliable); ok && r.Type() == common.PFTube {
+			// TODO (paul) update the reliability
 			logrus.Infof("I receive a remote pf")
 			go portforwarding.HandlePF(r, c.hostconfig.RemoteFwds, portforwarding.PfRemote)
 		} else if u, ok := t.(*tubes.Unreliable); ok && u.Type() == common.PrincipalProxyTube && c.hostconfig.IsPrincipal {

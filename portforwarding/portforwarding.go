@@ -3,16 +3,17 @@ package portforwarding
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"github.com/sirupsen/logrus"
+	"hop.computer/hop/common"
 	"hop.computer/hop/proxy"
+	"hop.computer/hop/transport"
+	"hop.computer/hop/tubes"
 	"io"
 	"log"
 	"net"
+	"strconv"
 	"strings"
-	"sync"
-
-	"hop.computer/hop/common"
-	"hop.computer/hop/tubes"
 )
 
 const (
@@ -27,26 +28,9 @@ type NetType byte
 
 // TODO(drebelsky): We may be able to use net.addr eventually, but for now this works
 
-type Addr struct {
-	netType NetType
-	addr    string
-}
 type Forward struct {
-	listen  Addr
-	connect Addr
-}
-type FwdMapping struct {
-	inbound  map[Addr]Addr
-	im       sync.Mutex
-	outbound map[Addr]Addr
-	om       sync.Mutex
-}
-
-func NewFwdMapping() *FwdMapping {
-	return &FwdMapping{
-		inbound:  make(map[Addr]Addr),
-		outbound: make(map[Addr]Addr),
-	}
+	listen  net.Addr
+	connect net.Addr
 }
 
 const (
@@ -54,43 +38,88 @@ const (
 	success = 1
 )
 
-func readPacket(r io.Reader) (*Addr, *byte, error) {
+func readPacket(r io.Reader) (net.Addr, *byte, error) {
 	b := make([]byte, 2)
 	_, err := io.ReadFull(r, b)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	pfType := NetType(b[0])
-
+	netType := NetType(b[0])
 	fwdType := b[1]
 
-	var hostLen uint16
-	err = binary.Read(r, binary.BigEndian, &hostLen)
+	var addrLen uint16
+	err = binary.Read(r, binary.BigEndian, &addrLen)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	host := make([]byte, hostLen)
-	_, err = io.ReadFull(r, host)
-	logrus.Debugf("PF: remote host address %v", string(host))
+	addrBytes := make([]byte, addrLen)
+	_, err = io.ReadFull(r, addrBytes)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return &Addr{
-		pfType,
-		string(host),
-	}, &fwdType, nil
+	addrStr := string(addrBytes)
+
+	var addr net.Addr
+	switch netType {
+	case pfTCP:
+		host, portStr, err := net.SplitHostPort(addrStr)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid TCP address: %s", addrStr)
+		}
+		port, _ := strconv.Atoi(portStr)
+		addr = &net.TCPAddr{IP: net.ParseIP(host), Port: port}
+
+	case pfUDP:
+		host, portStr, err := net.SplitHostPort(addrStr)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid UDP address: %s", addrStr)
+		}
+		port, _ := strconv.Atoi(portStr)
+		addr = &net.UDPAddr{IP: net.ParseIP(host), Port: port}
+
+	case pfUNIX:
+		addr = &net.UnixAddr{Name: addrStr, Net: "unix"}
+
+	default:
+		return nil, nil, fmt.Errorf("unknown network type: %d", netType)
+	}
+
+	return addr, &fwdType, nil
 }
-func toBytes(f *Addr, fwdType int) []byte {
-	length := make([]byte, 2)
-	binary.BigEndian.PutUint16(length, uint16(len(f.addr)))
+
+func toBytes(f net.Addr, fwdType int) []byte {
+	var netType byte
+	var addrStr string
+
+	switch addr := f.(type) {
+	case *net.TCPAddr:
+		netType = byte(pfTCP)
+		addrStr = net.JoinHostPort(addr.IP.String(), strconv.Itoa(addr.Port))
+
+	case *net.UDPAddr:
+		netType = byte(pfUDP)
+		addrStr = net.JoinHostPort(addr.IP.String(), strconv.Itoa(addr.Port))
+
+	case *net.UnixAddr:
+		netType = byte(pfUNIX)
+		addrStr = addr.Name
+
+	default:
+		logrus.Error("Unknown address type")
+		return nil
+	}
+
+	addrLen := make([]byte, 2)
+	binary.BigEndian.PutUint16(addrLen, uint16(len(addrStr)))
+
 	var res []byte
-	res = append(res, byte(f.netType))
+	res = append(res, netType)
 	res = append(res, byte(fwdType))
-	res = append(res, length...)
-	res = append(res, []byte(f.addr)...)
+	res = append(res, addrLen...)
+	res = append(res, []byte(addrStr)...)
 	return res
 }
 
@@ -133,7 +162,7 @@ func StartPF(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 	if *fwdType == PfLocal {
 		// This Dial is for creating a communication between the hop server(/client)
 		// and the service that needs to be reached
-		throwawayConn, err := net.Dial("tcp", local.addr)
+		throwawayConn, err := net.Dial(local.Network(), local.String())
 		if err != nil {
 			logrus.Error("PF: couldn't connect to local addr: ", err)
 			ch.Write([]byte{failure})
@@ -141,10 +170,10 @@ func StartPF(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 			return
 		}
 
-		logrus.Debugf("PF: dialed address, %v", local.addr)
+		logrus.Debugf("PF: dialed address, %v", local.String())
 		throwawayConn.Close()
 
-		forward.connect = *local
+		forward.connect = local
 
 		ch.Write([]byte{success})
 
@@ -154,7 +183,7 @@ func StartPF(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 
 		// TODO (paul) can't bind two time a listener on the same address if
 		// we re init the connection
-		listener, err := net.Listen("tcp", local.addr)
+		listener, err := net.Listen(local.Network(), local.String())
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -171,6 +200,7 @@ func StartPF(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 
 			// There is no need to close the PFTube and the local connection
 			// as they are closed in proxy.ReliableProxy
+			// TODO unreliable as well
 			reliableProxyTube, err := muxer.CreateReliableTube(common.PFTube)
 			if err != nil {
 				logrus.Errorf("PF: error making reliable PF tube with : %v", err)
@@ -193,40 +223,70 @@ func StartPF(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 
 // HandlePF create a connection with the requested service
 // and proxy the connection to the PF tube. The PFTube and
-// the established connections are closed in proxy.ReliableProxy
-func HandlePF(ch *tubes.Reliable, forward *Forward, pfType int) {
-
-	var addr string
-	if pfType == PfLocal {
-		addr = forward.connect.addr
-	} else if pfType == PfRemote {
-		addr = forward.listen.addr
-	} else {
+// the established connections are closed in proxy.ProxyConnection
+func HandlePF(ch tubes.Tube, forward *Forward, pfType int) {
+	addr, valid := getAddress(forward, pfType)
+	if !valid {
 		logrus.Error("PF: Wrong forwarding type ", pfType)
 		ch.Close()
 		return
 	}
 
-	logrus.Infof("PF: server handles a new port forwarding %v", addr)
-	// TODO (paul) make it not TCP unique
+	switch tube := ch.(type) {
+	case *tubes.Reliable:
+		conn, err := net.Dial("tcp", addr.String())
+		if err != nil {
+			logrus.Error("PF: couldn't connect to local addr: ", err)
+			ch.Close()
+			return
+		}
+		reliableProxyConnection(conn, tube)
 
-	conn, err := net.Dial("tcp", addr)
+	case *tubes.Unreliable:
+		udpAddr, ok := addr.(*net.UDPAddr)
+		if !ok {
+			logrus.Error("PF: Invalid UDP address type")
+			ch.Close()
+			return
+		}
+		conn, err := net.DialUDP("udp", nil, udpAddr)
+		if err != nil {
+			logrus.Error("PF: couldn't connect to local addr: ", err)
+			ch.Close()
+			return
+		}
+		unreliableProxyConnection(conn, tube)
 
-	if err != nil {
-		logrus.Error("PF: couldn't connect to local addr: ", err)
+	default:
 		ch.Close()
-		return
 	}
+}
 
+func getAddress(forward *Forward, pfType int) (net.Addr, bool) {
+	switch pfType {
+	case PfLocal:
+		return forward.connect, true
+	case PfRemote:
+		return forward.listen, true
+	default:
+		return nil, false
+	}
+}
+
+func reliableProxyConnection(conn net.Conn, ch *tubes.Reliable) {
 	wg := proxy.ReliableProxy(conn, ch)
 	go func() {
 		wg.Wait()
-		logrus.Infof("PF: Closing tube and connection to %v", addr)
+		logrus.Infof("PF: Closing tube and connection")
 	}()
 }
 
-func listenIncomingPFConnection() {
-
+func unreliableProxyConnection(conn transport.UDPLike, ch *tubes.Unreliable) {
+	wg := proxy.UnreliableProxy(conn, ch)
+	go func() {
+		wg.Wait()
+		logrus.Infof("PF: Closing tube and connection")
+	}()
 }
 
 // PFClientLocal receive the server response from the PF control tube and start a new listener
@@ -239,6 +299,7 @@ func listenIncomingPFConnection() {
 // a control tube to ask the server to acknowledge.
 
 func StartPFClient(forward *Forward, muxer *tubes.Muxer, pfType int) {
+
 	// The pf control tube will be closed if we generate a Remote PF as the server will be handling the generation of the tubes
 	pfControlTube, err := muxer.CreateReliableTube(common.PFControlTube)
 	if err != nil {
@@ -251,7 +312,7 @@ func StartPFClient(forward *Forward, muxer *tubes.Muxer, pfType int) {
 
 	// We are setting up only the local tunnel. Remote port forwarding is the server to create the tubes
 	if pfType == PfLocal {
-		byteAddr := toBytes(&forward.connect, pfType)
+		byteAddr := toBytes(forward.connect, pfType)
 		length := len(byteAddr)
 		b := make([]byte, length)
 		copy(b, byteAddr)
@@ -269,7 +330,7 @@ func StartPFClient(forward *Forward, muxer *tubes.Muxer, pfType int) {
 		}
 
 		// TODO 1) change from tcp to whatever
-		listener, err := net.Listen("tcp", forward.listen.addr)
+		listener, err := net.Listen(forward.listen.Network(), forward.listen.String())
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -284,14 +345,16 @@ func StartPFClient(forward *Forward, muxer *tubes.Muxer, pfType int) {
 
 			// There is no need to close the PFTube and the local connection
 			// as they are closed in proxy.ReliableProxy
-			reliableProxyTube, err := muxer.CreateReliableTube(common.PFTube)
+			//reliableProxyTube, err := muxer.CreateReliableTube(common.PFTube)
+			// TODO reli not reli
+			proxyTube, err := muxer.CreateUnreliableTube(common.PFTube)
 
 			if err != nil {
 				logrus.Errorf("PF: error making reliable PF tube with : %v", err)
 				return
 			}
 
-			wg := proxy.ReliableProxy(local, reliableProxyTube)
+			wg := proxy.ReliableProxy(local, proxyTube)
 			go func() {
 				wg.Wait()
 				// TODO check if it closes the connection when one or the other is broken
@@ -303,16 +366,17 @@ func StartPFClient(forward *Forward, muxer *tubes.Muxer, pfType int) {
 		// This Dial is for creating a communication between the hop server(/client)
 		// and the service that needs to be reached
 		// TODO paul see if the listen and connect are not mixed up
-		throwawayConn, err := net.Dial("tcp", forward.listen.addr)
+		localAddr := forward.listen
+		throwawayConn, err := net.Dial("tcp", localAddr.String())
 		if err != nil {
 			logrus.Error("PF: couldn't connect to local addr: ", err)
 			return
 		}
 
-		logrus.Debugf("PF: dialed address, %v", forward.listen.addr)
+		logrus.Debugf("PF: dialed address, %v", localAddr.String())
 		throwawayConn.Close()
 
-		byteAddr := toBytes(&forward.connect, pfType)
+		byteAddr := toBytes(forward.connect, pfType)
 		length := len(byteAddr)
 		b := make([]byte, length)
 		copy(b, byteAddr)
@@ -330,55 +394,6 @@ func StartPFClient(forward *Forward, muxer *tubes.Muxer, pfType int) {
 		}
 
 		return
-	}
-}
-
-func throwaway(pfControlTube *tubes.Reliable, b []byte, remoteFwds Forward, muxer *tubes.Muxer) {
-
-	// TODO (here don't wait for a message, but for a new tube with a PFTube type
-	// It will acknowledge that the server agrees on the fact he want a connection and then client
-	// can handle PF as the server function, should be the same somehow
-	// TODO remove below this point
-	// https://eli.thegreenplace.net/2022/ssh-port-forwarding-with-go/
-	// https://iximiuz.com/en/posts/ssh-tunnels/
-
-	n, err := pfControlTube.Read(b)
-	if err != nil {
-		return
-	}
-	logrus.Debugf("PF: Client receive this message %x", b[:n])
-
-	// ClientHandlePF receive the server response from the PF control tube and start a new listener
-	// with the local address and for as many connection that he needs, it will create and forward to
-	// a new reliable PFtube. The listener is in TCP, then the tube is in reliable mode, otherwise, we
-	// have to implement a unreliable tube for tcp addresses
-
-	listener, err := net.Listen("tcp", remoteFwds.listen.addr)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer listener.Close()
-
-	// There is no need to close the PFTube and the local connection
-	// as they are closed in proxy.ReliableProxy
-	reliableProxyTube, err := muxer.CreateReliableTube(common.PFTube)
-	if err != nil {
-		logrus.Errorf("PF: error making reliable PF tube with : %v", err)
-		return
-	}
-
-	for {
-		local, err := listener.Accept()
-		if err != nil {
-			log.Fatal(err)
-		}
-		logrus.Infof("Connection accepted from %s", local.RemoteAddr())
-
-		wg := proxy.ReliableProxy(local, reliableProxyTube)
-		go func() {
-			wg.Wait()
-			logrus.Infof("PF: Closing tube and connection to %v", local.RemoteAddr())
-		}()
 	}
 }
 
@@ -438,6 +453,8 @@ if Local: listen is on the local peer (hop client) and connect is contacted by t
   - listenpath:connectpath
 */
 func ParseForward(arg string) (forward *Forward, err error) {
+	// TODO (paul) do it dynamically
+	networkType := pfTCP
 	loopback := "127.0.0.1"
 	//TODO: expand env vars
 	//skip leading/trailing whitespace
@@ -500,41 +517,56 @@ func ParseForward(arg string) (forward *Forward, err error) {
 	}
 
 	forward = &Forward{}
-	forward.listen.netType = pfTCP
-	forward.connect.netType = pfTCP
+
+	createAddress := func(network int, ip string, port int) net.Addr {
+		if network == pfUDP {
+			return &net.UDPAddr{IP: net.ParseIP(ip), Port: port}
+		}
+		return &net.TCPAddr{IP: net.ParseIP(ip), Port: port}
+	}
 
 	if checkPath(parts[0]) {
-		forward.listen.addr = parts[0]
-		forward.listen.netType = pfUNIX
+		forward.listen = &net.UnixAddr{Name: parts[0], Net: "unix"}
 		parts = parts[1:]
 	}
+
 	if checkPath(parts[len(parts)-1]) {
-		forward.connect.addr = parts[len(parts)-1]
-		forward.connect.netType = pfUNIX
+		forward.connect = &net.UnixAddr{Name: parts[len(parts)-1], Net: "unix"}
 		parts = parts[:len(parts)-1]
 	}
-	switch len(parts) {
-	case 0: //both listen and connect were sockets
-		return forward, err
-	case 1: // all that remains is listen_port (connect_socket already parsed)
-		//listen_port:connect_socket				(1 no netType)
-		forward.listen.addr = loopback + ":" + parts[0]
 
-	case 2: // listen or connect was a socket. 2 args remain
-		if forward.connect.netType == pfTCP {
-			forward.connect.addr = parts[0] + ":" + parts[1]
-		} else if forward.listen.netType == pfTCP {
-			forward.listen.addr = parts[0] + ":" + parts[1]
+	switch len(parts) {
+	case 0: // both listen and connect were sockets
+		return forward, nil
+	case 1: // all that remains is listen_port (connect_socket already parsed)
+		//listen_port:connect_socket
+		forward.listen = createAddress(networkType, loopback, parsePort(parts[0]))
+	case 2:
+		// listen or connect was a socket. 2 args remain
+		if nil == forward.listen {
+			forward.listen = createAddress(networkType, parts[0], parsePort(parts[1]))
+		} else if nil == forward.connect {
+			forward.connect = createAddress(networkType, parts[0], parsePort(parts[1]))
 		}
-	case 3: //listen_port:connect_host:connect_port (3 no netType)
-		forward.listen.addr = loopback + ":" + parts[0]
-		forward.connect.addr = parts[1] + ":" + parts[2]
-	case 4: //listen_address:listen_port:connect_host:connect_port (4 no netType)
-		forward.listen.addr = parts[0] + ":" + parts[1]
-		forward.connect.addr = parts[2] + ":" + parts[3]
+	case 3:
+		//listen_port:connect_host:connect_port
+		forward.listen = createAddress(networkType, loopback, parsePort(parts[0]))
+		forward.connect = createAddress(networkType, parts[1], parsePort(parts[2]))
+	case 4:
+		//listen_address:listen_port:connect_host:connect_port
+		forward.listen = createAddress(networkType, parts[0], parsePort(parts[1]))
+		forward.connect = createAddress(networkType, parts[2], parsePort(parts[3]))
 	default:
-		return forward, ErrInvalidPFArgs
+		return nil, ErrInvalidPFArgs
 	}
 
 	return forward, err
+}
+
+func parsePort(portStr string) int {
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return 0
+	}
+	return port
 }
