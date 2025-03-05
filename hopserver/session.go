@@ -316,5 +316,5 @@ func (sess *hopSession) startPF(ch *tubes.Reliable) {
 }
 
 func (sess *hopSession) handlePF(ch *tubes.Reliable) {
-	portforwarding.HandlePF(ch, &sess.forward)
+	portforwarding.HandlePF(ch, &sess.forward, portforwarding.PfLocal)
 }

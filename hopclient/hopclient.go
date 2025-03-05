@@ -239,10 +239,14 @@ func (c *HopClient) Start() error {
 	// TODO (paul): Add a condition to initiate port forwarding based on the client flags
 	// if -L then initiatePFClient
 	// if -R then initiate InitiatePFClientRemote
-	if c.hostconfig.RemoteFwds != nil {
-		go portforwarding.InitiatePFClientRemote(c.hostconfig.RemoteFwds, c.TubeMuxer)
-	} else if c.hostconfig.LocalFwds != nil {
-		go portforwarding.InitiatePFClient(c.hostconfig.LocalFwds, c.TubeMuxer)
+	if c.hostconfig.RemoteFwds != nil || c.hostconfig.LocalFwds != nil {
+		pfType := portforwarding.PfLocal
+		fwds := c.hostconfig.LocalFwds
+		if c.hostconfig.RemoteFwds != nil {
+			pfType = portforwarding.PfRemote
+			fwds = c.hostconfig.RemoteFwds
+		}
+		go portforwarding.StartPFClient(fwds, c.TubeMuxer, pfType)
 	}
 
 	// handle incoming tubes
@@ -386,7 +390,8 @@ func (c *HopClient) HandleTubes() {
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
 			go c.newPrincipalInstanceSetup(r, proxyQueue)
 		} else if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.PFTube {
-			go portforwarding.HandlePF(r, c.hostconfig.RemoteFwds)
+			logrus.Infof("I receive a remote pf")
+			go portforwarding.HandlePF(r, c.hostconfig.RemoteFwds, portforwarding.PfRemote)
 		} else if u, ok := t.(*tubes.Unreliable); ok && u.Type() == common.PrincipalProxyTube && c.hostconfig.IsPrincipal {
 			// add to map and signal waiting processes
 			proxyQueue.lock.Lock()

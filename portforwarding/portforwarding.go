@@ -19,8 +19,8 @@ const (
 	pfTCP    = 1
 	pfUDP    = 2
 	pfUNIX   = 3
-	pfLocal  = 4
-	pfRemote = 5
+	PfLocal  = 4
+	PfRemote = 5
 )
 
 type NetType byte
@@ -130,7 +130,7 @@ func StartPF(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 		return
 	}
 
-	if *fwdType == pfLocal {
+	if *fwdType == PfLocal {
 		// This Dial is for creating a communication between the hop server(/client)
 		// and the service that needs to be reached
 		throwawayConn, err := net.Dial("tcp", local.addr)
@@ -150,7 +150,7 @@ func StartPF(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 
 		return
 
-	} else if *fwdType == pfRemote {
+	} else if *fwdType == PfRemote {
 
 		// TODO (paul) can't bind two time a listener on the same address if
 		// we re init the connection
@@ -160,13 +160,7 @@ func StartPF(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 		}
 		defer listener.Close()
 
-		// There is no need to close the PFTube and the local connection
-		// as they are closed in proxy.ReliableProxy
-		reliableProxyTube, err := muxer.CreateReliableTube(common.PFTube)
-		if err != nil {
-			logrus.Errorf("PF: error making reliable PF tube with : %v", err)
-			return
-		}
+		ch.Write([]byte{success})
 
 		for {
 			localConn, err := listener.Accept()
@@ -175,14 +169,22 @@ func StartPF(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 			}
 			logrus.Infof("Connection accepted from %s", localConn.RemoteAddr())
 
+			// There is no need to close the PFTube and the local connection
+			// as they are closed in proxy.ReliableProxy
+			reliableProxyTube, err := muxer.CreateReliableTube(common.PFTube)
+			if err != nil {
+				logrus.Errorf("PF: error making reliable PF tube with : %v", err)
+				return
+			}
+
 			wg := proxy.ReliableProxy(localConn, reliableProxyTube)
 			go func() {
 				wg.Wait()
 				logrus.Infof("PF: Closing tube and connection to %v", localConn.RemoteAddr())
 			}()
 		}
-		// TODO (paul) check if I should return here
 	} else {
+		logrus.Errorf("PF: closing porfforwarding session, bad fwdType %v", fwdType)
 		ch.Write([]byte{failure})
 		ch.Close()
 		return
@@ -192,11 +194,23 @@ func StartPF(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 // HandlePF create a connection with the requested service
 // and proxy the connection to the PF tube. The PFTube and
 // the established connections are closed in proxy.ReliableProxy
-func HandlePF(ch *tubes.Reliable, forward *Forward) {
+func HandlePF(ch *tubes.Reliable, forward *Forward, pfType int) {
 
-	logrus.Infof("PF: server handles a new port forwarding %v", forward.connect.addr)
+	var addr string
+	if pfType == PfLocal {
+		addr = forward.connect.addr
+	} else if pfType == PfRemote {
+		addr = forward.listen.addr
+	} else {
+		logrus.Error("PF: Wrong forwarding type ", pfType)
+		ch.Close()
+		return
+	}
+
+	logrus.Infof("PF: server handles a new port forwarding %v", addr)
 	// TODO (paul) make it not TCP unique
-	conn, err := net.Dial("tcp", forward.connect.addr)
+
+	conn, err := net.Dial("tcp", addr)
 
 	if err != nil {
 		logrus.Error("PF: couldn't connect to local addr: ", err)
@@ -204,103 +218,118 @@ func HandlePF(ch *tubes.Reliable, forward *Forward) {
 		return
 	}
 
-	// TODO (paul): after the second request sent by the client,
-	// there is a broken pipe between the pf service and the server
 	wg := proxy.ReliableProxy(conn, ch)
 	go func() {
 		wg.Wait()
-		logrus.Infof("PF: Closing tube and connection to %v", forward.connect.addr)
+		logrus.Infof("PF: Closing tube and connection to %v", addr)
 	}()
 }
 
-// InitiatePFClient is initiated by the client on client session start.
-// it writes the addr to dial for the remote server and send it through
-// a control tube to ask the server to acknowledge
-func InitiatePFClient(forward *Forward, muxer *tubes.Muxer) {
+func listenIncomingPFConnection() {
 
-	// TODO (paul) pf over udp
-	pfControlTube, err := muxer.CreateReliableTube(common.PFControlTube)
-	if err != nil {
-		logrus.Error(err)
-		return
-	}
-
-	defer pfControlTube.Close()
-
-	byteAddr := toBytes(&forward.connect, pfLocal)
-	length := len(byteAddr)
-	b := make([]byte, length)
-	copy(b, byteAddr)
-
-	_, err = pfControlTube.Write(b)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	n, err := pfControlTube.Read(b)
-	// TODO (paul) the read 01 should say success or not todo handle
-	if err != nil {
-		return
-	}
-	logrus.Debugf("PF: Client receive this message %x", b[:n])
-
-	// ClientHandlePF receive the server response from the PF control tube and start a new listener
-	// with the local address and for as many connection that he needs, it will create and forward to
-	// a new reliable PFtube. The listener is in TCP, then the tube is in reliable mode, otherwise, we
-	// have to implement a unreliable tube for tcp addresses
-
-	listener, err := net.Listen("tcp", forward.listen.addr)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer listener.Close()
-
-	for {
-		local, err := listener.Accept()
-		if err != nil {
-			log.Fatal(err)
-		}
-		logrus.Infof("Connection accepted from %s", local.RemoteAddr())
-
-		// There is no need to close the PFTube and the local connection
-		// as they are closed in proxy.ReliableProxy
-		reliableProxyTube, err := muxer.CreateReliableTube(common.PFTube)
-
-		if err != nil {
-			logrus.Errorf("PF: error making reliable PF tube with : %v", err)
-			return
-		}
-
-		wg := proxy.ReliableProxy(local, reliableProxyTube)
-		go func() {
-			wg.Wait()
-			// TODO check if it closes the connection when one or the other is broken
-			logrus.Infof("PF: Closing tube and connection to %v", local.RemoteAddr())
-		}()
-	}
 }
+
+// PFClientLocal receive the server response from the PF control tube and start a new listener
+// with the local address and for as many connection that he needs, it will create and forward to
+// a new reliable PFtube. The listener is in TCP, then the tube is in reliable mode, otherwise, we
+// have to implement a unreliable tube for tcp addresses
 
 // InitiatePFClientRemote is initiated by the client on client session start.
 // it writes the addr to dial for the remote server and send it through
 // a control tube to ask the server to acknowledge.
-func InitiatePFClientRemote(remoteFwds *Forward, muxer *tubes.Muxer) {
 
+func StartPFClient(forward *Forward, muxer *tubes.Muxer, pfType int) {
+	// The pf control tube will be closed if we generate a Remote PF as the server will be handling the generation of the tubes
 	pfControlTube, err := muxer.CreateReliableTube(common.PFControlTube)
 	if err != nil {
 		logrus.Error(err)
 		return
 	}
 
+	// for remote pf, I might not want the tube to close rn (try to initiate all from the other side?)
 	defer pfControlTube.Close()
 
-	byteAddr := toBytes(&remoteFwds.listen, pfRemote)
-	length := len(byteAddr)
-	b := make([]byte, length)
-	copy(b, byteAddr)
+	// We are setting up only the local tunnel. Remote port forwarding is the server to create the tubes
+	if pfType == PfLocal {
+		byteAddr := toBytes(&forward.connect, pfType)
+		length := len(byteAddr)
+		b := make([]byte, length)
+		copy(b, byteAddr)
 
-	_, err = pfControlTube.Write(b)
-	if err != nil {
-		log.Fatal(err)
+		_, err = pfControlTube.Write(b)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		n, err := pfControlTube.Read(b)
+		logrus.Debugf("PF: Client receive this message %x", b[:n])
+
+		if err != nil || int(b[0]) != success {
+			return
+		}
+
+		// TODO 1) change from tcp to whatever
+		listener, err := net.Listen("tcp", forward.listen.addr)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer listener.Close()
+
+		for {
+			local, err := listener.Accept()
+			if err != nil {
+				log.Fatal(err)
+			}
+			logrus.Infof("Connection accepted from %s", local.RemoteAddr())
+
+			// There is no need to close the PFTube and the local connection
+			// as they are closed in proxy.ReliableProxy
+			reliableProxyTube, err := muxer.CreateReliableTube(common.PFTube)
+
+			if err != nil {
+				logrus.Errorf("PF: error making reliable PF tube with : %v", err)
+				return
+			}
+
+			wg := proxy.ReliableProxy(local, reliableProxyTube)
+			go func() {
+				wg.Wait()
+				// TODO check if it closes the connection when one or the other is broken
+				logrus.Infof("PF: Closing tube and connection to %v", local.RemoteAddr())
+			}()
+		}
+	} else if pfType == PfRemote {
+
+		// This Dial is for creating a communication between the hop server(/client)
+		// and the service that needs to be reached
+		// TODO paul see if the listen and connect are not mixed up
+		throwawayConn, err := net.Dial("tcp", forward.listen.addr)
+		if err != nil {
+			logrus.Error("PF: couldn't connect to local addr: ", err)
+			return
+		}
+
+		logrus.Debugf("PF: dialed address, %v", forward.listen.addr)
+		throwawayConn.Close()
+
+		byteAddr := toBytes(&forward.connect, pfType)
+		length := len(byteAddr)
+		b := make([]byte, length)
+		copy(b, byteAddr)
+
+		_, err = pfControlTube.Write(b)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		n, err := pfControlTube.Read(b)
+		logrus.Debugf("PF: Client receive this message %x", b[:n])
+
+		if err != nil || int(b[0]) != success {
+			logrus.Errorf("PF: server can't start remote port forwarding %v", err)
+		}
+
+		return
 	}
 }
 
