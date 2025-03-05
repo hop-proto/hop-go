@@ -27,7 +27,7 @@ func TestParse(t *testing.T) {
 			Port: parsePort("connect_port"),
 		},
 	}
-	fwdStruct, err := ParseForward(A)
+	fwdStruct, err := ParseForward(A, pfTCP)
 	assert.NilError(t, err)
 	assertEqual(t, *fwdStruct, correctStruct)
 
@@ -42,7 +42,7 @@ func TestParse(t *testing.T) {
 			Net:  "unix",
 		},
 	}
-	fwdStruct, err = ParseForward(B)
+	fwdStruct, err = ParseForward(B, pfTCP)
 	assert.NilError(t, err)
 	assertEqual(t, *fwdStruct, correctStruct)
 
@@ -57,7 +57,7 @@ func TestParse(t *testing.T) {
 			Port: parsePort("connect_port"),
 		},
 	}
-	fwdStruct, err = ParseForward(C)
+	fwdStruct, err = ParseForward(C, pfTCP)
 	assert.NilError(t, err)
 	assertEqual(t, *fwdStruct, correctStruct)
 
@@ -72,7 +72,7 @@ func TestParse(t *testing.T) {
 			Net:  "unix",
 		},
 	}
-	fwdStruct, err = ParseForward(D)
+	fwdStruct, err = ParseForward(D, pfTCP)
 	assert.NilError(t, err)
 	assertEqual(t, *fwdStruct, correctStruct)
 
@@ -87,7 +87,7 @@ func TestParse(t *testing.T) {
 			Port: parsePort("connect_port"),
 		},
 	}
-	fwdStruct, err = ParseForward(E)
+	fwdStruct, err = ParseForward(E, pfTCP)
 	assert.NilError(t, err)
 	assertEqual(t, *fwdStruct, correctStruct)
 
@@ -102,7 +102,7 @@ func TestParse(t *testing.T) {
 			Net:  "unix",
 		},
 	}
-	fwdStruct, err = ParseForward(F)
+	fwdStruct, err = ParseForward(F, pfTCP)
 	assert.NilError(t, err)
 	assertEqual(t, *fwdStruct, correctStruct)
 
@@ -117,7 +117,7 @@ func TestParse(t *testing.T) {
 			Net:  "unix",
 		},
 	}
-	fwdStruct, err = ParseForward(G)
+	fwdStruct, err = ParseForward(G, pfTCP)
 	assert.NilError(t, err)
 	assertEqual(t, *fwdStruct, correctStruct)
 
@@ -132,7 +132,7 @@ func TestParse(t *testing.T) {
 			Port: parsePort("connect_port"),
 		},
 	}
-	fwdStruct, err = ParseForward(H)
+	fwdStruct, err = ParseForward(H, pfTCP)
 	assert.NilError(t, err)
 	assertEqual(t, *fwdStruct, correctStruct)
 
@@ -147,16 +147,16 @@ func TestParse(t *testing.T) {
 			Port: parsePort("connect_port"),
 		},
 	}
-	fwdStruct, err = ParseForward(I)
+	fwdStruct, err = ParseForward(I, pfTCP)
 	assert.NilError(t, err)
 	assertEqual(t, *fwdStruct, correctStruct)
 
 	// Invalid formats
 	errOne := "arg1" // too few args
-	_, err = ParseForward(errOne)
+	_, err = ParseForward(errOne, pfTCP)
 	assert.Error(t, err, ErrInvalidPFArgs.Error())
 
 	errTwo := "arg1:arg2:arg3:arg4:arg5" // too many args
-	_, err = ParseForward(errTwo)
+	_, err = ParseForward(errTwo, pfTCP)
 	assert.Error(t, err, ErrInvalidPFArgs.Error())
 }

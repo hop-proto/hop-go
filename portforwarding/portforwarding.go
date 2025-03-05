@@ -452,9 +452,7 @@ if Local: listen is on the local peer (hop client) and connect is contacted by t
 [listenhost:]listenport|listenpath:connecthost:connectport|connectpath
   - listenpath:connectpath
 */
-func ParseForward(arg string) (forward *Forward, err error) {
-	// TODO (paul) do it dynamically
-	networkType := pfTCP
+func ParseForward(arg string, networkType int) (forward *Forward, err error) {
 	loopback := "127.0.0.1"
 	//TODO: expand env vars
 	//skip leading/trailing whitespace
