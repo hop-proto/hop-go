@@ -163,7 +163,7 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 	}
 }
 
-func GetGroups(uid int) (groups []uint32) {
+func getGroups(uid int) (groups []uint32) {
 	groups = append(groups, uint32(uid))
 	u, err := user.LookupId(strconv.Itoa(uid))
 	if err != nil {
