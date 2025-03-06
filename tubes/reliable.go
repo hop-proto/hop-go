@@ -376,7 +376,6 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 		case created:
 			return 0, ErrBadTubeState
 		case initiated, closeWait:
-			break
 		default:
 			return 0, io.EOF
 		}
@@ -388,6 +387,10 @@ func (r *Reliable) Write(b []byte) (n int, err error) {
 		r.senderCV.Wait()
 	}
 
+	bytesAvailable := maxBufferedPackets*int(MaxFrameDataLength) - int(r.sender.bytesInFlight)
+	if len(b) > bytesAvailable {
+		b = b[:bytesAvailable]
+	}
 	return r.sender.write(b)
 }
 
