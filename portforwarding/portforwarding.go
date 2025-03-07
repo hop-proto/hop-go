@@ -10,6 +10,7 @@ import (
 	"hop.computer/hop/tubes"
 	"io"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -204,21 +205,36 @@ func HandlePF(ch tubes.Tube, forward *Forward, pfType int) {
 	}
 
 	if reliableTube, ok := ch.(*tubes.Reliable); ok {
-		if tcpAddr, ok := addr.(*net.TCPAddr); ok {
-			conn, err := net.Dial("tcp", tcpAddr.String())
+		switch addr := addr.(type) {
+		case *net.TCPAddr:
+			conn, err := net.DialTCP(addr.Network(), nil, addr)
 			if err != nil {
-				logrus.Error("PF: couldn't connect to local addr: ", err)
+				logrus.Error("PF: couldn't connect to local TCP addr: ", err)
 				ch.Close()
 				return
 			}
 			wg := proxy.ReliableProxy(conn, reliableTube)
 			go func() {
 				wg.Wait()
-				logrus.Infof("PF: Closing tube and connection")
+				logrus.Infof("PF: Closing TCP connection")
 			}()
-		} else if _, ok := addr.(*net.UnixAddr); ok {
-			// TODO Unix should be reliable
+
+		case *net.UnixAddr:
+			conn, err := net.DialUnix(addr.Network(), nil, addr)
+			if err != nil {
+				logrus.Error("PF: couldn't connect to local Unix socket: ", err)
+				ch.Close()
+				return
+			}
+			logrus.Infof("PF: Connected to Unix socket at %s", addr.Name)
+
+			wg := proxy.ReliableProxy(conn, reliableTube)
+			go func() {
+				wg.Wait()
+				logrus.Infof("PF: Closing Unix socket connection")
+			}()
 		}
+
 	} else if unreliableTube, ok := ch.(*tubes.Unreliable); ok {
 		udpAddr, ok := addr.(*net.UDPAddr)
 		if !ok {
@@ -226,16 +242,16 @@ func HandlePF(ch tubes.Tube, forward *Forward, pfType int) {
 			ch.Close()
 			return
 		}
-		conn, err := net.DialUDP("udp", nil, udpAddr)
+		conn, err := net.DialUDP(udpAddr.Network(), nil, udpAddr)
 		if err != nil {
-			logrus.Error("PF: couldn't connect to local addr: ", err)
+			logrus.Error("PF: couldn't connect to local UDP addr: ", err)
 			ch.Close()
 			return
 		}
 		wg := proxy.UnreliableProxy(conn, unreliableTube)
 		go func() {
 			wg.Wait()
-			logrus.Infof("PF: Closing tube and connection")
+			logrus.Infof("PF: Closing UDP connection")
 		}()
 	} else {
 		ch.Close()
@@ -263,42 +279,36 @@ func getAddress(forward *Forward, pfType int) (net.Addr, bool) {
 // a control tube to ask the server to acknowledge.
 
 func setupListenerAndForward(muxer *tubes.Muxer, addr net.Addr) {
-
-	// UDP setup
-	if _, ok := addr.(*net.UDPAddr); ok {
-		listener, err := net.ListenUDP(addr.Network(), addr.(*net.UDPAddr))
+	switch addr := addr.(type) {
+	case *net.UDPAddr:
+		listener, err := net.ListenUDP(addr.Network(), addr)
 		if err != nil {
-			logrus.Errorf("PF: UDP listener can't start with error: %v", err)
+			logrus.Errorf("PF: UDP listener can't start: %v", err)
 			return
 		}
-
 		proxyTube, err := muxer.CreateUnreliableTube(common.PFTube)
 		if err != nil {
 			logrus.Errorf("PF: error creating proxy tube: %v", err)
 			return
 		}
-
 		go proxy.UnreliableProxy(listener, proxyTube)
 
-		// TCP setup
-	} else if _, ok := addr.(*net.TCPAddr); ok {
-		listener, err := net.Listen("tcp", addr.String())
+	case *net.TCPAddr:
+		listener, err := net.ListenTCP(addr.Network(), addr)
 		if err != nil {
-			logrus.Errorf("PF: TCP listener can't start with error: %v", err)
+			logrus.Errorf("PF: TCP listener can't start: %v", err)
 			return
 		}
-
 		defer listener.Close()
 
 		for {
 			local, err := listener.Accept()
 			if err != nil {
-				logrus.Errorf("PF: TCP listener can't accept a connection with error: %v", err)
+				logrus.Errorf("PF: TCP listener can't accept connection: %v", err)
 				return
 			}
 			logrus.Infof("TCP Connection accepted from %s", local.RemoteAddr())
 
-			// Create the appropriate proxy tube (reliable for TCP)
 			proxyTube, err := muxer.CreateReliableTube(common.PFTube)
 			if err != nil {
 				logrus.Errorf("PF: error creating reliable proxy tube: %v", err)
@@ -308,15 +318,44 @@ func setupListenerAndForward(muxer *tubes.Muxer, addr net.Addr) {
 			wg := proxy.ReliableProxy(local, proxyTube)
 			go func() {
 				wg.Wait()
-				logrus.Infof("PF: Closing tube and connection to %v", local.RemoteAddr())
+				logrus.Infof("PF: Closing connection to %v", local.RemoteAddr())
 			}()
 		}
-	} else if _, ok := addr.(*net.UnixAddr); ok {
-		// TODO implement
-	} else {
-		// TODO
-	}
 
+	case *net.UnixAddr:
+		os.Remove(addr.Name)
+		listener, err := net.ListenUnix(addr.Network(), addr)
+		if err != nil {
+			logrus.Errorf("PF: Unix listener can't start: %v", err)
+			return
+		}
+		defer listener.Close()
+		logrus.Infof("PF: Unix socket listening on %s", addr.Name)
+
+		for {
+			local, err := listener.Accept()
+			if err != nil {
+				logrus.Errorf("PF: Unix listener can't accept connection: %v", err)
+				return
+			}
+			logrus.Infof("Unix Connection accepted from %s", local.RemoteAddr())
+
+			proxyTube, err := muxer.CreateReliableTube(common.PFTube)
+			if err != nil {
+				logrus.Errorf("PF: error creating reliable proxy tube: %v", err)
+				return
+			}
+
+			wg := proxy.ReliableProxy(local, proxyTube)
+			go func() {
+				wg.Wait()
+				logrus.Infof("PF: Closing Unix socket connection")
+			}()
+		}
+
+	default:
+		logrus.Errorf("PF: Unsupported address type: %T", addr)
+	}
 }
 
 func StartPFClient(forward *Forward, muxer *tubes.Muxer, pfType int) {
