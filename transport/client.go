@@ -177,7 +177,7 @@ func (c *Client) clientHandshakeLocked() error {
 
 	isClientHiddenHS := false
 
-	if c.config.ServerPublicKey != nil {
+	if c.config.ServerKey != nil {
 		logrus.Debug("---------- HIDDEN HANDSHAKE MODE -------------")
 
 		err := c.beginHiddenHandshake(buf)
@@ -299,7 +299,7 @@ func (c *Client) beginHiddenHandshake(buf []byte) error {
 
 	c.hs.RekeyFromSqueeze(HiddenProtocolName)
 
-	n, err := c.hs.writeClientRequestHidden(buf, c.config.ServerPublicKey)
+	n, err := c.hs.writeClientRequestHidden(buf, c.config.ServerKey)
 
 	if err != nil {
 		return err

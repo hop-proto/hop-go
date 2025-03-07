@@ -2,5 +2,8 @@ ListenAddress = ":77"
 
 Key = "/etc/hopd/id_hop.pem"
 Certificate = "/etc/hopd/id_hop.cert"
+CAFiles = [ "/etc/hopd/intermediate.cert" , "/etc/hopd/root.cert"]
 
 EnableAuthgrants = false
+Users = ["user"]
+HiddenModeVHostNames = ["example.com"]

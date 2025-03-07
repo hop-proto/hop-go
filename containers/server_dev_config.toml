@@ -5,3 +5,4 @@ Certificate = "/etc/hopd/id_hop.cert"
 CAFiles = [ "/etc/hopd/intermediate.cert" , "/etc/hopd/root.cert"]
 
 Users = ["user"]
+HiddenModeVHostNames = ["example.com"]
