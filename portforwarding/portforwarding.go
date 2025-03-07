@@ -204,56 +204,55 @@ func HandlePF(ch tubes.Tube, forward *Forward, pfType int) {
 		return
 	}
 
-	if reliableTube, ok := ch.(*tubes.Reliable); ok {
-		switch addr := addr.(type) {
-		case *net.TCPAddr:
-			conn, err := net.DialTCP(addr.Network(), nil, addr)
-			if err != nil {
-				logrus.Error("PF: couldn't connect to local TCP addr: ", err)
-				ch.Close()
-				return
-			}
-			wg := proxy.ReliableProxy(conn, reliableTube)
-			go func() {
-				wg.Wait()
-				logrus.Infof("PF: Closing TCP connection")
-			}()
-
-		case *net.UnixAddr:
-			conn, err := net.DialUnix(addr.Network(), nil, addr)
-			if err != nil {
-				logrus.Error("PF: couldn't connect to local Unix socket: ", err)
-				ch.Close()
-				return
-			}
-			logrus.Infof("PF: Connected to Unix socket at %s", addr.Name)
-
-			wg := proxy.ReliableProxy(conn, reliableTube)
-			go func() {
-				wg.Wait()
-				logrus.Infof("PF: Closing Unix socket connection")
-			}()
-		}
-
-	} else if unreliableTube, ok := ch.(*tubes.Unreliable); ok {
-		udpAddr, ok := addr.(*net.UDPAddr)
-		if !ok {
-			logrus.Error("PF: Invalid UDP address type")
-			ch.Close()
-			return
-		}
-		conn, err := net.DialUDP(udpAddr.Network(), nil, udpAddr)
+	switch addr := addr.(type) {
+	case *net.TCPAddr:
+		conn, err := net.DialTCP(addr.Network(), nil, addr)
 		if err != nil {
-			logrus.Error("PF: couldn't connect to local UDP addr: ", err)
+			logrus.Error("PF: couldn't connect to local TCP addr: ", err)
 			ch.Close()
 			return
 		}
-		wg := proxy.UnreliableProxy(conn, unreliableTube)
+		wg := proxy.ReliableProxy(conn, ch)
 		go func() {
 			wg.Wait()
-			logrus.Infof("PF: Closing UDP connection")
+			logrus.Infof("PF: Closing TCP connection")
 		}()
-	} else {
+
+	case *net.UnixAddr:
+		conn, err := net.DialUnix(addr.Network(), nil, addr)
+		if err != nil {
+			logrus.Error("PF: couldn't connect to local Unix socket: ", err)
+			ch.Close()
+			return
+		}
+		logrus.Infof("PF: Connected to Unix socket at %s", addr.Name)
+
+		wg := proxy.ReliableProxy(conn, ch)
+		go func() {
+			wg.Wait()
+			logrus.Infof("PF: Closing Unix socket connection")
+		}()
+	case *net.UDPAddr:
+		if unreliableTube, ok := ch.(*tubes.Unreliable); ok {
+			conn, err := net.DialUDP(addr.Network(), nil, addr)
+			if err != nil {
+				logrus.Error("PF: couldn't connect to local UDP addr: ", err)
+				ch.Close()
+				return
+			}
+
+			wg := proxy.UnreliableProxy(conn, unreliableTube)
+			go func() {
+				wg.Wait()
+				logrus.Infof("PF: Closing UDP connection")
+			}()
+		} else {
+			logrus.Error("PF: UDP connection are operated only over unreliable tubes")
+			ch.Close()
+		}
+
+	default:
+		logrus.Error("PF: Wrong address type")
 		ch.Close()
 	}
 }
