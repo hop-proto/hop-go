@@ -109,32 +109,44 @@ func (sess *hopSession) start() {
 			break
 		}
 		logrus.Infof("S: ACCEPTED NEW TUBE Type: %v, ID: %v, Reliable? %v)", tube.Type(), tube.GetID(), tube.IsReliable())
-		r, ok := tube.(*tubes.Reliable)
-		if !ok {
-			// TODO(hosono) handle unreliable tubes (general case)
-			r.Close()
-			continue
-		}
-		switch tube.Type() {
-		case common.ExecTube:
-			t2, err := sess.tubeMuxer.Accept()
-			r2, ok := t2.(*tubes.Reliable)
-			if err != nil || !ok {
-				sess.close()
-				return
+
+		if r, ok := tube.(*tubes.Reliable); ok {
+			switch tube.Type() {
+			case common.ExecTube:
+				t2, err := sess.tubeMuxer.Accept()
+				r2, ok := t2.(*tubes.Reliable)
+				if err != nil || !ok {
+					sess.close()
+					return
+				}
+				go sess.startCodex(r, r2)
+			case common.AuthGrantTube:
+				go sess.handleAgc(r)
+			case common.PFControlTube:
+				go sess.startPF(r)
+			case common.PFTube:
+				go sess.handlePFReliable(r)
+			case common.WinSizeTube:
+				go sess.startSizeTube(r)
+			default:
+				tube.Close() // Close unrecognized tube types
 			}
-			go sess.startCodex(r, r2)
-		case common.AuthGrantTube:
-			go sess.handleAgc(r)
-		case common.PFControlTube:
-			go sess.startPF(r)
-		case common.PFTube:
-			go sess.handlePF(r)
-		case common.WinSizeTube:
-			go sess.startSizeTube(r)
-		default:
-			tube.Close() // Close unrecognized tube types
+
+		} else if u, ok := tube.(*tubes.Unreliable); ok {
+			switch tube.Type() {
+			case common.PFTube:
+				go sess.handlePFUnreliable(u)
+			default:
+				tube.Close() // Close unrecognized tube types
+			}
+
+		} else {
+			e := tube.Close()
+			if e != nil {
+				logrus.Errorf("Error closing tube: %v", e)
+			}
 		}
+
 	}
 }
 
@@ -312,9 +324,13 @@ func (sess *hopSession) newAuthGrantTube() (*tubes.Reliable, error) {
 func (sess *hopSession) startPF(ch *tubes.Reliable) {
 	// TODO find a way of selecting a remote forwarding
 	// or a local forwarding
-	portforwarding.StartPF(ch, &sess.forward, sess.tubeMuxer)
+	portforwarding.StartPFServer(ch, &sess.forward, sess.tubeMuxer)
 }
 
-func (sess *hopSession) handlePF(ch *tubes.Reliable) {
+func (sess *hopSession) handlePFReliable(ch *tubes.Reliable) {
+	portforwarding.HandlePF(ch, &sess.forward, portforwarding.PfLocal)
+}
+
+func (sess *hopSession) handlePFUnreliable(ch *tubes.Unreliable) {
 	portforwarding.HandlePF(ch, &sess.forward, portforwarding.PfLocal)
 }
