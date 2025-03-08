@@ -4,8 +4,9 @@ import (
 	"net"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
 	"gotest.tools/assert"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func assertEqual(t *testing.T, fwdStruct, correctStruct Forward) {

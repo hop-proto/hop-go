@@ -57,6 +57,7 @@ linters-settings:
           - github.com/creack/pty
           - github.com/docker/docker
           - github.com/docker/go-connections
+          - github.com/google/go-cmp/cmp
           - github.com/mattn/go-isatty
           - github.com/muesli/cancelreader
           - github.com/sbinet/pstree

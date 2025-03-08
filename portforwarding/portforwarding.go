@@ -4,15 +4,16 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/sirupsen/logrus"
+	"io"
+	"net"
+	"strconv"
+	"strings"
+
 	"hop.computer/hop/common"
 	"hop.computer/hop/proxy"
 	"hop.computer/hop/tubes"
-	"io"
-	"net"
-	"os"
-	"strconv"
-	"strings"
+
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -118,30 +119,6 @@ func toBytes(f net.Addr, fwdType int) []byte {
 	res = append(res, addrLen...)
 	res = append(res, []byte(addrStr)...)
 	return res
-}
-
-// notify when true indicates that the receiver doesn't need to start listening
-// when false it should
-func readFlags(r io.Reader) (start, notify bool, err error) {
-	b := make([]byte, 1)
-	_, err = io.ReadFull(r, b)
-	if err != nil {
-		return
-	}
-	start = b[0]&1 != 0
-	notify = b[0]&2 != 0
-	return
-}
-func writeFlags(w io.Writer, start, notify bool) (err error) {
-	b := make([]byte, 1)
-	if start {
-		b[0] |= 1
-	}
-	if notify {
-		b[0] |= 2
-	}
-	_, err = w.Write(b)
-	return err
 }
 
 // StartPFServer handles the PFControlTube and start the appropriate PF
@@ -322,7 +299,6 @@ func setupListenerAndForward(muxer *tubes.Muxer, addr net.Addr) {
 		}
 
 	case *net.UnixAddr:
-		os.Remove(addr.Name)
 		listener, err := net.ListenUnix(addr.Network(), addr)
 		if err != nil {
 			logrus.Errorf("PF: Unix listener can't start: %v", err)
