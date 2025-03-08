@@ -173,7 +173,6 @@ func StartPFServer(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 // and proxy the connection to the PF tube. The PFTube and
 // the established connections are closed in proxy.ProxyConnection
 func HandlePF(ch tubes.Tube, forward *Forward, pfType int) {
-	logrus.Debugf("add: connect %v listen %v", forward.connect, forward.listen)
 	addr, valid := getAddress(forward, pfType)
 	if !valid {
 		logrus.Error("PF: Wrong forwarding type ", pfType)
