@@ -110,10 +110,6 @@ func (sess *hopSession) start() {
 		}
 		logrus.Infof("S: ACCEPTED NEW TUBE Type: %v, ID: %v, Reliable? %v)", tube.Type(), tube.GetID(), tube.IsReliable())
 
-		if tube.Type() == common.PFTube {
-			go sess.handlePF(&tube)
-		}
-
 		if r, ok := tube.(*tubes.Reliable); ok {
 			switch tube.Type() {
 			case common.ExecTube:
@@ -128,6 +124,8 @@ func (sess *hopSession) start() {
 				go sess.handleAgc(r)
 			case common.PFControlTube:
 				go sess.startPF(r)
+			case common.PFTube:
+				go sess.handlePF(r)
 			case common.WinSizeTube:
 				go sess.startSizeTube(r)
 			default:
@@ -136,6 +134,8 @@ func (sess *hopSession) start() {
 
 		} else if u, ok := tube.(*tubes.Unreliable); ok {
 			switch tube.Type() {
+			case common.PFTube:
+				go sess.handlePF(u)
 			case common.PrincipalProxyTube:
 				// TODO (paul) I suspect the PrincipalProxyTube to never be handled by this code but the one in hopclient
 				logrus.Errorf("PrincipalProxyTube are not handled yet %v", u)
@@ -330,10 +330,6 @@ func (sess *hopSession) startPF(ch *tubes.Reliable) {
 	portforwarding.StartPFServer(ch, &sess.forward, sess.tubeMuxer)
 }
 
-func (sess *hopSession) handlePF(ch *tubes.Tube) {
-	portforwarding.HandlePF(*ch, &sess.forward, portforwarding.PfLocal)
-}
-
-func (sess *hopSession) handlePFUnreliable(ch *tubes.Unreliable) {
+func (sess *hopSession) handlePF(ch tubes.Tube) {
 	portforwarding.HandlePF(ch, &sess.forward, portforwarding.PfLocal)
 }
