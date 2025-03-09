@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"net"
 	"testing"
+
+	"gotest.tools/assert"
 )
 
 func TestReadPacket(t *testing.T) {
@@ -141,6 +143,51 @@ func TestToBytes(t *testing.T) {
 			if !bytes.Equal(got, tt.expected) {
 				t.Errorf("expected %v, got %v", tt.expected, got)
 			}
+		})
+	}
+}
+
+func TestGetAddress(t *testing.T) {
+	addr1 := &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080}
+	addr2 := &net.TCPAddr{IP: net.ParseIP("192.168.1.1"), Port: 9090}
+
+	forward := &Forward{
+		connect: addr1,
+		listen:  addr2,
+	}
+
+	testCases := []struct {
+		name     string
+		pfType   int
+		expected net.Addr
+		valid    bool
+	}{
+		{
+			name:     "Valid PfLocal",
+			pfType:   PfLocal,
+			expected: addr1,
+			valid:    true,
+		},
+		{
+			name:     "Valid PfRemote",
+			pfType:   PfRemote,
+			expected: addr2,
+			valid:    true,
+		},
+		{
+			name:     "Invalid pfType",
+			pfType:   999,
+			expected: nil,
+			valid:    false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			addr, valid := getAddress(forward, tc.pfType)
+
+			assert.Equal(t, tc.expected, addr)
+			assert.Equal(t, tc.valid, valid)
 		})
 	}
 }
