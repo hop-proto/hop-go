@@ -192,7 +192,6 @@ func (r *Reliable) send() {
 					"Frame N°": rtoFrame.frame.frameNo,
 					"Ack N°":   r.recvWindow.getAck(),
 				}).Trace("Retransmission RTO")
-				logrus.Debugf("RTO frame %v with ack %v, rtt %v", rtoFrame.frame.frameNo, r.recvWindow.getAck(), r.sender.RTT)
 
 				// To notify the receiver of a RTO frame
 				rtoFrame.flags.RTR = true
@@ -584,15 +583,19 @@ func (r *Reliable) receiveRTRFrame(frame *frame) {
 	lastSentRTRNo := r.lastRTRSent.Load()
 	ackNo := frame.ackNo
 
-	r.log.Debugf("process rtr frame %v", frame.frameNo)
-
 	if !frame.flags.ACK && frame.dataLength > 0 {
 		frameCounter := r.recvWindow.getFrameToSendCounter()
 		newAck := r.recvWindow.getAck()
 		r.sendRetransmissionAck(frame.ackNo, newAck, frameCounter)
+
 	}
 
 	if ackNo > lastSentRTRNo {
+
+		// Frames sent via RTO ask the receiver to send a RTR frame
+		// with the current processing index
+
+		// To limit the search in a reasonable range
 		numFrames := min(windowSize, len(r.sender.frames))
 
 		for i := 0; i < numFrames; i++ {
@@ -629,14 +632,18 @@ func (r *Reliable) scheduleRetransmission(rtrFrame *frame, dataLength uint16, ti
 	r.pendingRTRTimers.Range(func(key, value interface{}) bool {
 		if timer, valid := value.(*time.Timer); valid {
 			timer.Stop()
-			r.log.Debugf("Canceled previous retransmission for frame %v", key)
+			if common.Debug {
+				r.log.Debugf("Canceled previous retransmission for frame %v", key)
+			}
 		}
 		r.pendingRTRTimers.Delete(key)
 		return true
 	})
 
 	if waitTime > 0 {
-		r.log.Debugf("Scheduling retransmission for frame %d in %v", rtrFrame.frameNo, waitTime)
+		if common.Debug {
+			r.log.Debugf("Scheduling retransmission for frame %d in %v", rtrFrame.frameNo, waitTime)
+		}
 
 		// To send an RTO only after the RTR
 		r.sender.resetRetransmitTicker()
@@ -655,12 +662,17 @@ func (r *Reliable) scheduleRetransmission(rtrFrame *frame, dataLength uint16, ti
 // executeRetransmission actually sends the retransmission if no newer frame has arrived.
 func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, oldFrameIndex int) {
 	if r.lastRTRSent.Load() >= rtrFrame.frameNo {
-		r.log.Debugf("Skipping retransmission for frame %d, newer frame received", rtrFrame.frameNo)
+		if common.Debug {
+			r.log.Debugf("Skipping retransmission for frame %d, newer frame received", rtrFrame.frameNo)
+		}
+
 		r.pendingRTRTimers.Delete(rtrFrame.frameNo)
 		return
 	}
 
-	r.log.Debugf("Executing retransmission for frame %d", rtrFrame.frameNo)
+	if common.Debug {
+		r.log.Debugf("Executing retransmission for frame %d", rtrFrame.frameNo)
+	}
 
 	if len(r.sender.frames) == 0 {
 		r.log.Errorf("Sender frames are empty, aborting retransmission for frame %d", rtrFrame.frameNo)
@@ -705,7 +717,9 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 			"Frame N°": rtrFullFrame.frameNo,
 		}).Trace("Retransmission of RTR pkt")
 
-		logrus.Debugf("I send frame RTR %v", rtrFullFrame.frameNo)
+		if common.Debug {
+			logrus.Debugf("I send frame RTR %v", rtrFullFrame.frameNo)
+		}
 
 		r.prioritySendQueue <- rtrFullFrame.toBytes()
 		r.lastRTRSent.Store(rtrFullFrame.frameNo)
