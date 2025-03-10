@@ -86,8 +86,8 @@ func TestReadPacket(t *testing.T) {
 			}
 
 			// Check the forward type
-			if *fwdType != tt.expectedFwdType {
-				t.Errorf("expected forward type %v, got %v", tt.expectedFwdType, *fwdType)
+			if fwdType != tt.expectedFwdType {
+				t.Errorf("expected forward type %v, got %v", tt.expectedFwdType, fwdType)
 			}
 		})
 	}
