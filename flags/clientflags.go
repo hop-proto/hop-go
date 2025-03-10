@@ -31,6 +31,7 @@ type ClientFlags struct {
 	// TODO(dadrian): What are these args?
 	RemoteFwds *portforwarding.Forward // CLI arguments related to remote port forwarding
 	LocalFwds  *portforwarding.Forward // CLI arguments related to local port forwarding
+	udpPFFlag  bool                    // CLI arguments to enable UDP port forwarding
 	Headless   bool                    // if no cmd desired (just port forwarding)
 	UsePty     bool                    // whether or not to request a remote PTY be allocated
 	Verbose    bool                    // show verbose error messages
@@ -105,9 +106,16 @@ func LoadClientConfigFromFlags(f *ClientFlags) (*config.HostConfig, error) {
 
 // defineClientFlags calls fs.StringVar for Client
 func defineClientFlags(fs *flag.FlagSet, f *ClientFlags) {
-	// TODO (paul): Add flag for TCP or UDP port forwarding
+	fs.BoolVar(&f.udpPFFlag, "udp", false, "Enable UDP port forwarding (default: TCP)")
+
 	fs.Func("R", "perform remote port forwarding", func(s string) error {
-		fwd, err := portforwarding.ParseForward(s, 1)
+		pfNetworkType := portforwarding.PfTCP
+
+		if f.udpPFFlag {
+			pfNetworkType = portforwarding.PfUDP
+		}
+
+		fwd, err := portforwarding.ParseForward(s, pfNetworkType)
 		if err != nil {
 			return err
 		}
@@ -116,8 +124,13 @@ func defineClientFlags(fs *flag.FlagSet, f *ClientFlags) {
 	})
 
 	fs.Func("L", "perform local port forwarding", func(s string) error {
-		// TODO (paul) add a flag to setup tcp or udp
-		fwd, err := portforwarding.ParseForward(s, 1)
+		pfNetworkType := portforwarding.PfTCP
+
+		if f.udpPFFlag {
+			pfNetworkType = portforwarding.PfUDP
+		}
+
+		fwd, err := portforwarding.ParseForward(s, pfNetworkType)
 		if err != nil {
 			return err
 		}

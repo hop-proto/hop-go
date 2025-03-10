@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	pfTCP    = 1
-	pfUDP    = 2
-	pfUNIX   = 3
+	PfTCP    = 1
+	PfUDP    = 2
+	PfUNIX   = 3
 	PfLocal  = 4
 	PfRemote = 5
 )
@@ -63,7 +63,7 @@ func readPacket(r io.Reader) (net.Addr, *byte, error) {
 
 	var addr net.Addr
 	switch netType {
-	case pfTCP:
+	case PfTCP:
 		host, portStr, err := net.SplitHostPort(addrStr)
 		if err != nil {
 			return nil, nil, fmt.Errorf("invalid TCP address: %s", addrStr)
@@ -71,7 +71,7 @@ func readPacket(r io.Reader) (net.Addr, *byte, error) {
 		port, _ := strconv.Atoi(portStr)
 		addr = &net.TCPAddr{IP: net.ParseIP(host), Port: port}
 
-	case pfUDP:
+	case PfUDP:
 		host, portStr, err := net.SplitHostPort(addrStr)
 		if err != nil {
 			return nil, nil, fmt.Errorf("invalid UDP address: %s", addrStr)
@@ -79,7 +79,7 @@ func readPacket(r io.Reader) (net.Addr, *byte, error) {
 		port, _ := strconv.Atoi(portStr)
 		addr = &net.UDPAddr{IP: net.ParseIP(host), Port: port}
 
-	case pfUNIX:
+	case PfUNIX:
 		addr = &net.UnixAddr{Name: addrStr, Net: "unix"}
 
 	default:
@@ -96,15 +96,15 @@ func toBytes(f net.Addr, fwdType int) []byte {
 
 	switch addr := f.(type) {
 	case *net.TCPAddr:
-		netType = byte(pfTCP)
+		netType = byte(PfTCP)
 		addrStr = net.JoinHostPort(addr.IP.String(), strconv.Itoa(addr.Port))
 
 	case *net.UDPAddr:
-		netType = byte(pfUDP)
+		netType = byte(PfUDP)
 		addrStr = net.JoinHostPort(addr.IP.String(), strconv.Itoa(addr.Port))
 
 	case *net.UnixAddr:
-		netType = byte(pfUNIX)
+		netType = byte(PfUNIX)
 		addrStr = addr.Name
 
 	default:
@@ -489,7 +489,7 @@ func ParseForward(arg string, networkType int) (forward *Forward, err error) {
 	forward = &Forward{}
 
 	createAddress := func(network int, ip string, port int) net.Addr {
-		if network == pfUDP {
+		if network == PfUDP {
 			return &net.UDPAddr{IP: net.ParseIP(ip), Port: port}
 		}
 		return &net.TCPAddr{IP: net.ParseIP(ip), Port: port}

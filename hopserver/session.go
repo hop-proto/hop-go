@@ -136,9 +136,6 @@ func (sess *hopSession) start() {
 			switch tube.Type() {
 			case common.PFTube:
 				go sess.handlePF(u)
-			case common.PrincipalProxyTube:
-				// TODO (paul) I suspect the PrincipalProxyTube to never be handled by this code but the one in hopclient
-				logrus.Errorf("PrincipalProxyTube are not handled yet %v", u)
 			default:
 				tube.Close() // Close unrecognized tube types
 			}
