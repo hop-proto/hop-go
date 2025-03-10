@@ -50,7 +50,6 @@ type Reliable struct {
 	lastAckSent      atomic.Uint32
 	lastFrameSent    atomic.Uint32
 	lastRTRSent      atomic.Uint32
-	rtrCounter       int
 	pendingRTRTimers sync.Map
 	closed           chan struct{}
 	initRecv         chan struct{}

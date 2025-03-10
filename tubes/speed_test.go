@@ -5,13 +5,14 @@ import (
 	"container/heap"
 	"crypto/rand"
 	"encoding/binary"
-	"github.com/sirupsen/logrus"
 	"io"
 	"sync"
 	"testing"
 	"time"
 
 	"gotest.tools/assert"
+
+	"github.com/sirupsen/logrus"
 )
 
 func TestFileTransferSpeedReliableTubes(t *testing.T) {
