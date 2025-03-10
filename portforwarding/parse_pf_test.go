@@ -1,148 +1,163 @@
 package portforwarding
 
 import (
+	"net"
 	"testing"
 
 	"gotest.tools/assert"
+
+	"github.com/google/go-cmp/cmp"
 )
 
+func assertEqual(t *testing.T, fwdStruct, correctStruct Forward) {
+	assert.DeepEqual(t, fwdStruct, correctStruct, cmp.Comparer(func(a, b Forward) bool {
+		return a.listen.String() == b.listen.String() && a.connect.String() == b.connect.String()
+	}))
+}
+
 func TestParse(t *testing.T) {
-	//valid formats
+	// Valid formats
 	A := "listen_port:connect_host:connect_port"
-	fwdStruct := Fwd{}
-	correctStruct := Fwd{
-		Listensock:        false,
-		Connectsock:       false,
-		Listenhost:        "",
-		Listenportorpath:  "listen_port",
-		Connecthost:       "connect_host",
-		Connectportorpath: "connect_port",
+	correctStruct := Forward{
+		listen: &net.TCPAddr{
+			IP:   net.ParseIP("127.0.0.1"),
+			Port: parsePort("listen_port"),
+		},
+		connect: &net.TCPAddr{
+			IP:   net.ParseIP("connect_host"),
+			Port: parsePort("connect_port"),
+		},
 	}
-	err := ParseForward(A, &fwdStruct)
+	fwdStruct, err := ParseForward(A, PfTCP)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, fwdStruct, correctStruct)
+	assertEqual(t, *fwdStruct, correctStruct)
 
 	B := "listen_port:/connect_socket"
-	fwdStruct = Fwd{}
-	correctStruct = Fwd{
-		Listensock:        false,
-		Connectsock:       true,
-		Listenhost:        "",
-		Listenportorpath:  "listen_port",
-		Connecthost:       "",
-		Connectportorpath: "/connect_socket",
+	correctStruct = Forward{
+		listen: &net.TCPAddr{
+			IP:   net.ParseIP("127.0.0.1"),
+			Port: parsePort("listen_port"),
+		},
+		connect: &net.UnixAddr{
+			Name: "/connect_socket",
+			Net:  "unix",
+		},
 	}
-	err = ParseForward(B, &fwdStruct)
+	fwdStruct, err = ParseForward(B, PfTCP)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, fwdStruct, correctStruct)
+	assertEqual(t, *fwdStruct, correctStruct)
 
 	C := "listen_address:listen_port:connect_host:connect_port"
-	fwdStruct = Fwd{}
-	correctStruct = Fwd{
-		Listensock:        false,
-		Connectsock:       false,
-		Listenhost:        "listen_address",
-		Listenportorpath:  "listen_port",
-		Connecthost:       "connect_host",
-		Connectportorpath: "connect_port",
+	correctStruct = Forward{
+		listen: &net.TCPAddr{
+			IP:   net.ParseIP("listen_address"),
+			Port: parsePort("listen_port"),
+		},
+		connect: &net.TCPAddr{
+			IP:   net.ParseIP("connect_host"),
+			Port: parsePort("connect_port"),
+		},
 	}
-	err = ParseForward(C, &fwdStruct)
+	fwdStruct, err = ParseForward(C, PfTCP)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, fwdStruct, correctStruct)
+	assertEqual(t, *fwdStruct, correctStruct)
 
 	D := "listen_address:listen_port:/connect_socket"
-	fwdStruct = Fwd{}
-	correctStruct = Fwd{
-		Listensock:        false,
-		Connectsock:       true,
-		Listenhost:        "listen_address",
-		Listenportorpath:  "listen_port",
-		Connecthost:       "",
-		Connectportorpath: "/connect_socket",
+	correctStruct = Forward{
+		listen: &net.TCPAddr{
+			IP:   net.ParseIP("listen_address"),
+			Port: parsePort("listen_port"),
+		},
+		connect: &net.UnixAddr{
+			Name: "/connect_socket",
+			Net:  "unix",
+		},
 	}
-	err = ParseForward(D, &fwdStruct)
+	fwdStruct, err = ParseForward(D, PfTCP)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, fwdStruct, correctStruct)
+	assertEqual(t, *fwdStruct, correctStruct)
 
 	E := "/listen_socket:connect_host:connect_port"
-	fwdStruct = Fwd{}
-	correctStruct = Fwd{
-		Listensock:        true,
-		Connectsock:       false,
-		Listenhost:        "",
-		Listenportorpath:  "/listen_socket",
-		Connecthost:       "connect_host",
-		Connectportorpath: "connect_port",
+	correctStruct = Forward{
+		listen: &net.UnixAddr{
+			Name: "/listen_socket",
+			Net:  "unix",
+		},
+		connect: &net.TCPAddr{
+			IP:   net.ParseIP("connect_host"),
+			Port: parsePort("connect_port"),
+		},
 	}
-	err = ParseForward(E, &fwdStruct)
+	fwdStruct, err = ParseForward(E, PfTCP)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, fwdStruct, correctStruct)
+	assertEqual(t, *fwdStruct, correctStruct)
 
 	F := "/listen_socket:/connect_socket"
-	fwdStruct = Fwd{}
-	correctStruct = Fwd{
-		Listensock:        true,
-		Connectsock:       true,
-		Listenhost:        "",
-		Listenportorpath:  "/listen_socket",
-		Connecthost:       "",
-		Connectportorpath: "/connect_socket",
+	correctStruct = Forward{
+		listen: &net.UnixAddr{
+			Name: "/listen_socket",
+			Net:  "unix",
+		},
+		connect: &net.UnixAddr{
+			Name: "/connect_socket",
+			Net:  "unix",
+		},
 	}
-	err = ParseForward(F, &fwdStruct)
+	fwdStruct, err = ParseForward(F, PfTCP)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, fwdStruct, correctStruct)
+	assertEqual(t, *fwdStruct, correctStruct)
 
-	G := "[2001:db8::1]:listen_port:/connect_socket" //leading IPv6 address
-	fwdStruct = Fwd{}
-	correctStruct = Fwd{
-		Listensock:        false,
-		Connectsock:       true,
-		Listenhost:        "2001:db8::1",
-		Listenportorpath:  "listen_port",
-		Connecthost:       "",
-		Connectportorpath: "/connect_socket",
+	G := "[2001:db8::1]:listen_port:/connect_socket" // leading IPv6 address
+	correctStruct = Forward{
+		listen: &net.TCPAddr{
+			IP:   net.ParseIP("[2001:db8::1]"),
+			Port: parsePort("listen_port"),
+		},
+		connect: &net.UnixAddr{
+			Name: "/connect_socket",
+			Net:  "unix",
+		},
 	}
-	err = ParseForward(G, &fwdStruct)
+	fwdStruct, err = ParseForward(G, PfTCP)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, fwdStruct, correctStruct)
+	assertEqual(t, *fwdStruct, correctStruct)
 
-	H := "listen_port:[2001:db8::1]:connect_port" //connect IPv6 address
-	fwdStruct = Fwd{}
-	correctStruct = Fwd{
-		Listensock:        false,
-		Connectsock:       false,
-		Listenhost:        "",
-		Listenportorpath:  "listen_port",
-		Connecthost:       "2001:db8::1",
-		Connectportorpath: "connect_port",
+	H := "listen_port:[2001:db8::1]:connect_port" // connect IPv6 address
+	correctStruct = Forward{
+		listen: &net.TCPAddr{
+			IP:   net.ParseIP("127.0.0.1"),
+			Port: parsePort("listen_port"),
+		},
+		connect: &net.TCPAddr{
+			IP:   net.ParseIP("[2001:db8::1]"),
+			Port: parsePort("connect_port"),
+		},
 	}
-	err = ParseForward(H, &fwdStruct)
+	fwdStruct, err = ParseForward(H, PfTCP)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, fwdStruct, correctStruct)
+	assertEqual(t, *fwdStruct, correctStruct)
 
-	I := "[2001:db8:3333:4444:5555:6666:7777:8888]:listen_port:[2001:db8::1]:connect_port" //listen and connect IPv6 address
-	fwdStruct = Fwd{}
-	correctStruct = Fwd{
-		Listensock:        false,
-		Connectsock:       false,
-		Listenhost:        "2001:db8:3333:4444:5555:6666:7777:8888",
-		Listenportorpath:  "listen_port",
-		Connecthost:       "2001:db8::1",
-		Connectportorpath: "connect_port",
+	I := "[2001:db8:3333:4444:5555:6666:7777:8888]:listen_port:[2001:db8::1]:connect_port" // listen and connect IPv6 address
+	correctStruct = Forward{
+		listen: &net.TCPAddr{
+			IP:   net.ParseIP("[2001:db8:3333:4444:5555:6666:7777:8888]"),
+			Port: parsePort("listen_port"),
+		},
+		connect: &net.TCPAddr{
+			IP:   net.ParseIP("[2001:db8::1]"),
+			Port: parsePort("connect_port"),
+		},
 	}
-	err = ParseForward(I, &fwdStruct)
+	fwdStruct, err = ParseForward(I, PfTCP)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, fwdStruct, correctStruct)
+	assertEqual(t, *fwdStruct, correctStruct)
 
-	//invalidFormats
+	// Invalid formats
 	errOne := "arg1" // too few args
-	fwdStruct = Fwd{}
-	err = ParseForward(errOne, &fwdStruct)
+	_, err = ParseForward(errOne, PfTCP)
 	assert.Error(t, err, ErrInvalidPFArgs.Error())
 
 	errTwo := "arg1:arg2:arg3:arg4:arg5" // too many args
-	fwdStruct = Fwd{}
-	err = ParseForward(errTwo, &fwdStruct)
+	_, err = ParseForward(errTwo, PfTCP)
 	assert.Error(t, err, ErrInvalidPFArgs.Error())
-
 }

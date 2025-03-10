@@ -21,7 +21,10 @@ require (
 	gotest.tools v2.2.0+incompatible
 )
 
-require golang.org/x/lint v0.0.0-20200302205851-738671d3881b // indirect
+require (
+	github.com/gosuri/uilive v0.0.4 // indirect
+	golang.org/x/lint v0.0.0-20200302205851-738671d3881b // indirect
+)
 
 require (
 	github.com/google/go-cmp v0.5.8 // indirect

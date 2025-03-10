@@ -21,6 +21,7 @@ import (
 	"hop.computer/hop/core"
 	"hop.computer/hop/keys"
 	"hop.computer/hop/pkg/combinators"
+	"hop.computer/hop/portforwarding"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
 	"hop.computer/hop/userauth"
@@ -251,6 +252,16 @@ func (c *HopClient) Start() error {
 		return ErrClientStartingExecTube
 	}
 
+	if c.hostconfig.RemoteFwds != nil || c.hostconfig.LocalFwds != nil {
+		pfType := portforwarding.PfLocal
+		fwds := c.hostconfig.LocalFwds
+		if c.hostconfig.RemoteFwds != nil {
+			pfType = portforwarding.PfRemote
+			fwds = c.hostconfig.RemoteFwds
+		}
+		go portforwarding.StartPFClient(fwds, c.TubeMuxer, pfType)
+	}
+
 	// handle incoming tubes
 	go c.HandleTubes()
 	c.Wait() // client program ends when the code execution tube ends or when the port forwarding conns end/fail if it is a headless session
@@ -392,6 +403,8 @@ func (c *HopClient) HandleTubes() {
 
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
 			go c.newPrincipalInstanceSetup(r, proxyQueue)
+		} else if t.Type() == common.PFTube {
+			go portforwarding.HandlePF(t, c.hostconfig.RemoteFwds)
 		} else if u, ok := t.(*tubes.Unreliable); ok && u.Type() == common.PrincipalProxyTube && c.hostconfig.IsPrincipal {
 			// add to map and signal waiting processes
 			proxyQueue.lock.Lock()
@@ -399,8 +412,6 @@ func (c *HopClient) HandleTubes() {
 			proxyQueue.lock.Unlock()
 			proxyQueue.cv.Broadcast()
 			logrus.Infof("session muxer broadcasted that unreliable tube is here: %x", u.GetID())
-		} else if t.Type() == common.RemotePFTube {
-			panic("client RemotePFTubes: unimplemented")
 		} else {
 			// Client only expects to receive AuthGrantTubes. All other tube requests are ignored.
 			e := t.Close()

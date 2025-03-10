@@ -104,3 +104,17 @@ services:
       - ./hop:/root/hop
       - ./CAFiles/root.cert:/home/user/.hop/root.cert
       - ./CAFiles/intermediate.cert:/home/user/.hop/intermediate.cert
+
+  # Providing a port forwarding test environment
+  pf_service:
+    image: python:3.9-slim
+    container_name: pf_service
+    command: python -m http.server 8080 --bind 0.0.0.0
+    ports:
+      - "8080:8080"
+    networks:
+      default:
+        aliases:
+          - pf-service.com
+    hostname: pf-service.com
+

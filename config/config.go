@@ -16,6 +16,7 @@ import (
 	"hop.computer/hop/core"
 	"hop.computer/hop/pkg/glob"
 	"hop.computer/hop/pkg/thunks"
+	"hop.computer/hop/portforwarding"
 )
 
 // ClientConfig represents a parsed client configuration.
@@ -73,6 +74,8 @@ type HostConfigOptional struct {
 	Key              *string
 	Patterns         []string
 	Port             int
+	RemoteFwds       *portforwarding.Forward
+	LocalFwds        *portforwarding.Forward
 	User             *string
 	IsDelegate       *bool // If set then client will initiate authgrant protocol
 	IsPrincipal      *bool // If set then client will respond to authgrant requests
@@ -100,6 +103,8 @@ type HostConfig struct {
 	Intermediate     string
 	Key              string
 	Port             int
+	RemoteFwds       *portforwarding.Forward
+	LocalFwds        *portforwarding.Forward
 	User             string
 	IsDelegate       bool
 	IsPrincipal      bool
@@ -233,6 +238,12 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	}
 	if hc.Key != nil {
 		newHC.Key = *hc.Key
+	}
+	if hc.LocalFwds != nil {
+		newHC.LocalFwds = hc.LocalFwds
+	}
+	if hc.RemoteFwds != nil {
+		newHC.RemoteFwds = hc.RemoteFwds
 	}
 	// don't need to include patterns
 	if hc.Port != 0 {

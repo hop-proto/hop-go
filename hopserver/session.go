@@ -17,6 +17,7 @@ import (
 	"hop.computer/hop/common"
 	"hop.computer/hop/keys"
 	"hop.computer/hop/pkg/thunks"
+	"hop.computer/hop/portforwarding"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
 	"hop.computer/hop/userauth"
@@ -40,6 +41,8 @@ type hopSession struct {
 
 	usingAuthGrant    bool // true if client authenticated with authgrant
 	authorizedActions []authgrants.Authgrant
+
+	forward portforwarding.Forward
 }
 
 func (sess *hopSession) checkAuthorization() bool {
@@ -106,32 +109,44 @@ func (sess *hopSession) start() {
 			break
 		}
 		logrus.Infof("S: ACCEPTED NEW TUBE Type: %v, ID: %v, Reliable? %v)", tube.Type(), tube.GetID(), tube.IsReliable())
-		r, ok := tube.(*tubes.Reliable)
-		if !ok {
-			// TODO(hosono) handle unreliable tubes (general case)
-			r.Close()
-			continue
-		}
-		switch tube.Type() {
-		case common.ExecTube:
-			t2, err := sess.tubeMuxer.Accept()
-			r2, ok := t2.(*tubes.Reliable)
-			if err != nil || !ok {
-				sess.close()
-				return
+
+		if r, ok := tube.(*tubes.Reliable); ok {
+			switch tube.Type() {
+			case common.ExecTube:
+				t2, err := sess.tubeMuxer.Accept()
+				r2, ok := t2.(*tubes.Reliable)
+				if err != nil || !ok {
+					sess.close()
+					return
+				}
+				go sess.startCodex(r, r2)
+			case common.AuthGrantTube:
+				go sess.handleAgc(r)
+			case common.PFControlTube:
+				go sess.startPF(r)
+			case common.PFTube:
+				go sess.handlePF(r)
+			case common.WinSizeTube:
+				go sess.startSizeTube(r)
+			default:
+				tube.Close() // Close unrecognized tube types
 			}
-			go sess.startCodex(r, r2)
-		case common.AuthGrantTube:
-			go sess.handleAgc(r)
-		case common.RemotePFTube:
-			panic("unimplemented: remote pf")
-		case common.LocalPFTube:
-			panic("unimplmented: local pf")
-		case common.WinSizeTube:
-			go sess.startSizeTube(r)
-		default:
-			tube.Close() // Close unrecognized tube types
+
+		} else if u, ok := tube.(*tubes.Unreliable); ok {
+			switch tube.Type() {
+			case common.PFTube:
+				go sess.handlePF(u)
+			default:
+				tube.Close() // Close unrecognized tube types
+			}
+
+		} else {
+			e := tube.Close()
+			if e != nil {
+				logrus.Errorf("S: Closing received tube with an unknown tube type: %v", e)
+			}
 		}
+
 	}
 }
 
@@ -304,4 +319,14 @@ func (sess *hopSession) startSizeTube(ch *tubes.Reliable) {
 
 func (sess *hopSession) newAuthGrantTube() (*tubes.Reliable, error) {
 	return sess.tubeMuxer.CreateReliableTube(common.AuthGrantTube)
+}
+
+func (sess *hopSession) startPF(ch *tubes.Reliable) {
+	// TODO find a way of selecting a remote forwarding
+	// or a local forwarding
+	portforwarding.StartPFServer(ch, &sess.forward, sess.tubeMuxer)
+}
+
+func (sess *hopSession) handlePF(ch tubes.Tube) {
+	portforwarding.HandlePF(ch, &sess.forward)
 }

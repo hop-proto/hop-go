@@ -37,7 +37,7 @@ const (
 	AuthGrantTube      = 2 // Used for myriad Authorization Grant protocol steps
 	PrincipalProxyTube = 3 // Net Proxy should maybe be unreliable tube?
 	UserAuthTube       = 4
-	LocalPFTube        = 5
-	RemotePFTube       = 6
+	PFControlTube      = 5
+	PFTube             = 6
 	WinSizeTube        = 7 // Used for notifying server of window size changes
 )
