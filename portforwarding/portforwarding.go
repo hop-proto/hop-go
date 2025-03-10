@@ -37,11 +37,11 @@ const (
 )
 
 // readPacket parse the addresses sent from the client and convert them to net.Addr objects
-func readPacket(r io.Reader) (net.Addr, *byte, error) {
+func readPacket(r io.Reader) (net.Addr, byte, error) {
 	b := make([]byte, 2)
 	_, err := io.ReadFull(r, b)
 	if err != nil {
-		return nil, nil, err
+		return nil, 0, err
 	}
 
 	netType := NetType(b[0])
@@ -50,13 +50,13 @@ func readPacket(r io.Reader) (net.Addr, *byte, error) {
 	var addrLen uint16
 	err = binary.Read(r, binary.BigEndian, &addrLen)
 	if err != nil {
-		return nil, nil, err
+		return nil, 0, err
 	}
 
 	addrBytes := make([]byte, addrLen)
 	_, err = io.ReadFull(r, addrBytes)
 	if err != nil {
-		return nil, nil, err
+		return nil, 0, err
 	}
 
 	addrStr := string(addrBytes)
@@ -66,7 +66,7 @@ func readPacket(r io.Reader) (net.Addr, *byte, error) {
 	case PfTCP:
 		host, portStr, err := net.SplitHostPort(addrStr)
 		if err != nil {
-			return nil, nil, fmt.Errorf("invalid TCP address: %s", addrStr)
+			return nil, 0, fmt.Errorf("invalid TCP address: %s", addrStr)
 		}
 		port, _ := strconv.Atoi(portStr)
 		addr = &net.TCPAddr{IP: net.ParseIP(host), Port: port}
@@ -74,7 +74,7 @@ func readPacket(r io.Reader) (net.Addr, *byte, error) {
 	case PfUDP:
 		host, portStr, err := net.SplitHostPort(addrStr)
 		if err != nil {
-			return nil, nil, fmt.Errorf("invalid UDP address: %s", addrStr)
+			return nil, 0, fmt.Errorf("invalid UDP address: %s", addrStr)
 		}
 		port, _ := strconv.Atoi(portStr)
 		addr = &net.UDPAddr{IP: net.ParseIP(host), Port: port}
@@ -83,10 +83,10 @@ func readPacket(r io.Reader) (net.Addr, *byte, error) {
 		addr = &net.UnixAddr{Name: addrStr, Net: "unix"}
 
 	default:
-		return nil, nil, fmt.Errorf("unknown network type: %d", netType)
+		return nil, 0, fmt.Errorf("unknown network type: %d", netType)
 	}
 
-	return addr, &fwdType, nil
+	return addr, fwdType, nil
 }
 
 // toBytes writes the PF information to send them to the server
@@ -135,7 +135,7 @@ func StartPFServer(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 		return
 	}
 
-	if *fwdType == PfLocal {
+	if fwdType == PfLocal {
 		// This Dial is for creating a communication between the hop server(/client)
 		// and the service that needs to be reached
 		throwawayConn, err := net.Dial(addr.Network(), addr.String())
@@ -155,7 +155,7 @@ func StartPFServer(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 
 		return
 
-	} else if *fwdType == PfRemote {
+	} else if fwdType == PfRemote {
 
 		ch.Write([]byte{success})
 
@@ -379,40 +379,11 @@ func checkPath(arg string) bool {
 	return strings.Contains(arg, "/")
 }
 
-/*-R port (ssh acts as a SOCKS 4/5 proxy) HOP NOT SUPPORTED -R
-A. (3) -R port:host:hostport or 				-L port:host:hostport 				--> listen_port:connect_host:connect_port (3 no sock)
-B. (2) -R port:local_socket or 					-L port:remote_socket 				--> listen_port:connect_socket				(1 no sock)
-
-C. (4) -R bind_address:port:host:hostport or 	-L bind_address:port:host:hostport 	--> listen_address:listen_port:connect_host:connect_port (4 no sock)
-D. (3) -R bind_address:port:local_socket or 	-L bind_address:port:remote_socket 	--> listen_address:listen_port:connect_socket (2 no sock)
-
-E. (3) -R remote_socket:host:hostport or 		-L local_socket:host:hostport 		--> listen_socket:connect_host:connect_port (2 no sock)
-F. (2) -R remote_socket:local_socket or 		-L local_socket:remote_socket 		--> listen_socket:connect_socket (0 no sock)
-
-*/
-
-// Bind address meanings
-//o  "" means that connections are to be accepted on all protocol
-// families supported by the SSH implementation.
-
-// o  "0.0.0.0" means to listen on all IPv4 addresses.
-
-// o  "::" means to listen on all IPv6 addresses.
-
-// o  "localhost" means to listen on all protocol families supported by
-// the SSH implementation on loopback addresses only ([RFC3330] and
-// [RFC3513]).
-
-// o  "127.0.0.1" and "::1" indicate listening on the loopback
-// interfaces for IPv4 and IPv6, respectively.
-
-/*
-ParseForward takes in a PF argument and populates fwdStruct with data
-if Remote: listen is on the remote peer (hop server) and connect is contacted by the local peer
-if Local: listen is on the local peer (hop client) and connect is contacted by the remote peer
-[listenhost:]listenport|listenpath:connecthost:connectport|connectpath
-  - listenpath:connectpath
-*/
+// ParseForward takes in a PF argument and populates Forward with data
+// if Remote: listen is on the remote peer (hop server) and connect is contacted by the local peer
+// if Local: listen is on the local peer (hop client) and connect is contacted by the remote peer
+// [listen_host:]listen_port|listen_path:connect_host:connect_port|connect_path
+// listen_path:connect_path
 func ParseForward(arg string, networkType int) (forward *Forward, err error) {
 	loopback := "127.0.0.1"
 	//TODO: expand env vars
