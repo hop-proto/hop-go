@@ -143,7 +143,7 @@ func (sess *hopSession) start() {
 		} else {
 			e := tube.Close()
 			if e != nil {
-				logrus.Errorf("S: Closing received tube with an unkown tube type: %v", e)
+				logrus.Errorf("S: Closing received tube with an unknown tube type: %v", e)
 			}
 		}
 
