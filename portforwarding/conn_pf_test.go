@@ -23,7 +23,7 @@ func TestReadPacket(t *testing.T) {
 				ipPort := "192.168.0.1:80"
 				addrLen := make([]byte, 2)
 				binary.BigEndian.PutUint16(addrLen, uint16(len(ipPort)))
-				return append([]byte{byte(pfTCP), PfLocal}, append(addrLen, []byte(ipPort)...)...)
+				return append([]byte{byte(PfTCP), PfLocal}, append(addrLen, []byte(ipPort)...)...)
 			}(),
 			expectedAddr:    &net.TCPAddr{IP: net.ParseIP("192.168.0.1"), Port: 80},
 			expectedFwdType: PfLocal,
@@ -35,7 +35,7 @@ func TestReadPacket(t *testing.T) {
 				ipPort := "127.0.0.1:53"
 				addrLen := make([]byte, 2)
 				binary.BigEndian.PutUint16(addrLen, uint16(len(ipPort)))
-				return append([]byte{byte(pfUDP), PfLocal}, append(addrLen, []byte(ipPort)...)...)
+				return append([]byte{byte(PfUDP), PfLocal}, append(addrLen, []byte(ipPort)...)...)
 			}(),
 			expectedAddr:    &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 53},
 			expectedFwdType: PfLocal,
@@ -47,7 +47,7 @@ func TestReadPacket(t *testing.T) {
 				unixAddr := "/tmp/unix.sock"
 				addrLen := make([]byte, 2)
 				binary.BigEndian.PutUint16(addrLen, uint16(len(unixAddr)))
-				return append([]byte{byte(pfUNIX), PfRemote}, append(addrLen, []byte(unixAddr)...)...)
+				return append([]byte{byte(PfUNIX), PfRemote}, append(addrLen, []byte(unixAddr)...)...)
 			}(),
 			expectedAddr:    &net.UnixAddr{Name: "/tmp/unix.sock", Net: "unix"},
 			expectedFwdType: PfRemote,
@@ -59,7 +59,7 @@ func TestReadPacket(t *testing.T) {
 				ipPort := "127.01:53"
 				addrLen := make([]byte, 2)
 				binary.BigEndian.PutUint16(addrLen, uint16(14))
-				return append([]byte{byte(pfUNIX), PfRemote}, append(addrLen, []byte(ipPort)...)...)
+				return append([]byte{byte(PfUNIX), PfRemote}, append(addrLen, []byte(ipPort)...)...)
 			}(),
 			expectedAddr:    nil,
 			expectedFwdType: 0,
@@ -110,7 +110,7 @@ func TestToBytes(t *testing.T) {
 				ipPort := "192.168.0.1:80"
 				addrLen := make([]byte, 2)
 				binary.BigEndian.PutUint16(addrLen, uint16(len(ipPort)))
-				return append([]byte{byte(pfTCP), PfLocal}, append(addrLen, []byte(ipPort)...)...)
+				return append([]byte{byte(PfTCP), PfLocal}, append(addrLen, []byte(ipPort)...)...)
 			}(),
 		},
 		{
@@ -121,7 +121,7 @@ func TestToBytes(t *testing.T) {
 				ipPort := "127.0.0.1:53"
 				addrLen := make([]byte, 2)
 				binary.BigEndian.PutUint16(addrLen, uint16(len(ipPort)))
-				return append([]byte{byte(pfUDP), PfLocal}, append(addrLen, []byte(ipPort)...)...)
+				return append([]byte{byte(PfUDP), PfLocal}, append(addrLen, []byte(ipPort)...)...)
 			}(),
 		},
 		{
@@ -132,7 +132,7 @@ func TestToBytes(t *testing.T) {
 				unixAddr := "/tmp/unix.sock"
 				addrLen := make([]byte, 2)
 				binary.BigEndian.PutUint16(addrLen, uint16(len(unixAddr)))
-				return append([]byte{byte(pfUNIX), PfRemote}, append(addrLen, []byte(unixAddr)...)...)
+				return append([]byte{byte(PfUNIX), PfRemote}, append(addrLen, []byte(unixAddr)...)...)
 			}(),
 		},
 	}
