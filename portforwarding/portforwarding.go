@@ -36,6 +36,7 @@ const (
 	success = 1
 )
 
+// readPacket parse the addresses sent from the client and convert them to net.Addr objects
 func readPacket(r io.Reader) (net.Addr, *byte, error) {
 	b := make([]byte, 2)
 	_, err := io.ReadFull(r, b)
@@ -88,6 +89,7 @@ func readPacket(r io.Reader) (net.Addr, *byte, error) {
 	return addr, &fwdType, nil
 }
 
+// toBytes writes the PF information to send them to the server
 func toBytes(f net.Addr, fwdType int) []byte {
 	var netType byte
 	var addrStr string
@@ -121,8 +123,8 @@ func toBytes(f net.Addr, fwdType int) []byte {
 	return res
 }
 
-// StartPFServer handles the PFControlTube and start the appropriate PF
-// based on the client config
+// StartPFServer handles the PFControlTube and starts the appropriate PF
+// based on the client's PF information sent through the common.PFControlTube.
 func StartPFServer(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 
 	local, fwdType, err := readPacket(ch)
@@ -136,7 +138,6 @@ func StartPFServer(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 	if *fwdType == PfLocal {
 		// This Dial is for creating a communication between the hop server(/client)
 		// and the service that needs to be reached
-		// TODO (paul) do we consider udp/unix here?
 		throwawayConn, err := net.Dial(local.Network(), local.String())
 		if err != nil {
 			logrus.Error("PF: couldn't connect to local addr: ", err)
@@ -156,7 +157,6 @@ func StartPFServer(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 
 	} else if *fwdType == PfRemote {
 
-		// TODO (paul) this should be in the setupListenerAndForward function
 		ch.Write([]byte{success})
 
 		setupListenerAndForward(muxer, local)
@@ -169,9 +169,14 @@ func StartPFServer(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 	}
 }
 
-// HandlePF create a connection with the requested service
-// and proxy the connection to the PF tube. The PFTube and
-// the established connections are closed in proxy.ProxyConnection
+// HandlePF establishes a connection with the requested service
+// and proxies the data through the provided PF tube.
+//
+// - For TCP and Unix socket connections, it creates a reliable proxy.
+// - For UDP connections, it ensures the use of an unreliable tube.
+//
+// The PFTube and established connections are automatically closed
+// within proxy.ReliableProxy or proxy.UnreliableProxy
 func HandlePF(ch tubes.Tube, forward *Forward, pfType int) {
 	addr, valid := getAddress(forward, pfType)
 	if !valid {
@@ -233,6 +238,7 @@ func HandlePF(ch tubes.Tube, forward *Forward, pfType int) {
 	}
 }
 
+// getAddress return the address for the dialer and listener based on the pfType
 func getAddress(forward *Forward, pfType int) (net.Addr, bool) {
 	switch pfType {
 	case PfLocal:
@@ -244,15 +250,16 @@ func getAddress(forward *Forward, pfType int) (net.Addr, bool) {
 	}
 }
 
-// PFClientLocal receive the server response from the PF control tube and start a new listener
-// with the local address and for as many connection that he needs, it will create and forward to
-// a new reliable PFtube. The listener is in TCP, then the tube is in reliable mode, otherwise, we
-// have to implement a unreliable tube for tcp addresses
-
-// InitiatePFClientRemote is initiated by the client on client session start.
-// it writes the addr to dial for the remote server and send it through
-// a control tube to ask the server to acknowledge.
-
+// setupListenerAndForward sets up a listener on the specified address and forwards
+// incoming connections through a proxy tube.
+//
+//   - UDP: Creates a UDP listener and forwards packets through an unreliable proxy tube.
+//   - TCP: Creates a TCP listener, accepts incoming connections, and forwards them
+//     through a reliable proxy tube
+//   - Unix Sockets: Listen the configured Unix socket and forwards connections
+//     through a reliable proxy tube.
+//
+// This method is called by the client if PF is Local and the server if PF is remote
 func setupListenerAndForward(muxer *tubes.Muxer, addr net.Addr) {
 	switch addr := addr.(type) {
 	case *net.UDPAddr:
@@ -332,6 +339,9 @@ func setupListenerAndForward(muxer *tubes.Muxer, addr net.Addr) {
 	}
 }
 
+// StartPFClient is called by the client when local or remote port forwarding
+// is specified in the client configuration. It establishes the control tube
+// used to share address information with the server.
 func StartPFClient(forward *Forward, muxer *tubes.Muxer, pfType int) {
 	pfControlTube, err := muxer.CreateReliableTube(common.PFControlTube)
 	if err != nil {
@@ -372,11 +382,8 @@ func StartPFClient(forward *Forward, muxer *tubes.Muxer, pfType int) {
 	}
 }
 
-// ErrInvalidPortForwardingArgs returned when client receives unsupported -L or -R options
-var ErrInvalidPortForwardingArgs = errors.New("port forwarding currently only supported with port:host:hostport format")
-
-// ErrInvalidPFArgs is returned when there is a problem parsing portfowarding argument
-var ErrInvalidPFArgs = errors.New("error parsing portforwarding argument")
+// ErrInvalidPFArgs is returned when there is a problem parsing argument
+var ErrInvalidPFArgs = errors.New("PF: Error parsing argument")
 
 // returns true if a forward slash exists
 func checkPath(arg string) bool {
@@ -422,7 +429,7 @@ func ParseForward(arg string, networkType int) (forward *Forward, err error) {
 	//TODO: expand env vars
 	//skip leading/trailing whitespace
 	arg = strings.TrimSpace(arg)
-	parts := []string{}
+	var parts []string
 
 	nleft := strings.Count(arg, "[")
 	nright := strings.Count(arg, "]")

@@ -234,9 +234,6 @@ func (c *HopClient) Start() error {
 		return ErrClientStartingExecTube
 	}
 
-	// TODO (paul): Add a condition to initiate port forwarding based on the client flags
-	// if -L then initiatePFClient
-	// if -R then initiate InitiatePFClientRemote
 	if c.hostconfig.RemoteFwds != nil || c.hostconfig.LocalFwds != nil {
 		pfType := portforwarding.PfLocal
 		fwds := c.hostconfig.LocalFwds
