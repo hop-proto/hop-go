@@ -385,7 +385,7 @@ func (c *HopClient) HandleTubes() {
 		if r, ok := t.(*tubes.Reliable); ok && r.Type() == common.AuthGrantTube && c.hostconfig.IsPrincipal {
 			go c.newPrincipalInstanceSetup(r, proxyQueue)
 		} else if t.Type() == common.PFTube {
-			go portforwarding.HandlePF(t, c.hostconfig.RemoteFwds, portforwarding.PfRemote)
+			go portforwarding.HandlePF(t, c.hostconfig.RemoteFwds)
 		} else if u, ok := t.(*tubes.Unreliable); ok && u.Type() == common.PrincipalProxyTube && c.hostconfig.IsPrincipal {
 			// add to map and signal waiting processes
 			proxyQueue.lock.Lock()

@@ -127,7 +127,7 @@ func toBytes(f net.Addr, fwdType int) []byte {
 // based on the client's PF information sent through the common.PFControlTube.
 func StartPFServer(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 
-	local, fwdType, err := readPacket(ch)
+	addr, fwdType, err := readPacket(ch)
 
 	if err != nil {
 		ch.Write([]byte{failure})
@@ -138,7 +138,7 @@ func StartPFServer(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 	if *fwdType == PfLocal {
 		// This Dial is for creating a communication between the hop server(/client)
 		// and the service that needs to be reached
-		throwawayConn, err := net.Dial(local.Network(), local.String())
+		throwawayConn, err := net.Dial(addr.Network(), addr.String())
 		if err != nil {
 			logrus.Error("PF: couldn't connect to local addr: ", err)
 			ch.Write([]byte{failure})
@@ -146,10 +146,10 @@ func StartPFServer(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 			return
 		}
 
-		logrus.Debugf("PF: dialed address, %v", local.String())
+		logrus.Debugf("PF: dialed address, %v", addr.String())
 		throwawayConn.Close()
 
-		forward.connect = local
+		forward.connect = addr
 
 		ch.Write([]byte{success})
 
@@ -159,7 +159,7 @@ func StartPFServer(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 
 		ch.Write([]byte{success})
 
-		setupListenerAndForward(muxer, local)
+		setupListenerAndForward(muxer, addr)
 
 	} else {
 		logrus.Errorf("PF: closing porfforwarding session, bad fwdType %v", fwdType)
@@ -177,13 +177,8 @@ func StartPFServer(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 //
 // The PFTube and established connections are automatically closed
 // within proxy.ReliableProxy or proxy.UnreliableProxy
-func HandlePF(ch tubes.Tube, forward *Forward, pfType int) {
-	addr, valid := getAddress(forward, pfType)
-	if !valid {
-		logrus.Error("PF: Wrong forwarding type ", pfType)
-		ch.Close()
-		return
-	}
+func HandlePF(ch tubes.Tube, forward *Forward) {
+	addr := forward.connect
 
 	switch addr := addr.(type) {
 	case *net.TCPAddr:
@@ -235,18 +230,6 @@ func HandlePF(ch tubes.Tube, forward *Forward, pfType int) {
 	default:
 		logrus.Error("PF: Wrong address type")
 		ch.Close()
-	}
-}
-
-// getAddress return the address for the dialer and listener based on the pfType
-func getAddress(forward *Forward, pfType int) (net.Addr, bool) {
-	switch pfType {
-	case PfLocal:
-		return forward.connect, true
-	case PfRemote:
-		return forward.listen, true
-	default:
-		return nil, false
 	}
 }
 
@@ -350,7 +333,13 @@ func StartPFClient(forward *Forward, muxer *tubes.Muxer, pfType int) {
 	}
 	defer pfControlTube.Close()
 
-	byteAddr := toBytes(forward.connect, pfType)
+	addr := forward.connect
+
+	if pfType == PfRemote {
+		addr = forward.listen
+	}
+
+	byteAddr := toBytes(addr, pfType)
 	_, err = pfControlTube.Write(byteAddr)
 	if err != nil {
 		logrus.Errorf("PF: Can't write in the PF control tube. %v", err)
