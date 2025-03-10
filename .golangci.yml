@@ -54,6 +54,8 @@ linters-settings:
           - $gostd
           - github.com/AstromechZA/etcpwdparse
           - github.com/BurntSushi/toml
+          - github.com/charmbracelet/bubbletea
+          - github.com/charmbracelet/lipgloss
           - github.com/creack/pty
           - github.com/docker/docker
           - github.com/docker/go-connections
