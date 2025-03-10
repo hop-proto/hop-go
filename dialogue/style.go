@@ -26,27 +26,22 @@ var baseStyle = lipgloss.NewStyle().
 	Background(bg)
 
 var delegateStyle = baseStyle.
-	Copy().
 	Foreground(blue).
 	Bold(true)
 
 var targetStyle = baseStyle.
-	Copy().
 	Foreground(purple).
 	Bold(true)
 
 var userStyle = baseStyle.
-	Copy().
 	Foreground(green).
 	Italic(true)
 
 var intentStyle = baseStyle.
-	Copy().
 	Foreground(red).
 	Italic(true)
 
 var timeStyle = baseStyle.
-	Copy().
 	Foreground(yellow)
 
 var titleStyle = lipgloss.
@@ -59,5 +54,4 @@ var itemStyle = lipgloss.
 	PaddingLeft(4)
 
 var selectedItemStyle = itemStyle.
-	Copy().
 	Foreground(orange)
