@@ -45,6 +45,9 @@ type sender struct {
 	// Retransmission TimeOut.
 	RetransmitTicker *time.Ticker
 
+	// RTO is the Recovery Time Objective, which aims to be used only on two consecutive packet loss
+	RTO time.Duration
+
 	// RTT is the estimate of the round trip time to the remote host
 	RTT time.Duration
 
@@ -69,6 +72,7 @@ func newSender(log *logrus.Entry) *sender {
 		// finSent defaults to false
 		RetransmitTicker: time.NewTicker(initialRTT),
 		RTT:              initialRTT,
+		RTO:              initialRTT,
 		windowSize:       windowSize,
 		windowOpen:       make(chan struct{}, 1),
 		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
@@ -83,7 +87,7 @@ func (s *sender) unAckedFramesRemaining() int {
 // Reset the retransmission timer to 9/8 of the measured RTT
 // 9/8 comes from RFC 9002 section 6.1.2
 func (s *sender) resetRetransmitTicker() {
-	s.RetransmitTicker.Reset((s.RTT / 8) * 9)
+	s.RetransmitTicker.Reset((s.RTO / 8) * 9)
 }
 
 func (s *sender) write(b []byte) (int, error) {
@@ -167,6 +171,9 @@ func (s *sender) recvAck(ackNo uint32) error {
 		if s.unacked > 0 {
 			s.unacked--
 		}
+
+		// Adjust the RTO on the RTT when receive an ACK
+		s.RTO = (s.RTT / 8) * 9
 
 		s.log.WithFields(logrus.Fields{
 			"ack frame No": newAckNo,

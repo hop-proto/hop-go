@@ -207,8 +207,8 @@ func (r *Reliable) send() {
 				r.sendOneFrame(rtoFrame.frame, true)
 			}
 
-			// Back off RTT if no ACKs were received
-			r.sender.RTT *= 2
+			// Back off RTO if no ACKs were received
+			r.sender.RTO *= 2
 
 			if r.sender.RTT > maxRTT {
 				r.Close()
