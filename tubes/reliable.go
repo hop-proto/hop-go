@@ -620,15 +620,10 @@ func (r *Reliable) receiveRTRFrame(frame *frame) {
 
 // scheduleRetransmission manages retransmission with a delay based on RTT
 func (r *Reliable) scheduleRetransmission(rtrFrame *frame, dataLength uint16, timeSinceQueued time.Duration, oldFrameIndex int) {
-	// Wait until a regular Round Trip Time
-	//waitTime := (r.sender.RTT - timeSinceQueued) + r.sender.RTT/8
+
 	waitTime := r.sender.RTT - timeSinceQueued
 
-	// To limit the deadlocks on RTT calculation
-	// if things are congested, then timeSinceQueued will increase and r.sender.RTT
-	// The difference should be kept small
-	// TODO (paul) -> have a logic way to define it
-	// TCP-NCR https://datatracker.ietf.org/doc/html/rfc4653
+	// Defining an upper bound to be more compliant with retransmission
 	if waitTime > r.sender.RTT/2 {
 		waitTime = r.sender.RTT / 2
 	}
