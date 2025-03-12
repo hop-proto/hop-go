@@ -110,10 +110,12 @@ func (r *receiver) processIntoBuffer() bool {
 				if frameToSend <= windowSize {
 					r.frameToSendCounter = frameToSend
 				}
-				r.log.WithFields(logrus.Fields{
-					"frag.priority": frag.priority,
-					"r.windowStart": r.windowStart,
-				}).Trace("cannot process packet")
+				if common.Debug {
+					log.WithFields(logrus.Fields{
+						"frag.priority": frag.priority,
+						"r.windowStart": r.windowStart,
+					}).Trace("cannot process packet")
+				}
 
 				break
 			}
