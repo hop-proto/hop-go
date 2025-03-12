@@ -182,11 +182,6 @@ func (ss *SessionState) readPacketLocked(plaintext, pkt []byte, key *[KeyLen]byt
 	}
 	b = b[CounterLen:]
 
-	if nil == key {
-		return 0, 0x0, errTransportOnly
-	}
-	// TODO (paul) handle the nil error here
-
 	aead, err := kravatte.NewSANSE(key[:])
 	if err != nil {
 		return 0, 0x0, err
