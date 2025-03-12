@@ -200,8 +200,8 @@ func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
 func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	//TODO(drebelsky): consider using reflection
 	newHC := HostConfig{
-		HandshakeTimeout: 5 * time.Second,
-		DataTimeout:      5 * time.Second,
+		HandshakeTimeout: 15 * time.Second,
+		DataTimeout:      15 * time.Second,
 		Input:            os.Stdin,
 		Output:           os.Stdout,
 	}
