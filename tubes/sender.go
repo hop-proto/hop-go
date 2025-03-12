@@ -196,7 +196,6 @@ func (s *sender) recvAck(ackNo uint32) error {
 	if windowOpen {
 		select {
 		case s.windowOpen <- struct{}{}:
-			//logrus.Debugf("I break the window on ack now, %v", newAckNo)
 			break
 		default:
 			break
@@ -236,7 +235,6 @@ func (s *sender) framesToSend(rto bool, startIndex int) int {
 	if numFrames < 0 {
 		numFrames = 0
 	}
-	//logrus.Debugf("len s.frames %v", len(s.frames))
 	return numFrames
 }
 
