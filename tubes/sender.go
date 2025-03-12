@@ -148,9 +148,12 @@ func (s *sender) recvAck(ackNo uint32) error {
 	windowOpen := s.ackNo < newAckNo
 
 	for s.ackNo < newAckNo {
-		if !s.frames[0].Time.Equal(time.Time{}) && ackNo == s.frames[0].frame.frameNo+1 {
+		if !s.frames[0].Time.Equal(time.Time{}) && ackNo == s.frames[0].frame.frameNo+1 && !s.frames[0].flags.RTR {
 			oldRTT := s.RTT
 			measuredRTT := time.Since(s.frames[0].Time)
+
+			// RTT Upper bound
+			measuredRTT = min(measuredRTT, s.RTT*2)
 
 			// This formula comes from RFC 9002 section 5.3
 			s.RTT = (s.RTT/8)*7 + measuredRTT/8

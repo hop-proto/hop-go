@@ -194,6 +194,11 @@ func (r *Reliable) send() {
 				}).Trace("Retransmission RTO")
 
 				// To notify the receiver of a RTO frame
+
+				if common.Debug {
+					logrus.Debugf("I send rto with rto %v", r.sender.RTO)
+				}
+
 				rtoFrame.flags.RTR = true
 				rtoFrame.Time = time.Now()
 
@@ -209,10 +214,6 @@ func (r *Reliable) send() {
 
 			// Back off RTO if no ACKs were received
 			r.sender.RTO *= 2
-
-			if r.sender.RTT > maxRTT {
-				r.Close()
-			}
 
 			r.sender.resetRetransmitTicker()
 
@@ -602,7 +603,9 @@ func (r *Reliable) receiveRTRFrame(frame *frame) {
 			rtrFrame := &r.sender.frames[i]
 
 			if rtrFrame.frameNo > ackNo {
-				r.log.Debug("receiver: RTR frame not found in valid range")
+				if common.Debug {
+					r.log.Debugf("receiver: RTR frame not found in valid range, i=%v", i)
+				}
 				break
 			}
 
@@ -618,6 +621,7 @@ func (r *Reliable) receiveRTRFrame(frame *frame) {
 // scheduleRetransmission manages retransmission with a delay based on RTT
 func (r *Reliable) scheduleRetransmission(rtrFrame *frame, dataLength uint16, timeSinceQueued time.Duration, oldFrameIndex int) {
 	// Wait until a regular Round Trip Time
+	//waitTime := (r.sender.RTT - timeSinceQueued) + r.sender.RTT/8
 	waitTime := r.sender.RTT - timeSinceQueued
 
 	// To limit the deadlocks on RTT calculation
