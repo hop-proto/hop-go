@@ -215,6 +215,12 @@ func (r *Reliable) send() {
 			// Back off RTO if no ACKs were received
 			r.sender.RTO *= 2
 
+			if r.sender.RTO > maxRTO && len(r.sender.frames) > 0 {
+				logrus.Errorf("REL: RTO exeeded, dropping frame n°%v", r.sender.frames[0])
+				r.sender.frames = r.sender.frames[1:]
+				r.sender.RTO = r.sender.RTT
+			}
+
 			r.sender.resetRetransmitTicker()
 
 			r.l.Unlock()

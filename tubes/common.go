@@ -39,6 +39,8 @@ const initialRTT = 333 * time.Millisecond
 // From RFC 9002 section 6.2.1 (kGranularity)
 const minRTT = 10 * time.Millisecond
 
+const maxRTO = 10 * time.Second
+
 // the maximum number of packets to retransmit per rto
 const maxFragTransPerRTO = 1
 
