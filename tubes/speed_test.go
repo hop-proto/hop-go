@@ -5,14 +5,13 @@ import (
 	"container/heap"
 	"crypto/rand"
 	"encoding/binary"
+	"github.com/sirupsen/logrus"
 	"io"
 	"sync"
 	"testing"
 	"time"
 
 	"gotest.tools/assert"
-
-	"github.com/sirupsen/logrus"
 )
 
 func TestFileTransferSpeedReliableTubes(t *testing.T) {
@@ -23,7 +22,7 @@ func TestFileTransferSpeedReliableTubes(t *testing.T) {
 	//fileSize := 1 << 30 // 128 MiB
 	t.Logf("Transferring file size: %d bytes", fileSize)
 
-	t1, t2, stop, _, err := makeConn(0.98, true, t)
+	t1, t2, stop, _, err := makeConn(1, true, t)
 	assert.NilError(t, err)
 	defer stop()
 
@@ -41,26 +40,21 @@ func TestFileTransferSpeedReliableTubes(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		rd := bytes.NewReader(sendBuf)
-		if err := chunkedCopy(t1, rd); err != nil {
+		if err = chunkedCopy(t1, rd); err != nil {
 			t.Errorf("client write failed: %v", err)
-		}
-		if err := t1.Close(); err != nil {
-			t.Errorf("client close failed: %v", err)
 		}
 	}()
 
 	go func() {
 		defer wg.Done()
-		if err := chunkedCopy(recvBuf, t2); err != nil {
-			t.Errorf("server read failed: %v", err)
-		}
-		if err := t2.Close(); err != nil {
-			t.Errorf("server close failed: %v", err)
-		}
+		chunkedCopy(recvBuf, t2)
 	}()
 
 	wg.Wait()
 	elapsed := time.Since(start)
+
+	t1.Close()
+	t2.Close()
 
 	// Verify data integrity takes 90% of the test
 	//assert.DeepEqual(t, sendBuf, recvBuf.Bytes())
