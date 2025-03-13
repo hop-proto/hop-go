@@ -3,6 +3,7 @@ package tubes
 import (
 	"io"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -59,6 +60,8 @@ type sender struct {
 
 	sendQueue chan *frame
 
+	m sync.Mutex
+
 	// logging context
 	log *logrus.Entry
 }
@@ -81,6 +84,8 @@ func newSender(log *logrus.Entry) *sender {
 }
 
 func (s *sender) unAckedFramesRemaining() int {
+	s.m.Lock()
+	defer s.m.Unlock()
 	return len(s.frames)
 }
 

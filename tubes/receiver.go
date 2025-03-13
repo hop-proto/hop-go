@@ -32,8 +32,9 @@ type receiver struct {
 
 	dataReady *common.DeadlineChan[struct{}]
 	// +checklocks:m
-	buffer             *bytes.Buffer
-	missingFrame       bool
+	buffer *bytes.Buffer
+	// +checklocks:m
+	missingFrame       atomic.Bool
 	frameToSendCounter uint16
 
 	log *logrus.Entry
@@ -41,13 +42,12 @@ type receiver struct {
 
 func newReceiver(log *logrus.Entry) *receiver {
 	r := &receiver{
-		dataReady:    common.NewDeadlineChan[struct{}](1),
-		buffer:       new(bytes.Buffer),
-		fragments:    make(PriorityQueue, 0),
-		windowSize:   windowSize,
-		windowStart:  1,
-		missingFrame: false,
-		log:          log.WithField("receiver", ""),
+		dataReady:   common.NewDeadlineChan[struct{}](1),
+		buffer:      new(bytes.Buffer),
+		fragments:   make(PriorityQueue, 0),
+		windowSize:  windowSize,
+		windowStart: 1,
+		log:         log.WithField("receiver", ""),
 	}
 
 	r.m.Lock()
@@ -104,7 +104,7 @@ func (r *receiver) processIntoBuffer() bool {
 			if frag.priority > r.windowStart {
 				heap.Push(&r.fragments, frag)
 
-				r.missingFrame = true
+				r.missingFrame.Store(true)
 				// Add to RTR frame.datalength the cumulative missing frames
 				frameToSend := uint16(frag.priority - r.windowStart)
 				if frameToSend <= windowSize {
