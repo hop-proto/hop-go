@@ -2,15 +2,20 @@
 package dialogue
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"hop.computer/hop/authgrants"
+	"hop.computer/hop/certs"
 )
 
 // AuthgrantModel implements tea.Model and contains all the data needed to render the authgrant dialogue
 type AuthgrantModel struct {
+	// TODO(hosono) deal with different grant types
 	Intent      string
 	DelegateSNI string
 	TargetSNI   string
@@ -21,7 +26,19 @@ type AuthgrantModel struct {
 	accept bool
 }
 
-var _ tea.Model = model{}
+var _ tea.Model = AuthgrantModel{}
+
+func FromIntent(i *authgrants.Intent) AuthgrantModel {
+	return AuthgrantModel{
+		Intent:      i.AssociatedData.CommandGrantData.Cmd,
+		DelegateSNI: i.DelegateCert.IDChunk.Blocks[0].String(),
+		TargetSNI:   i.TargetSNI.String(),
+		TargetUser:  i.TargetUsername,
+		StartTime:   i.StartTime,
+		EndTime:     i.ExpTime,
+		accept:      false,
+	}
+}
 
 // Init implements the tea.Model interface
 func (m AuthgrantModel) Init() tea.Cmd {
@@ -88,9 +105,22 @@ func (m AuthgrantModel) View() string {
 	return lipgloss.JoinVertical(0, title, yes, no)
 }
 
-// GetAuthgrantInput displays the relevant information about an authgrant
-// to the user. It returns a boolean indicating if they chose to accept the
-// authgrant or not and an error is any occurred
+// GetUserInputForAuthgrant displays the relevant information about an authgrant
+// to the user. It returns nil if the user accepted the authgrand and and error otherwise.
+func GetUserInputForAuthgrant(i authgrants.Intent, cert *certs.Certificate) error {
+	mod := FromIntent(&i)
+	m, err := tea.NewProgram(mod, tea.WithAltScreen()).Run()
+	if err != nil {
+		return err
+	}
+	if !m.(AuthgrantModel).accept {
+		return errors.New("user denied perimission")
+	}
+	return nil
+}
+
+var _ authgrants.CheckIntentCallback = GetUserInputForAuthgrant
+
 func GetAuthgrantInput(mod AuthgrantModel) (bool, error) {
 	m, err := tea.NewProgram(mod, tea.WithAltScreen()).Run()
 

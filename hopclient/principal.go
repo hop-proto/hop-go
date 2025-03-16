@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"hop.computer/hop/authgrants"
-	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
 	"hop.computer/hop/core"
 	"hop.computer/hop/flags"
@@ -31,7 +30,7 @@ type principalSubclient struct {
 //   - communicate Intent to Target server [implemented]
 
 // SetCheckIntentCallback can be used to set a custom approver for intent requests
-func (c *HopClient) SetCheckIntentCallback(f func(authgrants.Intent, *certs.Certificate) error) error {
+func (c *HopClient) SetCheckIntentCallback(f authgrants.CheckIntentCallback) error {
 	if c.hostconfig == nil {
 		return fmt.Errorf("can't set check intent callback without config loaded")
 	}
