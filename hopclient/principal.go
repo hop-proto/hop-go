@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"hop.computer/hop/authgrants"
+	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
 	"hop.computer/hop/core"
 	"hop.computer/hop/flags"
@@ -65,7 +66,12 @@ func newPTProxyTubeQueue() *ptProxyTubeQueue {
 
 func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable, pq *ptProxyTubeQueue) {
 	c.checkIntentLock.Lock()
-	ci := c.checkIntent
+	ci := func(intent authgrants.Intent, cert *certs.Certificate) error {
+		c.ExecTube.SuspendPipes()
+		err := c.checkIntent(intent, cert)
+		c.ExecTube.ResumePipes()
+		return err
+	}
 	c.checkIntentLock.Unlock()
 
 	var psubclient *principalSubclient
