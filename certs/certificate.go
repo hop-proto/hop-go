@@ -16,6 +16,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
@@ -134,7 +135,11 @@ func (name *Name) String() string {
 	case TypeIPv4Address, TypeIPv6Address:
 		return net.IP(name.Label).String()
 	case TypeRaw:
-		return fmt.Sprintf("%x", name.Label)
+		if utf8.Valid(name.Label) {
+			return string(name.Label)
+		} else {
+			return fmt.Sprintf("%x", name.Label)
+		}
 	default:
 		panic(fmt.Sprintf("unexpected certs.IDType: %#v", name.Type))
 	}
