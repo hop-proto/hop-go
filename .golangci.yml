@@ -52,6 +52,7 @@ linters-settings:
       main:
         allow:
           - $gostd
+          - go.uber.org/goleak
           - github.com/AstromechZA/etcpwdparse
           - github.com/BurntSushi/toml
           - github.com/charmbracelet/bubbletea
