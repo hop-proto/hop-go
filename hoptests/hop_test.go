@@ -2,7 +2,7 @@ package hoptests
 
 import (
 	"bytes"
-	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -434,10 +434,13 @@ func TestStartCmd(t *testing.T) {
 
 		// Modify client config with command to run
 		testString := "Hello from hop tests!"
-		c.AddCmd(fmt.Sprintf("echo '%s'", testString))
+		c.AddCmd("cat")
 
 		output := &bytes.Buffer{}
 		c.Config.Output = output
+
+		r, input := io.Pipe()
+		c.Config.Input = r
 
 		s.StartTransport(t)
 		s.StartHopServer(t)
@@ -454,6 +457,11 @@ func TestStartCmd(t *testing.T) {
 
 		logrus.Info("CMD: ", c.Config.Cmd)
 
+		go func() {
+			input.Write([]byte(testString))
+			input.Close()
+		}()
+
 		err := c.Client.Start()
 		assert.NilError(t, err)
 
@@ -467,6 +475,6 @@ func TestStartCmd(t *testing.T) {
 
 		outString := output.String()
 		logrus.Info(outString)
-		assert.Equal(t, outString, testString+"\n")
+		assert.Equal(t, outString, testString)
 	})
 }
