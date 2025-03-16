@@ -12,6 +12,7 @@ import (
 	"io"
 	"io/fs"
 	"math"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -123,6 +124,20 @@ const (
 type Name struct {
 	Label []byte
 	Type  IDType
+}
+
+// String converts a Name into a human readable string
+func (name *Name) String() string {
+	switch name.Type {
+	case TypeDNSName:
+		return string(name.Label)
+	case TypeIPv4Address, TypeIPv6Address:
+		return net.IP(name.Label).String()
+	case TypeRaw:
+		return fmt.Sprintf("%x", name.Label)
+	default:
+		panic(fmt.Sprintf("unexpected certs.IDType: %#v", name.Type))
+	}
 }
 
 // DNSName returns a Name with Type set to TypeDNSName and the provided label.
