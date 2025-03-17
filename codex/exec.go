@@ -21,17 +21,8 @@ import (
 
 // ExecTube wraps a code execution tube with additional terminal state
 type ExecTube struct {
-	stdoutTube *tubes.Reliable
-	stdinTube  *tubes.Reliable
-	outPipe    io.Writer
-	inPipe     io.Reader
-
-	stdoutTubeCancelable cancelreader.CancelReader
-	inPipeCancelable     cancelreader.CancelReader
-	state                *term.State
-
-	inPipeSignal     chan struct{}
-	stdoutTubeSignal chan struct{}
+	tube  *tubes.Reliable
+	state *term.State
 }
 
 // Config is the options required to start an ExecTube
@@ -141,51 +132,27 @@ func NewExecTube(c Config) (*ExecTube, error) {
 		}()
 	}
 
-	ex := ExecTube{
-		stdinTube:  c.StdinTube,
-		stdoutTube: c.StdoutTube,
-		inPipe:     c.InPipe,
-		outPipe:    c.OutPipe,
-
-		state: oldState,
-
-		inPipeSignal:     make(chan struct{}, 1),
-		stdoutTubeSignal: make(chan struct{}, 1),
-	}
-
 	var inPipe io.Reader
 	inPipe, err = cancelreader.NewReader(c.InPipe)
 	if err != nil {
-		logrus.Infof("could not create cancel reader for inPipe: %v", err)
+		logrus.Infof("could not create cancel reader %v", err)
 		inPipe = c.InPipe
-	} else {
-		ex.inPipeCancelable = inPipe.(cancelreader.CancelReader)
 	}
-	var outTube io.Reader
-	outTube, err = cancelreader.NewReader(c.StdoutTube)
-	if err != nil {
-		logrus.Infof("could not create cancel reader for outTube: %v", err)
-		outTube = c.StdoutTube
-	} else {
-		ex.stdoutTubeCancelable = outTube.(cancelreader.CancelReader)
+
+	ex := ExecTube{
+		tube:  c.StdoutTube,
+		state: oldState,
 	}
 
 	c.WaitGroup.Add(2)
 	go func(ex *ExecTube) {
 		defer c.WaitGroup.Done()
-		for {
-			_, err := io.Copy(c.OutPipe, outTube) // read bytes from tube to os.Stdout
-			if err == cancelreader.ErrCanceled {
-				<-ex.stdoutTubeSignal
-			} else {
-				break
-			}
-		}
+		n, err := io.Copy(c.OutPipe, c.StdoutTube) // read bytes from tube to os.Stdout
 		if err != nil {
 			logrus.Errorf("codex: error copying from tube to stdout: %s", err)
 		}
-		logrus.Info("Stopped io.Copy(OutPipe, StdoutTube)")
-		ex.stdoutTube.Close()
+		logrus.WithField("bytes", n).Info("Stopped io.Copy(OutPipe, StdoutTube)")
+		ex.tube.Close()
 		logrus.Info("closed stdout tube")
 		if inp, ok := inPipe.(cancelreader.CancelReader); ok {
 			inp.Cancel()
@@ -196,15 +163,7 @@ func NewExecTube(c Config) (*ExecTube, error) {
 
 	go func(ex *ExecTube) {
 		defer c.WaitGroup.Done()
-		for {
-			_, err = io.Copy(c.StdinTube, inPipe)
-			if err == cancelreader.ErrCanceled {
-				err = nil
-				<-ex.inPipeSignal
-			} else {
-				break
-			}
-		}
+		_, err := io.Copy(c.StdinTube, inPipe)
 		if err != nil {
 			logrus.Errorf("codex: error copying from stdin to tube: %s", err)
 		}
@@ -217,24 +176,6 @@ func NewExecTube(c Config) (*ExecTube, error) {
 	}(&ex)
 
 	return &ex, nil
-}
-
-func (e *ExecTube) SuspendPipes() {
-	if e.inPipeCancelable != nil {
-		e.inPipeCancelable.Cancel()
-	}
-	if e.stdoutTubeCancelable != nil {
-		e.stdoutTubeCancelable.Cancel()
-	}
-}
-
-func (e *ExecTube) ResumePipes() {
-	if e.inPipeCancelable != nil {
-		e.inPipeSignal <- struct{}{}
-	}
-	if e.stdoutTubeCancelable != nil {
-		e.stdoutTubeSignal <- struct{}{}
-	}
 }
 
 type execInitMsg struct {
