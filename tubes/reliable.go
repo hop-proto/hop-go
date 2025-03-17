@@ -253,13 +253,9 @@ func (r *Reliable) send() {
 					windowFrame.queued = true
 					r.frameMutex.Unlock()
 
-					r.sender.unacked++
+					r.sender.sendQueue <- windowFrame.frame
 
-					select {
-					case r.sender.sendQueue <- windowFrame.frame:
-					default:
-						r.log.Println("sendQueue is closed or full")
-					}
+					r.sender.unacked++
 
 					numQueued++
 				}
@@ -381,8 +377,8 @@ func (r *Reliable) enterClosedState() {
 	if r.lastAckTimer != nil {
 		r.lastAckTimer.Stop()
 	}
-	r.sender.Close()
 	r.recvWindow.Close()
+	r.sender.Close()
 	if r.tubeState != created {
 		r.l.Unlock()
 		<-r.sendDone
@@ -530,7 +526,9 @@ func (r *Reliable) Close() (err error) {
 	r.SetReadDeadline(time.Now())
 	r.sender.deadline = time.Now()
 
-	return r.sender.sendFin()
+	err = r.sender.sendFin()
+
+	return err
 }
 
 // WaitForInit blocks until the Tube is initiated
@@ -695,12 +693,14 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 		r.log.Debugf("Executing retransmission for frame %d", rtrFrame.frameNo)
 	}
 
-	if r.sender.unAckedFramesRemaining() == 0 {
+	frameListLen := r.sender.unAckedFramesRemaining()
+
+	if frameListLen == 0 {
 		r.log.Errorf("Sender frames are empty, aborting retransmission for frame %d", rtrFrame.frameNo)
 		return
 	}
 
-	if oldFrameIndex < 0 || oldFrameIndex+int(dataLength) > len(r.sender.frames) {
+	if oldFrameIndex < 0 || oldFrameIndex+int(dataLength) > frameListLen {
 		r.log.Errorf("Invalid retransmission range for frame %d, aborting", rtrFrame.frameNo)
 		return
 	}
@@ -708,10 +708,10 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 	// Retransmit frames without blocking everything
 	for j := 0; j < int(dataLength); j++ {
 		frameIndex := oldFrameIndex + j
+
+		r.frameMutex.Lock()
 		rtrFullFrame := &r.sender.frames[frameIndex]
 
-		// Lock only when modifying the frame
-		r.frameMutex.Lock()
 		rtrFullFrame.Time = time.Now()
 		rtrFullFrame.tubeID = r.id
 		rtrFullFrame.ackNo = r.recvWindow.getAck()

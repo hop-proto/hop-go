@@ -141,6 +141,9 @@ func (s *sender) write(b []byte) (int, error) {
 }
 
 func (s *sender) recvAck(ackNo uint32) error {
+	s.m.Lock()
+	defer s.m.Unlock()
+
 	// Stop the ticker since we're about to do a new RTT measurement.
 	s.RetransmitTicker.Stop()
 
@@ -254,6 +257,9 @@ func (s *sender) Close() error {
 }
 
 func (s *sender) sendFin() error {
+	s.m.Lock()
+	defer s.m.Unlock()
+
 	if s.finSent {
 		return io.EOF
 	}
