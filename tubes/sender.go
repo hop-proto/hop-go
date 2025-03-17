@@ -120,10 +120,12 @@ func (s *sender) write(b []byte) (int, error) {
 
 		s.frameNo++
 		s.buffer = s.buffer[dataLength:]
+		s.m.Lock()
 		s.frames = append(s.frames, struct {
 			*frame
 			time.Time
 		}{&pkt, time.Time{}})
+		s.m.Unlock()
 	}
 
 	numFrames := s.framesToSend(false, startFrame)
