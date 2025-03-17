@@ -4,7 +4,6 @@ package tubes
 import (
 	"encoding/binary"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -121,19 +120,20 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 	pkt.ackNo = ackNo
 	pkt.flags.REL = true
 
+	// The ACK flag must be used only to signal an acknowledgement.
+	// At this point only the frames with a dataLength of 0 are
+	// considered as being regular acknowledgements (not RTR).
 	if pkt.dataLength == 0 {
 		pkt.flags.ACK = true
 	}
 
 	missingFrame := r.recvWindow.missingFrame.Load()
 
-	if missingFrame {
-		if lastAckNo != ackNo {
-			frameToSendCounter := r.recvWindow.getFrameToSendCounter()
-			r.sendRetransmissionAck(lastFrameNo, ackNo, frameToSendCounter)
-			r.recvWindow.missingFrame.Store(false)
-			r.lastAckSent.Store(ackNo)
-		}
+	if missingFrame && lastAckNo != ackNo {
+		frameToSendCounter := r.recvWindow.getFrameToSendCounter()
+		r.sendRetransmissionAck(lastFrameNo, ackNo, frameToSendCounter)
+		r.recvWindow.missingFrame.Store(false)
+		r.lastAckSent.Store(ackNo)
 	}
 
 	// Limit the retransmission of ACKs to the last value loaded through r.recvWindow.getAck()
@@ -258,7 +258,7 @@ func (r *Reliable) send() {
 					select {
 					case r.sender.sendQueue <- windowFrame.frame:
 					default:
-						log.Println("sendQueue is closed or full")
+						r.log.Println("sendQueue is closed or full")
 					}
 
 					numQueued++

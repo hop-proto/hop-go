@@ -32,8 +32,7 @@ type receiver struct {
 
 	dataReady *common.DeadlineChan[struct{}]
 	// +checklocks:m
-	buffer *bytes.Buffer
-	// +checklocks:m
+	buffer             *bytes.Buffer
 	missingFrame       atomic.Bool
 	frameToSendCounter uint16
 
@@ -241,6 +240,8 @@ func (r *receiver) receive(p *frame) (bool, error) {
 		})
 	}
 
+	// The flag ACK must be false to be processed in the heap memory.
+	// Prevent processing of RTR ACK with dataLength > 0
 	if ((p.dataLength > 0 && !p.flags.ACK) || p.flags.FIN) && frameInBounds(windowStart, windowEnd, frameNo) {
 		heap.Push(&r.fragments, &pqItem{
 			value:    p.data,

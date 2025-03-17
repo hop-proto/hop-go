@@ -368,18 +368,6 @@ func (m *Muxer) readMsg() (*frame, error) {
 // underlying MsgConn. If an error occurs while sending data, sender will call
 // m.Stop in a new goroutine and the error will be reported by m.Stop
 func (m *Muxer) sender() {
-	/*
-		var err error
-		for rawBytes := range m.sendQueue {
-			err = m.underlying.WriteMsg(rawBytes)
-			if err != nil {
-				m.log.Warnf("error in muxer sender. stopping muxer: %s", err)
-				// TODO(hosono) is it ok to stop the muxer here? Are the recoverable errors?
-				go m.Stop()
-				break
-			}
-		}
-	*/
 	var err error
 	ok := true
 	var rawBytes []byte
