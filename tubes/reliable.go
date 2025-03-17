@@ -381,8 +381,8 @@ func (r *Reliable) enterClosedState() {
 	if r.lastAckTimer != nil {
 		r.lastAckTimer.Stop()
 	}
-	r.recvWindow.Close()
 	r.sender.Close()
+	r.recvWindow.Close()
 	if r.tubeState != created {
 		r.l.Unlock()
 		<-r.sendDone
@@ -713,7 +713,6 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 
 		rtrFullFrame := &r.sender.frames[frameIndex]
 
-		rtrFullFrame.Time = time.Now()
 		rtrFullFrame.ackNo = r.recvWindow.getAck()
 		rtrFullFrame.flags.REL = true
 
