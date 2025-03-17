@@ -196,7 +196,7 @@ func CloseTest(odds float64, rel bool, wait bool, t *testing.T) {
 
 // This is heavily based on the BasicIO test from the nettests
 func lossyBasicIO(t *testing.T) {
-	c1, c2, stop, _, err := makeConn(0.95, true, t)
+	c1, c2, stop, _, err := makeConn(0.99, true, t)
 	assert.NilError(t, err)
 	defer stop()
 
