@@ -56,7 +56,6 @@ type Reliable struct {
 	initDone         chan struct{}
 	sendDone         chan struct{}
 	l                sync.Mutex
-	frameMutex       sync.Mutex
 	log              *logrus.Entry
 }
 
@@ -203,8 +202,6 @@ func (r *Reliable) send() {
 					logrus.Debugf("I send rto with rto %v", r.sender.RTO)
 				}
 
-				r.frameMutex.Lock()
-
 				rtoFrame.flags.RTR = true
 				rtoFrame.Time = time.Now()
 
@@ -216,7 +213,6 @@ func (r *Reliable) send() {
 				r.lastRTRSent.Store(rtoFrame.frameNo)
 
 				r.sendOneFrame(rtoFrame.frame, true)
-				r.frameMutex.Unlock()
 			}
 
 			// Back off RTO if no ACKs were received
@@ -248,12 +244,10 @@ func (r *Reliable) send() {
 						"unacked":  r.sender.unacked,
 					}).Trace("Window sending")
 
-					r.frameMutex.Lock()
 					windowFrame.Time = time.Now()
 					windowFrame.queued = true
-					r.frameMutex.Unlock()
 
-					r.sender.sendQueue <- windowFrame.frame
+					safeSend(r.sender.sendQueue, windowFrame.frame)
 
 					r.sender.unacked++
 
@@ -268,13 +262,23 @@ func (r *Reliable) send() {
 			}
 
 			// Do not block ACKs - Blocks frame transmission out of window open
-			r.frameMutex.Lock()
 			r.sendOneFrame(pkt, false)
-			r.frameMutex.Unlock()
 		}
 	}
 	r.log.Debug("send ended")
 	close(r.sendDone)
+}
+
+// safeSend prevent to send a frame on a closed channel
+func safeSend(ch chan *frame, value *frame) (closed bool) {
+	defer func() {
+		if recover() != nil {
+			closed = true
+		}
+	}()
+
+	ch <- value
+	return false
 }
 
 // receive is called by the muxer for each new packet
@@ -704,21 +708,15 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 		r.log.Errorf("Invalid retransmission range for frame %d, aborting", rtrFrame.frameNo)
 		return
 	}
-
-	// Retransmit frames without blocking everything
 	for j := 0; j < int(dataLength); j++ {
 		frameIndex := oldFrameIndex + j
 
-		r.frameMutex.Lock()
 		rtrFullFrame := &r.sender.frames[frameIndex]
 
 		rtrFullFrame.Time = time.Now()
-		rtrFullFrame.tubeID = r.id
 		rtrFullFrame.ackNo = r.recvWindow.getAck()
 		rtrFullFrame.flags.REL = true
-		r.frameMutex.Unlock()
 
-		// Logging and sending the frame
 		if common.Debug {
 			r.log.Debugf("Retransmitting frame %d", rtrFullFrame.frameNo)
 		}
@@ -726,13 +724,10 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 			"Frame N°": rtrFullFrame.frameNo,
 		}).Trace("Retransmission of RTR pkt")
 
-		// Send frame
 		r.prioritySendQueue <- rtrFullFrame.toBytes()
 
-		// Update last sent retransmission
 		r.lastRTRSent.Store(rtrFullFrame.frameNo)
 	}
 
-	// Remove the retransmission timer after completion
 	r.pendingRTRTimers.Delete(rtrFrame.frameNo)
 }
