@@ -714,6 +714,7 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 		rtrFullFrame := &r.sender.frames[frameIndex]
 
 		rtrFullFrame.ackNo = r.recvWindow.getAck()
+		rtrFullFrame.Time = time.Now()
 		rtrFullFrame.flags.REL = true
 
 		if common.Debug {
