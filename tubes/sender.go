@@ -3,6 +3,7 @@ package tubes
 import (
 	"io"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -45,6 +46,9 @@ type sender struct {
 	// Retransmission TimeOut.
 	RetransmitTicker *time.Ticker
 
+	// RTO is the Recovery Time Objective, which aims to be used only on two consecutive packet loss
+	RTO time.Duration
+
 	// RTT is the estimate of the round trip time to the remote host
 	RTT time.Duration
 
@@ -56,6 +60,8 @@ type sender struct {
 
 	sendQueue chan *frame
 
+	m sync.Mutex
+
 	// logging context
 	log *logrus.Entry
 }
@@ -64,10 +70,12 @@ func newSender(log *logrus.Entry) *sender {
 	return &sender{
 		ackNo:   1,
 		frameNo: 1,
+		unacked: 0,
 		buffer:  make([]byte, 0),
 		// finSent defaults to false
 		RetransmitTicker: time.NewTicker(initialRTT),
 		RTT:              initialRTT,
+		RTO:              initialRTT,
 		windowSize:       windowSize,
 		windowOpen:       make(chan struct{}, 1),
 		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
@@ -76,13 +84,15 @@ func newSender(log *logrus.Entry) *sender {
 }
 
 func (s *sender) unAckedFramesRemaining() int {
+	s.m.Lock()
+	defer s.m.Unlock()
 	return len(s.frames)
 }
 
 // Reset the retransmission timer to 9/8 of the measured RTT
 // 9/8 comes from RFC 9002 section 6.1.2
 func (s *sender) resetRetransmitTicker() {
-	s.RetransmitTicker.Reset((s.RTT / 8) * 9)
+	s.RetransmitTicker.Reset((s.RTO / 8) * 9)
 }
 
 func (s *sender) write(b []byte) (int, error) {
@@ -105,30 +115,37 @@ func (s *sender) write(b []byte) (int, error) {
 			dataLength: dataLength,
 			frameNo:    s.frameNo,
 			data:       s.buffer[:dataLength],
+			queued:     false,
 		}
 
 		s.frameNo++
 		s.buffer = s.buffer[dataLength:]
+		s.m.Lock()
 		s.frames = append(s.frames, struct {
 			*frame
 			time.Time
 		}{&pkt, time.Time{}})
+		s.m.Unlock()
 	}
 
 	numFrames := s.framesToSend(false, startFrame)
 
-	for i := 0; i < numFrames; i++ {
-		pkt := s.frames[startFrame+i]
-		s.unacked++
-		s.sendQueue <- pkt.frame
-		s.frames[startFrame+i].Time = time.Now()
+	if numFrames > 0 {
+		select {
+		case s.windowOpen <- struct{}{}:
+			break
+		default:
+			break
+		}
 	}
 
-	s.resetRetransmitTicker()
 	return len(b), nil
 }
 
 func (s *sender) recvAck(ackNo uint32) error {
+	s.m.Lock()
+	defer s.m.Unlock()
+
 	// Stop the ticker since we're about to do a new RTT measurement.
 	s.RetransmitTicker.Stop()
 
@@ -141,9 +158,12 @@ func (s *sender) recvAck(ackNo uint32) error {
 	windowOpen := s.ackNo < newAckNo
 
 	for s.ackNo < newAckNo {
-		if !s.frames[0].Time.Equal(time.Time{}) && ackNo == s.frames[0].frame.frameNo+1 {
+		if !s.frames[0].Time.Equal(time.Time{}) && ackNo == s.frames[0].frame.frameNo+1 && !s.frames[0].flags.RTR {
 			oldRTT := s.RTT
 			measuredRTT := time.Since(s.frames[0].Time)
+
+			// RTT Upper bound
+			measuredRTT = min(measuredRTT, s.RTT*2)
 
 			// This formula comes from RFC 9002 section 5.3
 			s.RTT = (s.RTT/8)*7 + measuredRTT/8
@@ -160,8 +180,19 @@ func (s *sender) recvAck(ackNo uint32) error {
 			}
 		}
 		s.ackNo++
-		s.unacked--
 		s.frames = s.frames[1:]
+		if s.unacked > 0 {
+			s.unacked--
+		}
+
+		// Adjust the RTO on the RTT when receive an ACK
+		s.RTO = (s.RTT / 8) * 9
+
+		s.log.WithFields(logrus.Fields{
+			"ack frame No": newAckNo,
+			"unacked":      s.unacked,
+			"new ack now":  s.ackNo,
+		}).Trace("I am acknowledging")
 	}
 
 	if common.Debug {
@@ -202,12 +233,7 @@ func (s *sender) framesToSend(rto bool, startIndex int) int {
 	// TODO(hosono) this is a mess because there's no builtin min or clamp functions
 	var numFrames int
 	if rto {
-		// Get the minimum of s.windowSize and maxFragTransPerRTO
-		if maxFragTransPerRTO > int(s.windowSize) {
-			numFrames = int(s.windowSize)
-		} else {
-			numFrames = maxFragTransPerRTO
-		}
+		numFrames = maxFragTransPerRTO
 	} else {
 		numFrames = int(s.windowSize) - int(s.unacked) - startIndex
 	}
@@ -233,6 +259,9 @@ func (s *sender) Close() error {
 }
 
 func (s *sender) sendFin() error {
+	s.m.Lock()
+	defer s.m.Unlock()
+
 	if s.finSent {
 		return io.EOF
 	}
@@ -242,6 +271,7 @@ func (s *sender) sendFin() error {
 		dataLength: 0,
 		frameNo:    s.frameNo,
 		data:       []byte{},
+		queued:     false,
 		flags: frameFlags{
 			ACK:  true,
 			FIN:  true,
@@ -253,11 +283,24 @@ func (s *sender) sendFin() error {
 	s.log.WithField("frameNo", pkt.frameNo).Debug("queueing FIN packet")
 
 	s.frameNo++
+
+	// To properly close the receiver
+	addToSendQueue := false
+
+	if len(s.frames) == 0 {
+		pkt.queued = true
+		s.unacked++
+		addToSendQueue = true
+	}
+
 	s.frames = append(s.frames, struct {
 		*frame
 		time.Time
 	}{&pkt, time.Time{}})
-	s.sendQueue <- &pkt
-	s.unacked++
+
+	if addToSendQueue {
+		s.sendQueue <- &pkt
+	}
+
 	return nil
 }

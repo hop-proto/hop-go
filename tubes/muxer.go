@@ -53,12 +53,13 @@ type Muxer struct {
 	unreliableTubes map[byte]*Unreliable
 
 	// All hop tubes write raw bytes for a tube packet to this golang chan.
-	sendQueue  chan []byte
-	state      atomic.Value
-	stopped    chan struct{}
-	underlying transport.MsgConn
-	timeout    time.Duration
-	log        *logrus.Entry
+	sendQueue         chan []byte
+	prioritySendQueue chan []byte
+	state             atomic.Value
+	stopped           chan struct{}
+	underlying        transport.MsgConn
+	timeout           time.Duration
+	log               *logrus.Entry
 
 	senderErr chan error
 	sendErr   error
@@ -109,20 +110,21 @@ func newMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 	}
 	state := atomic.Value{}
 	mux := &Muxer{
-		idParity:        idParity,
-		reliableTubes:   make(map[byte]*Reliable),
-		unreliableTubes: make(map[byte]*Unreliable),
-		tubeQueue:       make(chan Tube, 128),
-		m:               sync.Mutex{},
-		sendQueue:       make(chan []byte),
-		state:           state,
-		stopped:         make(chan struct{}),
-		underlying:      msgConn,
-		timeout:         timeout,
-		log:             log,
-		readBuf:         make([]byte, 65535),
-		receiverErr:     make(chan error),
-		senderErr:       make(chan error),
+		idParity:          idParity,
+		reliableTubes:     make(map[byte]*Reliable),
+		unreliableTubes:   make(map[byte]*Unreliable),
+		tubeQueue:         make(chan Tube, 128),
+		m:                 sync.Mutex{},
+		sendQueue:         make(chan []byte),
+		prioritySendQueue: make(chan []byte),
+		state:             state,
+		stopped:           make(chan struct{}),
+		underlying:        msgConn,
+		timeout:           timeout,
+		log:               log,
+		readBuf:           make([]byte, 65535),
+		receiverErr:       make(chan error),
+		senderErr:         make(chan error),
 	}
 
 	mux.state.Store(muxerRunning)
@@ -250,21 +252,23 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 		"tubeType": tType,
 	})
 	r := &Reliable{
-		id:         tubeID,
-		localAddr:  m.underlying.LocalAddr(),
-		remoteAddr: m.underlying.RemoteAddr(),
-		tubeState:  created,
-		initRecv:   make(chan struct{}),
-		initDone:   make(chan struct{}),
-		sendDone:   make(chan struct{}),
-		closed:     make(chan struct{}, 1),
-		recvWindow: newReceiver(tubeLog),
-		sender:     newSender(tubeLog),
-		sendQueue:  m.sendQueue,
-		tType:      tType,
-		log:        tubeLog,
+		id:                tubeID,
+		localAddr:         m.underlying.LocalAddr(),
+		remoteAddr:        m.underlying.RemoteAddr(),
+		tubeState:         created,
+		initRecv:          make(chan struct{}),
+		initDone:          make(chan struct{}),
+		sendDone:          make(chan struct{}),
+		closed:            make(chan struct{}, 1),
+		recvWindow:        newReceiver(tubeLog),
+		sender:            newSender(tubeLog),
+		sendQueue:         m.sendQueue,
+		prioritySendQueue: m.prioritySendQueue,
+		tType:             tType,
+		log:               tubeLog,
 	}
 	r.lastAckSent.Store(0)
+	r.lastFrameSent.Store(0)
 	r.sender.closed.Store(true)
 	m.addTube(r)
 	go r.initiate(req)
@@ -365,8 +369,27 @@ func (m *Muxer) readMsg() (*frame, error) {
 // m.Stop in a new goroutine and the error will be reported by m.Stop
 func (m *Muxer) sender() {
 	var err error
-	for rawBytes := range m.sendQueue {
-		err = m.underlying.WriteMsg(rawBytes)
+	ok := true
+	var rawBytes []byte
+	for ok {
+		select {
+		// Priority send queue will have fewer packets and will be chosen pseudo randomly
+		// https://go.dev/ref/spec#Select_statements
+		case rawBytes, ok = <-m.prioritySendQueue:
+			if !ok {
+				break
+			}
+
+			err = m.underlying.WriteMsg(rawBytes)
+
+		case rawBytes, ok = <-m.sendQueue:
+			if !ok {
+				break
+			}
+
+			err = m.underlying.WriteMsg(rawBytes)
+		}
+
 		if err != nil {
 			m.log.Warnf("error in muxer sender. stopping muxer: %s", err)
 			// TODO(hosono) is it ok to stop the muxer here? Are the recoverable errors?
@@ -377,6 +400,8 @@ func (m *Muxer) sender() {
 
 	// if we broke out of the loop, consume all packets so tubes can still close
 	for range m.sendQueue {
+	}
+	for range m.prioritySendQueue {
 	}
 
 	m.log.WithField("error", err).Debug("muxer sender stopped")
@@ -539,6 +564,7 @@ func (m *Muxer) Stop() (sendErr error, recvErr error) {
 	wg.Wait()
 	m.state.Store(muxerStopped)
 
+	close(m.prioritySendQueue)
 	close(m.sendQueue)
 	close(m.tubeQueue)
 

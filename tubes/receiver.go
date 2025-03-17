@@ -32,7 +32,9 @@ type receiver struct {
 
 	dataReady *common.DeadlineChan[struct{}]
 	// +checklocks:m
-	buffer *bytes.Buffer
+	buffer             *bytes.Buffer
+	missingFrame       atomic.Bool
+	frameToSendCounter uint16
 
 	log *logrus.Entry
 }
@@ -66,6 +68,12 @@ func (r *receiver) getWindowSize() uint16 {
 	return r.windowSize
 }
 
+func (r *receiver) getFrameToSendCounter() uint16 {
+	r.m.Lock()
+	defer r.m.Unlock()
+	return r.frameToSendCounter
+}
+
 /*
 Processes window into buffer stream if the ordered fragments are ready (in order).
 Precondition: r.m mutex is held.
@@ -94,6 +102,20 @@ func (r *receiver) processIntoBuffer() bool {
 			}
 			if frag.priority > r.windowStart {
 				heap.Push(&r.fragments, frag)
+
+				r.missingFrame.Store(true)
+				// Add to RTR frame.datalength the cumulative missing frames
+				frameToSend := uint16(frag.priority - r.windowStart)
+				if frameToSend <= windowSize {
+					r.frameToSendCounter = frameToSend
+				}
+				if common.Debug {
+					log.WithFields(logrus.Fields{
+						"frag.priority": frag.priority,
+						"r.windowStart": r.windowStart,
+					}).Trace("cannot process packet")
+				}
+
 				break
 			}
 		} else {
@@ -104,6 +126,7 @@ func (r *receiver) processIntoBuffer() bool {
 			r.buffer.Write(frag.value)
 			r.windowStart++
 			r.ackNo++
+			r.frameToSendCounter = 0
 			if common.Debug {
 				log.Trace("processing packet")
 			}
@@ -217,7 +240,9 @@ func (r *receiver) receive(p *frame) (bool, error) {
 		})
 	}
 
-	if (p.dataLength > 0 || p.flags.FIN) && frameInBounds(windowStart, windowEnd, frameNo) {
+	// The flag ACK must be false to be processed in the heap memory.
+	// Prevent processing of RTR ACK with dataLength > 0
+	if ((p.dataLength > 0 && !p.flags.ACK) || p.flags.FIN) && frameInBounds(windowStart, windowEnd, frameNo) {
 		heap.Push(&r.fragments, &pqItem{
 			value:    p.data,
 			priority: frameNo,
@@ -228,7 +253,7 @@ func (r *receiver) receive(p *frame) (bool, error) {
 			log.Trace("in bounds frame")
 		}
 	} else {
-		if p.dataLength > 0 {
+		if p.dataLength > 0 && !p.flags.ACK {
 			if common.Debug {
 				log.Debug("out of bounds frame")
 			}
