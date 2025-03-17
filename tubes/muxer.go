@@ -373,6 +373,8 @@ func (m *Muxer) sender() {
 	var rawBytes []byte
 	for ok {
 		select {
+		// Priority send queue will have fewer packets and will be chosen pseudo randomly
+		// https://go.dev/ref/spec#Select_statements
 		case rawBytes, ok = <-m.prioritySendQueue:
 			if !ok {
 				break
