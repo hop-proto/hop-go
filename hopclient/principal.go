@@ -67,9 +67,13 @@ func newPTProxyTubeQueue() *ptProxyTubeQueue {
 func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable, pq *ptProxyTubeQueue) {
 	c.checkIntentLock.Lock()
 	ci := func(intent authgrants.Intent, cert *certs.Certificate) error {
-		c.ExecTube.SuspendPipes()
+		if c.ExecTube != nil {
+			c.ExecTube.SuspendPipes()
+		}
 		err := c.checkIntent(intent, cert)
-		c.ExecTube.ResumePipes()
+		if c.ExecTube != nil {
+			c.ExecTube.ResumePipes()
+		}
 		return err
 	}
 	c.checkIntentLock.Unlock()
@@ -150,6 +154,10 @@ func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable, ve
 	}
 
 	client, err := NewHopClient(hc)
+	if err != nil {
+		return psubclient, err
+	}
+	err = client.SetCheckIntentCallback(c.checkIntent)
 	if err != nil {
 		return psubclient, err
 	}
