@@ -80,9 +80,47 @@ This behavior is consistent with `bytes.Buffer`.
 
 Finally, `channel.Close()` is also blocking until the the channel has been torn down by both sides.
 
+
+
+# Congestion Control
+
+Reliable Tubes use a simple congestion control algorithm to ensure the reliable delivery of packets while accounting for network loss and delay.
+
+**Window Size**: The window size is fixed at 128 and remains constant throughout the file transfer. This size was arbitrarily chosen based on testing and has demonstrated good performance in both usability and file transfer. The window advances synchronously on both the sender and receiver sides as packets are received and acknowledged. Any packets received outside the window are ignored and dropped.
+
+**Acknowledgment**: To limit network congestion, Reliable Tubes use cumulative acknowledgments (ACKs). This means that every frame below the ACK number is considered successfully received. This approach reduces the number of ACKs sent, improving efficiency in high-latency and congestive environments.
+
+
+
+**Retransmission**: Reliable Tubes employ two primary retransmission mechanisms to ensure reliability:
+
+**1 - RTR Flag**: If the receiver detects that a frame has been skipped—meaning it receives frame (n+1) before frame (n)—it considers frame (n) lost. To request retransmission, the receiver:
+
+1. Sends an ACK for the last correctly received frame (e.g., if frames 1 and 5 arrive, it acknowledges frame 1).
+2. Sets the RTR (Retransmission Request) flag to `true` and includes the number of missing frames in the data length field (e.g., here 3).
+3. Requests retransmission for the missing frames (e.g., frames 2, 3, and 4).
+
+However, this mechanism alone does not distinguish between true packet loss and simple out-of-order delivery. To prevent unnecessary retransmissions:
+
+- The receiver introduces a wait time before requesting retransmission.
+- If the missing frame arrives within this wait period, the retransmission request is canceled.
+- The wait time is calculated as:
+
+`Wait Time = Estimated RTT - Frame Queue Time`
+
+This prevents unnecessary retransmissions due to network jitter.
+
+
+**2 - Retransmission Timeout (RTO)**: If a retransmitted frame is also lost, Reliable Tubes use a Retransmission Timeout (RTO) mechanism** to ensure delivery.
+
+- After the first retransmission attempt, the sender waits for 1 RTT.
+- If no ACK is received within that waiting period the sender will send an RTO frame.
+- The RTO event occurs at most 2 RTTs after the initial frame transmission.
+- When a RTO event is occurring, the receiver will send a RTR ACK with a length ranging from 0 to n, the number of missing frames, describing the state of the receiver causing this congestive event.
+
+
 ## Remaining Work
 - Unreliable channels.
-- Congestion control.
 - `LocalAddr()`
 - `RemoteAddr()`
 - `SetDeadline()`
