@@ -15,13 +15,11 @@ import (
 
 // AuthgrantModel implements tea.Model and contains all the data needed to render the authgrant dialogue
 type AuthgrantModel struct {
-	// TODO(hosono) deal with different grant types
-	Intent      string
-	DelegateSNI string
-	TargetSNI   string
-	TargetUser  string
-	StartTime   time.Time
-	EndTime     time.Time
+	Intent     authgrants.Intent
+	TargetSNI  string
+	TargetUser string
+	StartTime  time.Time
+	EndTime    time.Time
 
 	accept bool
 }
@@ -30,13 +28,12 @@ var _ tea.Model = AuthgrantModel{}
 
 func FromIntent(i *authgrants.Intent) AuthgrantModel {
 	return AuthgrantModel{
-		Intent:      i.AssociatedData.CommandGrantData.Cmd,
-		DelegateSNI: i.DelegateCert.IDChunk.Blocks[0].String(),
-		TargetSNI:   i.TargetSNI.String(),
-		TargetUser:  i.TargetUsername,
-		StartTime:   i.StartTime,
-		EndTime:     i.ExpTime,
-		accept:      false,
+		Intent:     *i,
+		TargetSNI:  i.TargetSNI.String(),
+		TargetUser: i.TargetUsername,
+		StartTime:  i.StartTime,
+		EndTime:    i.ExpTime,
+		accept:     false,
 	}
 }
 
@@ -70,16 +67,28 @@ func (m AuthgrantModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the UI with the data contained in model
 func (m AuthgrantModel) View() string {
-	delegateSNI := delegateStyle.Render(m.DelegateSNI)
+	delegateSNI := delegateStyle.Render(m.Intent.DelegateCert.IDChunk.Blocks[0].String())
 	targetSNI := targetStyle.Render(m.TargetSNI)
 	targetUser := userStyle.Render(m.TargetUser)
-	intent := intentStyle.Render(m.Intent)
 	startTime := timeStyle.Render(m.StartTime.In(time.Local).Format(time.UnixDate))
 	endTime := timeStyle.Render(m.EndTime.In(time.Local).Format(time.UnixDate))
 
-	text := fmt.Sprintf("Would you like to allow %s\n  to %s as %s on %s\n  from %s until %s?",
+	var intentStr string
+	switch m.Intent.GrantType {
+	case authgrants.Shell:
+		intentStr = intentStyle.Render("open a shell")
+	case authgrants.Command:
+		cmd := intentStyle.Render(m.Intent.AssociatedData.CommandGrantData.Cmd)
+		intentStr = fmt.Sprintf("run the command '%s'", cmd)
+	case authgrants.LocalPF, authgrants.RemotePF:
+		intentStr = "TODO intent string for port forwarding"
+	default:
+		panic(fmt.Sprintf("unexpected authgrants.GrantType: %#v", m.Intent.GrantType))
+	}
+
+	text := fmt.Sprintf("Would you like to\n  allow %s\n  to %s\n  as %s\n  on %s\n  from %s\n  until %s?",
 		delegateSNI,
-		intent,
+		intentStr,
 		targetUser,
 		targetSNI,
 		startTime,
