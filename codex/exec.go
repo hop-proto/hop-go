@@ -4,6 +4,7 @@ package codex
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -23,6 +24,9 @@ import (
 type ExecTube struct {
 	tube  *tubes.Reliable
 	state *term.State
+
+	// lock is used to pause copy operations
+	lock *sync.RWMutex
 }
 
 // Config is the options required to start an ExecTube
@@ -142,12 +146,13 @@ func NewExecTube(c Config) (*ExecTube, error) {
 	ex := ExecTube{
 		tube:  c.StdoutTube,
 		state: oldState,
+		lock:  &sync.RWMutex{},
 	}
 
 	c.WaitGroup.Add(2)
 	go func(ex *ExecTube) {
 		defer c.WaitGroup.Done()
-		n, err := io.Copy(c.OutPipe, c.StdoutTube) // read bytes from tube to os.Stdout
+		n, err := pausableCopy(c.OutPipe, c.StdoutTube, ex.lock)
 		if err != nil {
 			logrus.Errorf("codex: error copying from tube to stdout: %s", err)
 		}
@@ -163,7 +168,7 @@ func NewExecTube(c Config) (*ExecTube, error) {
 
 	go func(ex *ExecTube) {
 		defer c.WaitGroup.Done()
-		_, err := io.Copy(c.StdinTube, inPipe)
+		_, err := pausableCopy(c.StdinTube, inPipe, ex.lock)
 		if err != nil {
 			logrus.Errorf("codex: error copying from stdin to tube: %s", err)
 		}
@@ -176,6 +181,54 @@ func NewExecTube(c Config) (*ExecTube, error) {
 	}(&ex)
 
 	return &ex, nil
+}
+
+// pausableCopy copies everything from src to dst.
+// When lock.Lock() is called in another goroutine, pausableCopy temoporarily
+// stops copying data until lock.Unlock() is called.
+// This method is based on the code from io.Copy
+func pausableCopy(dst io.Writer, src io.Reader, lock *sync.RWMutex) (int64, error) {
+	buf := make([]byte, 32*1024)
+	var written int64 = 0
+	var err error
+	for {
+		lock.RLock()
+		nr, er := src.Read(buf)
+		if nr > 0 {
+			nw, ew := dst.Write(buf[0:nr])
+			if nw < 0 || nr < nw {
+				nw = 0
+				if ew == nil {
+					ew = fmt.Errorf("invalid write")
+				}
+			}
+			written += int64(nw)
+			if ew != nil {
+				err = ew
+				break
+			}
+			if nr != nw {
+				err = io.ErrShortWrite
+				break
+			}
+		}
+		if er != nil {
+			if er != io.EOF {
+				err = er
+			}
+			break
+		}
+		lock.RUnlock()
+	}
+	return written, err
+}
+
+func (e *ExecTube) SuspendPipes() {
+	e.lock.Lock()
+}
+
+func (e *ExecTube) ResumePipes() {
+	e.lock.Unlock()
 }
 
 type execInitMsg struct {

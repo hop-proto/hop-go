@@ -43,7 +43,7 @@ func (c *HopClient) getAuthorization(vc transport.VerifyConfig) error {
 		StartTime:  time.Now(),
 		ExpTime:    time.Now().Add(time.Minute), // TODO(baumanl): add way to customize this
 		TargetSNI: certs.Name{
-			Type:  certs.TypeRaw,
+			Type:  certs.TypeDNSName,
 			Label: []byte(c.hostconfig.Hostname),
 		},
 		TargetUsername: c.hostconfig.User,

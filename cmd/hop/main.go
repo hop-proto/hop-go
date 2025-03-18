@@ -6,6 +6,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/dialogue"
 	"hop.computer/hop/flags"
 	"hop.computer/hop/hopclient"
 )
@@ -47,6 +48,14 @@ func main() {
 	if err != nil {
 		logrus.Error(err)
 		return
+	}
+
+	if hc.IsPrincipal {
+		err = client.SetCheckIntentCallback(dialogue.GetUserInputForAuthgrant)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
 	}
 
 	client.RawConfigFilePath = f.ConfigPath

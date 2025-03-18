@@ -31,7 +31,7 @@ type principalSubclient struct {
 //   - communicate Intent to Target server [implemented]
 
 // SetCheckIntentCallback can be used to set a custom approver for intent requests
-func (c *HopClient) SetCheckIntentCallback(f func(authgrants.Intent, *certs.Certificate) error) error {
+func (c *HopClient) SetCheckIntentCallback(f authgrants.CheckIntentCallback) error {
 	if c.hostconfig == nil {
 		return fmt.Errorf("can't set check intent callback without config loaded")
 	}
@@ -66,7 +66,16 @@ func newPTProxyTubeQueue() *ptProxyTubeQueue {
 
 func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable, pq *ptProxyTubeQueue) {
 	c.checkIntentLock.Lock()
-	ci := c.checkIntent
+	ci := func(intent authgrants.Intent, cert *certs.Certificate) error {
+		if c.ExecTube != nil {
+			c.ExecTube.SuspendPipes()
+		}
+		err := c.checkIntent(intent, cert)
+		if c.ExecTube != nil {
+			c.ExecTube.ResumePipes()
+		}
+		return err
+	}
 	c.checkIntentLock.Unlock()
 
 	var psubclient *principalSubclient
@@ -145,6 +154,10 @@ func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable, ve
 	}
 
 	client, err := NewHopClient(hc)
+	if err != nil {
+		return psubclient, err
+	}
+	err = client.SetCheckIntentCallback(c.checkIntent)
 	if err != nil {
 		return psubclient, err
 	}
