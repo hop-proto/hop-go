@@ -731,3 +731,9 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 
 	r.pendingRTRTimers.Delete(rtrFrame.frameNo)
 }
+
+func (r *Reliable) CanAcceptBytes() bool {
+	r.sender.m.Lock()
+	defer r.sender.m.Unlock()
+	return len(r.sender.frames) < windowSize
+}

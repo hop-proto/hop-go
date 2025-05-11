@@ -130,7 +130,7 @@ func (s *sender) write(b []byte) (int, error) {
 
 	numFrames := s.framesToSend(false, startFrame)
 
-	if numFrames > 0 {
+	if numFrames > 0 && numFrames < windowSize {
 		select {
 		case s.windowOpen <- struct{}{}:
 			break
