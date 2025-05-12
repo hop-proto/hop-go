@@ -621,8 +621,7 @@ func (r *Reliable) receiveRTRFrame(frame *frame) {
 		// Frames sent via RTO ask the receiver to send a RTR frame
 		// with the current processing index
 
-		// To limit the search in a reasonable range
-		numFrames := min(windowSize, len(r.sender.frames))
+		numFrames := len(r.sender.frames)
 
 		for i := 0; i < numFrames; i++ {
 			rtrFrame := &r.sender.frames[i]
@@ -735,5 +734,5 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 func (r *Reliable) CanAcceptBytes() bool {
 	r.sender.m.Lock()
 	defer r.sender.m.Unlock()
-	return len(r.sender.frames) < windowSize
+	return len(r.sender.frames) < int(r.sender.windowSize)
 }

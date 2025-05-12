@@ -106,7 +106,7 @@ func (r *receiver) processIntoBuffer() bool {
 				r.missingFrame.Store(true)
 				// Add to RTR frame.datalength the cumulative missing frames
 				frameToSend := uint16(frag.priority - r.windowStart)
-				if frameToSend <= windowSize {
+				if frameToSend <= r.windowSize {
 					r.frameToSendCounter = frameToSend
 				}
 				if common.Debug {
