@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -99,6 +101,27 @@ func SigningKeyFromPEM(p *pem.Block) (*SigningKeyPair, error) {
 	copy(out.Private[:], p.Bytes)
 	out.PublicFromPrivate()
 	return out, nil
+}
+
+// ReadSigningKeyPEM reads bytes that are PEM-encoded as a SigningKeyPair.
+func ReadSigningKeyPEM(pemBytes []byte) (*SigningKeyPair, error) {
+	p, _ := pem.Decode(pemBytes)
+	return SigningKeyFromPEM(p)
+}
+
+// ReadSigningPrivateKeyPEMFile opens the file at path, and reads it as a
+// PEM-encoded signing key.
+func ReadSigningPrivateKeyPEMFile(path string) (*SigningKeyPair, error) {
+	fd, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer fd.Close()
+	b, err := io.ReadAll(fd)
+	if err != nil {
+		return nil, err
+	}
+	return ReadSigningKeyPEM(b)
 }
 
 // ParseSigningPublicKey parses a text public signing key. It must have the
