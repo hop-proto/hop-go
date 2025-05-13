@@ -68,6 +68,12 @@ func (r *receiver) getWindowSize() uint16 {
 	return r.windowSize
 }
 
+func (r *receiver) setWindowSize(window uint16) {
+	r.m.Lock()
+	defer r.m.Unlock()
+	r.windowSize = window
+}
+
 func (r *receiver) getFrameToSendCounter() uint16 {
 	r.m.Lock()
 	defer r.m.Unlock()

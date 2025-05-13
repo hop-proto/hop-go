@@ -114,10 +114,16 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 	ackNo := r.recvWindow.getAck()
 	lastFrameNo := r.lastFrameSent.Load()
 	lastAckNo := r.lastAckSent.Load()
+	senderWindowSize := r.sender.getWindowSize()
+
+	if senderWindowSize == 0 {
+		senderWindowSize = windowSize
+	}
 
 	pkt.tubeID = r.id
 	pkt.ackNo = ackNo
 	pkt.flags.REL = true
+	pkt.windowSize = senderWindowSize
 
 	// The ACK flag must be used only to signal an acknowledgement.
 	// At this point only the frames with a dataLength of 0 are
@@ -357,6 +363,11 @@ func (r *Reliable) receive(pkt *frame) error {
 	// ACK every data packet
 	if pkt.dataLength > 0 && r.tubeState != closed && !pkt.flags.FIN {
 		r.sender.sendEmptyPacket()
+	}
+
+	if pkt.windowSize > 0 && pkt.windowSize != r.recvWindow.windowSize {
+		r.recvWindow.setWindowSize(pkt.windowSize)
+		r.log.Debugf("Updated window size to %v", pkt.windowSize)
 	}
 
 	return err
@@ -732,7 +743,6 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 }
 
 func (r *Reliable) CanAcceptBytes() bool {
-	r.sender.m.Lock()
-	defer r.sender.m.Unlock()
-	return len(r.sender.frames) < int(r.sender.windowSize)
+	senderWindowSize := r.sender.getWindowSize()
+	return len(r.sender.frames) < int(senderWindowSize)
 }

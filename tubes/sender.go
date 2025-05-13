@@ -16,7 +16,9 @@ type sender struct {
 	// The acknowledgement number sent from the other end of the connection.
 	ackNo uint64
 
-	frameNo    uint32
+	frameNo uint32
+
+	// +checklocks:m
 	windowSize uint16
 
 	// The number of packets sent but not acked
@@ -59,11 +61,19 @@ type sender struct {
 	windowOpen chan struct{}
 
 	sendQueue chan *frame
+	probe     probe
 
 	m sync.Mutex
 
 	// logging context
 	log *logrus.Entry
+}
+
+type probe struct {
+	timeLastProbe        time.Time
+	rate                 float64
+	packetCountLastProbe int
+	totalProbeCount      int
 }
 
 func newSender(log *logrus.Entry) *sender {
@@ -79,7 +89,13 @@ func newSender(log *logrus.Entry) *sender {
 		windowSize:       windowSize,
 		windowOpen:       make(chan struct{}, 1),
 		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
-		log:              log.WithField("sender", ""),
+		probe: probe{
+			timeLastProbe:        time.Now(),
+			rate:                 0,
+			packetCountLastProbe: 0,
+			totalProbeCount:      0,
+		},
+		log: log.WithField("sender", ""),
 	}
 }
 
@@ -180,6 +196,7 @@ func (s *sender) recvAck(ackNo uint32) error {
 			}
 		}
 		s.ackNo++
+		s.probe.packetCountLastProbe++
 		s.frames = s.frames[1:]
 		if s.unacked > 0 {
 			s.unacked--
@@ -187,6 +204,54 @@ func (s *sender) recvAck(ackNo uint32) error {
 
 		// Adjust the RTO on the RTT when receive an ACK
 		s.RTO = (s.RTT / 8) * 9
+
+		// Update window size on the Bandwidth-Delay Product (BDP)
+		// Window Size (packets) = Bandwidth (packets/sec) × RTT (sec)
+		if time.Since(s.probe.timeLastProbe) > 2*time.Second && s.probe.packetCountLastProbe > 0 {
+
+			duration := time.Since(s.probe.timeLastProbe).Seconds()
+			rate := float64(s.probe.packetCountLastProbe) / duration // packets/sec
+
+			// initial loop to evaluate the pace
+			if s.probe.totalProbeCount == 0 {
+				s.probe.rate = rate
+				s.probe.totalProbeCount++
+			}
+
+			s.probe.totalProbeCount++
+
+			// Makes an average of the measured bandwidth
+			logrus.Debugf("s.probe.rate before %v", s.probe.rate)
+			logrus.Debugf("new rate %v", rate)
+
+			increaseFactor := 1.5
+			//s.probe.rate = ((s.probe.rate * float64(s.probe.totalProbeCount-1)) + (rate * increaseFactor)) / float64(s.probe.totalProbeCount)
+
+			s.probe.rate = (s.probe.rate + rate*increaseFactor) / 2
+
+			rttSeconds := s.RTT.Seconds()
+
+			logrus.Debugf("rtt %v", rttSeconds)
+			logrus.Debugf("s.probe.bandwidth %v", s.probe.rate)
+
+			newWindowSize := uint16(s.probe.rate * rttSeconds)
+
+			if newWindowSize <= minWindowSize {
+				newWindowSize = minWindowSize
+			}
+
+			if newWindowSize > maxWindowSize {
+				newWindowSize = maxWindowSize
+			}
+
+			s.windowSize = newWindowSize
+
+			s.probe.timeLastProbe = time.Now()
+			s.probe.packetCountLastProbe = 0
+
+			s.log.Debugf("Updated window size to %v", newWindowSize)
+
+		}
 
 		s.log.WithFields(logrus.Fields{
 			"ack frame No": newAckNo,
@@ -303,4 +368,10 @@ func (s *sender) sendFin() error {
 	}
 
 	return nil
+}
+
+func (s *sender) getWindowSize() uint16 {
+	s.m.Lock()
+	defer s.m.Unlock()
+	return s.windowSize
 }
