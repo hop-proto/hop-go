@@ -74,6 +74,7 @@ type probe struct {
 	rate                 float64
 	packetCountLastProbe int
 	totalProbeCount      int
+	minRTT               time.Duration
 }
 
 func newSender(log *logrus.Entry) *sender {
@@ -94,6 +95,7 @@ func newSender(log *logrus.Entry) *sender {
 			rate:                 0,
 			packetCountLastProbe: 0,
 			totalProbeCount:      0,
+			minRTT:               time.Second,
 		},
 		log: log.WithField("sender", ""),
 	}
@@ -187,6 +189,9 @@ func (s *sender) recvAck(ackNo uint32) error {
 			if s.RTT < minRTT {
 				s.RTT = minRTT
 			}
+
+			s.probe.minRTT = min(s.RTT, s.probe.minRTT)
+
 			if common.Debug {
 				s.log.WithFields(logrus.Fields{
 					"oldRTT":      oldRTT,
@@ -207,7 +212,9 @@ func (s *sender) recvAck(ackNo uint32) error {
 
 		// Update window size on the Bandwidth-Delay Product (BDP)
 		// Window Size (packets) = Bandwidth (packets/sec) × RTT (sec)
-		if time.Since(s.probe.timeLastProbe) > 2*time.Second && s.probe.packetCountLastProbe > 0 {
+		if (time.Since(s.probe.timeLastProbe) > 2*time.Second ||
+			(time.Since(s.probe.timeLastProbe) > 100*time.Millisecond && s.probe.totalProbeCount < 20)) &&
+			s.probe.packetCountLastProbe > 0 {
 
 			duration := time.Since(s.probe.timeLastProbe).Seconds()
 			rate := float64(s.probe.packetCountLastProbe) / duration // packets/sec
@@ -221,20 +228,21 @@ func (s *sender) recvAck(ackNo uint32) error {
 			s.probe.totalProbeCount++
 
 			// Makes an average of the measured bandwidth
-			logrus.Debugf("s.probe.rate before %v", s.probe.rate)
-			logrus.Debugf("new rate %v", rate)
 
-			increaseFactor := 1.5
-			//s.probe.rate = ((s.probe.rate * float64(s.probe.totalProbeCount-1)) + (rate * increaseFactor)) / float64(s.probe.totalProbeCount)
+			alpha := 1.2 // overestimation of the window size
 
-			s.probe.rate = (s.probe.rate + rate*increaseFactor) / 2
+			if rate > s.probe.rate*1.5 || s.probe.totalProbeCount < 20 {
+				alpha = 2
+			}
+			if s.probe.rate > rate*1.5 {
+				alpha = 0.8
+			}
 
-			rttSeconds := s.RTT.Seconds()
+			rttSeconds := s.probe.minRTT.Seconds()
 
-			logrus.Debugf("rtt %v", rttSeconds)
-			logrus.Debugf("s.probe.bandwidth %v", s.probe.rate)
+			s.probe.rate = max(rate, s.probe.rate)
 
-			newWindowSize := uint16(s.probe.rate * rttSeconds)
+			newWindowSize := uint16(s.probe.rate * rttSeconds * alpha)
 
 			if newWindowSize <= minWindowSize {
 				newWindowSize = minWindowSize
@@ -248,6 +256,7 @@ func (s *sender) recvAck(ackNo uint32) error {
 
 			s.probe.timeLastProbe = time.Now()
 			s.probe.packetCountLastProbe = 0
+			s.probe.minRTT = time.Second // reset the value for the next probe
 
 			s.log.Debugf("Updated window size to %v", newWindowSize)
 

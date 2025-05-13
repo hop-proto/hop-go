@@ -46,7 +46,7 @@ const maxFragTransPerRTO = 1
 
 // the number of packets in the window for reliable tubes
 const windowSize = 128
-const maxWindowSize = 1200
+const maxWindowSize = 2000
 const minWindowSize = 10
 
 // TODO(hosono) choose this time

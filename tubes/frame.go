@@ -1,11 +1,14 @@
 package tubes
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+)
 
 type frame struct {
 	ackNo      uint32
 	frameNo    uint32
 	dataLength uint16
+	windowSize uint16
 	flags      frameFlags
 	tubeID     byte
 	data       []byte
@@ -108,11 +111,15 @@ func (p *frame) toBytes() []byte {
 	binary.BigEndian.PutUint32(frameNoBytes, p.frameNo)
 	dataLength := []byte{0, 0}
 	binary.BigEndian.PutUint16(dataLength, p.dataLength)
+	windowSizeBytes := []byte{0, 0}
+	binary.BigEndian.PutUint16(windowSizeBytes, p.windowSize)
 	ackNoBytes := []byte{0, 0, 0, 0}
 	binary.BigEndian.PutUint32(ackNoBytes, p.ackNo)
 	return append(
 		[]byte{
-			p.tubeID, flagsToMetaByte(&p.flags), dataLength[0], dataLength[1],
+			p.tubeID, flagsToMetaByte(&p.flags),
+			dataLength[0], dataLength[1],
+			windowSizeBytes[0], windowSizeBytes[1],
 			ackNoBytes[0], ackNoBytes[1], ackNoBytes[2], ackNoBytes[3],
 			frameNoBytes[0], frameNoBytes[1], frameNoBytes[2], frameNoBytes[3],
 		},
@@ -126,9 +133,10 @@ func fromBytes(b []byte) (*frame, error) {
 		tubeID:     b[0],
 		flags:      metaToFlags(b[1]),
 		dataLength: dataLength,
-		data:       append([]byte(nil), b[12:12+dataLength]...),
-		ackNo:      binary.BigEndian.Uint32(b[4:8]),
-		frameNo:    binary.BigEndian.Uint32(b[8:12]),
+		windowSize: binary.BigEndian.Uint16(b[4:6]),
+		ackNo:      binary.BigEndian.Uint32(b[6:10]),
+		frameNo:    binary.BigEndian.Uint32(b[10:14]),
+		data:       append([]byte(nil), b[14:14+dataLength]...),
 	}, nil
 }
 
