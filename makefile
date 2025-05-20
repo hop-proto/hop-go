@@ -63,3 +63,6 @@ port-forwarding-dev: ## launch a container running the server with code mounted 
 
 stop-servers: ## stop all running docker instances
 	docker compose -f ./containers/docker-compose.yml down
+
+acme-server:
+	docker build -f ./acme/acme.dockerfile . -t hop_acme
