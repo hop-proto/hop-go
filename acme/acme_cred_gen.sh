@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 set -exu
 set -o pipefail
 
@@ -6,13 +6,12 @@ set -o pipefail
 
 HOP_DIR=${PWD}
 
-ACME_DIR="${HOP_DIR}/acme"
-CAFILES_OUTPUT_DIR=${ACME_DIR}/${CAFILES_OUTPUT_DIR:="${ACME_DIR}/acme_root/etc/hopd/CAFiles"}
+ACME_DIR=${HOP_DIR}/acme
+HOPD_FILES=${ACME_DIR}/acme_root/etc/hopd
+CAFILES_OUTPUT_DIR=${CAFILES_OUTPUT_DIR:="${ACME_DIR}/acme_root/etc/hopd/CAFiles"}
 
-CA_CERT_OUTPUT_DIR="${}"
-
-echo ${ACME_DIR}
-mkdir -p ${CAFILES_OUTPUT_DIR}
+mkdir -p $CAFILES_OUTPUT_DIR
+mkdir -p $HOPD_FILES
 
 # Generate CAFiles used to sign other certificates and such
 CA_CERT_DNS_NAME=${CA_CERT_DNS_NAME:='super_ca.com'}
@@ -43,10 +42,10 @@ EXAMPLE_CERT_DNS_NAME=${EXAMPLE_CERT_DNS_NAME:='example.com'}
 EXAMPLE_CERT_OUTPUT_DIR=${HOP_DIR}/${EXAMPLE_CERT_OUTPUT_DIR:='./containers'}
 
 ## private keys
-${HOP_GEN} | tee $CA_CERT_OUTPUT_DIR/id_server.pem
+${HOP_GEN} | tee $HOPD_FILES/id_hop.pem
 
 ## public keys
-${HOP_GEN} -private $CA_CERT_OUTPUT_DIR/id_server.pem | tee $EXAMPLE_CERT_OUTPUT_DIR/id_server.pub
+${HOP_GEN} -private $HOPD_FILES/id_hop.pem | tee $HOPD_FILES/id_hop.pub
 
 ## certs
-${HOP_ISSUE} -type leaf -key-file $CAFILES_OUTPUT_DIR/intermediate-key.pem -cert-file $CAFILES_OUTPUT_DIR/intermediate.cert -public-key $EXAMPLE_CERT_OUTPUT_DIR/id_server.pub -dns-name $EXAMPLE_CERT_DNS_NAME | tee $EXAMPLE_CERT_OUTPUT_DIR/id_server.cert
+${HOP_ISSUE} -type leaf -key-file $CAFILES_OUTPUT_DIR/intermediate-key.pem -cert-file $CAFILES_OUTPUT_DIR/intermediate.cert -public-key $HOPD_FILES/id_hop.pub -dns-name $EXAMPLE_CERT_DNS_NAME | tee $HOPD_FILES/id_hop.cert

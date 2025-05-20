@@ -1,1 +1,2 @@
-acme_root/etc/hopd/CAFiles
+acme_root
+!acme_root/etc/hopd/config.toml

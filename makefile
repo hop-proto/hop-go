@@ -61,8 +61,11 @@ port-forwarding-dev: ## launch a container running the server with code mounted 
 	docker compose -f ./containers/docker-compose.yml build hopd-dev
 	docker compose -f ./containers/docker-compose.yml up --detach hop-server pf_service
 
+.PHONY: stop-servers
 stop-servers: ## stop all running docker instances
 	docker compose -f ./containers/docker-compose.yml down
 
-acme-server:
-	docker build -f ./acme/acme.dockerfile . -t hop_acme
+.PHONY: acme-server
+acme-server: ## start up the acme server in docker
+	./acme/acme_cred_gen.sh
+	docker build -f ./acme/acme.dockerfile . -t hop-acme
