@@ -217,7 +217,6 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 		dataLength: dataLength,
 		frameNo:    u.frameNo.Load(),
 		data:       b,
-		queued:     false,
 	}
 	u.frameNo.Add(1)
 
@@ -253,7 +252,6 @@ func (u *Unreliable) Close() error {
 		dataLength: 0,
 		frameNo:    u.frameNo.Load(),
 		data:       []byte{},
-		queued:     false,
 	}
 	u.frameNo.Add(1)
 

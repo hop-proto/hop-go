@@ -77,7 +77,6 @@ func (r *Reliable) initiate(req bool) {
 			data:       []byte{},
 			dataLength: 0,
 			frameNo:    0,
-			windowSize: r.recvWindow.getWindowSize(),
 			flags: frameFlags{
 				REQ:  req,
 				RESP: !req,
@@ -146,6 +145,9 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 		(pkt.dataLength == 0 && (ackNo != lastAckNo || pkt.frameNo != lastFrameNo ||
 			retransmission || pkt.flags.FIN || pkt.flags.RESP)) {
 
+		if pkt.dataLength > 1000 {
+			r.sender.probe.inflightData += int(pkt.dataLength)
+		}
 		r.sendQueue <- pkt.toBytes()
 		r.lastAckSent.Store(ackNo)
 		r.lastFrameSent.Store(pkt.frameNo)
@@ -208,15 +210,15 @@ func (r *Reliable) send() {
 					logrus.Debugf("I send rto with rto %v", r.sender.RTO)
 				}
 
-				rtoFrame.flags.RTR = true
+				rtoFrame.frame.flags.RTR = true
 				rtoFrame.Time = time.Now()
 
-				if !rtoFrame.queued && rtoFrame.dataLength > 0 {
+				if !rtoFrame.queued && rtoFrame.frame.dataLength > 0 {
 					r.sender.unacked++
 					rtoFrame.queued = true
 				}
 
-				r.lastRTRSent.Store(rtoFrame.frameNo)
+				r.lastRTRSent.Store(rtoFrame.frame.frameNo)
 
 				r.sendOneFrame(rtoFrame.frame, true)
 			}
@@ -252,6 +254,8 @@ func (r *Reliable) send() {
 
 					windowFrame.Time = time.Now()
 					windowFrame.queued = true
+					windowFrame.dataDelivered = r.sender.probe.dataDelivered
+					windowFrame.deliveredTime = r.sender.probe.deliveredTime
 
 					safeSend(r.sender.sendQueue, windowFrame.frame)
 
@@ -365,11 +369,6 @@ func (r *Reliable) receive(pkt *frame) error {
 		r.sender.sendEmptyPacket()
 	}
 
-	if pkt.windowSize > 0 && pkt.windowSize != r.recvWindow.windowSize {
-		r.recvWindow.setWindowSize(pkt.windowSize)
-		r.log.Debugf("Updated window size to %v", pkt.windowSize)
-	}
-
 	return err
 }
 
@@ -435,7 +434,6 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 			data:       []byte{},
 			dataLength: 0,
 			frameNo:    0,
-			windowSize: r.recvWindow.getWindowSize(),
 			flags: frameFlags{
 				REQ:  false,
 				RESP: true,
@@ -637,14 +635,14 @@ func (r *Reliable) receiveRTRFrame(frame *frame) {
 		for i := 0; i < numFrames; i++ {
 			rtrFrame := &r.sender.frames[i]
 
-			if rtrFrame.frameNo > ackNo {
+			if rtrFrame.frame.frameNo > ackNo {
 				if common.Debug {
 					r.log.Debugf("receiver: RTR frame not found in valid range, i=%v", i)
 				}
 				break
 			}
 
-			if rtrFrame.frameNo == ackNo {
+			if rtrFrame.frame.frameNo == ackNo {
 				timeSinceQueued := time.Since(rtrFrame.Time)
 				r.scheduleRetransmission(rtrFrame.frame, frame.dataLength, timeSinceQueued, i)
 				break
@@ -723,20 +721,20 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 
 		rtrFullFrame := &r.sender.frames[frameIndex]
 
-		rtrFullFrame.ackNo = r.recvWindow.getAck()
+		rtrFullFrame.frame.ackNo = r.recvWindow.getAck()
 		rtrFullFrame.Time = time.Now()
-		rtrFullFrame.flags.REL = true
+		rtrFullFrame.frame.flags.REL = true
 
 		if common.Debug {
-			r.log.Debugf("Retransmitting frame %d", rtrFullFrame.frameNo)
+			r.log.Debugf("Retransmitting frame %d", rtrFullFrame.frame.frameNo)
 		}
 		r.sender.log.WithFields(logrus.Fields{
-			"Frame N°": rtrFullFrame.frameNo,
+			"Frame N°": rtrFullFrame.frame.frameNo,
 		}).Trace("Retransmission of RTR pkt")
 
-		r.prioritySendQueue <- rtrFullFrame.toBytes()
+		r.prioritySendQueue <- rtrFullFrame.frame.toBytes()
 
-		r.lastRTRSent.Store(rtrFullFrame.frameNo)
+		r.lastRTRSent.Store(rtrFullFrame.frame.frameNo)
 	}
 
 	r.pendingRTRTimers.Delete(rtrFrame.frameNo)

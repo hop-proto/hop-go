@@ -22,8 +22,6 @@ type receiver struct {
 	ackNo uint64
 	// +checklocks:m
 	windowStart uint64
-	// +checklocks:m
-	windowSize uint16
 
 	closed atomic.Bool
 	m      sync.Mutex
@@ -44,7 +42,6 @@ func newReceiver(log *logrus.Entry) *receiver {
 		dataReady:   common.NewDeadlineChan[struct{}](1),
 		buffer:      new(bytes.Buffer),
 		fragments:   make(PriorityQueue, 0),
-		windowSize:  windowSize,
 		windowStart: 1,
 		log:         log.WithField("receiver", ""),
 	}
@@ -60,18 +57,6 @@ func (r *receiver) getAck() uint32 {
 	r.m.Lock()
 	defer r.m.Unlock()
 	return uint32(r.ackNo)
-}
-
-func (r *receiver) getWindowSize() uint16 {
-	r.m.Lock()
-	defer r.m.Unlock()
-	return r.windowSize
-}
-
-func (r *receiver) setWindowSize(window uint16) {
-	r.m.Lock()
-	defer r.m.Unlock()
-	r.windowSize = window
 }
 
 func (r *receiver) getFrameToSendCounter() uint16 {
@@ -112,7 +97,7 @@ func (r *receiver) processIntoBuffer() bool {
 				r.missingFrame.Store(true)
 				// Add to RTR frame.datalength the cumulative missing frames
 				frameToSend := uint16(frag.priority - r.windowStart)
-				if frameToSend <= r.windowSize {
+				if frameToSend <= windowSize {
 					r.frameToSendCounter = frameToSend
 				}
 				if common.Debug {
@@ -168,20 +153,6 @@ func (r *receiver) read(buf []byte) (int, error) {
 	return nbytes, nil
 }
 
-/* Checks if frame is in bounds of receive window. */
-func frameInBounds(wS uint64, wE uint64, f uint64) bool {
-	if wS < wE { // contiguous:  ------WS+++++++WE------
-		if f > wE || f < wS {
-			return false
-		}
-	} else { // wraparound: ++++WE------WS++++
-		if f > wE && f < wS {
-			return false
-		}
-	}
-	return true
-}
-
 // unwrapFrameNo converts 32 bit frame numbers into 64 bit frame numbers.
 // It selects the frame number closest to the current ackNo.
 // +checklocks:r.m
@@ -234,7 +205,6 @@ func (r *receiver) receive(p *frame) (bool, error) {
 	}
 
 	windowStart := r.windowStart
-	windowEnd := r.windowStart + uint64(uint32(r.windowSize))
 	frameNo := r.unwrapFrameNo(p.frameNo)
 
 	var log *logrus.Entry
@@ -242,13 +212,12 @@ func (r *receiver) receive(p *frame) (bool, error) {
 		log = r.log.WithFields(logrus.Fields{
 			"frameNo":     frameNo,
 			"windowStart": windowStart,
-			"windowEnd":   windowEnd,
 		})
 	}
 
 	// The flag ACK must be false to be processed in the heap memory.
 	// Prevent processing of RTR ACK with dataLength > 0
-	if ((p.dataLength > 0 && !p.flags.ACK) || p.flags.FIN) && frameInBounds(windowStart, windowEnd, frameNo) {
+	if ((p.dataLength > 0 && !p.flags.ACK) || p.flags.FIN) && windowStart <= frameNo {
 		heap.Push(&r.fragments, &pqItem{
 			value:    p.data,
 			priority: frameNo,

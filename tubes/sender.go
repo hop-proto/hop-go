@@ -2,6 +2,7 @@ package tubes
 
 import (
 	"io"
+	"math"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -34,6 +35,9 @@ type sender struct {
 	frames []struct {
 		*frame
 		time.Time
+		dataDelivered int
+		deliveredTime time.Time
+		queued        bool
 	}
 
 	// The current buffer of unacknowledged bytes from the sender.
@@ -69,12 +73,33 @@ type sender struct {
 	log *logrus.Entry
 }
 
+type bbrState int
+
+const (
+	Startup bbrState = iota
+	Drain
+	ProbeBW
+	ProbeRTT
+)
+
+// old value 1.25, 0.75, 1...
+var probeBWGainCycle = [...]float64{1.75, 0.75, 1, 1, 1, 1, 1, 1} // 8-phase cycle
+
 type probe struct {
-	timeLastProbe        time.Time
-	rate                 float64
-	packetCountLastProbe int
-	totalProbeCount      int
-	minRTT               time.Duration
+	state          bbrState
+	cycleIndex     int
+	stateStartTime time.Time
+	maxBtlBwFilter float64
+	prevBtlBw      float64
+	minRTT         time.Duration
+	inflightData   int
+	// pacingGain controls how fast packets are sent relative to BtlBw
+	// A pacingGain > 1 increases inflight and decreases packet inter-arrival time
+	pacingGain float64
+	//cwndGain      float64
+	avgDataLength uint16
+	dataDelivered int
+	deliveredTime time.Time
 }
 
 func newSender(log *logrus.Entry) *sender {
@@ -91,11 +116,17 @@ func newSender(log *logrus.Entry) *sender {
 		windowOpen:       make(chan struct{}, 1),
 		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
 		probe: probe{
-			timeLastProbe:        time.Now(),
-			rate:                 0,
-			packetCountLastProbe: 0,
-			totalProbeCount:      0,
-			minRTT:               time.Second,
+			state:      Startup,
+			cycleIndex: 0,
+			pacingGain: 2 / math.Ln2, //  2 / math.Ln2,
+			//cwndGain:       2 / math.Ln2,
+			maxBtlBwFilter: 10000, // default 10kB/s
+			minRTT:         maxRTO,
+			inflightData:   0,
+			avgDataLength:  0,
+			prevBtlBw:      0,
+			dataDelivered:  0,
+			deliveredTime:  time.Now(),
 		},
 		log: log.WithField("sender", ""),
 	}
@@ -133,7 +164,6 @@ func (s *sender) write(b []byte) (int, error) {
 			dataLength: dataLength,
 			frameNo:    s.frameNo,
 			data:       s.buffer[:dataLength],
-			queued:     false,
 		}
 
 		s.frameNo++
@@ -142,7 +172,16 @@ func (s *sender) write(b []byte) (int, error) {
 		s.frames = append(s.frames, struct {
 			*frame
 			time.Time
-		}{&pkt, time.Time{}})
+			dataDelivered int
+			deliveredTime time.Time
+			queued        bool
+		}{
+			frame:         &pkt,
+			Time:          time.Time{},
+			dataDelivered: s.probe.dataDelivered,
+			deliveredTime: s.probe.deliveredTime,
+			queued:        false,
+		})
 		s.m.Unlock()
 	}
 
@@ -176,6 +215,7 @@ func (s *sender) recvAck(ackNo uint32) error {
 	windowOpen := s.ackNo < newAckNo
 
 	for s.ackNo < newAckNo {
+
 		if !s.frames[0].Time.Equal(time.Time{}) && ackNo == s.frames[0].frame.frameNo+1 && !s.frames[0].flags.RTR {
 			oldRTT := s.RTT
 			measuredRTT := time.Since(s.frames[0].Time)
@@ -200,67 +240,54 @@ func (s *sender) recvAck(ackNo uint32) error {
 				}).Trace("updated rtt")
 			}
 		}
+
+		if s.frames[0].dataLength > 1000 {
+
+			s.probe.dataDelivered += int(s.frames[0].dataLength)
+			s.probe.deliveredTime = time.Now()
+
+			rate := float64(s.probe.dataDelivered-s.frames[0].dataDelivered) / s.probe.deliveredTime.Sub(s.frames[0].deliveredTime).Seconds()
+
+			//s.log.Debugf("abcd rate %v", rate)
+
+			if rate > s.probe.maxBtlBwFilter {
+				s.probe.maxBtlBwFilter = rate
+			} else if rate < 0.5*s.probe.maxBtlBwFilter {
+				s.probe.maxBtlBwFilter = 0.99 * s.probe.maxBtlBwFilter
+			}
+
+			// init
+
+			s.probe.inflightData -= int(s.frames[0].dataLength)
+
+			s.probe.avgDataLength = (s.probe.avgDataLength*7 + s.frames[0].dataLength) / 8
+
+			s.updateBBRState()
+
+			s.updateWindowSize(true)
+
+			/*
+				s.log.Debugf("abcd windowSize %v", s.windowSize)
+				s.log.Debugf("abcd minRTT %v", s.probe.minRTT)
+				s.log.Debugf("abcd dataDelivered %v", s.probe.dataDelivered)
+				s.log.Debugf("abcd deliveredTime %v", s.probe.deliveredTime)
+				s.log.Debugf("abcd inflightData %v", s.probe.inflightData)
+
+			*/
+
+		}
+
 		s.ackNo++
-		s.probe.packetCountLastProbe++
 		s.frames = s.frames[1:]
+
+		//s.windowSize = uint16(s.getCwnd() / float64(s.probe.maxDataLength)) // convert bytes to packets
+
 		if s.unacked > 0 {
 			s.unacked--
 		}
 
 		// Adjust the RTO on the RTT when receive an ACK
 		s.RTO = (s.RTT / 8) * 9
-
-		// Update window size on the Bandwidth-Delay Product (BDP)
-		// Window Size (packets) = Bandwidth (packets/sec) × RTT (sec)
-		if (time.Since(s.probe.timeLastProbe) > 2*time.Second ||
-			(time.Since(s.probe.timeLastProbe) > 100*time.Millisecond && s.probe.totalProbeCount < 20)) &&
-			s.probe.packetCountLastProbe > 0 {
-
-			duration := time.Since(s.probe.timeLastProbe).Seconds()
-			rate := float64(s.probe.packetCountLastProbe) / duration // packets/sec
-
-			// initial loop to evaluate the pace
-			if s.probe.totalProbeCount == 0 {
-				s.probe.rate = rate
-				s.probe.totalProbeCount++
-			}
-
-			s.probe.totalProbeCount++
-
-			// Makes an average of the measured bandwidth
-
-			alpha := 1.2 // overestimation of the window size
-
-			if rate > s.probe.rate*1.5 || s.probe.totalProbeCount < 20 {
-				alpha = 2
-			}
-			if s.probe.rate > rate*1.5 {
-				alpha = 0.8
-			}
-
-			rttSeconds := s.probe.minRTT.Seconds()
-
-			s.probe.rate = max(rate, s.probe.rate)
-
-			newWindowSize := uint16(s.probe.rate * rttSeconds * alpha)
-
-			if newWindowSize <= minWindowSize {
-				newWindowSize = minWindowSize
-			}
-
-			if newWindowSize > maxWindowSize {
-				newWindowSize = maxWindowSize
-			}
-
-			s.windowSize = newWindowSize
-
-			s.probe.timeLastProbe = time.Now()
-			s.probe.packetCountLastProbe = 0
-			s.probe.minRTT = time.Second // reset the value for the next probe
-
-			s.log.Debugf("Updated window size to %v", newWindowSize)
-
-		}
 
 		s.log.WithFields(logrus.Fields{
 			"ack frame No": newAckNo,
@@ -345,7 +372,6 @@ func (s *sender) sendFin() error {
 		dataLength: 0,
 		frameNo:    s.frameNo,
 		data:       []byte{},
-		queued:     false,
 		flags: frameFlags{
 			ACK:  true,
 			FIN:  true,
@@ -360,9 +386,10 @@ func (s *sender) sendFin() error {
 
 	// To properly close the receiver
 	addToSendQueue := false
+	queued := false
 
 	if len(s.frames) == 0 {
-		pkt.queued = true
+		queued = true
 		s.unacked++
 		addToSendQueue = true
 	}
@@ -370,7 +397,16 @@ func (s *sender) sendFin() error {
 	s.frames = append(s.frames, struct {
 		*frame
 		time.Time
-	}{&pkt, time.Time{}})
+		dataDelivered int
+		deliveredTime time.Time
+		queued        bool
+	}{
+		frame:         &pkt,
+		Time:          time.Time{},
+		dataDelivered: s.probe.dataDelivered,
+		deliveredTime: s.probe.deliveredTime,
+		queued:        queued,
+	})
 
 	if addToSendQueue {
 		s.sendQueue <- &pkt
@@ -383,4 +419,100 @@ func (s *sender) getWindowSize() uint16 {
 	s.m.Lock()
 	defer s.m.Unlock()
 	return s.windowSize
+}
+
+// RTProp -> (min RTT withing probing window)
+// BtlBw -> max DR in bw window
+
+// Update window size on the Bandwidth-Delay Product (BDP)
+// Inflight (bytes) = Bandwidth (bytes/sec) × RTT (sec)
+func (s *sender) updateBBRState() {
+	now := time.Now()
+
+	switch s.probe.state {
+
+	// Startup -> Binary search of the rate space. This finds BtlBw very quickly (log2BDP round trips)
+	case Startup:
+		if s.probe.maxBtlBwFilter >= s.probe.prevBtlBw*1.25 {
+			s.probe.prevBtlBw = s.probe.maxBtlBwFilter
+			s.probe.stateStartTime = now
+			s.updateWindowSize(false)
+
+			// plateau in BtlBw estimate (3 round-trips where newDr < DR * 1.25) => enter in drain phase
+		} else if now.Sub(s.probe.stateStartTime) > 5*s.RTT {
+			s.enterDrain()
+			logrus.Debugf("window %v", s.windowSize)
+		}
+
+	case Drain:
+		// Goal number of packets in flight matches the estimated BDP -> ProbeBW
+		if s.probe.inflightData <= int(s.getBDP()) {
+			s.log.Debugf("I switch to ProbeBW")
+			s.enterProbeBW()
+		}
+
+	case ProbeBW:
+		// 8 phase cycle pacingGain -> 5/4, 3/4, 1, 1, 1, 1, 1, 1
+		if now.Sub(s.probe.stateStartTime) >= s.RTT {
+			s.probe.cycleIndex = (s.probe.cycleIndex + 1) % len(probeBWGainCycle)
+			//s.probe.pacingGain = probeBWGainCycle[s.probe.cycleIndex]
+			s.probe.stateStartTime = now
+		}
+
+	case ProbeRTT:
+		if now.Sub(s.probe.stateStartTime) > 200*time.Millisecond {
+			s.log.Debugf("I switch to ProbeBW from RTT")
+			s.probe.minRTT = s.RTT
+			s.enterProbeBW()
+			logrus.Debugf("window %v", s.windowSize)
+		}
+	}
+
+	// ProbeRTT -> duration > 10 seconds since last  -> cwndGain to 4 packets for at least 200 ms and one round trip
+	if now.Sub(s.probe.stateStartTime) > 10*time.Second {
+		s.enterProbeRTT()
+		logrus.Debugf("window %v", s.windowSize)
+	}
+}
+
+// Drain pacingGain = 1/pacingGainStartup -> empty the queue
+func (s *sender) enterDrain() {
+	s.log.Debugf("I switch to Drain")
+	s.probe.state = Drain
+	s.probe.pacingGain = 1.0 / (2 / math.Ln2)
+	//s.probe.cwndGain = 2 / math.Ln2
+	s.probe.stateStartTime = time.Now()
+}
+
+func (s *sender) enterProbeBW() {
+	s.probe.state = ProbeBW
+	s.probe.pacingGain = probeBWGainCycle[0]
+	//s.probe.cwndGain = 2.0 // BBR default for ProbeBW
+	s.probe.stateStartTime = time.Now()
+	s.probe.cycleIndex = 0
+}
+
+func (s *sender) enterProbeRTT() {
+	s.probe.state = ProbeRTT
+	s.probe.pacingGain = 1.0
+	//s.probe.cwndGain = 0.75
+	s.probe.stateStartTime = time.Now()
+}
+
+func (s *sender) getBDP() float64 {
+	return s.probe.maxBtlBwFilter * s.probe.minRTT.Seconds()
+}
+
+func (s *sender) getPacing() float64 {
+	return s.probe.pacingGain * s.getBDP()
+}
+
+func (s *sender) updateWindowSize(drain bool) {
+	if drain && s.probe.inflightData > int(s.windowSize*s.probe.avgDataLength) {
+		// Only update the window size if the window is drained
+		return
+	}
+
+	newWindowSize := uint16(s.getPacing() / float64(s.probe.avgDataLength))
+	s.windowSize = min(newWindowSize, 1000)
 }

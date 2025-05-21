@@ -12,9 +12,6 @@ type frame struct {
 	flags      frameFlags
 	tubeID     byte
 	data       []byte
-	// To cover the case where the frame is queued
-	// by the reliable tube but the window shifts
-	queued bool
 }
 
 type initiateFrame struct {
