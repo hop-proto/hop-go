@@ -95,8 +95,11 @@ type probe struct {
 	inflightData   int
 	// pacingGain controls how fast packets are sent relative to BtlBw
 	// A pacingGain > 1 increases inflight and decreases packet inter-arrival time
-	pacingGain float64
-	//cwndGain      float64
+	// The usage that I want is for the congestion window as we are not implementing any pacing for now
+	// However, the number used for the cwnd might be similar to the pacing gain as it acts as a larger
+	// in flight data. TBD
+	//pacingGain float64
+	cwndGain      float64
 	avgDataLength uint16
 	dataDelivered int
 	deliveredTime time.Time
@@ -118,8 +121,8 @@ func newSender(log *logrus.Entry) *sender {
 		probe: probe{
 			state:      Startup,
 			cycleIndex: 0,
-			pacingGain: 2 / math.Ln2, //  2 / math.Ln2,
-			//cwndGain:       2 / math.Ln2,
+			//pacingGain: 2 / math.Ln2, //  2 / math.Ln2,
+			cwndGain:       2 / math.Ln2,
 			maxBtlBwFilter: 10000, // default 10kB/s
 			minRTT:         maxRTO,
 			inflightData:   0,
@@ -479,23 +482,25 @@ func (s *sender) updateBBRState() {
 func (s *sender) enterDrain() {
 	s.log.Debugf("I switch to Drain")
 	s.probe.state = Drain
-	s.probe.pacingGain = 1.0 / (2 / math.Ln2)
-	//s.probe.cwndGain = 2 / math.Ln2
+	//s.probe.pacingGain = 1.0 / (2 / math.Ln2)
+	// So here in bbr v1 for the drain, they are keeping the same window size but pacing them very slowly
+	// How would we do without a pacing for the drain
+	s.probe.cwndGain = 2 / math.Ln2 // -> lower the pace with a smaller window size?
 	s.probe.stateStartTime = time.Now()
 }
 
 func (s *sender) enterProbeBW() {
 	s.probe.state = ProbeBW
-	s.probe.pacingGain = probeBWGainCycle[0]
-	//s.probe.cwndGain = 2.0 // BBR default for ProbeBW
+	//s.probe.pacingGain = probeBWGainCycle[0] -> here same, the probBW is not great without pacing
+	s.probe.cwndGain = 2.0 // BBR default for ProbeBW
 	s.probe.stateStartTime = time.Now()
 	s.probe.cycleIndex = 0
 }
 
 func (s *sender) enterProbeRTT() {
 	s.probe.state = ProbeRTT
-	s.probe.pacingGain = 1.0
-	//s.probe.cwndGain = 0.75
+	//s.probe.pacingGain = 1.0
+	s.probe.cwndGain = 0.75 // -> this is actually shrinking down the window size
 	s.probe.stateStartTime = time.Now()
 }
 
@@ -503,8 +508,8 @@ func (s *sender) getBDP() float64 {
 	return s.probe.maxBtlBwFilter * s.probe.minRTT.Seconds()
 }
 
-func (s *sender) getPacing() float64 {
-	return s.probe.pacingGain * s.getBDP()
+func (s *sender) getCwnd() float64 {
+	return s.probe.cwndGain * s.getBDP()
 }
 
 func (s *sender) updateWindowSize(drain bool) {
@@ -513,6 +518,6 @@ func (s *sender) updateWindowSize(drain bool) {
 		return
 	}
 
-	newWindowSize := uint16(s.getPacing() / float64(s.probe.avgDataLength))
+	newWindowSize := uint16(s.getCwnd() / float64(s.probe.avgDataLength))
 	s.windowSize = min(newWindowSize, 1000)
 }
