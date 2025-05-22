@@ -2,6 +2,7 @@ package tubes
 
 import (
 	"encoding/binary"
+	"time"
 )
 
 type frame struct {
@@ -12,6 +13,8 @@ type frame struct {
 	flags      frameFlags
 	tubeID     byte
 	data       []byte
+	// Time is used to calculate the RTT
+	time time.Time
 }
 
 type initiateFrame struct {

@@ -34,7 +34,6 @@ type sender struct {
 	// along with the time when they were sent
 	frames []struct {
 		*frame
-		time.Time
 		dataDelivered int
 		deliveredTime time.Time
 		queued        bool
@@ -98,7 +97,7 @@ type probe struct {
 	// The usage that I want is for the congestion window as we are not implementing any pacing for now
 	// However, the number used for the cwnd might be similar to the pacing gain as it acts as a larger
 	// in flight data. TBD
-	//pacingGain float64
+	pacingGain    float64
 	cwndGain      float64
 	avgDataLength uint16
 	dataDelivered int
@@ -119,9 +118,9 @@ func newSender(log *logrus.Entry) *sender {
 		windowOpen:       make(chan struct{}, 1),
 		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
 		probe: probe{
-			state:      Startup,
-			cycleIndex: 0,
-			//pacingGain: 2 / math.Ln2, //  2 / math.Ln2,
+			state:          Startup,
+			cycleIndex:     0,
+			pacingGain:     2 / math.Ln2, //  2 / math.Ln2,
 			cwndGain:       2 / math.Ln2,
 			maxBtlBwFilter: 10000, // default 10kB/s
 			minRTT:         maxRTO,
@@ -174,13 +173,11 @@ func (s *sender) write(b []byte) (int, error) {
 		s.m.Lock()
 		s.frames = append(s.frames, struct {
 			*frame
-			time.Time
 			dataDelivered int
 			deliveredTime time.Time
 			queued        bool
 		}{
 			frame:         &pkt,
-			Time:          time.Time{},
 			dataDelivered: s.probe.dataDelivered,
 			deliveredTime: s.probe.deliveredTime,
 			queued:        false,
@@ -219,9 +216,9 @@ func (s *sender) recvAck(ackNo uint32) error {
 
 	for s.ackNo < newAckNo {
 
-		if !s.frames[0].Time.Equal(time.Time{}) && ackNo == s.frames[0].frame.frameNo+1 && !s.frames[0].flags.RTR {
+		if !s.frames[0].frame.time.Equal(time.Time{}) && ackNo == s.frames[0].frame.frameNo+1 && !s.frames[0].flags.RTR {
 			oldRTT := s.RTT
-			measuredRTT := time.Since(s.frames[0].Time)
+			measuredRTT := time.Since(s.frames[0].frame.time)
 
 			// RTT Upper bound
 			measuredRTT = min(measuredRTT, s.RTT*2)
@@ -251,8 +248,6 @@ func (s *sender) recvAck(ackNo uint32) error {
 
 			rate := float64(s.probe.dataDelivered-s.frames[0].dataDelivered) / s.probe.deliveredTime.Sub(s.frames[0].deliveredTime).Seconds()
 
-			//s.log.Debugf("abcd rate %v", rate)
-
 			if rate > s.probe.maxBtlBwFilter {
 				s.probe.maxBtlBwFilter = rate
 			} else if rate < 0.5*s.probe.maxBtlBwFilter {
@@ -269,14 +264,14 @@ func (s *sender) recvAck(ackNo uint32) error {
 
 			s.updateWindowSize(true)
 
-			/*
-				s.log.Debugf("abcd windowSize %v", s.windowSize)
-				s.log.Debugf("abcd minRTT %v", s.probe.minRTT)
-				s.log.Debugf("abcd dataDelivered %v", s.probe.dataDelivered)
-				s.log.Debugf("abcd deliveredTime %v", s.probe.deliveredTime)
-				s.log.Debugf("abcd inflightData %v", s.probe.inflightData)
-
-			*/
+			s.log.Debugf("abcd windowSize %v", s.windowSize)
+			s.log.Debugf("abcd minRTT %v", s.probe.minRTT)
+			s.log.Debugf("abcd RTT %v", s.RTT)
+			s.log.Debugf("abcd dataDelivered %v", s.probe.dataDelivered)
+			s.log.Debugf("abcd deliveredTime %v", s.probe.deliveredTime)
+			s.log.Debugf("abcd inflightData %v", s.probe.inflightData)
+			s.log.Debugf("abcd rate %v", rate)
+			s.log.Debugf("abcd cycleGain %v", s.probe.pacingGain)
 
 		}
 
@@ -399,13 +394,11 @@ func (s *sender) sendFin() error {
 
 	s.frames = append(s.frames, struct {
 		*frame
-		time.Time
 		dataDelivered int
 		deliveredTime time.Time
 		queued        bool
 	}{
 		frame:         &pkt,
-		Time:          time.Time{},
 		dataDelivered: s.probe.dataDelivered,
 		deliveredTime: s.probe.deliveredTime,
 		queued:        queued,
@@ -442,7 +435,7 @@ func (s *sender) updateBBRState() {
 			s.updateWindowSize(false)
 
 			// plateau in BtlBw estimate (3 round-trips where newDr < DR * 1.25) => enter in drain phase
-		} else if now.Sub(s.probe.stateStartTime) > 5*s.RTT {
+		} else if now.Sub(s.probe.stateStartTime) > 2*s.RTT {
 			s.enterDrain()
 			logrus.Debugf("window %v", s.windowSize)
 		}
@@ -458,7 +451,7 @@ func (s *sender) updateBBRState() {
 		// 8 phase cycle pacingGain -> 5/4, 3/4, 1, 1, 1, 1, 1, 1
 		if now.Sub(s.probe.stateStartTime) >= s.RTT {
 			s.probe.cycleIndex = (s.probe.cycleIndex + 1) % len(probeBWGainCycle)
-			//s.probe.pacingGain = probeBWGainCycle[s.probe.cycleIndex]
+			s.probe.pacingGain = probeBWGainCycle[s.probe.cycleIndex]
 			s.probe.stateStartTime = now
 		}
 
@@ -482,24 +475,24 @@ func (s *sender) updateBBRState() {
 func (s *sender) enterDrain() {
 	s.log.Debugf("I switch to Drain")
 	s.probe.state = Drain
-	//s.probe.pacingGain = 1.0 / (2 / math.Ln2)
+	s.probe.pacingGain = 1.0 / (2 / math.Ln2)
 	// So here in bbr v1 for the drain, they are keeping the same window size but pacing them very slowly
 	// How would we do without a pacing for the drain
-	s.probe.cwndGain = 2 / math.Ln2 // -> lower the pace with a smaller window size?
+	s.probe.cwndGain = 2 / math.Ln2 //2 / math.Ln2 // -> lower the pace with a smaller window size?
 	s.probe.stateStartTime = time.Now()
 }
 
 func (s *sender) enterProbeBW() {
 	s.probe.state = ProbeBW
-	//s.probe.pacingGain = probeBWGainCycle[0] -> here same, the probBW is not great without pacing
-	s.probe.cwndGain = 2.0 // BBR default for ProbeBW
+	s.probe.pacingGain = probeBWGainCycle[0] //-> here same, the probBW is not great without pacing
+	s.probe.cwndGain = 2.0                   // BBR default for ProbeBW
 	s.probe.stateStartTime = time.Now()
 	s.probe.cycleIndex = 0
 }
 
 func (s *sender) enterProbeRTT() {
 	s.probe.state = ProbeRTT
-	//s.probe.pacingGain = 1.0
+	s.probe.pacingGain = 1.0
 	s.probe.cwndGain = 0.75 // -> this is actually shrinking down the window size
 	s.probe.stateStartTime = time.Now()
 }

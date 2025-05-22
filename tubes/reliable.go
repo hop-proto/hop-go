@@ -55,6 +55,7 @@ type Reliable struct {
 	initRecv         chan struct{}
 	initDone         chan struct{}
 	sendDone         chan struct{}
+	nextSendTime     time.Time
 	l                sync.Mutex
 	log              *logrus.Entry
 }
@@ -104,6 +105,8 @@ func (r *Reliable) initiate(req bool) {
 
 	go r.send()
 
+	r.nextSendTime = time.Now()
+
 	r.l.Lock() // required for checklocks
 	r.sender.closed.Store(false)
 	r.l.Unlock()
@@ -114,6 +117,7 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 	lastFrameNo := r.lastFrameSent.Load()
 	lastAckNo := r.lastAckSent.Load()
 	senderWindowSize := r.sender.getWindowSize()
+	pkt.time = time.Now()
 
 	if senderWindowSize == 0 {
 		senderWindowSize = windowSize
@@ -148,7 +152,26 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 		if pkt.dataLength > 1000 {
 			r.sender.probe.inflightData += int(pkt.dataLength)
 		}
-		r.sendQueue <- pkt.toBytes()
+
+		if len(r.sender.frames) > 5 && pkt.dataLength > 1000 {
+			// Calculate pacing interval
+			bandwidth := r.sender.probe.pacingGain * r.sender.probe.maxBtlBwFilter // bytes/sec
+			if bandwidth > 0 {
+				intervalSeconds := float64(pkt.dataLength) / bandwidth
+				r.nextSendTime = time.Now().Add(time.Duration(intervalSeconds * float64(time.Second)))
+			}
+
+			waitDuration := time.Until(r.nextSendTime)
+			if waitDuration > 0 {
+				time.Sleep(waitDuration)
+			}
+
+			pkt.time = time.Now()
+			r.sendQueue <- pkt.toBytes()
+		} else {
+			r.sendQueue <- pkt.toBytes()
+		}
+
 		r.lastAckSent.Store(ackNo)
 		r.lastFrameSent.Store(pkt.frameNo)
 	}
@@ -211,7 +234,7 @@ func (r *Reliable) send() {
 				}
 
 				rtoFrame.frame.flags.RTR = true
-				rtoFrame.Time = time.Now()
+				rtoFrame.frame.time = time.Now()
 
 				if !rtoFrame.queued && rtoFrame.frame.dataLength > 0 {
 					r.sender.unacked++
@@ -252,7 +275,6 @@ func (r *Reliable) send() {
 						"unacked":  r.sender.unacked,
 					}).Trace("Window sending")
 
-					windowFrame.Time = time.Now()
 					windowFrame.queued = true
 					windowFrame.dataDelivered = r.sender.probe.dataDelivered
 					windowFrame.deliveredTime = r.sender.probe.deliveredTime
@@ -643,7 +665,7 @@ func (r *Reliable) receiveRTRFrame(frame *frame) {
 			}
 
 			if rtrFrame.frame.frameNo == ackNo {
-				timeSinceQueued := time.Since(rtrFrame.Time)
+				timeSinceQueued := time.Since(rtrFrame.frame.time)
 				r.scheduleRetransmission(rtrFrame.frame, frame.dataLength, timeSinceQueued, i)
 				break
 			}
@@ -722,7 +744,7 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 		rtrFullFrame := &r.sender.frames[frameIndex]
 
 		rtrFullFrame.frame.ackNo = r.recvWindow.getAck()
-		rtrFullFrame.Time = time.Now()
+		rtrFullFrame.frame.time = time.Now()
 		rtrFullFrame.frame.flags.REL = true
 
 		if common.Debug {
