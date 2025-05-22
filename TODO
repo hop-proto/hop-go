@@ -1,0 +1,49 @@
+Can we use /usr/bin/security to interface with Keychain?
+- Create a `hop` keychain
+- Insert an X25519 key
+
+Maybe just skip all of this
+- How do we prove ownership of X25519 key to vend?
+  - Vend provides a random challenge
+  - Agent does a kex with it?
+- Another signature from device key?
+
+OK
+- Just have the agent send the key, given some JS in the app to localhost?
+- HTTP API?
+- How do you get origin binding from an HTTP API?
+- You can get an Origin: header from a ws:// connection
+- This could be spoofed by an app, but not by arbitrary websites
+  - Include the target origin in the config
+  - Can we do an auth grant here?
+
+So if we were doing a websocket flow:
+- expected Origin is listed in config
+- hop-agent listens on some web-socket port
+  - maybe also in config?
+- after OAuth, vend hits ws URL
+  - maybe include a static secret? (probably not)
+  - could define an API with the hop-vend server where the client reaches out to auth the request
+  - but then the server needs state, wait maybe it doesn't
+  - can we do this without the server needing state?
+    - only the client needs to store it technically?
+    - the server needs to prove itself to the client when it makes the call
+       - could just provide a key over the boostrapping call
+
+
+Hop Agent
+- Configure vend server for host pattern
+  - Includes an HTTPS URL
+  - Optionally sets ws:// port
+- Hop Agent, on launch or config change:
+  - hits the hop-vend server over HTTPS
+  - hop-vend returns a AGENT_AUTH_KEY
+
+User goes to Hop Vend to get a cert
+- Hop Vend does SSO with $IDP
+- After $IDP
+  - Hop Vend sends a ping to hop-agent ws
+  - hop-agent verifies origin, sends back a challenge and a $CLIENT_PUBLIC
+  - Hop Vend signs some form of the challenge (domain separation, include origin), sends another challenge
+  - hop agent proves ownership of some private key corresponding with $CLIENT_PUBLIC using the challenge from vend
+  - hop vend issues the certificate
