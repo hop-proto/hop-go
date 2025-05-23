@@ -8,7 +8,8 @@ HOP_DIR=${PWD}
 
 ACME_DIR=${HOP_DIR}/acme
 HOPD_FILES=${ACME_DIR}/acme_root/etc/hopd
-CAFILES_OUTPUT_DIR=${CAFILES_OUTPUT_DIR:="${ACME_DIR}/acme_root/etc/hopd/CAFiles"}
+# CAFILES_OUTPUT_DIR=${CAFILES_OUTPUT_DIR:="${ACME_DIR}/acme_root/etc/hopd/CAFiles"}
+CAFILES_OUTPUT_DIR=$HOPD_FILES
 
 mkdir -p $CAFILES_OUTPUT_DIR
 mkdir -p $HOPD_FILES
@@ -36,11 +37,6 @@ ${HOP_ISSUE} -type root -key-file $CAFILES_OUTPUT_DIR/root-key.pem -dns-name $CA
 ${HOP_ISSUE} -type intermediate -key-file $CAFILES_OUTPUT_DIR/root-key.pem -cert-file $CAFILES_OUTPUT_DIR/root.cert -public-key $CAFILES_OUTPUT_DIR/intermediate.pub -dns-name $CA_CERT_DNS_NAME | tee $CAFILES_OUTPUT_DIR/intermediate.cert
                    
 
-# Generate files for make serve-dev (simple hop connection)
-## server
-EXAMPLE_CERT_DNS_NAME=${EXAMPLE_CERT_DNS_NAME:='example.com'}
-EXAMPLE_CERT_OUTPUT_DIR=${HOP_DIR}/${EXAMPLE_CERT_OUTPUT_DIR:='./containers'}
-
 ## private keys
 ${HOP_GEN} | tee $HOPD_FILES/id_hop.pem
 
@@ -48,4 +44,4 @@ ${HOP_GEN} | tee $HOPD_FILES/id_hop.pem
 ${HOP_GEN} -private $HOPD_FILES/id_hop.pem | tee $HOPD_FILES/id_hop.pub
 
 ## certs
-${HOP_ISSUE} -type leaf -key-file $CAFILES_OUTPUT_DIR/intermediate-key.pem -cert-file $CAFILES_OUTPUT_DIR/intermediate.cert -public-key $HOPD_FILES/id_hop.pub -dns-name $EXAMPLE_CERT_DNS_NAME | tee $HOPD_FILES/id_hop.cert
+${HOP_ISSUE} -type leaf -key-file $CAFILES_OUTPUT_DIR/intermediate-key.pem -cert-file $CAFILES_OUTPUT_DIR/intermediate.cert -public-key $HOPD_FILES/id_hop.pub -dns-name $CA_CERT_DNS_NAME | tee $HOPD_FILES/id_hop.cert

@@ -69,3 +69,7 @@ stop-servers: ## stop all running docker instances
 acme-server: ## start up the acme server in docker
 	./acme/acme_cred_gen.sh
 	docker build -f ./acme/acme.dockerfile . -t hop-acme
+
+.PHONY: run-acme-server
+run-acme-server:
+	docker run -p 7777:77/udp -t hop-acme:latest

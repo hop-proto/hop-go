@@ -1,0 +1,9 @@
+[Global]
+Key = "containers/id_client.pem"
+Certificate = "containers/id_client.cert"
+CAFiles = ["acme/acme_root/etc/hopd/intermediate.cert", "acme/acme_root/etc/hopd/root.cert"]
+
+[[Hosts]]
+Patterns = ["127.0.0.1"]
+ServerName = "super_ca.com"
+Port = 7777

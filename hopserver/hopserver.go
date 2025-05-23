@@ -201,7 +201,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 					logrus.Errorf("server: error parsing authorized keys file %s: %s", authKeysPath, err)
 					continue
 				}
-				for _, key := range authKeys {
+				for _, key := range authKeys.Keys {
 					logrus.Debugf("server: added key %s to authkeys set", key.String())
 					tconf.ClientVerify.AuthKeys.AddKey(key)
 				}
