@@ -7,6 +7,8 @@ import (
 	"hop.computer/hop/certs"
 )
 
+const ChallengeLen int = 32
+
 // TODO(hosono) maybe this should be signed?
 type DomainNameAndKey struct {
 	DomainName string
