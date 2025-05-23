@@ -122,11 +122,11 @@ func newSender(log *logrus.Entry) *sender {
 			cycleIndex:     0,
 			pacingGain:     2 / math.Ln2, //  2 / math.Ln2,
 			cwndGain:       2 / math.Ln2,
-			maxBtlBwFilter: 10000, // default 10kB/s
-			minRTT:         maxRTO,
+			maxBtlBwFilter: 1, // not 0
+			minRTT:         initialRTT,
 			inflightData:   0,
 			avgDataLength:  0,
-			prevBtlBw:      0,
+			prevBtlBw:      1, // not 0
 			dataDelivered:  0,
 			deliveredTime:  time.Now(),
 		},
@@ -230,6 +230,11 @@ func (s *sender) recvAck(ackNo uint32) error {
 				s.RTT = minRTT
 			}
 
+			if s.probe.dataDelivered == 0 {
+				s.probe.minRTT = measuredRTT
+			}
+
+			//s.log.Debugf("abcd RTT %v", measuredRTT)
 			s.probe.minRTT = min(s.RTT, s.probe.minRTT)
 
 			if common.Debug {
@@ -243,12 +248,17 @@ func (s *sender) recvAck(ackNo uint32) error {
 
 		if s.frames[0].dataLength > 1000 {
 
+			if s.probe.dataDelivered == 0 {
+				s.probe.avgDataLength = s.frames[0].dataLength
+				s.probe.stateStartTime = time.Now()
+			}
+
 			s.probe.dataDelivered += int(s.frames[0].dataLength)
 			s.probe.deliveredTime = time.Now()
 
 			rate := float64(s.probe.dataDelivered-s.frames[0].dataDelivered) / s.probe.deliveredTime.Sub(s.frames[0].deliveredTime).Seconds()
 
-			if rate > s.probe.maxBtlBwFilter {
+			if rate > s.probe.maxBtlBwFilter && s.probe.dataDelivered > int(s.frames[0].dataLength) {
 				s.probe.maxBtlBwFilter = rate
 			} else if rate < 0.5*s.probe.maxBtlBwFilter {
 				s.probe.maxBtlBwFilter = 0.99 * s.probe.maxBtlBwFilter
@@ -262,16 +272,21 @@ func (s *sender) recvAck(ackNo uint32) error {
 
 			s.updateBBRState()
 
-			s.updateWindowSize(true)
+			if s.probe.state != Startup {
+				s.updateWindowSize(true)
+			}
 
-			s.log.Debugf("abcd windowSize %v", s.windowSize)
-			s.log.Debugf("abcd minRTT %v", s.probe.minRTT)
-			s.log.Debugf("abcd RTT %v", s.RTT)
-			s.log.Debugf("abcd dataDelivered %v", s.probe.dataDelivered)
-			s.log.Debugf("abcd deliveredTime %v", s.probe.deliveredTime)
-			s.log.Debugf("abcd inflightData %v", s.probe.inflightData)
-			s.log.Debugf("abcd rate %v", rate)
-			s.log.Debugf("abcd cycleGain %v", s.probe.pacingGain)
+			/*
+				s.log.Debugf("abcd windowSize %v", s.windowSize)
+				s.log.Debugf("abcd minRTT %v", s.probe.minRTT)
+				// and RTT
+				s.log.Debugf("abcd dataDelivered %v", s.probe.dataDelivered)
+				s.log.Debugf("abcd deliveredTime %v", s.probe.deliveredTime)
+				s.log.Debugf("abcd inflightData %v", s.probe.inflightData)
+				s.log.Debugf("abcd rate %v", rate)
+				s.log.Debugf("abcd cycleGain %v", s.probe.pacingGain)
+
+			*/
 
 		}
 
@@ -437,7 +452,7 @@ func (s *sender) updateBBRState() {
 			// plateau in BtlBw estimate (3 round-trips where newDr < DR * 1.25) => enter in drain phase
 		} else if now.Sub(s.probe.stateStartTime) > 2*s.RTT {
 			s.enterDrain()
-			logrus.Debugf("window %v", s.windowSize)
+			s.updateWindowSize(true)
 		}
 
 	case Drain:
@@ -512,5 +527,8 @@ func (s *sender) updateWindowSize(drain bool) {
 	}
 
 	newWindowSize := uint16(s.getCwnd() / float64(s.probe.avgDataLength))
+	if newWindowSize < 10 {
+		newWindowSize = 10
+	}
 	s.windowSize = min(newWindowSize, 1000)
 }

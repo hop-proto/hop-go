@@ -156,7 +156,7 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 		if len(r.sender.frames) > 5 && pkt.dataLength > 1000 {
 			// Calculate pacing interval
 			bandwidth := r.sender.probe.pacingGain * r.sender.probe.maxBtlBwFilter // bytes/sec
-			if bandwidth > 0 {
+			if bandwidth > 0 && r.sender.probe.dataDelivered > 100000 {
 				intervalSeconds := float64(pkt.dataLength) / bandwidth
 				r.nextSendTime = time.Now().Add(time.Duration(intervalSeconds * float64(time.Second)))
 			}
