@@ -17,13 +17,13 @@ RUN go mod download
 COPY . .
 RUN go build -tags debug -o /bin/hopd hop.computer/hop/cmd/hopd
 RUN go build -o /bin/hop hop.computer/hop/cmd/hop
-RUN go build -o /bin/acme-client hop.computer/hop/cmd/acme-client
+RUN go build -o /bin/acme-server hop.computer/hop/cmd/acme-server
 
 # Set up users
 RUN useradd -m acme -s /bin/bash -g sudo -p "" 
-RUN useradd -m acme_client -s /bin/acme-client -p ""
-RUN mkdir -p /home/acme_client/.hop
-RUN echo '*' >> /home/acme_client/.hop/authorized_keys
+RUN useradd -m acme_server -s /bin/acme-server -p ""
+RUN mkdir -p /home/acme_server/.hop
+RUN echo '*' >> /home/acme_server/.hop/authorized_keys
 
 COPY acme/acme_root /
 
