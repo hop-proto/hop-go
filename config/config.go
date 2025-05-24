@@ -56,6 +56,8 @@ type ServerConfig struct {
 
 	// Currently this option is only used by the acme client, but it setting the key without ever touching the disk seems like a useful property
 	TransportCert *transport.Certificate
+	// Only used for acme
+	Challenge string
 }
 
 // HostConfigOptional contains a definition of a host pattern in a client

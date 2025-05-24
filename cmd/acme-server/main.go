@@ -1,8 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -25,7 +25,6 @@ func checkErr(err error) {
 
 func main() {
 	logrus.SetLevel(logrus.DebugLevel)
-
 	// Step 1: Read domain to be requested and the public key that it will be advertized with
 	fmt.Fprintln(os.Stderr, "Server: Step 1")
 	domainAndKey := acme.DomainNameAndKey{}
@@ -38,12 +37,13 @@ func main() {
 	fmt.Fprintln(os.Stderr, "Server: Step 2")
 	challenge := make([]byte, acme.ChallengeLen)
 	rand.Read(challenge)
+	challengeString := base64.StdEncoding.EncodeToString(challenge)
 
 	keyPair := keys.GenerateNewX25519KeyPair()
 
 	_, err = os.Stdout.Write(keyPair.Public[:])
 	checkErr(err)
-	_, err = os.Stdout.Write(challenge)
+	_, err = os.Stdout.Write([]byte(challengeString))
 	checkErr(err)
 
 	// Step 3: Wait for confirmation that challenge is ready
@@ -59,16 +59,18 @@ func main() {
 	// Step 4: CA checks that client controls identifier
 	fmt.Fprintln(os.Stderr, "Server: Step 4")
 	pipeReader, pipeWriter := io.Pipe()
-	var t = true
+	fakeReader, _ := io.Pipe()
 	clientKeys := keys.GenerateNewX25519KeyPair()
+	var t = true
+	var username = acme.AcmeUser
 	hc := &config.HostConfigOptional{
 		AutoSelfSign:   &t,
 		KeyPair:        clientKeys,
 		ServerName:     &domain,
 		Port:           7777,
 		ServerKeyBytes: pubKey,
-		User:           new(string),
-		Input:          nil,
+		User:           &username,
+		Input:          fakeReader,
 		Output:         pipeWriter,
 	}
 	clientConfig := hc.Unwrap()
@@ -83,14 +85,17 @@ func main() {
 		checkErr(err)
 	}()
 
-	challengeResponse := make([]byte, acme.ChallengeLen)
+	challengeResponse := make([]byte, base64.StdEncoding.EncodedLen(acme.ChallengeLen))
 	fmt.Fprintln(os.Stderr, "waiting for client response")
 	_, err = io.ReadFull(pipeReader, challengeResponse)
+	fmt.Fprintln(os.Stderr, "finished pipe read")
 	checkErr(err)
 
-	if !bytes.Equal(challenge, challengeResponse) {
+	if challengeString != string(challengeResponse) {
 		fmt.Fprintf(os.Stderr, "CHALLENGE RESPONSE DID NOT MATCH")
 		os.Exit(2)
+	} else {
+		fmt.Fprintf(os.Stderr, "CHALLENGE MATCHED RESPONSE")
 	}
 
 	// Send confimation back to requester

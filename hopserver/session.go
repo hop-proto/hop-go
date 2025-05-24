@@ -12,6 +12,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/acme"
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/codex"
 	"hop.computer/hop/common"
@@ -68,7 +69,11 @@ func (sess *hopSession) checkAuthorization() bool {
 	sess.usingAuthGrant = false
 	err = sess.server.authorizeKey(username, k)
 	if err != nil {
-		if sess.server.config.EnableAuthgrants != nil && *sess.server.config.EnableAuthgrants {
+		if username == acme.AcmeUser {
+			// TODO Logically, these should use authgrants, that's not set up.
+			// I don't like the idea of letting one username always authenticate on any server
+			// Do not merge until this is fixed
+		} else if sess.server.config.EnableAuthgrants != nil && *sess.server.config.EnableAuthgrants {
 			actions, err := sess.server.authorizeKeyAuthGrant(username, k)
 			if err != nil {
 				logrus.Errorf("rejecting key for %q: %s", username, err)
@@ -244,7 +249,9 @@ func (sess *hopSession) startCodex(t1, t2 *tubes.Reliable) {
 		"TERM=" + termEnv,
 	}
 	var c *exec.Cmd
-	if cmd == "" {
+	if sess.user == acme.AcmeUser {
+		c = exec.Command("/bin/sh", "-c", "echo", sess.server.config.Challenge)
+	} else if cmd == "" {
 		//login(1) starts default shell for user and changes all privileges and environment variables
 		c = exec.Command("login", "-f", sess.user)
 	} else {
@@ -257,7 +264,9 @@ func (sess *hopSession) startCodex(t1, t2 *tubes.Reliable) {
 			Groups: getGroups(user.Uid()),
 		}
 	}
-	c.Env = env
+	if sess.user != acme.AcmeUser {
+		c.Env = env
+	}
 	logrus.Infof("Executing: %v", cmd)
 	var f *os.File
 

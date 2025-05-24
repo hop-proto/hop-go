@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/AstromechZA/etcpwdparse"
+	"hop.computer/hop/acme"
 )
 
 // UserHomeDir is an alias for os.UserHomeDir
@@ -29,6 +30,11 @@ var StartCmd = func(c *exec.Cmd) error {
 }
 
 func lookupUser(username string) (*etcpwdparse.EtcPasswdEntry, error) {
+	if username == acme.AcmeUser {
+		passwdLine := fmt.Sprintf("%s:x:1000:1000:Test User:/home/%s:/sbin/nologin", username, username)
+		ent, err := etcpwdparse.ParsePasswdLine(passwdLine)
+		return &ent, err
+	}
 	cache, err := etcpwdparse.NewLoadedEtcPasswdCache()
 	if err != nil {
 		return nil, err

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -44,7 +45,7 @@ func genCerts(domainName string, ourKeys *keys.X25519KeyPair) (root, intermediat
 	return rootCert, intermediateCert, leafCert
 }
 
-func startChallengeServer(domainName string, challenge [32]byte, ourKeys *keys.X25519KeyPair, caPubKey keys.PublicKey) *hopserver.HopServer {
+func startChallengeServer(domainName string, challengeString string, ourKeys *keys.X25519KeyPair, caPubKey keys.PublicKey) *hopserver.HopServer {
 	_, intermediate, leaf := genCerts(domainName, ourKeys)
 	leafBytes, err := leaf.Marshal()
 	checkErr(err)
@@ -57,6 +58,7 @@ func startChallengeServer(domainName string, challenge [32]byte, ourKeys *keys.X
 		HiddenModeVHostNames: []string{domainName},
 		InsecureSkipVerify:   &t,
 		HandshakeTimeout:     time.Minute,
+		Challenge:            challengeString,
 	}
 	b := true
 	sc.EnableAuthorizedKeys = &b
@@ -80,7 +82,6 @@ func startChallengeServer(domainName string, challenge [32]byte, ourKeys *keys.X
 
 func main() {
 	logrus.SetLevel(logrus.DebugLevel)
-
 	domainName := "request.com"
 
 	// Step 1: Send domain name and public key to CA
@@ -95,9 +96,10 @@ func main() {
 
 	// Step 2: Receive public key and challenge from server
 	fmt.Fprintln(os.Stderr, "Step 2")
-	challenge := make([]byte, acme.ChallengeLen)
+	challenge := make([]byte, base64.StdEncoding.EncodedLen(acme.ChallengeLen))
 	_, err = io.ReadFull(os.Stdin, challenge)
 	checkErr(err)
+	challengeString := string(challenge)
 
 	caPubKey := keys.PublicKey{}
 	_, err = io.ReadFull(os.Stdin, caPubKey[:])
@@ -105,7 +107,7 @@ func main() {
 
 	// Step 3: Requester informs CA that challenge is complete
 	fmt.Fprintln(os.Stderr, "Step 3")
-	server := startChallengeServer(domainName, [32]byte(challenge), keyPair, caPubKey)
+	server := startChallengeServer(domainName, challengeString, keyPair, caPubKey)
 	_, err = os.Stdout.Write([]byte{1})
 	checkErr(err)
 

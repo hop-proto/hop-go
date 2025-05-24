@@ -181,7 +181,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 
 	// TODO this code path is only used by the acme server. Make sure this doesn't cause something terrible to happen
 	if hc.KeyPair != nil && hc.AutoSelfSign {
-		leaf = loadLeaf("", true, (*keys.PublicKey)(&hc.KeyPair.Public), hc.HostURL())
+		leaf = loadLeaf("", true, &hc.KeyPair.Public, hc.HostURL())
 		verifyConfig.InsecureSkipVerify = true
 		authenticator = core.InMemoryAuthenticator{
 			X25519KeyPair: hc.KeyPair,

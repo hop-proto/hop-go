@@ -8,6 +8,7 @@ import (
 )
 
 const ChallengeLen int = 32
+const AcmeUser = "reserved_hop_certificate_request_username"
 
 // TODO(hosono) maybe this should be signed?
 type DomainNameAndKey struct {
