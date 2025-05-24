@@ -14,6 +14,7 @@ import (
 
 	"hop.computer/hop/common"
 	"hop.computer/hop/core"
+	"hop.computer/hop/keys"
 	"hop.computer/hop/pkg/glob"
 	"hop.computer/hop/pkg/thunks"
 	"hop.computer/hop/portforwarding"
@@ -67,9 +68,11 @@ type HostConfigOptional struct {
 	CAFiles          []string
 	ServerName       *string
 	ServerKey        *string
+	ServerKeyBytes   [32]byte
 	ServerIPv4       *string
 	ServerIPv6       *string
 	Certificate      *string
+	KeyPair          *keys.X25519KeyPair
 	Cmd              *string // what command to run on connect
 	DisableAgent     *bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
 	Headless         *bool   // run without command
@@ -97,9 +100,11 @@ type HostConfig struct {
 	CAFiles          []string
 	ServerName       string // expected name on server cert
 	ServerKey        string // Server Public key to enable Hidden mode
+	ServerKeyBytes   [32]byte
 	ServerIPv4       string
 	ServerIPv6       string
 	Certificate      string
+	KeyPair          *keys.X25519KeyPair
 	Cmd              string // what command to run on connect
 	DisableAgent     bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
 	Headless         bool   // run without command
@@ -222,9 +227,11 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	if hc.ServerKey != nil {
 		newHC.ServerKey = *hc.ServerKey
 	}
+	newHC.ServerKeyBytes = hc.ServerKeyBytes
 	if hc.Certificate != nil {
 		newHC.Certificate = *hc.Certificate
 	}
+	newHC.KeyPair = hc.KeyPair
 	if hc.Cmd != nil {
 		newHC.Cmd = *hc.Cmd
 	}

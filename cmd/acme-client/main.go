@@ -1,18 +1,20 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
+	"time"
+
+	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/acme"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/config"
-	"hop.computer/hop/transport"
-
-	// "hop.computer/hop/certs"
 	"hop.computer/hop/hopserver"
 	"hop.computer/hop/keys"
+	"hop.computer/hop/transport"
 )
 
 func checkErr(err error) {
@@ -49,7 +51,13 @@ func startChallengeServer(domainName string, challenge [32]byte, ourKeys *keys.X
 	intermediateBytes, err := intermediate.Marshal()
 	checkErr(err)
 
-	sc := &config.ServerConfig{}
+	t := true
+	sc := &config.ServerConfig{
+		ListenAddress:        ":7777",
+		HiddenModeVHostNames: []string{domainName},
+		InsecureSkipVerify:   &t,
+		HandshakeTimeout:     time.Minute,
+	}
 	b := true
 	sc.EnableAuthorizedKeys = &b
 	sc.TransportCert = &transport.Certificate{
@@ -71,6 +79,8 @@ func startChallengeServer(domainName string, challenge [32]byte, ourKeys *keys.X
 }
 
 func main() {
+	logrus.SetLevel(logrus.DebugLevel)
+
 	domainName := "request.com"
 
 	// Step 1: Send domain name and public key to CA
@@ -97,10 +107,18 @@ func main() {
 	fmt.Fprintln(os.Stderr, "Step 3")
 	server := startChallengeServer(domainName, [32]byte(challenge), keyPair, caPubKey)
 	_, err = os.Stdout.Write([]byte{1})
+	checkErr(err)
 
 	// Step 4: CA checks that client controls identifier
 	fmt.Fprintln(os.Stderr, "Step 4")
 
+	var ok byte
+	err = binary.Read(os.Stdin, binary.BigEndian, &ok)
+	checkErr(err)
+	if ok != 1 {
+		err = fmt.Errorf("confirmation was %d instead of 1", ok)
+		checkErr(err)
+	}
 	server.Close()
 
 	// Step 5: Make certificate request

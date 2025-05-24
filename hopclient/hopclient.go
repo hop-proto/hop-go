@@ -142,7 +142,10 @@ func (c *HopClient) authenticatorSetupLocked() error {
 	var serverKey *keys.PublicKey
 	var err error
 
-	if hc.ServerKey != "" {
+	if hc.ServerKeyBytes != [32]byte{0} {
+		logrus.Infof("client: server key set directly in config struct")
+		serverKey = (*keys.PublicKey)(hc.ServerKeyBytes[:])
+	} else if hc.ServerKey != "" {
 		logrus.Infof("client: server Key loaded to complete Hidden Mode handshake")
 
 		serverKeyPath := combinators.StringOr(hc.ServerKey, config.DefaultKeyPath())
@@ -176,7 +179,17 @@ func (c *HopClient) authenticatorSetupLocked() error {
 	// Connect to the agent
 	aconn, _ := net.Dial("tcp", agentURL)
 
-	if !hc.DisableAgent && aconn != nil && ac.Available(context.Background()) {
+	// TODO this code path is only used by the acme server. Make sure this doesn't cause something terrible to happen
+	if hc.KeyPair != nil && hc.AutoSelfSign {
+		leaf = loadLeaf("", true, (*keys.PublicKey)(&hc.KeyPair.Public), hc.HostURL())
+		verifyConfig.InsecureSkipVerify = true
+		authenticator = core.InMemoryAuthenticator{
+			X25519KeyPair: hc.KeyPair,
+			VerifyConfig:  verifyConfig,
+			Leaf:          leaf,
+			ServerKey:     serverKey,
+		}
+	} else if !hc.DisableAgent && aconn != nil && ac.Available(context.Background()) {
 		bc, err := ac.ExchangerFor(context.Background(), keyPath)
 		if err != nil {
 			return fmt.Errorf("unable to create exchanger for agent with keyID: %s", err)
