@@ -366,8 +366,9 @@ func transportCert(keyPath, certPath, intermediatePath string) (*transport.Certi
 
 // NewVirtualHosts constructs a VirtualHost object from a server
 // configmap[string]transport.Certificate{}.
+// TODO(hosono) remove fallbackCert and fallbackKey
 func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fallbackCert *certs.Certificate) (VirtualHosts, error) {
-	out := make([]VirtualHost, 0, len(c.Names)+1)
+	out := make([]VirtualHost, 0, len(c.Names)+2)
 	for _, block := range c.Names {
 		// TODO(dadrian)[2022-12-26]: If certs are shared, we'll re-parse all
 		// these. We could use some kind of content-addressable store to cache
@@ -389,6 +390,12 @@ func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fa
 		out = append(out, VirtualHost{
 			Pattern:     "*",
 			Certificate: *tc,
+		})
+	}
+	if c.TransportCert != nil {
+		out = append(out, VirtualHost{
+			Pattern:     c.TransportCert.HostName,
+			Certificate: *c.TransportCert,
 		})
 	}
 	return out, nil

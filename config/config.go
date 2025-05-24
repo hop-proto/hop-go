@@ -17,6 +17,7 @@ import (
 	"hop.computer/hop/pkg/glob"
 	"hop.computer/hop/pkg/thunks"
 	"hop.computer/hop/portforwarding"
+	"hop.computer/hop/transport"
 )
 
 // ClientConfig represents a parsed client configuration.
@@ -51,6 +52,9 @@ type ServerConfig struct {
 
 	EnableAuthgrants    *bool // as an authgrant Target this server will approve authgrants and as an authgrant Delegate server will proxy ag intent requests
 	AgProxyListenSocket *string
+
+	// Currently this option is only used by the acme client, but it setting the key without ever touching the disk seems like a useful property
+	TransportCert *transport.Certificate
 }
 
 // HostConfigOptional contains a definition of a host pattern in a client
