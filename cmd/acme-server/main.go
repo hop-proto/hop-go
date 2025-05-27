@@ -8,9 +8,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/sirupsen/logrus"
-
 	"hop.computer/hop/acme"
+	"hop.computer/hop/certs"
 	"hop.computer/hop/config"
 	"hop.computer/hop/hopclient"
 	"hop.computer/hop/keys"
@@ -23,8 +22,25 @@ func checkErr(err error) {
 	}
 }
 
+func loadCerts() *certs.Certificate {
+	// TODO real implementation
+
+	rootKeys := keys.GenerateNewSigningKeyPair()
+	rootCert, err := certs.SelfSignRoot(certs.SigningIdentity(rootKeys), rootKeys)
+	checkErr(err)
+	err = rootCert.ProvideKey((*[32]byte)(&rootKeys.Private))
+	checkErr(err)
+
+	intermediateKeys := keys.GenerateNewSigningKeyPair()
+	intermediateCert, err := certs.IssueIntermediate(rootCert, certs.SigningIdentity(intermediateKeys))
+	checkErr(err)
+	err = intermediateCert.ProvideKey((*[32]byte)(&intermediateKeys.Private))
+	checkErr(err)
+
+	return intermediateCert
+}
+
 func main() {
-	logrus.SetLevel(logrus.DebugLevel)
 	// Step 1: Read domain to be requested and the public key that it will be advertized with
 	fmt.Fprintln(os.Stderr, "Server: Step 1")
 	domainAndKey := acme.DomainNameAndKey{}
@@ -104,11 +120,24 @@ func main() {
 	// Send confimation back to requester
 	_, err = os.Stdout.Write([]byte{1})
 	checkErr(err)
-	client.Close()
+	// TODO make sure this closes correctly
+	go client.Close()
 
 	// Step 5: Requester makes certificate request
-	fmt.Fprintln(os.Stderr, "Serer: Step 5")
+	fmt.Fprintln(os.Stderr, "Server: Step 5")
+	request := acme.CertificateRequest{}
+	_, err = request.ReadFrom(os.Stdin)
+	checkErr(err)
 
 	// Step 6: CA issues certificate
-	fmt.Fprintln(os.Stderr, "Serer: Step 6")
+	fmt.Fprintln(os.Stderr, "Server: Step 6")
+
+	intermediate := loadCerts()
+	cert, err := certs.IssueLeaf(intermediate, &certs.Identity{
+		PublicKey: request.PubKey,
+		Names:     []certs.Name{request.Name},
+	})
+	checkErr(err)
+	_, err = cert.WriteTo(os.Stdout)
+	checkErr(err)
 }

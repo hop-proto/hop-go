@@ -2,9 +2,11 @@ package acme
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 
 	"hop.computer/hop/certs"
+	"hop.computer/hop/keys"
 )
 
 const ChallengeLen int = 32
@@ -39,4 +41,34 @@ func (d *DomainNameAndKey) Read(r io.Reader) error {
 	_, err = io.ReadFull(r, d.PublicKey[:])
 
 	return err
+}
+
+type CertificateRequest struct {
+	// TODO additional certificate request info
+	Name   certs.Name
+	PubKey keys.PublicKey
+}
+
+func (req *CertificateRequest) WriteTo(w io.Writer) (int64, error) {
+	if req.Name.Type != certs.TypeDNSName {
+		return 0, fmt.Errorf("only DNS names are currently supported")
+	}
+
+	n, err := req.Name.WriteTo(w)
+	if err != nil {
+		return n, err
+	}
+
+	n2, err := w.Write(req.PubKey[:])
+	return int64(n2) + n, err
+}
+
+func (req *CertificateRequest) ReadFrom(r io.Reader) (int64, error) {
+	n, err := req.Name.ReadFrom(r)
+	if err != nil {
+		return n, err
+	}
+
+	n2, err := io.ReadFull(r, req.PubKey[:])
+	return int64(n2) + n, err
 }

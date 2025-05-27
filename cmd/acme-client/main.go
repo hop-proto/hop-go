@@ -8,8 +8,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/sirupsen/logrus"
-
 	"hop.computer/hop/acme"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/config"
@@ -81,8 +79,8 @@ func startChallengeServer(domainName string, challengeString string, ourKeys *ke
 }
 
 func main() {
-	logrus.SetLevel(logrus.DebugLevel)
 	domainName := "request.com"
+	reqKeyPair := keys.GenerateNewX25519KeyPair()
 
 	// Step 1: Send domain name and public key to CA
 	fmt.Fprintln(os.Stderr, "Step 1")
@@ -126,7 +124,21 @@ func main() {
 
 	// Step 5: Make certificate request
 	fmt.Fprintln(os.Stderr, "Step 5")
+	request := acme.CertificateRequest{
+		Name:   certs.DNSName(domainName),
+		PubKey: reqKeyPair.Public,
+	}
+	_, err = request.WriteTo(os.Stdout)
+	checkErr(err)
 
 	// Step 6: Receive certificate
 	fmt.Fprintln(os.Stderr, "Step 6")
+	cert := certs.Certificate{}
+	_, err = cert.ReadFrom(os.Stdin)
+	checkErr(err)
+
+	certBuf, err := certs.EncodeCertificateToPEM(&cert)
+	checkErr(err)
+
+	fmt.Fprintln(os.Stderr, string(certBuf))
 }
