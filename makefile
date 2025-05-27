@@ -73,3 +73,8 @@ acme-server: ## start up the acme server in docker
 .PHONY: run-acme-server
 run-acme-server:
 	docker run -p 7777:77/udp -t hop-acme:latest
+
+.PHONY: test-acme-scripts
+test-acme-scripts:
+	mkfifo /tmp/acme_fifo
+	go run hop.computer/hop/cmd/acme-client </tmp/acme_fifo | go run hop.computer/hop/cmd/acme-server > /tmp/acme_fifo
