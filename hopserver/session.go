@@ -250,7 +250,8 @@ func (sess *hopSession) startCodex(t1, t2 *tubes.Reliable) {
 	}
 	var c *exec.Cmd
 	if sess.user == acme.AcmeUser {
-		c = exec.Command("/bin/sh", "-c", "echo", sess.server.config.Challenge)
+		c = exec.Command("echo", sess.server.config.Challenge)
+		logrus.Warn("special Acme user logic")
 	} else if cmd == "" {
 		//login(1) starts default shell for user and changes all privileges and environment variables
 		c = exec.Command("login", "-f", sess.user)
@@ -267,7 +268,7 @@ func (sess *hopSession) startCodex(t1, t2 *tubes.Reliable) {
 	if sess.user != acme.AcmeUser {
 		c.Env = env
 	}
-	logrus.Infof("Executing: %v", cmd)
+	logrus.Infof("Executing: %v", c.Args)
 	var f *os.File
 
 	// lock principals map so can be updated with pid after starting process

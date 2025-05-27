@@ -96,14 +96,15 @@ func main() {
 
 	// Step 2: Receive public key and challenge from server
 	fmt.Fprintln(os.Stderr, "Step 2")
+	caPubKey := keys.PublicKey{}
+	_, err = io.ReadFull(os.Stdin, caPubKey[:])
+	checkErr(err)
+
 	challenge := make([]byte, base64.StdEncoding.EncodedLen(acme.ChallengeLen))
 	_, err = io.ReadFull(os.Stdin, challenge)
 	checkErr(err)
 	challengeString := string(challenge)
-
-	caPubKey := keys.PublicKey{}
-	_, err = io.ReadFull(os.Stdin, caPubKey[:])
-	checkErr(err)
+	fmt.Fprintf(os.Stderr, "client got challenge string: %s\n", challengeString)
 
 	// Step 3: Requester informs CA that challenge is complete
 	fmt.Fprintln(os.Stderr, "Step 3")

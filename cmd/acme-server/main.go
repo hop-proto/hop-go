@@ -46,6 +46,8 @@ func main() {
 	_, err = os.Stdout.Write([]byte(challengeString))
 	checkErr(err)
 
+	fmt.Fprintf(os.Stderr, "challenge: %s\npubkey: %s\n", challengeString, base64.StdEncoding.EncodeToString(keyPair.Public[:]))
+
 	// Step 3: Wait for confirmation that challenge is ready
 	fmt.Fprintln(os.Stderr, "Server: Step 3")
 	var ok byte
@@ -88,7 +90,8 @@ func main() {
 	challengeResponse := make([]byte, base64.StdEncoding.EncodedLen(acme.ChallengeLen))
 	fmt.Fprintln(os.Stderr, "waiting for client response")
 	_, err = io.ReadFull(pipeReader, challengeResponse)
-	fmt.Fprintln(os.Stderr, "finished pipe read")
+	fmt.Fprintf(os.Stderr, "expected challenge: %s\n", challengeString)
+	fmt.Fprintf(os.Stderr, "finished pipe read: %s\n", string(challengeResponse))
 	checkErr(err)
 
 	if challengeString != string(challengeResponse) {
