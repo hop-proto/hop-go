@@ -82,7 +82,7 @@ const (
 )
 
 // old value 1.25, 0.75, 1...
-var probeBWGainCycle = [...]float64{1.75, 0.75, 1, 1, 1, 1, 1, 1} // 8-phase cycle
+var probeBWGainCycle = [...]float64{1.25, 0.75, 1, 1, 1, 1, 1, 1} // 8-phase cycle
 
 type probe struct {
 	state          bbrState
@@ -275,7 +275,6 @@ func (s *sender) recvAck(ackNo uint32) error {
 			if s.probe.state != Startup {
 				s.updateWindowSize(true)
 			}
-
 			/*
 				s.log.Debugf("abcd windowSize %v", s.windowSize)
 				s.log.Debugf("abcd minRTT %v", s.probe.minRTT)
@@ -284,7 +283,8 @@ func (s *sender) recvAck(ackNo uint32) error {
 				s.log.Debugf("abcd deliveredTime %v", s.probe.deliveredTime)
 				s.log.Debugf("abcd inflightData %v", s.probe.inflightData)
 				s.log.Debugf("abcd rate %v", rate)
-				s.log.Debugf("abcd cycleGain %v", s.probe.pacingGain)
+				s.log.Debugf("abcd cwndGain %v", s.probe.cwndGain)
+				s.log.Debugf("abcd pacingGain %v", s.probe.pacingGain)
 
 			*/
 
@@ -530,5 +530,11 @@ func (s *sender) updateWindowSize(drain bool) {
 	if newWindowSize < 10 {
 		newWindowSize = 10
 	}
-	s.windowSize = min(newWindowSize, 1000)
+
+	if newWindowSize < s.windowSize {
+		// limit the big drop locking the bdp in a low rate
+		s.windowSize = (s.windowSize*7 + newWindowSize) / 8
+	} else {
+		s.windowSize = min(newWindowSize, 1000)
+	}
 }
