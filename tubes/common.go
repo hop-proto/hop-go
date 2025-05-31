@@ -45,7 +45,7 @@ const maxRTO = 10 * time.Second
 const maxFragTransPerRTO = 1
 
 // the number of packets in the window for reliable tubes
-const windowSize = 10
+const windowSize = 1
 
 // TODO(hosono) choose this time
 // amount of time to wait for all all tubes to close when muxer is stopping

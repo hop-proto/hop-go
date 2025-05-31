@@ -237,7 +237,7 @@ func (s *HopServer) Serve() {
 	}
 
 	for {
-		serverConn, err := s.server.AcceptTimeout(30 * time.Minute)
+		serverConn, err := s.server.AcceptTimeout(3000 * time.Hour)
 		// io.EOF indicates the server was closed, which is ok
 		if errors.Is(err, io.EOF) {
 			return
