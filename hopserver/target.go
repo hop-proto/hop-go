@@ -9,6 +9,8 @@ import (
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
+	"hop.computer/hop/pkg/thunks"
+	"slices"
 )
 
 // Target server: a hop server that a delegate hop client
@@ -77,16 +79,16 @@ func (sess *hopSession) checkIntent(intent authgrants.Intent, principalCert *cer
 func (sess *hopSession) checkCmd(cmd string, shell bool) (sessID, error) {
 	logrus.Info("target: received request to perform: ", cmd)
 	for i, ag := range sess.authorizedActions {
-		if time.Now().Before(ag.ExpTime) {
+		if thunks.TimeNow().Before(ag.ExpTime) {
 			if !shell && ag.GrantType == authgrants.Command {
 				if ag.AssociatedData.CommandGrantData.Cmd == cmd {
 					// remove from authorized actions and return
-					sess.authorizedActions = append(sess.authorizedActions[:i], sess.authorizedActions[i+1:]...)
+					sess.authorizedActions = slices.Delete(sess.authorizedActions, i, i+1)
 					return sessID(ag.PrincipalID), nil
 				}
 			}
 			if shell && ag.GrantType == authgrants.Shell {
-				sess.authorizedActions = append(sess.authorizedActions[:i], sess.authorizedActions[i+1:]...)
+				sess.authorizedActions = slices.Delete(sess.authorizedActions, i, i+1)
 				return sessID(ag.PrincipalID), nil
 			}
 		}

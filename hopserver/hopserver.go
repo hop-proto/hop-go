@@ -90,6 +90,8 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, 
 	if (config.EnableAuthorizedKeys != nil && *config.EnableAuthorizedKeys) ||
 		(config.EnableAuthgrants != nil && *config.EnableAuthgrants) {
 		server.keyStore = ks
+	} else {
+		server.keyStore = authkeys.NewSyncAuthKeySet()
 	}
 	return server, nil
 }
@@ -307,6 +309,10 @@ func (s *HopServer) Close() error {
 }
 
 func (s *HopServer) AddAuthGrant(intent *authgrants.Intent) error {
+	if s.config.EnableAuthgrants != nil && !*s.config.EnableAuthgrants {
+		logrus.Warn("Tried to add authgrant, but authgrants are not enabled")
+		return fmt.Errorf("authgrants not enabled")
+	}
 	if intent == nil {
 		logrus.Error("intent is nil")
 		return fmt.Errorf("intent is nil")

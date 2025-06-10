@@ -18,6 +18,7 @@ import (
 	"gotest.tools/assert"
 
 	"hop.computer/hop/agent"
+	"hop.computer/hop/authgrants"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
 	"hop.computer/hop/config"
@@ -104,7 +105,7 @@ func NewTestServer(t *testing.T) *TestServer {
 	s.Store.AddCertificate(s.Root)
 
 	s.Config = &config.ServerConfig{}
-	s.Config.DataTimeout = time.Second
+	s.Config.DataTimeout = 1000 * time.Second
 	s.FileSystem = &fstest.MapFS{}
 
 	s.AuthorizedKeyFiles = make(map[string][]byte)
@@ -204,7 +205,7 @@ func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
 		AutoSelfSign: &truth,
 		Key:          &keyPath,
 		ServerName:   &s.ServerName,
-		CAFiles:      []string{"home/username/.hop/root.cert", "home/username/.hop/intermediate.cert"},
+		CAFiles:      []string{"home/" + username + "/.hop/root.cert", "home/" + username + "/.hop/intermediate.cert"},
 		DataTimeout:  int(time.Second),
 		Input:        os.Stdin,
 	}
@@ -218,11 +219,11 @@ func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
 			Data: []byte(c.KeyPair.Private.String() + "\n"),
 			Mode: 0600,
 		},
-		"home/username/.hop/root.cert": &fstest.MapFile{
+		"home/" + username + "/.hop/root.cert": &fstest.MapFile{
 			Data: rootBytes,
 			Mode: 0600,
 		},
-		"home/username/.hop/intermediate.cert": &fstest.MapFile{
+		"home/" + username + "/.hop/intermediate.cert": &fstest.MapFile{
 			Data: intermediateBytes,
 			Mode: 0600,
 		},
@@ -477,4 +478,83 @@ func TestStartCmd(t *testing.T) {
 		logrus.Info(outString)
 		assert.Equal(t, outString, testString)
 	})
+}
+
+func TestSelfAuthGrant(t *testing.T) {
+	// defer goleak.VerifyNone(t)
+	logrus.SetLevel(logrus.TraceLevel)
+	thunks.SetUpTest()
+	var err error
+
+	// Create the basic Client and Server
+	s := NewTestServer(t)
+	c := NewTestClient(t, s, "hop_user")
+
+	clientCert, err := certs.SelfSignLeaf(&certs.Identity{
+		PublicKey: c.KeyPair.Public,
+		Names:     []certs.Name{certs.RawStringName("hop_user")},
+	})
+	assert.NilError(t, err)
+	certBytes, err := clientCert.Marshal()
+	assert.NilError(t, err)
+
+	certPath := "/home/" + c.Username + "/.hop/identity.cert"
+	(*c.FileSystem)[certPath] = &fstest.MapFile{
+		Data: certBytes,
+		Mode: 0600,
+	}
+
+	c.Config.Certificate = certPath
+
+	// Modify client config with command to run
+	testString := "Hello from hop tests!"
+	c.AddCmd("cat")
+
+	output := &bytes.Buffer{}
+	c.Config.Output = output
+
+	r, input := io.Pipe()
+	c.Config.Input = r
+
+	s.StartTransport(t)
+	s.StartHopServer(t)
+
+	// Modify authentication details
+	var truth = true
+	s.Config.EnableAuthgrants = &truth
+	err = s.Server.AddAuthGrant(&authgrants.Intent{
+		GrantType:      authgrants.Command,
+		StartTime:      thunks.TimeNow(),
+		ExpTime:        thunks.TimeNow().Add(time.Minute),
+		TargetSNI:      certs.DNSName(s.ServerName),
+		TargetUsername: "hop_user",
+		DelegateCert:   *clientCert,
+		AssociatedData: authgrants.GrantData{
+			CommandGrantData: authgrants.CommandGrantData{
+				Cmd: "cat",
+			},
+		},
+	})
+	assert.NilError(t, err)
+
+	c.StartClient(t)
+
+	logrus.Info("CMD: ", c.Config.Cmd)
+
+	go func() {
+		input.Write([]byte(testString))
+		input.Close()
+	}()
+
+	err = c.Client.Start()
+	assert.NilError(t, err)
+
+	err = c.Client.Close()
+	assert.NilError(t, err)
+	err = s.Server.Close()
+	assert.NilError(t, err)
+
+	outString := output.String()
+	logrus.Info(outString)
+	assert.Equal(t, outString, testString)
 }
