@@ -25,6 +25,8 @@ import (
 
 type sessID uint32
 
+const NoSession sessID = 4294967295
+
 type hopSession struct {
 	transportConn   *transport.Handle
 	tubeMuxer       *tubes.Muxer
@@ -113,13 +115,17 @@ func (sess *hopSession) start() {
 		if r, ok := tube.(*tubes.Reliable); ok {
 			switch tube.Type() {
 			case common.ExecTube:
-				t2, err := sess.tubeMuxer.Accept()
-				r2, ok := t2.(*tubes.Reliable)
-				if err != nil || !ok {
-					sess.close()
-					return
+				if len(sess.authorizedActions) == 1 && sess.authorizedActions[0].GrantType == authgrants.Acme {
+					// TODO Do Acme Stuff
+				} else {
+					t2, err := sess.tubeMuxer.Accept()
+					r2, ok := t2.(*tubes.Reliable)
+					if err != nil || !ok {
+						sess.close()
+						return
+					}
+					go sess.startCodex(r, r2)
 				}
-				go sess.startCodex(r, r2)
 			case common.AuthGrantTube:
 				go sess.handleAgc(r)
 			case common.PFControlTube:
@@ -174,7 +180,7 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 	} else {
 		logrus.Info("target: starting target instance")
 		cert := sess.transportConn.FetchClientLeaf()
-		authgrants.StartTargetInstance(tube, cert, sess.checkIntent, sess.addAuthGrant)
+		authgrants.StartTargetInstance(tube, cert, sess.checkIntent, sess.server.AddAuthGrant)
 	}
 }
 

@@ -58,6 +58,7 @@ const (
 	Command  = GrantType(2)
 	LocalPF  = GrantType(3)
 	RemotePF = GrantType(4)
+	Acme     = GrantType(5)
 )
 
 // GrantType differentiates between types of actions

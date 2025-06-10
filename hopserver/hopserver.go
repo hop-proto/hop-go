@@ -306,6 +306,29 @@ func (s *HopServer) Close() error {
 	return s.server.Close()
 }
 
+func (s *HopServer) AddAuthGrant(intent *authgrants.Intent) error {
+	if intent == nil {
+		logrus.Error("intent is nil")
+		return fmt.Errorf("intent is nil")
+	}
+
+	if s.agMap == nil {
+		return fmt.Errorf("agmap is nil")
+	}
+
+	if s.keyStore == nil {
+		return fmt.Errorf("keystore is nil")
+	}
+
+	// add authorization grant to server mappings
+	s.agMap.AddAuthGrant(intent, authgrants.PrincipalID(NoSession))
+
+	// add delegate key from cert to transport server authorized key pool
+	s.keyStore.AddKey(intent.DelegateCert.PublicKey)
+
+	return nil
+}
+
 // authorizeKey returns nil if the publicKey is in the authorized_keys file for
 // the user.
 func (s *HopServer) authorizeKey(user string, publicKey keys.PublicKey) error {
