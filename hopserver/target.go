@@ -2,6 +2,7 @@ package hopserver
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -10,7 +11,6 @@ import (
 	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
 	"hop.computer/hop/pkg/thunks"
-	"slices"
 )
 
 // Target server: a hop server that a delegate hop client
