@@ -135,7 +135,8 @@ func StartPFServer(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 		return
 	}
 
-	if fwdType == PfLocal {
+	switch fwdType {
+	case PfLocal:
 		// This Dial is for creating a communication between the hop server(/client)
 		// and the service that needs to be reached
 		throwawayConn, err := net.Dial(addr.Network(), addr.String())
@@ -152,16 +153,13 @@ func StartPFServer(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 		forward.connect = addr
 
 		ch.Write([]byte{success})
-
 		return
 
-	} else if fwdType == PfRemote {
-
+	case PfRemote:
 		ch.Write([]byte{success})
-
 		setupListenerAndForward(muxer, addr)
 
-	} else {
+	default:
 		logrus.Errorf("PF: closing porfforwarding session, bad fwdType %v", fwdType)
 		ch.Write([]byte{failure})
 		ch.Close()
@@ -355,10 +353,11 @@ func StartPFClient(forward *Forward, muxer *tubes.Muxer, pfType int) {
 		return
 	}
 
-	if pfType == PfLocal {
+	switch pfType {
+	case PfLocal:
 		setupListenerAndForward(muxer, forward.listen)
 
-	} else if pfType == PfRemote {
+	case PfRemote:
 		throwawayConn, err := net.Dial(forward.listen.Network(), forward.listen.String())
 		if err != nil {
 			logrus.Error("PF: couldn't connect to local addr: ", err)
@@ -367,7 +366,6 @@ func StartPFClient(forward *Forward, muxer *tubes.Muxer, pfType int) {
 
 		logrus.Debugf("PF: dialed address, %v", forward.listen.String())
 		throwawayConn.Close()
-
 	}
 }
 
@@ -473,9 +471,9 @@ func ParseForward(arg string, networkType int) (forward *Forward, err error) {
 		forward.listen = createAddress(networkType, loopback, parsePort(parts[0]))
 	case 2:
 		// listen or connect was a socket. 2 args remain
-		if nil == forward.listen {
+		if forward.listen == nil {
 			forward.listen = createAddress(networkType, parts[0], parsePort(parts[1]))
-		} else if nil == forward.connect {
+		} else if forward.connect == nil {
 			forward.connect = createAddress(networkType, parts[0], parsePort(parts[1]))
 		}
 	case 3:

@@ -12,7 +12,7 @@ import (
 )
 
 // Handle implements net.Conn and MsgConn for connections accepted by a Server.
-type Handle struct { // nolint:maligned // unclear if 120-byte struct is better than 128
+type Handle struct { // unclear if 120-byte struct is better than 128
 	readLock sync.Mutex
 
 	underlying UDPLike                      // outgoing socket-like

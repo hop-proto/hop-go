@@ -158,7 +158,7 @@ func (s *sender) recvAck(ackNo uint32) error {
 	windowOpen := s.ackNo < newAckNo
 
 	for s.ackNo < newAckNo {
-		if !s.frames[0].Time.Equal(time.Time{}) && ackNo == s.frames[0].frame.frameNo+1 && !s.frames[0].flags.RTR {
+		if !s.frames[0].Equal(time.Time{}) && ackNo == s.frames[0].frameNo+1 && !s.frames[0].flags.RTR {
 			oldRTT := s.RTT
 			measuredRTT := time.Since(s.frames[0].Time)
 
