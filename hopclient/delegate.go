@@ -25,7 +25,7 @@ import (
 
 func makeAuthenticatorWithGeneratedKeypair(targetURL core.URL, vc transport.VerifyConfig) core.Authenticator {
 	keypair := keys.GenerateNewX25519KeyPair()
-	leaf := loadLeaf("", true, &keypair.Public, targetURL)
+	leaf := selfSignLeaf(&keypair.Public, targetURL)
 	return core.InMemoryAuthenticator{
 		X25519KeyPair: keypair,
 		VerifyConfig:  vc,

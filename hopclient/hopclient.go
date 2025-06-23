@@ -157,12 +157,9 @@ func (c *HopClient) authenticatorSetupLocked() error {
 	// Host block overrides global block. Set overrides Unset. Certificate
 	// overrides AutoSelfSign.
 	var leafFile string
-	var autoSelfSign bool
 	if hc.Certificate != "" {
 		leafFile = hc.Certificate
-	} else if hc.AutoSelfSign {
-		autoSelfSign = true
-	} else {
+	} else if !hc.AutoSelfSign {
 		return fmt.Errorf("no certificate provided and AutoSelfSign is not enabled for %q", hc.HostURL().Address())
 	}
 	keyPath := combinators.StringOr(hc.Key, config.DefaultKeyPath())
@@ -186,7 +183,12 @@ func (c *HopClient) authenticatorSetupLocked() error {
 
 		var public keys.PublicKey
 		copy(public[:], bc.Public[:]) // TODO(baumanl): resolve public key type awkwardness
-		leaf = loadLeaf(leafFile, autoSelfSign, &public, hc.HostURL())
+
+		if c.hostconfig.AutoSelfSign {
+			leaf = selfSignLeaf(&public, hc.HostURL())
+		} else {
+			leaf = loadLeafFromFile(leafFile, c.Fsystem)
+		}
 		authenticator = core.AgentAuthenticator{
 			BoundClient:  bc,
 			VerifyConfig: verifyConfig,
@@ -202,7 +204,12 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		if err != nil {
 			return fmt.Errorf("unable to load key pair %q: %s", keyPath, err)
 		}
-		leaf = loadLeaf(leafFile, autoSelfSign, &keypair.Public, hc.HostURL())
+		var leaf *certs.Certificate
+		if c.hostconfig.AutoSelfSign {
+			leaf = selfSignLeaf(&keypair.Public, hc.HostURL())
+		} else {
+			leaf = loadLeafFromFile(leafFile, c.Fsystem)
+		}
 		logrus.Infof("no agent running")
 		authenticator = core.InMemoryAuthenticator{
 			X25519KeyPair: keypair,
@@ -217,26 +224,26 @@ func (c *HopClient) authenticatorSetupLocked() error {
 
 // TODO(baumanl): Put this in a different package/file
 
+func selfSignLeaf(public *keys.PublicKey, address core.URL) *certs.Certificate {
+	logrus.Infof("auto self-signing leaf for user %q", address.User)
+	leaf, err := certs.SelfSignLeaf(&certs.Identity{
+		PublicKey: *public,
+		Names: []certs.Name{
+			certs.RawStringName(address.User),
+		},
+	})
+	if err != nil {
+		logrus.Fatalf("unable to self-sign certificate: %s", err)
+	}
+	return leaf
+}
+
 // Creates a self-signed leaf or loads in from leafFile.
-func loadLeaf(leafFile string, autoSelfSign bool, public *keys.PublicKey, address core.URL) *certs.Certificate {
-	var leaf *certs.Certificate
-	var err error
-	if autoSelfSign {
-		logrus.Infof("auto self-signing leaf for user %q", address.User)
-		leaf, err = certs.SelfSignLeaf(&certs.Identity{
-			PublicKey: *public,
-			Names: []certs.Name{
-				certs.RawStringName(address.User),
-			},
-		})
-		if err != nil {
-			logrus.Fatalf("unable to self-sign certificate: %s", err)
-		}
-	} else {
-		leaf, err = certs.ReadCertificatePEMFile(leafFile)
-		if err != nil {
-			logrus.Fatalf("unable to open certificate: %s", err)
-		}
+func loadLeafFromFile(leafFile string, fs fs.FS) *certs.Certificate {
+	logrus.Infof("loading leaf from file: %s", leafFile)
+	leaf, err := certs.ReadCertificatePEMFileFS(leafFile, fs)
+	if err != nil {
+		logrus.Fatalf("unable to open certificate: %s", err)
 	}
 	return leaf
 }

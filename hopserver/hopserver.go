@@ -90,6 +90,8 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, 
 	if (config.EnableAuthorizedKeys != nil && *config.EnableAuthorizedKeys) ||
 		(config.EnableAuthgrants != nil && *config.EnableAuthgrants) {
 		server.keyStore = ks
+	} else {
+		server.keyStore = authkeys.NewSyncAuthKeySet()
 	}
 	return server, nil
 }
@@ -304,6 +306,35 @@ func (s *HopServer) Close() error {
 	wg.Wait()
 	s.dpProxy.stop()
 	return s.server.Close()
+}
+
+func (s *HopServer) AddAuthGrant(intent *authgrants.Intent) error {
+	// TODO(hosono) should authgrants be disabled by default?
+	// Can we give the server more fine-grained control over what intents it allows?
+	if s.config.EnableAuthgrants != nil && !*s.config.EnableAuthgrants {
+		logrus.Warn("Tried to add authgrant, but authgrants are not enabled")
+		return fmt.Errorf("authgrants not enabled")
+	}
+	if intent == nil {
+		logrus.Error("intent is nil")
+		return fmt.Errorf("intent is nil")
+	}
+
+	if s.agMap == nil {
+		return fmt.Errorf("agmap is nil")
+	}
+
+	if s.keyStore == nil {
+		return fmt.Errorf("keystore is nil")
+	}
+
+	// add authorization grant to server mappings
+	s.agMap.AddAuthGrant(intent, authgrants.PrincipalID(NoSession))
+
+	// add delegate key from cert to transport server authorized key pool
+	s.keyStore.AddKey(intent.DelegateCert.PublicKey)
+
+	return nil
 }
 
 // authorizeKey returns nil if the publicKey is in the authorized_keys file for

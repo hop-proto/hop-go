@@ -2,6 +2,7 @@ package hopserver
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -9,6 +10,7 @@ import (
 	"hop.computer/hop/authgrants"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
+	"hop.computer/hop/pkg/thunks"
 )
 
 // Target server: a hop server that a delegate hop client
@@ -32,33 +34,6 @@ func (s *HopServer) authorizeKeyAuthGrant(user string, publicKey keys.PublicKey)
 		return ags, err
 	}
 	return []authgrants.Authgrant{}, fmt.Errorf("auth grants not enabled")
-}
-
-func (sess *hopSession) addAuthGrant(intent *authgrants.Intent) error {
-	if intent == nil {
-		logrus.Error("intent is nil")
-		return fmt.Errorf("intent is nil")
-	}
-
-	if sess.server == nil {
-		return fmt.Errorf("server is nil")
-	}
-
-	if sess.server.agMap == nil {
-		return fmt.Errorf("agmap is nil")
-	}
-
-	if sess.server.keyStore == nil {
-		return fmt.Errorf("keystore is nil")
-	}
-
-	// add authorization grant to server mappings
-	sess.server.agMap.AddAuthGrant(intent, authgrants.PrincipalID(sess.ID))
-
-	// add delegate key from cert to transport server authorized key pool
-	sess.server.keyStore.AddKey(intent.DelegateCert.PublicKey)
-
-	return nil
 }
 
 // checkIntent looks at details of Intent Request and ensures they follow its policies
@@ -104,16 +79,16 @@ func (sess *hopSession) checkIntent(intent authgrants.Intent, principalCert *cer
 func (sess *hopSession) checkCmd(cmd string, shell bool) (sessID, error) {
 	logrus.Info("target: received request to perform: ", cmd)
 	for i, ag := range sess.authorizedActions {
-		if time.Now().Before(ag.ExpTime) {
+		if thunks.TimeNow().Before(ag.ExpTime) {
 			if !shell && ag.GrantType == authgrants.Command {
 				if ag.AssociatedData.CommandGrantData.Cmd == cmd {
 					// remove from authorized actions and return
-					sess.authorizedActions = append(sess.authorizedActions[:i], sess.authorizedActions[i+1:]...)
+					sess.authorizedActions = slices.Delete(sess.authorizedActions, i, i+1)
 					return sessID(ag.PrincipalID), nil
 				}
 			}
 			if shell && ag.GrantType == authgrants.Shell {
-				sess.authorizedActions = append(sess.authorizedActions[:i], sess.authorizedActions[i+1:]...)
+				sess.authorizedActions = slices.Delete(sess.authorizedActions, i, i+1)
 				return sessID(ag.PrincipalID), nil
 			}
 		}
