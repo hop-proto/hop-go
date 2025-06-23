@@ -309,6 +309,8 @@ func (s *HopServer) Close() error {
 }
 
 func (s *HopServer) AddAuthGrant(intent *authgrants.Intent) error {
+	// TODO(hosono) should authgrants be disabled by default?
+	// Can we give the server more fine-grained control over what intents it allows?
 	if s.config.EnableAuthgrants != nil && !*s.config.EnableAuthgrants {
 		logrus.Warn("Tried to add authgrant, but authgrants are not enabled")
 		return fmt.Errorf("authgrants not enabled")

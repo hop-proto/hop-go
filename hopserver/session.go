@@ -25,7 +25,9 @@ import (
 
 type sessID uint32
 
-const NoSession sessID = 4294967295
+// NoSession is a signal value to indicate that an authgrant
+// was issued by the server and belongs to no user session
+const NoSession sessID = 1<<32 - 1
 
 type hopSession struct {
 	transportConn   *transport.Handle
