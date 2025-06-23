@@ -55,6 +55,53 @@ type ServerConfig struct {
 	AgProxyListenSocket *string
 }
 
+// NameConfig defines the keys and certificates presented by the server for a
+// given name.
+type NameConfig struct {
+	Pattern      string
+	Key          *keys.X25519KeyPair
+	Certificate  *certs.Certificate
+	Intermediate *certs.Certificate
+	AutoSelfSign bool
+	// TODO(dadrian): User mapping
+}
+
+// serverConfigSchema represents a server config file in a way that TOML can parse
+type serverConfigSchema struct {
+	Key          string // the path the the key file
+	Certificate  string // path to the certificate
+	Intermediate string // path to the intermediate cert
+
+	AutoSelfSign  *bool
+	ListenAddress string
+
+	Names                []nameConfigSchema
+	HiddenModeVHostNames []string
+
+	HandshakeTimeout time.Duration
+	DataTimeout      time.Duration
+
+	// transport layer client validation options
+	CAFiles                      []string // root and intermediate cert paths
+	InsecureSkipVerify           *bool
+	DisableCertificateValidation *bool
+	EnableAuthorizedKeys         *bool
+	Users                        []string // users for whom to load their authorized_keys files into transport layer
+
+	EnableAuthgrants    *bool // as an authgrant Target this server will approve authgrants and as an authgrant Delegate server will proxy ag intent requests
+	AgProxyListenSocket *string
+}
+
+// NameConfig defines the keys and certificates presented by the server for a
+// given name.
+type nameConfigSchema struct {
+	Pattern      string
+	Key          string
+	Certificate  string
+	Intermediate string
+	AutoSelfSign *bool
+}
+
 // HostConfigOptional contains a definition of a host pattern in a client
 // configuration; strings and bools are represented as pointers so that a
 // default value can be distinguished from a set zero-value; users should
@@ -117,18 +164,6 @@ type HostConfig struct {
 	Input io.Reader
 	// The destination where data from the server will be written
 	Output io.Writer
-}
-
-// NameConfig defines the keys and certificates presented by the server for a
-// given name.
-type NameConfig struct {
-	Pattern      string
-	Key          string
-	Certificate  string
-	Intermediate string
-	AutoSelfSign *bool
-
-	// TODO(dadrian): User mapping
 }
 
 // MergeWith takes non-default values in another HostConfigOptional and overwrites them
@@ -306,17 +341,119 @@ func LoadServerConfigFromFile(path string) (*ServerConfig, error) {
 }
 
 func loadServerConfigFromFile(c *ServerConfig, path string) (*ServerConfig, error) {
+	parsed := &serverConfigSchema{}
 	file, err := fileSystem.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	meta, err := toml.NewDecoder(file).Decode(c)
-	keys, lines := meta.UndecodedWithLines()
-	for i, key := range keys {
+	meta, err := toml.NewDecoder(file).Decode(parsed)
+	if err != nil {
+		return nil, err
+	}
+	tomlKeys, lines := meta.UndecodedWithLines()
+	for i, key := range tomlKeys {
 		logrus.Warnf("While parsing config, encountered unknown key `%v` at %v:%v", key, path, lines[i])
 	}
-	c.HandshakeTimeout *= time.Second
+
+	key, err := keys.ReadDHKeyFromPEMFileFS(parsed.Key, fileSystem)
+	if err != nil {
+		return nil, err
+	}
+	c.Key = key
+
+	cert, err := certs.ReadCertificatePEMFileFS(parsed.Certificate, fileSystem)
+	if err != nil {
+		return nil, err
+	}
+	c.Certificate = cert
+
+	if parsed.Intermediate != "" {
+		intermediate, err := certs.ReadCertificatePEMFileFS(parsed.Intermediate, fileSystem)
+		if err != nil {
+			return nil, err
+		}
+		c.Intermediate = intermediate
+	}
+
+	c.AutoSelfSign = false
+	if parsed.AutoSelfSign != nil {
+		c.AutoSelfSign = *parsed.AutoSelfSign
+	}
+
+	c.ListenAddress = parsed.ListenAddress
+
+	c.Names = make([]NameConfig, 0)
+	for _, nameConf := range parsed.Names {
+		key, err := keys.ReadDHKeyFromPEMFileFS(nameConf.Key, fileSystem)
+		if err != nil {
+			return nil, err
+		}
+		cert, err := certs.ReadCertificatePEMFileFS(nameConf.Certificate, fileSystem)
+		if err != nil {
+			return nil, err
+		}
+		intermediate, err := certs.ReadCertificatePEMFileFS(nameConf.Intermediate, fileSystem)
+		if err != nil {
+			return nil, err
+		}
+		autoSelfSign := false
+		if nameConf.AutoSelfSign != nil {
+			autoSelfSign = *nameConf.AutoSelfSign
+		}
+		name := NameConfig{
+			Pattern:      nameConf.Pattern,
+			Key:          key,
+			Certificate:  cert,
+			Intermediate: intermediate,
+			AutoSelfSign: autoSelfSign,
+		}
+		c.Names = append(c.Names, name)
+	}
+
+	c.HiddenModeVHostNames = parsed.HiddenModeVHostNames
+
+	c.HandshakeTimeout = time.Second
+	if parsed.HandshakeTimeout != 0 {
+		c.HandshakeTimeout = parsed.HandshakeTimeout
+	}
+
 	c.DataTimeout *= time.Second
+	if parsed.DataTimeout != 0 {
+		c.DataTimeout = parsed.DataTimeout
+	}
+
+	c.CACerts = make([]*certs.Certificate, 0)
+	for _, certPath := range parsed.CAFiles {
+		cert, err := certs.ReadCertificatePEMFileFS(certPath, fileSystem)
+		if err != nil {
+			return nil, err
+		}
+		c.CACerts = append(c.CACerts, cert)
+	}
+
+	c.InsecureSkipVerify = false
+	if parsed.InsecureSkipVerify != nil {
+		c.InsecureSkipVerify = *parsed.InsecureSkipVerify
+	}
+
+	c.DisableCertificateValidation = false
+	if parsed.DisableCertificateValidation != nil {
+		c.DisableCertificateValidation = *parsed.DisableCertificateValidation
+	}
+
+	c.EnableAuthorizedKeys = false
+	if parsed.EnableAuthorizedKeys != nil {
+		c.EnableAuthorizedKeys = *parsed.EnableAuthorizedKeys
+	}
+
+	c.Users = parsed.Users
+
+	c.EnableAuthgrants = false
+	if parsed.EnableAuthgrants != nil {
+		c.EnableAuthgrants = *parsed.EnableAuthgrants
+	}
+	c.AgProxyListenSocket = parsed.AgProxyListenSocket
+
 	return c, err
 }
 

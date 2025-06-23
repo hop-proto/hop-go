@@ -3,8 +3,9 @@ package config
 import (
 	"bytes"
 	"testing"
+	"testing/fstest"
 
-	"github.com/spf13/afero"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"gotest.tools/assert"
 
 	"hop.computer/hop/certs"
@@ -68,9 +69,9 @@ func TestLoadClientConfig(t *testing.T) {
 
 const serverToml = `ListenAddress = ":77"
 
-Key = "/etc/hopd/id_hop.pem"
-Certificate = "/etc/hopd/id_hop.cert"
-CAFiles = [ "/etc/hopd/intermediate.cert" , "/etc/hopd/root.cert"]
+Key = "etc/hopd/id_hop.pem"
+Certificate = "etc/hopd/id_hop.cert"
+CAFiles = [ "etc/hopd/intermediate.cert" , "etc/hopd/root.cert"]
 
 EnableAuthgrants = false
 Users = ["user"]
@@ -89,14 +90,15 @@ func TestLoadServerConfig(t *testing.T) {
 	leafBytes, err := certs.EncodeCertificateToPEM(leaf)
 	assert.NilError(t, err)
 
-	fileSystem = afero.NewMemMapFs()
-	afero.WriteFile(fileSystem, "/etc/hopd/config.toml", []byte(serverToml), 0600)
-	afero.WriteFile(fileSystem, "/etc/hopd/id_hop.pem", keyBytes.Bytes(), 0600)
-	afero.WriteFile(fileSystem, "/etc/hopd/id_hop.cert", leafBytes, 0600)
-	afero.WriteFile(fileSystem, "/etc/hopd/intermediate.cert", intermediateBytes, 0600)
-	afero.WriteFile(fileSystem, "/etc/hopd/root.cert", rootBytes, 0600)
+	fileSystem = &fstest.MapFS{
+		"etc/hopd/config.toml":       &fstest.MapFile{Data: []byte(serverToml)},
+		"etc/hopd/id_hop.pem":        &fstest.MapFile{Data: keyBytes.Bytes()},
+		"etc/hopd/id_hop.cert":       &fstest.MapFile{Data: leafBytes},
+		"etc/hopd/intermediate.cert": &fstest.MapFile{Data: intermediateBytes},
+		"etc/hopd/root.cert":         &fstest.MapFile{Data: rootBytes},
+	}
 
-	c, err := LoadServerConfigFromFile("/etc/hopd/config.toml")
+	c, err := LoadServerConfigFromFile("etc/hopd/config.toml")
 	assert.NilError(t, err)
 	expected := &ServerConfig{
 		ListenAddress:        ":77",
@@ -107,5 +109,5 @@ func TestLoadServerConfig(t *testing.T) {
 		Users:                []string{"user"},
 		HiddenModeVHostNames: []string{"example.com"},
 	}
-	assert.DeepEqual(t, c, expected)
+	assert.DeepEqual(t, c, expected, cmpopts.IgnoreUnexported(certs.Certificate{}))
 }
