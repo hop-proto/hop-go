@@ -87,8 +87,7 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, 
 		fsystem: os.DirFS("/"),
 	}
 
-	if (config.EnableAuthorizedKeys != nil && *config.EnableAuthorizedKeys) ||
-		(config.EnableAuthgrants != nil && *config.EnableAuthgrants) {
+	if config.EnableAuthorizedKeys || config.EnableAuthgrants {
 		server.keyStore = ks
 	} else {
 		server.keyStore = authkeys.NewSyncAuthKeySet()
@@ -158,24 +157,18 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	// 4. Authorized keys only: cert validation explicitly disabled and auth keys explicitly enabled
 
 	// Explicitly setting sc.InsecureSkipVerify overrides everything else
-	if sc.InsecureSkipVerify != nil && *sc.InsecureSkipVerify {
+	if sc.InsecureSkipVerify {
 		tconf.ClientVerify.InsecureSkipVerify = true
 	} else {
 		// Cert validation enabled by default (must be explicitly disabled)
-		if sc.DisableCertificateValidation == nil || !*sc.DisableCertificateValidation {
+		if !sc.DisableCertificateValidation {
 			tconf.ClientVerify.Store = certs.Store{}
-			for _, s := range sc.CAFiles {
-				cert, err := certs.ReadCertificatePEMFile(s)
-				if err != nil {
-					logrus.Fatalf("server: error loading cert at %s: %s", s, err)
-					continue
-				}
-				logrus.Debugf("server: loaded cert with fingerprint: %x", cert.Fingerprint)
-				tconf.ClientVerify.Store.AddCertificate(cert)
+			for _, caCert := range sc.CACerts {
+				tconf.ClientVerify.Store.AddCertificate(caCert)
 			}
 		}
 		// Authgrants disabled by default (must be explicitly enabled)
-		if sc.EnableAuthgrants != nil && *sc.EnableAuthgrants {
+		if sc.EnableAuthgrants {
 			// Create an empty key set for authgrant keys to be added to
 			logrus.Debug("created authkeys sync set")
 			tconf.ClientVerify.AuthKeys = authkeys.NewSyncAuthKeySet()
@@ -183,7 +176,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		}
 
 		// Authorized keys disabled by default (must be explicitly enabled)
-		if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
+		if sc.EnableAuthorizedKeys {
 			logrus.Debug("hopserver: authorized keys are enabled")
 			if tconf.ClientVerify.AuthKeys == nil {
 				// Create key set if one doesn't already exist from Authgrants being enabled
@@ -311,7 +304,7 @@ func (s *HopServer) Close() error {
 func (s *HopServer) AddAuthGrant(intent *authgrants.Intent) error {
 	// TODO(hosono) should authgrants be disabled by default?
 	// Can we give the server more fine-grained control over what intents it allows?
-	if s.config.EnableAuthgrants != nil && !*s.config.EnableAuthgrants {
+	if !s.config.EnableAuthgrants {
 		logrus.Warn("Tried to add authgrant, but authgrants are not enabled")
 		return fmt.Errorf("authgrants not enabled")
 	}
@@ -412,10 +405,20 @@ func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fa
 			Certificate: *tc,
 		})
 	}
-	if c.Key != "" {
-		tc, err := transportCert(c.Key, c.Certificate, c.Intermediate)
+	if c.Key != nil {
+		rawLeaf, err := c.Certificate.Marshal()
 		if err != nil {
 			return nil, err
+		}
+		rawIntermediate, err := c.Intermediate.Marshal()
+		if err != nil {
+			return nil, err
+		}
+		tc := &transport.Certificate{
+			RawLeaf:         rawLeaf,
+			RawIntermediate: rawIntermediate,
+			Exchanger:       c.Key,
+			Leaf:            c.Certificate,
 		}
 		out = append(out, VirtualHost{
 			Pattern:     "*",

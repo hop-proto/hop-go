@@ -520,8 +520,7 @@ func TestSelfAuthGrant(t *testing.T) {
 	s.StartHopServer(t)
 
 	// Modify authentication details
-	var truth = true
-	s.Config.EnableAuthgrants = &truth
+	s.Config.EnableAuthgrants = true
 	err = s.Server.AddAuthGrant(&authgrants.Intent{
 		GrantType:      authgrants.Command,
 		StartTime:      thunks.TimeNow(),

@@ -12,8 +12,10 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
 	"hop.computer/hop/core"
+	"hop.computer/hop/keys"
 	"hop.computer/hop/pkg/glob"
 	"hop.computer/hop/pkg/thunks"
 	"hop.computer/hop/portforwarding"
@@ -29,11 +31,11 @@ type ClientConfig struct {
 
 // ServerConfig represents a parsed server configuration.
 type ServerConfig struct {
-	Key          string
-	Certificate  string
-	Intermediate string
+	Key          *keys.X25519KeyPair
+	Certificate  *certs.Certificate
+	Intermediate *certs.Certificate
 
-	AutoSelfSign  *bool
+	AutoSelfSign  bool
 	ListenAddress string
 
 	Names                []NameConfig
@@ -43,13 +45,13 @@ type ServerConfig struct {
 	DataTimeout      time.Duration
 
 	// transport layer client validation options
-	CAFiles                      []string // root and intermediate certs
-	InsecureSkipVerify           *bool
-	DisableCertificateValidation *bool
-	EnableAuthorizedKeys         *bool
+	CACerts                      []*certs.Certificate // root and intermediate certs
+	InsecureSkipVerify           bool
+	DisableCertificateValidation bool
+	EnableAuthorizedKeys         bool
 	Users                        []string // users for whom to load their authorized_keys files into transport layer
 
-	EnableAuthgrants    *bool // as an authgrant Target this server will approve authgrants and as an authgrant Delegate server will proxy ag intent requests
+	EnableAuthgrants    bool // as an authgrant Target this server will approve authgrants and as an authgrant Delegate server will proxy ag intent requests
 	AgProxyListenSocket *string
 }
 
@@ -284,7 +286,11 @@ func LoadClientConfigFromFile(path string) (*ClientConfig, error) {
 }
 
 func loadClientConfigFromFile(c *ClientConfig, path string) (*ClientConfig, error) {
-	meta, err := toml.DecodeFile(path, c)
+	file, err := fileSystem.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	meta, err := toml.NewDecoder(file).Decode(c)
 	keys, lines := meta.UndecodedWithLines()
 	for i, key := range keys {
 		logrus.Warnf("While parsing config, encountered unknown key `%v` at %v:%v", key, path, lines[i])
@@ -300,7 +306,11 @@ func LoadServerConfigFromFile(path string) (*ServerConfig, error) {
 }
 
 func loadServerConfigFromFile(c *ServerConfig, path string) (*ServerConfig, error) {
-	meta, err := toml.DecodeFile(path, c)
+	file, err := fileSystem.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	meta, err := toml.NewDecoder(file).Decode(c)
 	keys, lines := meta.UndecodedWithLines()
 	for i, key := range keys {
 		logrus.Warnf("While parsing config, encountered unknown key `%v` at %v:%v", key, path, lines[i])

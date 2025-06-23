@@ -25,7 +25,7 @@ import (
 //   authorized actions accordingly
 
 func (s *HopServer) authorizeKeyAuthGrant(user string, publicKey keys.PublicKey) ([]authgrants.Authgrant, error) {
-	if s.config.EnableAuthgrants != nil && *s.config.EnableAuthgrants {
+	if s.config.EnableAuthgrants {
 		ags, err := s.agMap.RemoveAuthgrants(user, publicKey)
 		if err == nil {
 			// remove from transport layer key set
