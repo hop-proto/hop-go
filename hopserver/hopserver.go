@@ -363,31 +363,6 @@ type VirtualHost struct {
 	Certificate transport.Certificate
 }
 
-func transportCert(keyPath, certPath, intermediatePath string) (*transport.Certificate, error) {
-	keyPair, err := keys.ReadDHKeyFromPEMFile(keyPath)
-	if err != nil {
-		return nil, err
-	}
-	leaf, rawLeaf, err := certs.ReadCertificateBytesFromPEMFile(certPath)
-	if err != nil {
-		return nil, err
-	}
-	var rawIntermediate []byte
-	if intermediatePath != "" {
-		_, rawIntermediate, err = certs.ReadCertificateBytesFromPEMFile(intermediatePath)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return &transport.Certificate{
-		RawLeaf:         rawLeaf,
-		RawIntermediate: rawIntermediate,
-		Exchanger:       keyPair,
-		Leaf:            leaf,
-	}, nil
-
-}
-
 // NewVirtualHosts constructs a VirtualHost object from a server
 // configmap[string]transport.Certificate{}.
 func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fallbackCert *certs.Certificate) (VirtualHosts, error) {
@@ -396,7 +371,7 @@ func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fa
 		// TODO(dadrian)[2022-12-26]: If certs are shared, we'll re-parse all
 		// these. We could use some kind of content-addressable store to cache
 		// these after a single load pass across the whole config.
-		tc, err := transportCert(block.Key, block.Certificate, block.Intermediate)
+		tc, err := transport.MakeCert(block.Key, block.Certificate, block.Intermediate)
 		if err != nil {
 			return nil, err
 		}

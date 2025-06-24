@@ -16,3 +16,22 @@ type Certificate struct {
 
 	HostName string
 }
+
+func MakeCert(keyPair *keys.X25519KeyPair, leaf, intermdiate *certs.Certificate) (*Certificate, error) {
+	leafBytes, err := leaf.Marshal()
+	if err != nil {
+		return nil, err
+	}
+	intermediateBytes, err := intermdiate.Marshal()
+	if err != nil {
+		return nil, err
+	}
+
+	return &Certificate{
+		RawLeaf:         leafBytes,
+		RawIntermediate: intermediateBytes,
+		Exchanger:       keyPair,
+		Leaf:            leaf,
+		HostName:        "",
+	}, nil
+}
