@@ -47,7 +47,7 @@ func main() {
 	err := domainAndKey.Read(os.Stdin)
 	checkErr(err)
 	domain := domainAndKey.DomainName
-	pubKey := domainAndKey.PublicKey
+	// pubKey := domainAndKey.PublicKey
 
 	// Step 2: CA sends deployment key and a random challenge token
 	fmt.Fprintln(os.Stderr, "Server: Step 2")
@@ -78,18 +78,18 @@ func main() {
 	fmt.Fprintln(os.Stderr, "Server: Step 4")
 	pipeReader, pipeWriter := io.Pipe()
 	fakeReader, _ := io.Pipe()
-	clientKeys := keys.GenerateNewX25519KeyPair()
+	// clientKeys := keys.GenerateNewX25519KeyPair()
 	var t = true
 	var username = acme.AcmeUser
 	hc := &config.HostConfigOptional{
-		AutoSelfSign:   &t,
-		KeyPair:        clientKeys,
-		ServerName:     &domain,
-		Port:           7777,
-		ServerKeyBytes: pubKey,
-		User:           &username,
-		Input:          fakeReader,
-		Output:         pipeWriter,
+		AutoSelfSign: &t,
+		// KeyPair:        clientKeys,
+		ServerName: &domain,
+		Port:       7777,
+		// ServerKeyBytes: pubKey,
+		User:   &username,
+		Input:  fakeReader,
+		Output: pipeWriter,
 	}
 	clientConfig := hc.Unwrap()
 	// prevent logging from messing up communication

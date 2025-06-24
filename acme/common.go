@@ -1,3 +1,4 @@
+// Package acme contains structs and methods to run acme servers and clients
 package acme
 
 import (
@@ -12,6 +13,7 @@ import (
 const ChallengeLen int = 32
 const AcmeUser = "reserved_hop_certificate_request_username"
 
+// DomainNameAndKey is a message requesting a certificate for a given domain name and public key
 // TODO(hosono) maybe this should be signed?
 type DomainNameAndKey struct {
 	DomainName string

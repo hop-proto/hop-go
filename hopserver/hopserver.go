@@ -49,7 +49,7 @@ type HopServer struct {
 
 	fsystem fs.FS
 
-	server   *transport.Server
+	Server   *transport.Server
 	keyStore *authkeys.SyncAuthKeySet
 	authsock net.Listener //nolint TODO(hosono) add linting back
 }
@@ -82,7 +82,7 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, 
 
 		config: config,
 
-		server: underlying,
+		Server: underlying,
 
 		fsystem: os.DirFS("/"),
 	}
@@ -216,7 +216,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 // Serve listens for incoming hop connection requests and starts
 // corresponding agproxy on unix socket
 func (s *HopServer) Serve() {
-	go s.server.Serve() // start transport layer server
+	go s.Server.Serve() // start transport layer server
 	logrus.Info("hop server starting")
 
 	// start dpproxy
@@ -232,7 +232,7 @@ func (s *HopServer) Serve() {
 	}
 
 	for {
-		serverConn, err := s.server.AcceptTimeout(30 * time.Minute)
+		serverConn, err := s.Server.AcceptTimeout(30 * time.Minute)
 		// io.EOF indicates the server was closed, which is ok
 		if errors.Is(err, io.EOF) {
 			return
@@ -275,10 +275,10 @@ func (s *HopServer) SetFSystem(fsystem fstest.MapFS) {
 func (s *HopServer) ListenAddress() net.Addr {
 	s.m.Lock()
 	defer s.m.Unlock()
-	if s.server == nil {
+	if s.Server == nil {
 		return &net.UDPAddr{}
 	}
-	return s.server.Addr()
+	return s.Server.Addr()
 }
 
 // Close stops the underlying connection and cleans up all resources
@@ -298,7 +298,7 @@ func (s *HopServer) Close() error {
 	}
 	wg.Wait()
 	s.dpProxy.stop()
-	return s.server.Close()
+	return s.Server.Close()
 }
 
 func (s *HopServer) AddAuthGrant(intent *authgrants.Intent) error {

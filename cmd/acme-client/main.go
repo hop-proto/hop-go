@@ -13,7 +13,7 @@ import (
 	"hop.computer/hop/config"
 	"hop.computer/hop/hopserver"
 	"hop.computer/hop/keys"
-	"hop.computer/hop/transport"
+	// "hop.computer/hop/transport"
 )
 
 func checkErr(err error) {
@@ -44,29 +44,29 @@ func genCerts(domainName string, ourKeys *keys.X25519KeyPair) (root, intermediat
 }
 
 func startChallengeServer(domainName string, challengeString string, ourKeys *keys.X25519KeyPair, caPubKey keys.PublicKey) *hopserver.HopServer {
-	_, intermediate, leaf := genCerts(domainName, ourKeys)
-	leafBytes, err := leaf.Marshal()
-	checkErr(err)
-	intermediateBytes, err := intermediate.Marshal()
-	checkErr(err)
+	// _, intermediate, leaf := genCerts(domainName, ourKeys)
+	// leafBytes, err := leaf.Marshal()
+	// checkErr(err)
+	// intermediateBytes, err := intermediate.Marshal()
+	// checkErr(err)
 
 	t := true
 	sc := &config.ServerConfig{
 		ListenAddress:        ":7777",
 		HiddenModeVHostNames: []string{domainName},
-		InsecureSkipVerify:   &t,
+		InsecureSkipVerify:   t,
 		HandshakeTimeout:     time.Minute,
-		Challenge:            challengeString,
+		// Challenge:            challengeString,
 	}
 	b := true
-	sc.EnableAuthorizedKeys = &b
-	sc.TransportCert = &transport.Certificate{
-		RawLeaf:         leafBytes,
-		RawIntermediate: intermediateBytes,
-		Exchanger:       ourKeys,
-		Leaf:            leaf,
-		HostName:        domainName,
-	}
+	sc.EnableAuthorizedKeys = b
+	// sc.TransportCert = &transport.Certificate{
+	// 	RawLeaf:         leafBytes,
+	// 	RawIntermediate: intermediateBytes,
+	// 	Exchanger:       ourKeys,
+	// 	Leaf:            leaf,
+	// 	HostName:        domainName,
+	// }
 
 	server, err := hopserver.NewHopServer(sc)
 	checkErr(err)
