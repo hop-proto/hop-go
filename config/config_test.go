@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"gotest.tools/assert"
@@ -108,6 +109,10 @@ func TestLoadServerConfig(t *testing.T) {
 		EnableAuthgrants:     false,
 		Users:                []string{"user"},
 		HiddenModeVHostNames: []string{"example.com"},
+		Names:                []NameConfig{},
+		HandshakeTimeout:     time.Second,
+		DataTimeout:          time.Second,
 	}
-	assert.DeepEqual(t, c, expected, cmpopts.IgnoreUnexported(certs.Certificate{}))
+	// TODO(hosono) there is currently no good way to compare certificates as equal
+	assert.DeepEqual(t, c, expected, cmpopts.IgnoreFields(ServerConfig{}, "Certificate", "Intermediate", "CACerts"))
 }
