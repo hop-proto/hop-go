@@ -1,0 +1,47 @@
+#!/usr/bin/bash
+set -exu
+set -o pipefail
+
+# Pass the name of your CA as the `CA_CERT_DNS_NAME` env variable
+
+HOP_DIR=${PWD}
+
+ACME_DIR=${HOP_DIR}/acme
+HOPD_FILES=${ACME_DIR}/acme_root/etc/hopd
+# CAFILES_OUTPUT_DIR=${CAFILES_OUTPUT_DIR:="${ACME_DIR}/acme_root/etc/hopd/CAFiles"}
+CAFILES_OUTPUT_DIR=$HOPD_FILES
+
+mkdir -p $CAFILES_OUTPUT_DIR
+mkdir -p $HOPD_FILES
+
+# Generate CAFiles used to sign other certificates and such
+CA_CERT_DNS_NAME=${CA_CERT_DNS_NAME:='super_ca.com'}
+
+HOP_GEN=${HOP_GEN:='./hop-gen'}
+HOP_ISSUE=${HOP_ISSUE:='./hop-issue'}
+
+# Build Hop commands
+go build -o ${HOP_GEN} "${HOP_DIR}/cmd/hop-gen"
+go build -o ${HOP_ISSUE} "${HOP_DIR}/cmd/hop-issue"
+
+## CA private keygen
+${HOP_GEN} -signing | tee $CAFILES_OUTPUT_DIR/root-key.pem
+${HOP_GEN} -signing | tee $CAFILES_OUTPUT_DIR/intermediate-key.pem
+
+## CA public keygen
+${HOP_GEN} -signing -private $CAFILES_OUTPUT_DIR/root-key.pem | tee $CAFILES_OUTPUT_DIR/root.pub
+${HOP_GEN} -signing -private $CAFILES_OUTPUT_DIR/intermediate-key.pem | tee $CAFILES_OUTPUT_DIR/intermediate.pub
+
+## CA cert gen
+${HOP_ISSUE} -type root -key-file $CAFILES_OUTPUT_DIR/root-key.pem -dns-name $CA_CERT_DNS_NAME | tee $CAFILES_OUTPUT_DIR/root.cert
+${HOP_ISSUE} -type intermediate -key-file $CAFILES_OUTPUT_DIR/root-key.pem -cert-file $CAFILES_OUTPUT_DIR/root.cert -public-key $CAFILES_OUTPUT_DIR/intermediate.pub -dns-name $CA_CERT_DNS_NAME | tee $CAFILES_OUTPUT_DIR/intermediate.cert
+                   
+
+## private keys
+${HOP_GEN} | tee $HOPD_FILES/id_hop.pem
+
+## public keys
+${HOP_GEN} -private $HOPD_FILES/id_hop.pem | tee $HOPD_FILES/id_hop.pub
+
+## certs
+${HOP_ISSUE} -type leaf -key-file $CAFILES_OUTPUT_DIR/intermediate-key.pem -cert-file $CAFILES_OUTPUT_DIR/intermediate.cert -public-key $HOPD_FILES/id_hop.pub -dns-name $CA_CERT_DNS_NAME | tee $HOPD_FILES/id_hop.cert
