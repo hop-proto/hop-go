@@ -522,10 +522,12 @@ func (s *Server) Serve() error {
 	go func() {
 		defer s.wg.Done()
 
+		ticker := time.NewTicker(2 * time.Minute)
+		defer ticker.Stop()
+
 		for s.state.Load() == uint32(serverStateServing) {
-			t := time.NewTicker(2 * time.Minute)
 			select {
-			case <-t.C:
+			case <-ticker.C:
 				s.cookieLock.Lock()
 				// TODO(dadrian)[2023-09-10]: Save the previous cookie
 				_, err := rand.Read(s.cookieKey[:])
@@ -534,6 +536,7 @@ func (s *Server) Serve() error {
 				}
 				s.cookieLock.Unlock()
 			case <-s.stopCookieRotate:
+				return
 			}
 		}
 	}()
