@@ -685,6 +685,8 @@ func (r *Reliable) scheduleRetransmission(rtrFrame *frame, dataLength uint16, ti
 
 // executeRetransmission actually sends the retransmission if no newer frame has arrived.
 func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, oldFrameIndex int) {
+        r.sender.m.Lock()
+        defer r.sender.m.Unlock()
 	if r.lastRTRSent.Load() >= rtrFrame.frameNo {
 		if common.Debug {
 			r.log.Debugf("Skipping retransmission for frame %d, newer frame received", rtrFrame.frameNo)
