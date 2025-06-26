@@ -16,6 +16,7 @@ import (
 	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
 	"hop.computer/hop/config"
+	"hop.computer/hop/hopclient"
 	"hop.computer/hop/hopserver"
 	"hop.computer/hop/keys"
 	"hop.computer/hop/transport"
@@ -90,6 +91,7 @@ func (s *AcmeServer) newSession(serverConn *transport.Handle) {
 		server:        s,
 		ID:            sessID(s.nextSessionID.Load()),
 	}
+	sess.log = s.Config.log.WithField("session", sess.ID)
 	s.nextSessionID.Add(1)
 	s.sessionLock.Lock()
 	s.sessions[sess.ID] = sess
@@ -105,7 +107,7 @@ func (s *AcmeSession) Start() error {
 		return err
 	}
 	if tube.Type() != common.ExecTube {
-		return fmt.Errorf("Acme Session was not an ExecTube")
+		return fmt.Errorf("acme Session was not an ExecTube")
 	}
 
 	// Step 1: Read domain to be requested and the public key that it will be advertized with
@@ -116,7 +118,7 @@ func (s *AcmeSession) Start() error {
 		return err
 	}
 	domain := domainAndKey.DomainName
-	pubKey := domainAndKey.PublicKey
+	// pubKey := domainAndKey.PublicKey
 
 	// Step 2: CA sends deployment key and a random challenge token
 	s.log.Info("Step 2. CA sends new deployment key and random challenge token")
@@ -148,8 +150,62 @@ func (s *AcmeSession) Start() error {
 	}
 
 	// Step 4: CA checks that client controls identifier
-	s.log.Info("Step 4. CA checkts that client controls identifier")
-	// TODO
+	s.log.Info("Step 4. CA checks that client controls identifier")
+	pipeReader, pipeWriter := io.Pipe()
+	fakeReader, _ := io.Pipe()
+	// clientKeys := keys.GenerateNewX25519KeyPair()
+	var t = true
+	var username = AcmeUser
+	hc := &config.HostConfigOptional{
+		AutoSelfSign: &t,
+		// KeyPair:        clientKeys,
+		ServerName: &domain,
+		Port:       7777,
+		// ServerKeyBytes: pubKey,
+		User:   &username,
+		Input:  fakeReader,
+		Output: pipeWriter,
+	}
+	clientConfig := hc.Unwrap()
+	// prevent logging from messing up communication
+	client, err := hopclient.NewHopClient(clientConfig)
+	if err != nil {
+		return err
+	}
+	err = client.Dial()
+	if err != nil {
+		return err
+	}
+	go func() {
+		err = client.Start()
+		if err != nil {
+			s.log.Warnf("client error: %v", err)
+		}
+	}()
+
+	challengeResponse := make([]byte, base64.StdEncoding.EncodedLen(ChallengeLen))
+	s.log.Info("waiting for client response")
+	_, err = io.ReadFull(pipeReader, challengeResponse)
+	s.log.Infof("expected challenge: %s\n", challengeString)
+	s.log.Infof("finished pipe read: %s\n", string(challengeResponse))
+	if err != nil {
+		return err
+	}
+
+	if challengeString != string(challengeResponse) {
+		s.log.Warn("CHALLENGE RESPONSE DID NOT MATCH")
+		return fmt.Errorf("challenge response did not match")
+	} else {
+		s.log.Info("CHALLENGE MATCHED RESPONSE")
+	}
+
+	// Send confimation back to requester
+	_, err = tube.Write([]byte{1})
+	if err != nil {
+		return err
+	}
+	// TODO(hosono) make sure this closes correctly
+	go client.Close()
 
 	// Step 5: Requester makes certificate request
 	s.log.Info("Step 5. Requester makes certificate request")
