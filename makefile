@@ -22,6 +22,11 @@ lint: ; $(GOLANGCI_LINT_ERR)
 	@echo "lint-go"
 	@$(GOLANGCI_LINT) run --timeout 1m
 
+.PHONY: format
+format: ## format Go code
+	@echo "Formatting Go code"
+	@gofmt -s -w ./
+
 .PHONY: build
 build: ## compile
 build:
