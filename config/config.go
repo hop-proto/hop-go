@@ -131,6 +131,7 @@ type HostConfigOptional struct {
 	UsePty               *bool
 	HandshakeTimeout     int
 	DataTimeout          int
+	InsecureSkipVerify   *bool // If set, the client will not verify the server's certificate
 	RequestAuthorization *bool
 	Input                io.Reader
 	Output               io.Writer
@@ -161,6 +162,7 @@ type HostConfig struct {
 	UsePty               bool
 	HandshakeTimeout     time.Duration
 	DataTimeout          time.Duration
+	InsecureSkipVerify   bool
 	RequestAuthorization bool // whether or not the client will open a userauth tube to login as a user
 	// The source from which data will be read and sent to the server
 	Input io.Reader
@@ -306,6 +308,9 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	}
 	if hc.DataTimeout != 0 {
 		newHC.DataTimeout = time.Duration(hc.DataTimeout) * time.Second
+	}
+	if hc.InsecureSkipVerify != nil {
+		newHC.InsecureSkipVerify = *hc.InsecureSkipVerify
 	}
 	if hc.RequestAuthorization != nil {
 		newHC.RequestAuthorization = *hc.RequestAuthorization

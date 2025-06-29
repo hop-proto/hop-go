@@ -9,6 +9,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"testing/fstest"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -95,21 +96,34 @@ func (s *AcmeServer) newSession(serverConn *transport.Handle) {
 		ID:            sessID(s.nextSessionID.Load()),
 	}
 	sess.log = s.Config.log.WithField("session", sess.ID)
+	sess.log.Debug("created session")
 	s.nextSessionID.Add(1)
 	s.sessionLock.Lock()
 	s.sessions[sess.ID] = sess
 	s.sessionLock.Unlock()
 
+	var err error
 	if s.Config.IsChallengeServer {
-		sess.StartChallenge()
+		err = sess.StartChallenge()
 	} else {
-		sess.Start()
+		err = sess.Start()
+	}
+	if err != nil {
+		sess.log.Warnf("session failed: %v", err)
 	}
 }
 
 func (s *AcmeSession) StartChallenge() error {
-	s.log.Info("Starting Challenge!!!")
-	return nil
+	s.log.Info("sending challenge")
+	tube, err := s.tubeMuxer.Accept()
+	if err != nil {
+		return err
+	}
+	_, err = tube.Write([]byte(s.server.Config.ChallengeString))
+	if err != nil {
+		return err
+	}
+	return tube.Close()
 }
 
 func (s *AcmeSession) Start() error {
@@ -119,7 +133,7 @@ func (s *AcmeSession) Start() error {
 		return err
 	}
 	if tube.Type() != common.ExecTube {
-		return fmt.Errorf("acme Session was not an ExecTube")
+		return fmt.Errorf("acme Session type `%d` instead of ExecTube", tube.Type())
 	}
 
 	// Step 1: Read domain to be requested and the public key that it will be advertized with
@@ -163,41 +177,46 @@ func (s *AcmeSession) Start() error {
 
 	// Step 4: CA checks that client controls identifier
 	s.log.Info("Step 4. CA checks that client controls identifier")
-	pipeReader, pipeWriter := io.Pipe()
-	fakeReader, _ := io.Pipe()
-	// clientKeys := keys.GenerateNewX25519KeyPair()
-	var t = true
-	var username = AcmeUser
+	t := true
+	f := false
+	username := AcmeUser
+	keyPath := "id_hop.pem"
 	hc := &config.HostConfigOptional{
-		AutoSelfSign: &t,
-		// KeyPair:        clientKeys,
-		ServerName: &domain,
-		Port:       7777,
-		// ServerKeyBytes: pubKey,
-		User:   &username,
-		Input:  fakeReader,
-		Output: pipeWriter,
+		AutoSelfSign:         &t,
+		ServerName:           &domain,
+		Key:                  &keyPath,
+		Port:                 8888,
+		User:                 &username,
+		InsecureSkipVerify:   &t,
+		RequestAuthorization: &f,
 	}
 	clientConfig := hc.Unwrap()
-	// prevent logging from messing up communication
 	client, err := hopclient.NewHopClient(clientConfig)
 	if err != nil {
 		return err
 	}
+
+	keyBytes := keyPair.Private.String()
+	client.Fsystem = fstest.MapFS{
+		keyPath: &fstest.MapFile{
+			Data: []byte(keyBytes + "\n"),
+			Mode: 0600,
+		},
+	}
+
 	err = client.Dial()
 	if err != nil {
 		return err
 	}
-	go func() {
-		err = client.Start()
-		if err != nil {
-			s.log.Warnf("client error: %v", err)
-		}
-	}()
+
+	innerTube, err := client.TubeMuxer.CreateReliableTube(common.ExecTube)
+	if err != nil {
+		return err
+	}
 
 	challengeResponse := make([]byte, base64.StdEncoding.EncodedLen(ChallengeLen))
 	s.log.Info("waiting for client response")
-	_, err = io.ReadFull(pipeReader, challengeResponse)
+	_, err = io.ReadFull(innerTube, challengeResponse)
 	s.log.Infof("expected challenge: %s\n", challengeString)
 	s.log.Infof("finished pipe read: %s\n", string(challengeResponse))
 	if err != nil {

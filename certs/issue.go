@@ -63,6 +63,7 @@ func issue(parent *Certificate, child *Identity, certType CertificateType, durat
 	h.Write(b[:tbsLen])
 	h.Write(out.Signature[:])
 	h.Sum(out.Fingerprint[:0])
+	out.raw = buf
 	return out, nil
 }
 
@@ -130,6 +131,7 @@ func selfSign(self *Identity, certificateType CertificateType, keyPair *keys.Sig
 	h.Write(b[:tbsLen])
 	h.Write(out.Signature[:])
 	h.Sum(out.Fingerprint[:0])
+	out.raw = buf
 	return out, nil
 }
 

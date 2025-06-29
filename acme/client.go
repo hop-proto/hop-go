@@ -53,17 +53,18 @@ func (c *AcmeClient) startChallengeServer(challengeString string, ourKeys *keys.
 
 	config := &AcmeServerConfig{
 		ServerConfig: &config.ServerConfig{
-			Key:                  ourKeys,
-			Certificate:          leaf,
-			Intermediate:         intermediate,
-			ListenAddress:        "localhost:8888",
-			HandshakeTimeout:     5 * time.Minute,
-			DataTimeout:          5 * time.Minute,
-			CACerts:              []*certs.Certificate{root, intermediate},
-			EnableAuthorizedKeys: true,
-			EnableAuthgrants:     true,
+			Key:                ourKeys,
+			Certificate:        leaf,
+			Intermediate:       intermediate,
+			ListenAddress:      "localhost:8888",
+			HandshakeTimeout:   5 * time.Minute,
+			DataTimeout:        5 * time.Minute,
+			CACerts:            []*certs.Certificate{root, intermediate},
+			InsecureSkipVerify: true, // TODO(hosono) only allow the CA to see the challenge
 		},
 		SigningCertificate: nil,
+		IsChallengeServer:  true,
+		ChallengeString:    challengeString,
 		log:                c.log.WithField("challengeServer", ""),
 	}
 

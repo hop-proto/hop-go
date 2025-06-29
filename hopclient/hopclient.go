@@ -214,6 +214,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 			leaf = loadLeafFromFile(leafFile, c.Fsystem)
 		}
 		logrus.Infof("no agent running")
+		verifyConfig.InsecureSkipVerify = hc.InsecureSkipVerify
 		authenticator = core.InMemoryAuthenticator{
 			X25519KeyPair: keypair,
 			VerifyConfig:  verifyConfig,
