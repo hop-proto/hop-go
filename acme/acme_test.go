@@ -23,7 +23,6 @@ func createTestServer(t *testing.T, domainName string, keyPair *keys.X25519KeyPa
 			Key:                keyPair,
 			Certificate:        serverLeaf,
 			Intermediate:       serverInter,
-			AutoSelfSign:       false,
 			ListenAddress:      "localhost:7777",
 			HandshakeTimeout:   time.Second,
 			DataTimeout:        time.Second,

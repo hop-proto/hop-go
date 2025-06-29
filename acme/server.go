@@ -28,6 +28,8 @@ type sessID uint32
 type AcmeServerConfig struct {
 	*config.ServerConfig
 	SigningCertificate *certs.Certificate
+	IsChallengeServer  bool
+	ChallengeString    string
 	log                *logrus.Entry
 }
 
@@ -98,7 +100,16 @@ func (s *AcmeServer) newSession(serverConn *transport.Handle) {
 	s.sessions[sess.ID] = sess
 	s.sessionLock.Unlock()
 
-	sess.Start()
+	if s.Config.IsChallengeServer {
+		sess.StartChallenge()
+	} else {
+		sess.Start()
+	}
+}
+
+func (s *AcmeSession) StartChallenge() error {
+	s.log.Info("Starting Challenge!!!")
+	return nil
 }
 
 func (s *AcmeSession) Start() error {

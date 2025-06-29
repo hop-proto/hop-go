@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -12,7 +13,6 @@ import (
 	"hop.computer/hop/common"
 	"hop.computer/hop/config"
 	"hop.computer/hop/hopclient"
-	"hop.computer/hop/hopserver"
 	"hop.computer/hop/keys"
 )
 
@@ -45,8 +45,36 @@ func (c *AcmeClient) Dial() error {
 	return c.HopClient.Dial()
 }
 
-func startChallengeServer(domainName string, challengeString string, ourKeys *keys.X25519KeyPair, caPubKey keys.PublicKey) *hopserver.HopServer {
-	panic("todo")
+func (c *AcmeClient) startChallengeServer(challengeString string, ourKeys *keys.X25519KeyPair, caPubKey keys.PublicKey) (*AcmeServer, error) {
+	root, intermediate, leaf, err := createCertChain(c.Config.DomainName, ourKeys)
+	if err != nil {
+		return nil, err
+	}
+
+	config := &AcmeServerConfig{
+		ServerConfig: &config.ServerConfig{
+			Key:                  ourKeys,
+			Certificate:          leaf,
+			Intermediate:         intermediate,
+			ListenAddress:        "localhost:8888",
+			HandshakeTimeout:     5 * time.Minute,
+			DataTimeout:          5 * time.Minute,
+			CACerts:              []*certs.Certificate{root, intermediate},
+			EnableAuthorizedKeys: true,
+			EnableAuthgrants:     true,
+		},
+		SigningCertificate: nil,
+		log:                c.log.WithField("challengeServer", ""),
+	}
+
+	server, err := NewAcmeServer(config)
+	if err != nil {
+		return nil, err
+	}
+
+	go server.Serve()
+
+	return server, err
 }
 
 func (c *AcmeClient) Run() (*certs.Certificate, error) {
@@ -86,7 +114,10 @@ func (c *AcmeClient) Run() (*certs.Certificate, error) {
 
 	// Step 3: Requester informs CA that challenge is complete
 	c.log.Info("Step 3: Requester informs CA that challenge is complete")
-	server := startChallengeServer(c.Config.DomainName, challengeString, reqKeyPair, caPubKey)
+	server, err := c.startChallengeServer(challengeString, reqKeyPair, caPubKey)
+	if err != nil {
+		return nil, err
+	}
 	_, err = tube.Write([]byte{1})
 	if err != nil {
 		return nil, err
