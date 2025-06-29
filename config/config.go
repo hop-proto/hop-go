@@ -107,59 +107,61 @@ type nameConfigSchema struct {
 // default value can be distinguished from a set zero-value; users should
 // convert to a `HostConfig` (via .Unwrap) before reading the values
 type HostConfigOptional struct {
-	AgentURL         *string
-	AutoSelfSign     *bool
-	CAFiles          []string
-	ServerName       *string
-	ServerKey        *string
-	ServerIPv4       *string
-	ServerIPv6       *string
-	Certificate      *string
-	Cmd              *string // what command to run on connect
-	DisableAgent     *bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
-	Headless         *bool   // run without command
-	Hostname         *string
-	Intermediate     *string
-	Key              *string
-	Patterns         []string
-	Port             int
-	RemoteFwds       *portforwarding.Forward
-	LocalFwds        *portforwarding.Forward
-	User             *string
-	IsDelegate       *bool // If set then client will initiate authgrant protocol
-	IsPrincipal      *bool // If set then client will respond to authgrant requests
-	UsePty           *bool
-	HandshakeTimeout int
-	DataTimeout      int
-	Input            io.Reader
-	Output           io.Writer
+	AgentURL             *string
+	AutoSelfSign         *bool
+	CAFiles              []string
+	ServerName           *string
+	ServerKey            *string
+	ServerIPv4           *string
+	ServerIPv6           *string
+	Certificate          *string
+	Cmd                  *string // what command to run on connect
+	DisableAgent         *bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
+	Headless             *bool   // run without command
+	Hostname             *string
+	Intermediate         *string
+	Key                  *string
+	Patterns             []string
+	Port                 int
+	RemoteFwds           *portforwarding.Forward
+	LocalFwds            *portforwarding.Forward
+	User                 *string
+	IsDelegate           *bool // If set then client will initiate authgrant protocol
+	IsPrincipal          *bool // If set then client will respond to authgrant requests
+	UsePty               *bool
+	HandshakeTimeout     int
+	DataTimeout          int
+	RequestAuthorization *bool
+	Input                io.Reader
+	Output               io.Writer
 }
 
 // HostConfig contains a definition of a host pattern in a client configuration
 type HostConfig struct {
-	AgentURL         string
-	AutoSelfSign     bool
-	CAFiles          []string
-	ServerName       string // expected name on server cert
-	ServerKey        string // Server Public key to enable Hidden mode
-	ServerIPv4       string
-	ServerIPv6       string
-	Certificate      string
-	Cmd              string // what command to run on connect
-	DisableAgent     bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
-	Headless         bool   // run without command
-	Hostname         string
-	Intermediate     string
-	Key              string
-	Port             int
-	RemoteFwds       *portforwarding.Forward
-	LocalFwds        *portforwarding.Forward
-	User             string
-	IsDelegate       bool
-	IsPrincipal      bool
-	UsePty           bool
-	HandshakeTimeout time.Duration
-	DataTimeout      time.Duration
+	AgentURL             string
+	AutoSelfSign         bool
+	CAFiles              []string
+	ServerName           string // expected name on server cert
+	ServerKey            string // Server Public key to enable Hidden mode
+	ServerIPv4           string
+	ServerIPv6           string
+	Certificate          string
+	Cmd                  string // what command to run on connect
+	DisableAgent         bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
+	Headless             bool   // run without command
+	Hostname             string
+	Intermediate         string
+	Key                  string
+	Port                 int
+	RemoteFwds           *portforwarding.Forward
+	LocalFwds            *portforwarding.Forward
+	User                 string
+	IsDelegate           bool
+	IsPrincipal          bool
+	UsePty               bool
+	HandshakeTimeout     time.Duration
+	DataTimeout          time.Duration
+	RequestAuthorization bool // whether or not the client will open a userauth tube to login as a user
 	// The source from which data will be read and sent to the server
 	Input io.Reader
 	// The destination where data from the server will be written
@@ -237,10 +239,11 @@ func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
 func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	//TODO(drebelsky): consider using reflection
 	newHC := HostConfig{
-		HandshakeTimeout: 15 * time.Second,
-		DataTimeout:      15 * time.Second,
-		Input:            os.Stdin,
-		Output:           os.Stdout,
+		HandshakeTimeout:     15 * time.Second,
+		DataTimeout:          15 * time.Second,
+		Input:                os.Stdin,
+		Output:               os.Stdout,
+		RequestAuthorization: true,
 	}
 	if hc.AgentURL != nil {
 		newHC.AgentURL = *hc.AgentURL
@@ -303,6 +306,9 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	}
 	if hc.DataTimeout != 0 {
 		newHC.DataTimeout = time.Duration(hc.DataTimeout) * time.Second
+	}
+	if hc.RequestAuthorization != nil {
+		newHC.RequestAuthorization = *hc.RequestAuthorization
 	}
 	if hc.Input != nil {
 		newHC.Input = hc.Input

@@ -110,11 +110,14 @@ func (c *HopClient) connectLocked(address string, authenticator core.Authenticat
 	}
 	c.TubeMuxer = tubes.Server(c.TransportConn, &config)
 
-	err = c.userAuthorization()
-	if err != nil {
-		return err
+	if c.hostconfig.RequestAuthorization {
+		err = c.userAuthorization()
+		if err != nil {
+			return err
+		}
+		c.connected = true
+
 	}
-	c.connected = true
 	return nil
 }
 

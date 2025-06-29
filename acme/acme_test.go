@@ -29,6 +29,7 @@ func createTestServer(t *testing.T, domainName string, keyPair *keys.X25519KeyPa
 			DataTimeout:        time.Second,
 			CACerts:            []*certs.Certificate{serverRoot, serverInter},
 			InsecureSkipVerify: true,
+			Users:              []string{AcmeUser},
 		},
 		SigningCertificate: serverInter,
 		log:                logrus.WithField("acmeServer", ""),
@@ -38,26 +39,28 @@ func createTestServer(t *testing.T, domainName string, keyPair *keys.X25519KeyPa
 	return server, serverRoot
 }
 
-func createTestClient(t *testing.T, server *AcmeServer, serverDomain string, rootCert *certs.Certificate) *AcmeClient {
-	serverDomain, p, err := net.SplitHostPort(server.HopServer.ListenAddress().String())
+func createTestClient(t *testing.T, server *AcmeServer, serverName string, rootCert *certs.Certificate) *AcmeClient {
+	serverListenDomain, p, err := net.SplitHostPort(server.HopServer.ListenAddress().String())
 	assert.NilError(t, err)
 	port, err := strconv.Atoi(p)
 	assert.NilError(t, err)
 
 	username := AcmeUser
 	truth := true
+	falsey := false
 	keyPath := "home/user/.hop/id_hop.pem"
 	rootCertPath := "home/user/.hop/root.cert"
 	interCertPath := "home/user/.hop/intermediate.cert"
 	hc := &config.HostConfigOptional{
-		Hostname:     &serverDomain,
-		Port:         port,
-		User:         &username,
-		AutoSelfSign: &truth,
-		Key:          &keyPath,
-		ServerName:   &serverDomain,
-		CAFiles:      []string{rootCertPath, interCertPath},
-		DataTimeout:  int(time.Second),
+		Hostname:             &serverListenDomain,
+		Port:                 port,
+		User:                 &username,
+		AutoSelfSign:         &truth,
+		Key:                  &keyPath,
+		ServerName:           &serverName,
+		CAFiles:              []string{rootCertPath, interCertPath},
+		DataTimeout:          int(time.Second),
+		RequestAuthorization: &falsey,
 	}
 	hostConf := hc.Unwrap()
 	config := &AcmeClientConfig{
@@ -97,6 +100,7 @@ func createTestClient(t *testing.T, server *AcmeServer, serverDomain string, roo
 }
 
 func TestAcme(t *testing.T) {
+	logrus.SetLevel(logrus.DebugLevel)
 	serverKeys := keys.GenerateNewX25519KeyPair()
 	server, serverRootCert := createTestServer(t, "acme.com", serverKeys)
 	logrus.Info("created server")

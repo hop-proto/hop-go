@@ -58,6 +58,7 @@ func NewAcmeServer(sc *AcmeServerConfig) (*AcmeServer, error) {
 	return &AcmeServer{
 		HopServer: inner,
 		Config:    sc,
+		sessions:  make(map[sessID]*AcmeSession),
 	}, nil
 }
 
