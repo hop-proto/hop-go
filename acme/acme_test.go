@@ -112,4 +112,14 @@ func TestAcme(t *testing.T) {
 
 	err := client.Dial()
 	assert.NilError(t, err)
+
+	cert, err := client.Run()
+	assert.NilError(t, err)
+
+	store := certs.Store{}
+	store.AddCertificate(serverRootCert)
+	store.AddCertificate(server.Config.Intermediate)
+
+	err = store.VerifyLeaf(cert, certs.VerifyOptions{})
+	assert.NilError(t, err)
 }

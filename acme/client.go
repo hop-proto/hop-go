@@ -25,7 +25,7 @@ type AcmeClientConfig struct {
 type AcmeClient struct {
 	*hopclient.HopClient
 	Config *AcmeClientConfig
-	log    logrus.Entry
+	log    *logrus.Entry
 }
 
 func NewAcmeClient(hc *AcmeClientConfig) (*AcmeClient, error) {
@@ -36,6 +36,8 @@ func NewAcmeClient(hc *AcmeClientConfig) (*AcmeClient, error) {
 
 	return &AcmeClient{
 		HopClient: client,
+		Config:    hc,
+		log:       logrus.WithField("client", ""),
 	}, nil
 }
 
