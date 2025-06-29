@@ -74,3 +74,33 @@ func (req *CertificateRequest) ReadFrom(r io.Reader) (int64, error) {
 	n2, err := io.ReadFull(r, req.PubKey[:])
 	return int64(n2) + n, err
 }
+
+// Generates a fully self-signed chain for the given key pair
+func createCertChain(domainName string, ourKeys *keys.X25519KeyPair) (root, intermediate, leaf *certs.Certificate, err error) {
+	rootKeys := keys.GenerateNewSigningKeyPair()
+	rootCert, err := certs.SelfSignRoot(certs.SigningIdentity(rootKeys), rootKeys)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	err = rootCert.ProvideKey((*[32]byte)(&rootKeys.Private))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	intermediateKeys := keys.GenerateNewSigningKeyPair()
+	intermediateCert, err := certs.IssueIntermediate(rootCert, certs.SigningIdentity(intermediateKeys))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	err = intermediateCert.ProvideKey((*[32]byte)(&intermediateKeys.Private))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	leafCert, err := certs.IssueLeaf(intermediateCert, certs.LeafIdentity(ourKeys, certs.DNSName(domainName)))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return rootCert, intermediateCert, leafCert, nil
+}

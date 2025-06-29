@@ -27,8 +27,8 @@ type sessID uint32
 
 type AcmeServerConfig struct {
 	*config.ServerConfig
-	Certificate *certs.Certificate
-	log         *logrus.Entry
+	SigningCertificate *certs.Certificate
+	log                *logrus.Entry
 }
 
 // AcmeServer represents the state of a server engaging in the acme protocol
@@ -218,7 +218,7 @@ func (s *AcmeSession) Start() error {
 	// Step 6: CA issues certificate
 	s.log.Info("Step 6. CA issues certificate")
 
-	cert, err := certs.IssueLeaf(s.server.Config.Certificate, &certs.Identity{
+	cert, err := certs.IssueLeaf(s.server.Config.SigningCertificate, &certs.Identity{
 		PublicKey: request.PubKey,
 		Names:     []certs.Name{request.Name},
 	})

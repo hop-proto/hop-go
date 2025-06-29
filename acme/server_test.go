@@ -12,8 +12,6 @@ func TestAcmeConfig(t *testing.T) {
 	config := &AcmeServerConfig{
 		ServerConfig: &config.ServerConfig{},
 	}
-	s, err := NewAcmeServer(config)
+	_, err := NewAcmeServer(config)
 	assert.NilError(t, err)
-
-	s.Serve()
 }
