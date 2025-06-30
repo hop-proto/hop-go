@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+
 	"gotest.tools/assert"
+
 	"hop.computer/hop/certs"
 	"hop.computer/hop/config"
 	"hop.computer/hop/keys"
