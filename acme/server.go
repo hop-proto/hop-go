@@ -144,7 +144,6 @@ func (s *AcmeSession) Start() error {
 		return err
 	}
 	domain := domainAndKey.DomainName
-	// pubKey := domainAndKey.PublicKey
 
 	// Step 2: CA sends deployment key and a random challenge token
 	s.log.Info("Step 2. CA sends new deployment key and random challenge token")

@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"strconv"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -18,8 +19,9 @@ import (
 
 type AcmeClientConfig struct {
 	*config.HostConfig
-	Key        keys.X25519KeyPair
-	DomainName string
+	Key           *keys.X25519KeyPair
+	DomainName    string
+	ChallengePort uint16
 }
 
 type AcmeClient struct {
@@ -45,7 +47,7 @@ func (c *AcmeClient) Dial() error {
 	return c.HopClient.Dial()
 }
 
-func (c *AcmeClient) startChallengeServer(challengeString string, ourKeys *keys.X25519KeyPair, caPubKey keys.PublicKey) (*AcmeServer, error) {
+func (c *AcmeClient) startChallengeServer(listenAddr, challengeString string, ourKeys *keys.X25519KeyPair, caPubKey keys.PublicKey) (*AcmeServer, error) {
 	root, intermediate, leaf, err := createCertChain(c.Config.DomainName, ourKeys)
 	if err != nil {
 		return nil, err
@@ -56,7 +58,7 @@ func (c *AcmeClient) startChallengeServer(challengeString string, ourKeys *keys.
 			Key:                ourKeys,
 			Certificate:        leaf,
 			Intermediate:       intermediate,
-			ListenAddress:      "localhost:8888",
+			ListenAddress:      listenAddr,
 			HandshakeTimeout:   5 * time.Minute,
 			DataTimeout:        5 * time.Minute,
 			CACerts:            []*certs.Certificate{root, intermediate},
@@ -90,6 +92,7 @@ func (c *AcmeClient) Run() (*certs.Certificate, error) {
 	c.log.Info("Step 1: Send domain name and public key to CA")
 	domainAndKey := DomainNameAndKey{
 		DomainName: c.Config.DomainName,
+		Port:       c.Config.ChallengePort,
 		PublicKey:  reqKeyPair.Public,
 	}
 	_, err = domainAndKey.Write(tube)
@@ -115,7 +118,8 @@ func (c *AcmeClient) Run() (*certs.Certificate, error) {
 
 	// Step 3: Requester informs CA that challenge is complete
 	c.log.Info("Step 3: Requester informs CA that challenge is complete")
-	server, err := c.startChallengeServer(challengeString, reqKeyPair, caPubKey)
+	localAddr := "localhost:" + strconv.Itoa(int(c.Config.ChallengePort))
+	server, err := c.startChallengeServer(localAddr, challengeString, reqKeyPair, caPubKey)
 	if err != nil {
 		return nil, err
 	}

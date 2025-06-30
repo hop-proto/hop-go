@@ -17,14 +17,16 @@ const AcmeUser = "reserved_hop_certificate_request_username"
 // TODO(hosono) maybe this should be signed?
 type DomainNameAndKey struct {
 	DomainName string
+	Port       uint16
 	PublicKey  [certs.KeyLen]byte
 }
 
 func (d *DomainNameAndKey) Write(w io.Writer) (int, error) {
-	buf := make([]byte, len(d.DomainName)+len(d.PublicKey)+2)
+	buf := make([]byte, len(d.DomainName)+len(d.PublicKey)+4)
 	binary.BigEndian.PutUint16(buf, uint16(len(d.DomainName)))
 	copy(buf[2:], []byte(d.DomainName))
-	copy(buf[2+len(d.DomainName):], d.PublicKey[:])
+	binary.BigEndian.PutUint16(buf[2+len(d.DomainName):], d.Port)
+	copy(buf[4+len(d.DomainName):], d.PublicKey[:])
 
 	return w.Write(buf)
 }
@@ -40,6 +42,10 @@ func (d *DomainNameAndKey) Read(r io.Reader) error {
 	io.ReadFull(r, domainBuf)
 
 	d.DomainName = string(domainBuf)
+	err = binary.Read(r, binary.BigEndian, &d.Port)
+	if err != nil {
+		return err
+	}
 	_, err = io.ReadFull(r, d.PublicKey[:])
 
 	return err

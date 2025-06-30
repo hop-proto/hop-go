@@ -63,9 +63,10 @@ func createTestClient(t *testing.T, server *AcmeServer, serverName string, rootC
 	}
 	hostConf := hc.Unwrap()
 	config := &AcmeClientConfig{
-		HostConfig: hostConf,
-		Key:        keys.X25519KeyPair{},
-		DomainName: "client.com",
+		HostConfig:    hostConf,
+		Key:           keys.GenerateNewX25519KeyPair(),
+		ChallengePort: 0,
+		DomainName:    "client.com",
 	}
 	client, err := NewAcmeClient(config)
 	assert.NilError(t, err)
