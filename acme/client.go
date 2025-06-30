@@ -67,7 +67,7 @@ func (c *AcmeClient) startChallengeServer(listenAddr, challengeString string, ou
 		SigningCertificate: nil,
 		IsChallengeServer:  true,
 		ChallengeString:    challengeString,
-		log:                c.log.WithField("challengeServer", ""),
+		Log:                c.log.WithField("challengeServer", ""),
 	}
 
 	server, err := NewAcmeServer(config)

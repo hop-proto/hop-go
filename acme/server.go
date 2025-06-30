@@ -31,7 +31,7 @@ type AcmeServerConfig struct {
 	SigningCertificate *certs.Certificate
 	IsChallengeServer  bool
 	ChallengeString    string
-	log                *logrus.Entry
+	Log                *logrus.Entry
 }
 
 // AcmeServer represents the state of a server engaging in the acme protocol
@@ -95,7 +95,7 @@ func (s *AcmeServer) newSession(serverConn *transport.Handle) {
 		server:        s,
 		ID:            sessID(s.nextSessionID.Load()),
 	}
-	sess.log = s.Config.log.WithField("session", sess.ID)
+	sess.log = s.Config.Log.WithField("session", sess.ID)
 	sess.log.Debug("created session")
 	s.nextSessionID.Add(1)
 	s.sessionLock.Lock()

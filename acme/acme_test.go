@@ -33,7 +33,7 @@ func createTestServer(t *testing.T, domainName string, keyPair *keys.X25519KeyPa
 			Users:              []string{AcmeUser},
 		},
 		SigningCertificate: serverInter,
-		log:                logrus.WithField("acmeServer", ""),
+		Log:                logrus.WithField("acmeServer", ""),
 	}
 	server, err := NewAcmeServer(serverConfig)
 	assert.NilError(t, err)
