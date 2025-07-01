@@ -16,7 +16,7 @@ import (
 
 func checkErr(err error) {
 	if err != nil {
-		logrus.Fatalf(err.Error())
+		logrus.Fatalf("%v", err)
 	}
 }
 
