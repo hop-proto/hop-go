@@ -245,6 +245,10 @@ func (s *AcmeSession) Start() error {
 		return err
 	}
 
+	if request.Name.String() != domainAndKey.DomainName {
+		return fmt.Errorf("Requested name `%s` did not match verified name `%s`", request.Name.String(), domainAndKey.DomainName)
+	}
+
 	// Step 6: CA issues certificate
 	s.log.Info("Step 6. CA issues certificate")
 
