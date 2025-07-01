@@ -43,7 +43,7 @@ func main() {
 		Key:        keyPair,
 		// TODO(hosono) this is a bit of a hack. Acme client should have its own flags
 		DomainName:    f.Cmd,
-		ChallengePort: 0,
+		ChallengePort: 8888,
 	}
 
 	client, err := acme.NewAcmeClient(config)
