@@ -67,7 +67,7 @@ func createTestClient(t *testing.T, server *AcmeServer, serverName string, rootC
 	config := &AcmeClientConfig{
 		HostConfig:    hostConf,
 		Key:           keys.GenerateNewX25519KeyPair(),
-		ChallengePort: 0,
+		ChallengePort: 8888,
 		DomainName:    "client.com",
 	}
 	client, err := NewAcmeClient(config)
