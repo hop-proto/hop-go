@@ -17,6 +17,11 @@ import (
 
 type muxerState int32
 
+const (
+	pacingRateBps    = 10_000_000              // 10 Mbps
+	pacingBurstBytes = MaxFrameDataLength * 10 // e.g., 10 UDP packets of 1200 bytes
+)
+
 // a Muxer can be in one of three states
 // muxerRunning indicates the muxer is able to create and accept new tubes
 // muxerStopping indicates that Stop() has been called and the muxer is waiting on its Tubes to close. In this state, the muxer cannot create or accept new tubes.
@@ -69,6 +74,9 @@ type Muxer struct {
 
 	// This buffer is only used in m.readMsg
 	readBuf []byte
+
+	tokens     float64
+	lastRefill time.Time
 }
 
 // A Config is used to configure a muxer client or server. After one has been
@@ -125,6 +133,8 @@ func newMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 		readBuf:           make([]byte, 65535),
 		receiverErr:       make(chan error),
 		senderErr:         make(chan error),
+		tokens:            float64(pacingBurstBytes),
+		lastRefill:        time.Now(),
 	}
 
 	mux.state.Store(muxerRunning)
@@ -369,36 +379,56 @@ func (m *Muxer) readMsg() (*frame, error) {
 // m.Stop in a new goroutine and the error will be reported by m.Stop
 func (m *Muxer) sender() {
 	var err error
-	ok := true
 	var rawBytes []byte
+	ok := true
+	ticker := time.NewTicker(1 * time.Millisecond)
+	defer ticker.Stop()
+
 	for ok {
 		select {
-		// Priority send queue will have fewer packets and will be chosen pseudo randomly
-		// https://go.dev/ref/spec#Select_statements
 		case rawBytes, ok = <-m.prioritySendQueue:
 			if !ok {
 				break
 			}
-
 			err = m.underlying.WriteMsg(rawBytes)
 
-		case rawBytes, ok = <-m.sendQueue:
-			if !ok {
-				break
+		case <-ticker.C:
+			// Refill tokens
+			now := time.Now()
+			elapsed := now.Sub(m.lastRefill).Seconds()
+			m.lastRefill = now
+			refill := elapsed * (float64(pacingRateBps) / 8.0)
+			m.tokens += refill
+			if m.tokens > float64(pacingBurstBytes) {
+				m.tokens = float64(pacingBurstBytes)
 			}
 
-			err = m.underlying.WriteMsg(rawBytes)
+			select {
+			case rawBytes, ok = <-m.sendQueue:
+				if !ok {
+					break
+				}
+
+				packetSize := float64(len(rawBytes))
+				if m.tokens >= packetSize {
+					m.tokens -= packetSize
+					err = m.underlying.WriteMsg(rawBytes)
+				} else {
+					// Not enough tokens, skip this tick and retry later
+				}
+			default:
+				// No packet to send
+			}
 		}
 
 		if err != nil {
 			m.log.Warnf("error in muxer sender. stopping muxer: %s", err)
-			// TODO(hosono) is it ok to stop the muxer here? Are the recoverable errors?
 			go m.Stop()
 			break
 		}
 	}
 
-	// if we broke out of the loop, consume all packets so tubes can still close
+	// drain queues
 	for range m.sendQueue {
 	}
 	for range m.prioritySendQueue {
@@ -407,6 +437,35 @@ func (m *Muxer) sender() {
 	m.log.WithField("error", err).Debug("muxer sender stopped")
 	m.senderErr <- err
 }
+
+/*
+// TimeUntilSend returns when the next packet should be sent.
+// It returns the zero value of time.Time if a packet can be sent immediately.
+func (p *pacer) TimeUntilSend() time.Time {
+	if p.budgetAtLastSent >= p.maxDatagramSize {
+		return time.Time{}
+	}
+	diff := 1e9 * uint64(p.maxDatagramSize-p.budgetAtLastSent)
+	bw := p.adjustedBandwidth()
+	// We might need to round up this value.
+	// Otherwise, we might have a budget (slightly) smaller than the datagram size when the timer expires.
+	d := diff / bw
+	// this is effectively a math.Ceil, but using only integer math
+	if diff%bw > 0 {
+		d++
+	}
+	return p.lastSentTime.Add(max(protocol.MinPacingDelay, time.Duration(d)*time.Nanosecond))
+}
+
+func (p *pacer) maxBurstSize() protocol.ByteCount {
+	return max(
+		protocol.ByteCount(uint64((protocol.MinPacingDelay+protocol.TimerGranularity).Nanoseconds())*p.adjustedBandwidth())/1e9,
+		maxBurstSizePackets*p.maxDatagramSize,
+	)
+}
+
+
+*/
 
 // start begins the sender and receiver goroutines
 func (m *Muxer) start() {

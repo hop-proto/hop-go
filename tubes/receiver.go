@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -22,6 +23,8 @@ type receiver struct {
 	ackNo uint64
 	// +checklocks:m
 	windowStart uint64
+
+	rwnd uint64 //RWND is used for flow control (don’t overwhelm recipient buffer). // TODO
 
 	closed atomic.Bool
 	m      sync.Mutex
@@ -73,6 +76,7 @@ Returns true if it processed a FIN packet
 // +checklocks:r.m
 func (r *receiver) processIntoBuffer() bool {
 	fin := false
+	waiting := false
 	oldLen := r.fragments.Len()
 	for r.fragments.Len() > 0 {
 		frag := heap.Pop(&(r.fragments)).(*pqItem)
@@ -93,13 +97,19 @@ func (r *receiver) processIntoBuffer() bool {
 			}
 			if frag.priority > r.windowStart {
 				heap.Push(&r.fragments, frag)
+				waiting = true
 
-				r.missingFrame.Store(true)
-				// Add to RTR frame.datalength the cumulative missing frames
-				frameToSend := uint16(frag.priority - r.windowStart)
-				if frameToSend <= windowSize {
-					r.frameToSendCounter = frameToSend
-				}
+				// todo review the retransmission process
+
+				/*
+					r.missingFrame.Store(true)
+					// Add to RTR frame.datalength the cumulative missing frames
+					frameToSend := uint16(frag.priority - r.windowStart)
+					if frameToSend <= windowSize {
+						r.frameToSendCounter = frameToSend
+					}
+
+				*/
 				if common.Debug {
 					log.WithFields(logrus.Fields{
 						"frag.priority": frag.priority,
@@ -123,7 +133,7 @@ func (r *receiver) processIntoBuffer() bool {
 			}
 		}
 	}
-	if oldLen > r.fragments.Len() {
+	if oldLen > r.fragments.Len() || waiting {
 		select {
 		case r.dataReady.C <- struct{}{}:
 			break
@@ -195,13 +205,13 @@ func (r *receiver) unwrapFrameNo(frameNo uint32) uint64 {
 }
 
 // receive processes a single incoming packet
-func (r *receiver) receive(p *frame) (bool, error) {
+func (r *receiver) receive(p *frame) (bool, uint64, error) {
 	r.m.Lock()
 	defer r.m.Unlock()
 
 	if r.closed.Load() {
 		r.log.Trace("receiver closed. not processing packet into buffer")
-		return false, io.EOF
+		return false, r.ackNo, io.EOF
 	}
 
 	windowStart := r.windowStart
@@ -218,6 +228,12 @@ func (r *receiver) receive(p *frame) (bool, error) {
 	// The flag ACK must be false to be processed in the heap memory.
 	// Prevent processing of RTR ACK with dataLength > 0
 	if ((p.dataLength > 0 && !p.flags.ACK) || p.flags.FIN) && windowStart <= frameNo {
+		if p.flags.RTR {
+			r.log.Debugf("I received a rtr %v, window %v, time %v", p.frameNo, r.windowStart, time.Now())
+		}
+		r.log.Debugf("I received %v, window %v time %v", p.frameNo, r.windowStart, time.Now())
+
+		// maybe prio here?
 		heap.Push(&r.fragments, &pqItem{
 			value:    p.data,
 			priority: frameNo,
@@ -232,7 +248,7 @@ func (r *receiver) receive(p *frame) (bool, error) {
 			if common.Debug {
 				log.Debug("out of bounds frame")
 			}
-			return false, errFrameOutOfBounds
+			return false, r.ackNo, errFrameOutOfBounds
 		}
 
 		if common.Debug {
@@ -241,7 +257,7 @@ func (r *receiver) receive(p *frame) (bool, error) {
 	}
 
 	fin := r.processIntoBuffer()
-	return fin, nil
+	return fin, r.ackNo, nil
 }
 
 // Close causes future reads to return io.EOF

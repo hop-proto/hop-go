@@ -2,7 +2,6 @@ package tubes
 
 import (
 	"io"
-	"math"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -63,6 +62,7 @@ type sender struct {
 
 	sendQueue chan *frame
 	probe     probe
+	probeReno probeReno
 
 	m sync.Mutex
 
@@ -82,19 +82,13 @@ func newSender(log *logrus.Entry) *sender {
 		RTO:              initialRTT,
 		windowSize:       windowSize,
 		windowOpen:       make(chan struct{}, 1),
-		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
-		probe: probe{
-			state:          Startup,
-			cycleIndex:     0,
-			pacingGain:     2 / math.Ln2, //  2 / math.Ln2,
-			cwndGain:       2 / math.Ln2,
-			maxBtlBwFilter: 1, // not 0
-			minRTT:         initialRTT,
-			inflightData:   0,
-			avgDataLength:  0,
-			prevBtlBw:      1, // not 0
-			dataDelivered:  0,
-			deliveredTime:  time.Now(),
+		// TODO paul, verify this, it looks like it would be a limiting factor
+		sendQueue: make(chan *frame, 1024), // TODO(hosono) make this size 0
+		probeReno: probeReno{
+			state:                SlowStart,
+			cwndSize:             1,
+			duplicatedAckCounter: 0,
+			ssThresh:             1000, // should be infinity
 		},
 		log: log.WithField("sender", ""),
 	}
@@ -153,7 +147,8 @@ func (s *sender) write(b []byte) (int, error) {
 
 	numFrames := s.framesToSend(false, startFrame)
 
-	if numFrames > 0 && numFrames < int(s.windowSize) {
+	// TODO does not work with the slow start
+	if numFrames > 0 && numFrames < int(s.windowSize)+1 {
 		select {
 		case s.windowOpen <- struct{}{}:
 			break
@@ -165,7 +160,8 @@ func (s *sender) write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (s *sender) sendEmptyPacket() {
+func (s *sender) sendEmptyPacket(rcvAck uint64) {
+	// TODO safe convert
 	if s.closed.Load() {
 		return
 	}
@@ -173,6 +169,7 @@ func (s *sender) sendEmptyPacket() {
 		dataLength: 0,
 		frameNo:    s.frameNo,
 		data:       []byte{},
+		ackNo:      uint32(rcvAck),
 	}
 	s.sendQueue <- pkt
 }

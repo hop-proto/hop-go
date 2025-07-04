@@ -113,9 +113,6 @@ func (r *Reliable) initiate(req bool) {
 }
 
 func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
-	ackNo := r.recvWindow.getAck()
-	lastFrameNo := r.lastFrameSent.Load()
-	lastAckNo := r.lastAckSent.Load()
 	senderWindowSize := r.sender.getWindowSize()
 	pkt.time = time.Now()
 
@@ -123,8 +120,8 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 		senderWindowSize = windowSize
 	}
 
+	//logrus.Debugf("Ack %v", pkt.ackNo)
 	pkt.tubeID = r.id
-	pkt.ackNo = ackNo
 	pkt.flags.REL = true
 	pkt.windowSize = senderWindowSize
 
@@ -135,52 +132,28 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 		pkt.flags.ACK = true
 	}
 
-	missingFrame := r.recvWindow.missingFrame.Load()
+	//missingFrame := r.recvWindow.missingFrame.Load()
 
-	if missingFrame && lastAckNo != ackNo {
-		frameToSendCounter := r.recvWindow.getFrameToSendCounter()
-		r.sendRetransmissionAck(lastFrameNo, ackNo, frameToSendCounter)
-		r.recvWindow.missingFrame.Store(false)
-		r.lastAckSent.Store(ackNo)
-	}
-
-	// Limit the retransmission of ACKs to the last value loaded through r.recvWindow.getAck()
-	if pkt.dataLength > 0 ||
-		(pkt.dataLength == 0 && (ackNo != lastAckNo || pkt.frameNo != lastFrameNo ||
-			retransmission || pkt.flags.FIN || pkt.flags.RESP)) {
-
-		if pkt.dataLength > 1000 {
-			r.sender.probe.inflightData += int(pkt.dataLength)
+	/*
+		if missingFrame && lastAckNo != ackNo {
+			frameToSendCounter := r.recvWindow.getFrameToSendCounter()
+			r.sendRetransmissionAck(lastFrameNo, ackNo, frameToSendCounter)
+			r.recvWindow.missingFrame.Store(false)
+			r.lastAckSent.Store(ackNo)
 		}
 
-		if len(r.sender.frames) > 5 && pkt.dataLength > 1000 {
-			// Calculate pacing interval
-			bandwidth := r.sender.probe.pacingGain * r.sender.probe.maxBtlBwFilter // bytes/sec
-			if bandwidth > 0 && r.sender.probe.dataDelivered > 100000 {
-				intervalSeconds := float64(pkt.dataLength) / bandwidth
-				/*
-					if intervalSeconds > 10*time.Millisecond {
-						intervalSeconds = 10 * time.Millisecond
-					}
+	*/
 
-				*/
-				r.nextSendTime = time.Now().Add(time.Duration(intervalSeconds * float64(time.Second)))
-			}
-
-			waitDuration := time.Until(r.nextSendTime)
-			if waitDuration > 0 {
-				time.Sleep(waitDuration)
-			}
-
-			pkt.time = time.Now()
-			r.sendQueue <- pkt.toBytes()
-		} else {
-			r.sendQueue <- pkt.toBytes()
-		}
-
-		r.lastAckSent.Store(ackNo)
-		r.lastFrameSent.Store(pkt.frameNo)
+	if !retransmission && pkt.dataLength > 1000 {
+		r.sender.probeReno.inflightPackets++
 	}
+
+	//r.log.Debugf("xyz time %v", time.Now())
+	//r.log.Debugf("xyz windowSize %v", r.sender.windowSize)
+	r.sendQueue <- pkt.toBytes()
+
+	r.lastAckSent.Store(pkt.ackNo)
+	r.lastFrameSent.Store(pkt.frameNo)
 
 	if common.Debug {
 		r.log.WithFields(logrus.Fields{
@@ -223,37 +196,46 @@ func (r *Reliable) send() {
 
 			r.l.Lock()
 
-			numFrames := r.sender.framesToSend(true, 0)
+			if len(r.sender.frames) > 0 && r.sender.probeReno.state != SlowStart {
 
-			for i := 0; i < numFrames; i++ {
-				rtoFrame := &r.sender.frames[i]
+				rtoFrame := &r.sender.frames[0]
 
-				r.log.WithFields(logrus.Fields{
-					"Frame N°": rtoFrame.frame.frameNo,
-					"Ack N°":   r.recvWindow.getAck(),
-				}).Trace("Retransmission RTO")
+				// to prevent spurious retransmission
+				if r.lastRTRSent.Load() != rtoFrame.frameNo {
+					// todo event to decrease the window size
 
-				// To notify the receiver of a RTO frame
+					// todo upate the rtr here and make the congestion control plugable
+					// the 2 looks a bit arbitrary but looks like i don't want to be < 1
+					if r.sender.probeReno.cwndSize > 2 {
+						r.sender.probeReno.ssThresh = uint16(r.sender.probeReno.cwndSize / 2)
+						logrus.Debugf("I ssThresh")
+					}
+					r.sender.probeReno.cwndSize = windowSize
+					r.sender.probeReno.state = SlowStart
+					r.sender.windowSize = uint16(r.sender.probeReno.cwndSize)
 
-				if common.Debug {
-					logrus.Debugf("I send rto with rto %v", r.sender.RTO)
+					logrus.Debugf("I rto %v", r.sender.RTO)
+
+					// TODO maybe send the first frame here
+
+					// To notify the receiver of a RTO frame
+
+					rtoFrame.frame.time = time.Now()
+
+					if !rtoFrame.queued && rtoFrame.frame.dataLength > 0 {
+						r.sender.unacked++
+						rtoFrame.queued = true
+					}
+
+					r.lastRTRSent.Store(rtoFrame.frame.frameNo)
+
+					r.sendOneFrame(rtoFrame.frame, true)
+
+					// Back off RTO if no ACKs were received
+					r.sender.RTO *= 2
 				}
 
-				rtoFrame.frame.flags.RTR = true
-				rtoFrame.frame.time = time.Now()
-
-				if !rtoFrame.queued && rtoFrame.frame.dataLength > 0 {
-					r.sender.unacked++
-					rtoFrame.queued = true
-				}
-
-				r.lastRTRSent.Store(rtoFrame.frame.frameNo)
-
-				r.sendOneFrame(rtoFrame.frame, true)
 			}
-
-			// Back off RTO if no ACKs were received
-			r.sender.RTO *= 2
 
 			if r.sender.RTO > maxRTO && len(r.sender.frames) > 0 {
 				logrus.Errorf("REL: RTO exeeded, dropping frame n°%v", r.sender.frames[0])
@@ -267,6 +249,25 @@ func (r *Reliable) send() {
 
 		case <-r.sender.windowOpen:
 			r.l.Lock()
+
+			// to cover retransmission of lost frames
+			if r.sender.probeReno.retransmit && len(r.sender.frames) > 0 {
+				r.sender.probeReno.retransmit = false
+				rtrFrame := &r.sender.frames[0]
+				logrus.Debugf("I retransmit %v", rtrFrame.frameNo)
+				rtrFrame.frame.time = time.Now()
+				rtrFrame.frame.flags.RTR = true
+				r.lastRTRSent.Store(rtrFrame.frame.frameNo)
+
+				if !rtrFrame.queued && rtrFrame.frame.dataLength > 0 {
+					r.sender.unacked++
+					rtrFrame.queued = true
+				}
+
+				r.sendOneFrame(rtrFrame.frame, true)
+				r.sender.resetRetransmitTicker()
+			}
+
 			numFrames := r.sender.framesToSend(false, 0)
 			r.log.WithField("numFrames", numFrames).Trace("window open")
 
@@ -282,6 +283,7 @@ func (r *Reliable) send() {
 					}).Trace("Window sending")
 
 					windowFrame.queued = true
+					// todo remove that if not bbr
 					windowFrame.dataDelivered = r.sender.probe.dataDelivered
 					windowFrame.deliveredTime = r.sender.probe.deliveredTime
 
@@ -346,15 +348,20 @@ func (r *Reliable) receive(pkt *frame) error {
 		return ErrBadTubeState
 	}
 
-	if pkt.flags.RTR {
-		r.receiveRTRFrame(pkt)
-	}
+	// not in reno?
+	//if pkt.flags.RTR {
+	//	r.receiveRTRFrame(pkt)
+	//}
 
-	finProcessed, err := r.recvWindow.receive(pkt)
+	//logrus.Debugf("Fno %v", pkt.frameNo)
+
+	finProcessed, rcvAck, err := r.recvWindow.receive(pkt)
 
 	// Pass the frame to the sender
 	if pkt.flags.ACK {
-		r.sender.recvAck(pkt.ackNo)
+		r.sender.recvAckReno(pkt.ackNo)
+		// TODO remove this over send, but let see the behavior on receive send
+		r.sendPacket()
 	}
 
 	// Handle ACK of FIN frame
@@ -383,18 +390,18 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.log.Debug("got FIN packet. going from finWait1 to closing")
 		case finWait2:
 			r.log.Debug("got FIN packet. going from finWait2 to closed")
-			r.sender.sendEmptyPacket()
+			r.sender.sendEmptyPacket(rcvAck)
 			r.enterClosedState()
 		}
 		if r.tubeState != closed {
 			r.log.Trace("sending ACK of FIN")
-			r.sender.sendEmptyPacket()
+			r.sender.sendEmptyPacket(rcvAck)
 		}
 	}
 
 	// ACK every data packet
 	if pkt.dataLength > 0 && r.tubeState != closed && !pkt.flags.FIN {
-		r.sender.sendEmptyPacket()
+		r.sender.sendEmptyPacket(rcvAck)
 	}
 
 	return err
@@ -451,7 +458,7 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		r.recvWindow.m.Unlock()
 		r.log.Debug("INITIATED!")
 		r.tubeState = initiated
-		r.sender.recvAck(1)
+		r.sender.recvAckReno(1)
 		close(r.initRecv)
 	}
 
@@ -771,4 +778,50 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 func (r *Reliable) CanAcceptBytes() bool {
 	senderWindowSize := r.sender.getWindowSize()
 	return len(r.sender.frames) < int(senderWindowSize)
+}
+
+func (r *Reliable) sendPacket() {
+	if r.sender.probeReno.retransmit && len(r.sender.frames) > 0 {
+		r.sender.probeReno.retransmit = false
+		rtrFrame := &r.sender.frames[0]
+		logrus.Debugf("I retransmit %v", rtrFrame.frameNo)
+		rtrFrame.frame.time = time.Now()
+		rtrFrame.frame.flags.RTR = true
+		r.lastRTRSent.Store(rtrFrame.frame.frameNo)
+
+		if !rtrFrame.queued && rtrFrame.frame.dataLength > 0 {
+			r.sender.unacked++
+			rtrFrame.queued = true
+		}
+
+		r.sendOneFrame(rtrFrame.frame, true)
+		r.sender.resetRetransmitTicker()
+	}
+
+	numFrames := r.sender.framesToSend(false, 0)
+	r.log.WithField("numFrames", numFrames).Trace("window open")
+
+	numQueued := 0
+
+	for i := 0; i < len(r.sender.frames) && numQueued < numFrames; i++ {
+		windowFrame := &r.sender.frames[i]
+
+		if !windowFrame.queued {
+			r.log.WithFields(logrus.Fields{
+				"frame No": windowFrame.frame.frameNo,
+				"unacked":  r.sender.unacked,
+			}).Trace("Window sending")
+
+			windowFrame.queued = true
+			// todo remove that if not bbr
+			windowFrame.dataDelivered = r.sender.probe.dataDelivered
+			windowFrame.deliveredTime = r.sender.probe.deliveredTime
+
+			r.sendOneFrame(windowFrame.frame, false)
+
+			r.sender.unacked++
+
+			numQueued++
+		}
+	}
 }
