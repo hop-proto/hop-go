@@ -14,6 +14,7 @@ import (
 
 type sender struct {
 	// The acknowledgement number sent from the other end of the connection.
+	// +checklocks:m
 	ackNo uint64
 
 	frameNo    uint32
@@ -23,7 +24,7 @@ type sender struct {
 	unacked uint16
 
 	finSent    bool
-	finFrameNo uint32
+	finFrameNo uint32 // +checklocksignore
 
 	closed atomic.Bool
 

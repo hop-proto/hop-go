@@ -32,11 +32,12 @@ type receiver struct {
 
 	dataReady *common.DeadlineChan[struct{}]
 	// +checklocks:m
-	buffer             *bytes.Buffer
-	missingFrame       atomic.Bool
+	buffer       *bytes.Buffer
+	missingFrame atomic.Bool
+	// +checklocks:m
 	frameToSendCounter uint16
 
-	log *logrus.Entry
+	log *logrus.Entry // +checklocksignore
 }
 
 func newReceiver(log *logrus.Entry) *receiver {

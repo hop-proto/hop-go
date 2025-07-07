@@ -14,7 +14,7 @@ var ErrMuxerStopping = errors.New("muxer is stopping")
 // ErrBadTubeState indicates an operation was performed when a tube was in a state where that operation is not valid
 var ErrBadTubeState = errors.New("tube in bad state")
 
-var errFrameOutOfBounds = errors.New("received data frame out of receive window bounds")
+var errFrameOutOfBounds = errors.New("received data frame out of receive window bounds") // +checklocksignore
 
 // TODO(hosono) create a config struct to pass to the muxer to set these things
 
