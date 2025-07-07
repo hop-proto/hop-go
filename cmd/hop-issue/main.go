@@ -59,7 +59,7 @@ func main() {
 	}
 
 	switch certType {
-	case certs.Leaf: //nolint:dupl // not quite a full duplicate
+	case certs.Leaf:
 		pubKeyBytes, err := ioutil.ReadFile(publicKeyFilePath)
 		if err != nil {
 			logrus.Fatalf("could not read public key file: %s", err)
@@ -103,7 +103,7 @@ func main() {
 			logrus.Fatalf("unable to encode certificate to PEM: %s", err)
 		}
 		output.Write(pemBytes)
-	case certs.Intermediate: //nolint:dupl // not quite a full duplicate
+	case certs.Intermediate:
 		data, err := ioutil.ReadFile(parentFilePath)
 		if err != nil {
 			logrus.Fatalf("could not open parent cert file: %s", err)

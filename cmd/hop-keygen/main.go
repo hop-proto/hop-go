@@ -53,14 +53,14 @@ func main() {
 	if err != nil {
 		logrus.Fatalf("unable to open or create private key file %q: %s", privateKeyPath, err)
 	}
-	defer fd.Close() //nolint:staticcheck
+	defer fd.Close()
 
 	publicKeyPath := prefix + ".pub"
 	pfd, err := os.Create(publicKeyPath)
 	if err != nil {
 		logrus.Fatalf("unable to create public key file %q: %s", publicKeyPath, err)
 	}
-	defer pfd.Close() // nolint:staticheck
+	defer pfd.Close()
 
 	if f.Signing {
 		kp := keys.GenerateNewSigningKeyPair()
