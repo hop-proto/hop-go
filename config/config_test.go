@@ -3,8 +3,8 @@ package config
 import (
 	"bytes"
 	"testing"
-	"testing/fstest"
 
+	"github.com/spf13/afero"
 	"gotest.tools/assert"
 
 	"hop.computer/hop/certs"
@@ -17,26 +17,28 @@ func generateCerts(t *testing.T) (root, intermediate, leaf *certs.Certificate, k
 		PublicKey: rootKey.Public,
 		Names:     []certs.Name{certs.DNSName("root.com")},
 	}
-	rootCert, err := certs.SelfSignRoot(rootID, rootKey)
+	root, err := certs.SelfSignRoot(rootID, rootKey)
 	assert.NilError(t, err)
+	root.ProvideKey((*[32]byte)(&rootKey.Private))
 
 	intermediateKey := keys.GenerateNewSigningKeyPair()
-	intermediateID := certs.Identity{
+	intermediateID := &certs.Identity{
 		PublicKey: intermediateKey.Public,
 		Names:     []certs.Name{certs.DNSName("intermediate.com")},
 	}
-	intermediateCert, err := certs.IssueIntermediate(root, &intermediateID)
+	intermediate, err = certs.IssueIntermediate(root, intermediateID)
 	assert.NilError(t, err)
+	intermediate.ProvideKey((*[32]byte)(&intermediateKey.Private))
 
 	keyPair = keys.GenerateNewX25519KeyPair()
 	identity := &certs.Identity{
 		PublicKey: keyPair.Public,
 		Names:     []certs.Name{certs.DNSName("leaf.com")},
 	}
-	leafCert, err := certs.IssueLeaf(intermediateCert, identity)
+	leaf, err = certs.IssueLeaf(intermediate, identity)
 	assert.NilError(t, err)
 
-	return rootCert, intermediateCert, leafCert, keyPair
+	return root, intermediate, leaf, keyPair
 }
 
 func TestLoadClientConfig(t *testing.T) {
@@ -87,23 +89,12 @@ func TestLoadServerConfig(t *testing.T) {
 	leafBytes, err := certs.EncodeCertificateToPEM(leaf)
 	assert.NilError(t, err)
 
-	fileSystem = fstest.MapFS{
-		"/etc/hopd/config.toml": &fstest.MapFile{
-			Data: []byte(serverToml),
-		},
-		"/etc/hopd/id_hop.pem": &fstest.MapFile{
-			Data: keyBytes.Bytes(),
-		},
-		"/etc/hopd/root.cert": &fstest.MapFile{
-			Data: rootBytes,
-		},
-		"/etc/hopd/intermediate.cert": &fstest.MapFile{
-			Data: intermediateBytes,
-		},
-		"/etc/hopd/id_hop.cert": &fstest.MapFile{
-			Data: leafBytes,
-		},
-	}
+	fileSystem = afero.NewMemMapFs()
+	afero.WriteFile(fileSystem, "/etc/hopd/config.toml", []byte(serverToml), 0600)
+	afero.WriteFile(fileSystem, "/etc/hopd/id_hop.pem", keyBytes.Bytes(), 0600)
+	afero.WriteFile(fileSystem, "/etc/hopd/id_hop.cert", leafBytes, 0600)
+	afero.WriteFile(fileSystem, "/etc/hopd/intermediate.cert", intermediateBytes, 0600)
+	afero.WriteFile(fileSystem, "/etc/hopd/root.cert", rootBytes, 0600)
 
 	c, err := LoadServerConfigFromFile("/etc/hopd/config.toml")
 	assert.NilError(t, err)
