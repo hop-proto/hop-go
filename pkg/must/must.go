@@ -16,3 +16,18 @@ func ReadRandom(b []byte) {
 		pkg.Panicf("unable to read from random: %s", err.Error())
 	}
 }
+
+// Do takes any value and error pair, and panics if the error is non-nil. Use it
+// wrapping another function call that returns two values, to get a single
+// statement that only returns one value.
+//
+// Example:
+//
+//	f := must.Do(os.Open("somefile.txt"))
+//	defer f.Close()
+func Do[T any](v T, err error) T {
+	if err != nil {
+		pkg.Panicf("expected nil-error, got %s", err)
+	}
+	return v
+}

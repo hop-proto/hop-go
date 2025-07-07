@@ -2,7 +2,9 @@
 // anything except themselves.
 package pkg
 
-import "fmt"
+import (
+	"fmt"
+)
 
 // Panicf functions like printf, but for constructing a string sent to panic. Do
 // not use if you think that fmt.Sprintf would also panic, e.g. if you are
