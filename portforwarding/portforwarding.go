@@ -135,7 +135,8 @@ func StartPFServer(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 		return
 	}
 
-	if fwdType == PfLocal {
+	switch fwdType {
+	case PfLocal:
 		// This Dial is for creating a communication between the hop server(/client)
 		// and the service that needs to be reached
 		throwawayConn, err := net.Dial(addr.Network(), addr.String())
@@ -154,14 +155,12 @@ func StartPFServer(ch *tubes.Reliable, forward *Forward, muxer *tubes.Muxer) {
 		ch.Write([]byte{success})
 
 		return
-
-	} else if fwdType == PfRemote {
+	case PfRemote:
 
 		ch.Write([]byte{success})
 
 		setupListenerAndForward(muxer, addr)
-
-	} else {
+	default:
 		logrus.Errorf("PF: closing porfforwarding session, bad fwdType %v", fwdType)
 		ch.Write([]byte{failure})
 		ch.Close()

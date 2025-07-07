@@ -29,7 +29,7 @@ import (
 
 // HopClient holds state for client's perspective of session. It is not safe to
 // copy a HopClient.
-type HopClient struct { // nolint:maligned
+type HopClient struct {
 	m  sync.Mutex     // must be held whenever changing state (connecting)
 	wg sync.WaitGroup // incremented while a connection opens, decremented when it ends
 

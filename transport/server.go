@@ -743,7 +743,7 @@ func (s *Server) init() error {
 		return errors.New("config.KeyPair or config.GetCertificate must be set")
 	}
 	if s.config.Certificate == nil && s.config.GetCertificate == nil {
-		return errors.New("Certificate must be set when GetCertificate is Nil") //nolint:stylecheck
+		return errors.New("Certificate must be set when GetCertificate is Nil")
 	}
 
 	if s.config.GetCertificate == nil {
