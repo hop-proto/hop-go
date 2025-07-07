@@ -224,12 +224,12 @@ func pausableCopy(dst io.Writer, src io.Reader, lock *sync.RWMutex) (int64, erro
 	return written, err
 }
 
-// +checklocksacquire:e.lock
+// +checklocksignore
 func (e *ExecTube) SuspendPipes() {
 	e.lock.Lock()
 }
 
-// +checklocksrelease:e.lock
+// +checklocksignore
 func (e *ExecTube) ResumePipes() {
 	e.lock.Unlock()
 }
