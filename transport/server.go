@@ -39,7 +39,8 @@ type Server struct {
 
 	// +checklocks:m
 	handshakes map[string]*HandshakeState
-	sessions   map[SessionID]*SessionState
+	// +checklocks:m
+	sessions map[SessionID]*SessionState
 
 	pendingConnections chan *Handle
 
@@ -140,7 +141,6 @@ func (s *Server) writePacket(pkt []byte, dst *net.UDPAddr) error {
 	return err
 }
 
-// +checklocks:s.serveLock
 func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 	msgLen, oobn, flags, addr, err := s.udpConn.ReadMsgUDP(rawRead, nil)
 	if err != nil {
@@ -441,7 +441,6 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	return pos, hs, nil
 }
 
-// +checklocks:s.serveLock
 func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte) error {
 	sessionID, err := PeekSession(msg)
 	if err != nil {
@@ -546,7 +545,6 @@ func (s *Server) Serve() error {
 	return nil
 }
 
-// +checklocks:s.serveLock
 func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
 	scratchHS := &HandshakeState{}
 	scratchHS.duplex.InitializeEmpty()
@@ -604,7 +602,6 @@ func (s *Server) finishHandshake(hs *HandshakeState, isHidden bool) error {
 	return nil
 }
 
-// +checklocks:s.serveLock
 func (s *Server) handleClientRequestHidden(b []byte) (int, *HandshakeState, error) {
 	hs := &HandshakeState{}
 	hs.duplex.InitializeEmpty()
