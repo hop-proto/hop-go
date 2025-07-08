@@ -110,7 +110,7 @@ func TestClientServerHiddenHSWithAgent(t *testing.T) {
 
 	keydescr, err := ac.Get(context.Background(), keypath)
 	assert.NilError(t, err)
-	var public keys.PublicKey
+	var public keys.DHPublicKey
 	assert.Check(t, len(keydescr.Public[:]) == 32)
 	copy(public[:], keydescr.Public[0:32])
 
@@ -165,13 +165,13 @@ func TestClientServerHiddenHSWithAgent(t *testing.T) {
 func TestClientHelloHiddenLength(t *testing.T) {
 	buf := make([]byte, 65535)
 	hs := new(HandshakeState)
-	hs.duplex.InitializeEmpty()
-	hs.ephemeral.Generate()
+	hs.DH.duplex.InitializeEmpty()
+	hs.DH.ephemeral.Generate()
 	hs.RekeyFromSqueeze(HiddenProtocolName)
 
 	keyPair := keys.X25519KeyPair{}
 	keyPair.Generate()
-	hs.static = &keyPair
+	hs.DH.static = &keyPair
 
 	leaf, err := certs.ReadCertificatePEMFile("testdata/leaf.pem")
 	assert.NilError(t, err)

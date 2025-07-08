@@ -139,7 +139,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		return c.getAuthorization(verifyConfig)
 	}
 
-	var serverKey *keys.PublicKey
+	var serverKey *keys.DHPublicKey
 	var err error
 
 	if hc.ServerKey != "" {
@@ -181,7 +181,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 
 		logrus.Infof("Created exchanger for agent with keyID: %s ", keyPath)
 
-		var public keys.PublicKey
+		var public keys.DHPublicKey
 		copy(public[:], bc.Public[:]) // TODO(baumanl): resolve public key type awkwardness
 
 		if c.hostconfig.AutoSelfSign {
@@ -224,7 +224,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 
 // TODO(baumanl): Put this in a different package/file
 
-func selfSignLeaf(public *keys.PublicKey, address core.URL) *certs.Certificate {
+func selfSignLeaf(public *keys.DHPublicKey, address core.URL) *certs.Certificate {
 	logrus.Infof("auto self-signing leaf for user %q", address.User)
 	leaf, err := certs.SelfSignLeaf(&certs.Identity{
 		PublicKey: *public,
@@ -429,7 +429,7 @@ func (c *HopClient) HandleTubes() {
 	}
 }
 
-func loadServerPublicKey(serverKeyPath string) (*keys.PublicKey, error) {
+func loadServerPublicKey(serverKeyPath string) (*keys.DHPublicKey, error) {
 
 	keyBytes, err := os.ReadFile(serverKeyPath)
 	if err != nil {
