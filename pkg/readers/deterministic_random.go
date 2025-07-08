@@ -48,8 +48,9 @@ func DeterministicRandomReader(seed uint64) io.Reader {
 }
 
 type DeterministicCoinFlipper struct {
-	r    *ctrReader
-	bits int
+	r     *ctrReader
+	bits  int
+	heads bool
 }
 
 // Flip flips the (biased) coin. True represents heads.
@@ -62,17 +63,23 @@ func (f *DeterministicCoinFlipper) Flip() bool {
 	result := buf[0] & mask
 
 	// Only the all-zero case is true (i.e. 00000000 up to n bits)
-	return result == 0
+	if result == 0 {
+		return f.heads
+	}
+	return !f.heads
 }
 
-func NewDeterministicCoinFlipper(seed uint64, bits int) *DeterministicCoinFlipper {
+// NewDeterministicCoinFlipper returns `heads` with 1 / 2^bits probability. Any
+// sequence of flips with the same seed, bits, and heads value will be the same.
+func NewDeterministicCoinFlipper(seed uint64, bits int, heads bool) *DeterministicCoinFlipper {
 	if bits > 7 || bits < 0 {
 		pkg.Panicf("bits must be in the range 0-7, got %d", bits)
 	}
 	r := DeterministicRandomReader(seed).(*ctrReader)
 	return &DeterministicCoinFlipper{
-		r:    r,
-		bits: bits,
+		r:     r,
+		bits:  bits,
+		heads: heads,
 	}
 
 }

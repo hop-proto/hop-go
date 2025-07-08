@@ -8,12 +8,12 @@ import (
 func TestDeterministicCoinFlipper_Repeatability(t *testing.T) {
 	seed := uint64(42)
 	bits := 3
-	flipper1 := NewDeterministicCoinFlipper(seed, bits)
-	flipper2 := NewDeterministicCoinFlipper(seed, bits)
+	flipper1 := NewDeterministicCoinFlipper(seed, bits, true)
+	flipper2 := NewDeterministicCoinFlipper(seed, bits, false)
 
 	const n = 100
 	for i := 0; i < n; i++ {
-		if flipper1.Flip() != flipper2.Flip() {
+		if flipper1.Flip() != !flipper2.Flip() {
 			t.Fatalf("flip mismatch at index %d", i)
 		}
 	}
@@ -35,7 +35,7 @@ func TestDeterministicCoinFlipper_BiasCounts(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		flipper := NewDeterministicCoinFlipper(seed, tc.bits)
+		flipper := NewDeterministicCoinFlipper(seed, tc.bits, true)
 		count := 0
 		for i := 0; i < totalFlips; i++ {
 			if flipper.Flip() {
