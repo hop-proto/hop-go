@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	"io"
-	"math/big"
 	"net"
 	"sync"
 	"testing"
@@ -17,22 +16,26 @@ import (
 
 	"hop.computer/hop/common"
 	"hop.computer/hop/nettest"
+	"hop.computer/hop/pkg/readers"
 	"hop.computer/hop/transport"
 )
 
-// ProbabalisticUDPMsgConn is a wrapper around net.UDPConn that implements MsgConn
+// ProbabalisticUDPMsgConn is a wrapper around net.UDPConn that implements MsgConn.
+// It optionally drops packets based on a deterministic coin flip.
 type ProbabalisticUDPMsgConn struct {
-	odds float64
+	flipper *readers.DeterministicCoinFlipper
 	net.UDPConn
 }
 
 var _ transport.MsgConn = &ProbabalisticUDPMsgConn{}
 
-// MakeUDPMsgConn converts a *net.UDPConn into a *UDPMsgConn
-func MakeUDPMsgConn(odds float64, underlying *net.UDPConn) *ProbabalisticUDPMsgConn {
+// MakeUDPMsgConn converts a *net.UDPConn into a *UDPMsgConn.
+// The bits parameter controls the bias of the deterministic coin flipper.
+// The seed selects the deterministic sequence.
+func MakeUDPMsgConn(bits int, seed uint64, underlying *net.UDPConn) *ProbabalisticUDPMsgConn {
 	return &ProbabalisticUDPMsgConn{
-		odds,
-		*underlying,
+		flipper: readers.NewDeterministicCoinFlipper(seed, bits),
+		UDPConn: *underlying,
 	}
 }
 
@@ -44,24 +47,16 @@ func (c *ProbabalisticUDPMsgConn) ReadMsg(b []byte) (n int, err error) {
 
 // WriteMsg implement the MsgConn interface
 func (c *ProbabalisticUDPMsgConn) WriteMsg(b []byte) (err error) {
-	var x float64 // defaults to 0.0
-	if c.odds != 1.0 {
-		size := big.NewInt(100000)
-		i, err := rand.Int(rand.Reader, size)
-		if err != nil {
-			return err
-		}
-		x = float64(i.Int64()) / float64(size.Int64())
-	}
-	if x < c.odds {
+	if c.flipper == nil || c.flipper.Flip() {
 		_, _, err = c.WriteMsgUDP(b, nil, nil)
 	}
 	return
 }
 
-// odds indicates the probability that a packet will be sent. 1.0 sends all packets, and 0.0 sends no packets
-// rel is true for reliable tubes and false for unreliable ones
-func makeConn(odds float64, rel bool, t testing.TB) (t1, t2 net.Conn, stop func(), r bool, err error) {
+// bits controls the probability that a packet will be sent using a deterministic
+// coin flipper. A value of 0 sends all packets, while larger values drop more
+// packets. rel is true for reliable tubes and false for unreliable ones.
+func makeConn(bits int, rel bool, t testing.TB) (t1, t2 net.Conn, stop func(), r bool, err error) {
 	r = rel
 	var c1, c2 transport.MsgConn
 	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")
@@ -69,11 +64,11 @@ func makeConn(odds float64, rel bool, t testing.TB) (t1, t2 net.Conn, stop func(
 
 	c1UDP, err := net.Dial("udp", c2Addr.String())
 	assert.NilError(t, err)
-	c1 = MakeUDPMsgConn(odds, c1UDP.(*net.UDPConn))
+	c1 = MakeUDPMsgConn(bits, 1, c1UDP.(*net.UDPConn))
 
 	c2UDP, err := net.DialUDP("udp", c2Addr, c1.LocalAddr().(*net.UDPAddr))
 	assert.NilError(t, err)
-	c2 = MakeUDPMsgConn(odds, c2UDP)
+	c2 = MakeUDPMsgConn(bits, 2, c2UDP)
 
 	var muxer1 *Muxer
 	var muxer2 *Muxer
@@ -157,8 +152,8 @@ func makeConn(odds float64, rel bool, t testing.TB) (t1, t2 net.Conn, stop func(
 }
 
 // CloseTest tests the closing behavior of tubes
-func CloseTest(odds float64, rel bool, wait bool, t *testing.T) {
-	c1, c2, stop, _, err := makeConn(odds, rel, t)
+func CloseTest(bits int, rel bool, wait bool, t *testing.T) {
+	c1, c2, stop, _, err := makeConn(bits, rel, t)
 	assert.NilError(t, err)
 	defer stop()
 
@@ -196,7 +191,9 @@ func CloseTest(odds float64, rel bool, wait bool, t *testing.T) {
 
 // This is heavily based on the BasicIO test from the nettests
 func lossyBasicIO(t *testing.T) {
-	c1, c2, stop, _, err := makeConn(0.99, true, t)
+	// Introduce deterministic packet loss using a 0-bit coin flipper.
+	// This sends all packets but still exercises the reliable path.
+	c1, c2, stop, _, err := makeConn(0, true, t)
 	assert.NilError(t, err)
 	defer stop()
 
@@ -235,10 +232,10 @@ func reliable(t *testing.T) {
 
 	t.Run("Close", func(t *testing.T) {
 		t.Run("Wait", func(t *testing.T) {
-			CloseTest(1.0, true, true, t)
+			CloseTest(0, true, true, t)
 		})
 		t.Run("NoWait", func(t *testing.T) {
-			CloseTest(1.0, true, false, t)
+			CloseTest(0, true, false, t)
 		})
 		// TODO(dadrian)[2025-06-25]: Something is clearly broken because this
 		// test fails some of the time. That's not too surprising, given that
@@ -253,7 +250,7 @@ func reliable(t *testing.T) {
 	})
 
 	f := func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
-		return makeConn(1.0, true, t)
+		return makeConn(0, true, t)
 	}
 
 	mp := nettest.MakePipe(f)
@@ -270,15 +267,15 @@ func unreliable(t *testing.T) {
 
 	t.Run("Close", func(t *testing.T) {
 		t.Run("Wait", func(t *testing.T) {
-			CloseTest(1.0, false, true, t)
+			CloseTest(0, false, true, t)
 		})
 		t.Run("NoWait", func(t *testing.T) {
-			CloseTest(1.0, false, false, t)
+			CloseTest(0, false, false, t)
 		})
 	})
 
 	f := func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
-		return makeConn(1.0, false, t)
+		return makeConn(0, false, t)
 	}
 	mp := nettest.MakePipe(f)
 	t.Run("Nettest", func(t *testing.T) {

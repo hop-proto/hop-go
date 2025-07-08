@@ -23,7 +23,7 @@ func TestFileTransferSpeedReliableTubes(t *testing.T) {
 	//fileSize := 1 << 30 // 128 MiB
 	t.Logf("Transferring file size: %d bytes", fileSize)
 
-	t1, t2, stop, _, err := makeConn(1, true, t)
+	t1, t2, stop, _, err := makeConn(0, true, t)
 	assert.NilError(t, err)
 	defer stop()
 

@@ -15,21 +15,20 @@ import (
 	"hop.computer/hop/transport"
 )
 
-// makeMuxers creates two connected muxers running over UDP
-// odds is the probability that a given packet is sent.
-// Set odds to 1.0 to send all packet and 0.0 to send no packets
-func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
+// makeMuxers creates two connected muxers running over UDP. Packet delivery is
+// controlled by a deterministic coin flipper with the provided bit bias.
+func makeMuxers(bits int, t *testing.T) (m1, m2 *Muxer, stop func()) {
 	var c1, c2 transport.MsgConn
 	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")
 	assert.NilError(t, err)
 
 	c1UDP, err := net.Dial("udp", c2Addr.String())
 	assert.NilError(t, err)
-	c1 = MakeUDPMsgConn(odds, c1UDP.(*net.UDPConn))
+	c1 = MakeUDPMsgConn(bits, 1, c1UDP.(*net.UDPConn))
 
 	c2UDP, err := net.DialUDP("udp", c2Addr, c1.LocalAddr().(*net.UDPAddr))
 	assert.NilError(t, err)
-	c2 = MakeUDPMsgConn(odds, c2UDP)
+	c2 = MakeUDPMsgConn(bits, 2, c2UDP)
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)
@@ -79,10 +78,10 @@ func makeMuxers(odds float64, t *testing.T) (m1, m2 *Muxer, stop func()) {
 	return m1, m2, stop
 }
 
-func manyTubes(odds float64, rel bool, waitForOpen bool, t *testing.T) {
+func manyTubes(bits int, rel bool, waitForOpen bool, t *testing.T) {
 	// Each muxer can create exactly 128 Unreliable tubes and 128 Reliable tubes
 	// The server creates even numbered tubes. The client creates odd numbered tubes
-	m1, m2, stop := makeMuxers(odds, t)
+	m1, m2, stop := makeMuxers(bits, t)
 
 	var m1CreateTube func() (Tube, error)
 	var m2CreateTube func() (Tube, error)
@@ -166,20 +165,20 @@ func TestMuxer(t *testing.T) {
 	logrus.SetLevel(logrus.TraceLevel)
 
 	t.Run("ImmediateStop", func(t *testing.T) {
-		_, _, stop := makeMuxers(1.0, t)
+		_, _, stop := makeMuxers(0, t)
 		stop()
 	})
 	t.Run("UnreliableTubes/ImmediateStop", func(t *testing.T) {
-		manyTubes(1.0, false, false, t)
+		manyTubes(0, false, false, t)
 	})
 	t.Run("UnreliableTubes/Wait", func(t *testing.T) {
-		manyTubes(0.9, false, true, t)
+		manyTubes(1, false, true, t)
 	})
 
 	t.Run("ReliableTubes/ImmediateStop", func(t *testing.T) {
-		manyTubes(1.0, true, false, t)
+		manyTubes(0, true, false, t)
 	})
 	t.Run("ReliableTubes/Wait", func(t *testing.T) {
-		manyTubes(0.9, true, true, t)
+		manyTubes(1, true, true, t)
 	})
 }
