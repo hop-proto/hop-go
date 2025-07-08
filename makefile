@@ -20,7 +20,7 @@ vet:
 lint: ## lint go code
 lint: ; $(GOLANGCI_LINT_ERR)
 	@echo "lint-go"
-	@$(GOLANGCI_LINT) run --timeout 1m
+	@$(GOLANGCI_LINT) run --timeout 10s
 
 .PHONY: format
 format: ## format Go code
@@ -40,7 +40,7 @@ debug:
 .PHONY: test
 test: ## test. To run with trace logging, add "-tags debug" to the arguments
 test:
-	go test -race ./... -timeout 4m
+	go test -race ./... -timeout 1m
 
 .PHONY: cred-gen
 cred-gen: ## generates credentials for container tests
