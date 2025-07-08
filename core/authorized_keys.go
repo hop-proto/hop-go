@@ -13,7 +13,7 @@ import (
 
 // AuthorizedKeys is a list of keys that can be used to authenticate as a single
 // user.
-type AuthorizedKeys []keys.PublicKey
+type AuthorizedKeys []keys.DHPublicKey
 
 // ParseAuthorizedKeys parses a list of DH public keys read from a reader.
 func ParseAuthorizedKeys(r io.Reader) (authorized AuthorizedKeys, err error) {
@@ -49,7 +49,7 @@ func AuthorizedKeysPath(userDirectory string) string {
 }
 
 // Allowed returns true if the public key is in the authorized keys file.
-func (akeys AuthorizedKeys) Allowed(pk keys.PublicKey) bool {
+func (akeys AuthorizedKeys) Allowed(pk keys.DHPublicKey) bool {
 	for _, k := range akeys {
 		if k == pk {
 			return true

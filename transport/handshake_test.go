@@ -111,7 +111,7 @@ func TestClientServerHSWithAgent(t *testing.T) {
 
 	keydescr, err := ac.Get(context.Background(), keypath)
 	assert.NilError(t, err)
-	var public keys.PublicKey
+	var public keys.DHPublicKey
 	assert.Check(t, len(keydescr.Public[:]) == 32)
 	copy(public[:], keydescr.Public[0:32])
 
@@ -154,8 +154,8 @@ func TestClientServerHSWithAgent(t *testing.T) {
 func TestBufferSizes(t *testing.T) {
 	short := make([]byte, HeaderLen+4)
 	hs := new(HandshakeState)
-	hs.duplex.InitializeEmpty()
-	hs.ephemeral.Generate()
+	hs.DH.duplex.InitializeEmpty()
+	hs.DH.ephemeral.Generate()
 	n, err := writeClientHello(hs, short)
 	assert.Check(t, cmp.Equal(ErrBufOverflow, err))
 	assert.Check(t, cmp.Equal(0, n))
@@ -166,19 +166,19 @@ func TestCookie(t *testing.T) {
 	_, err := rand.Read(cookieKey[:])
 	assert.NilError(t, err)
 	hs := HandshakeState{}
-	hs.duplex.InitializeEmpty()
-	hs.duplex.Absorb([]byte("some data that is longish"))
-	hs.ephemeral.Generate()
-	_, err = rand.Read(hs.remoteEphemeral[:])
+	hs.DH.duplex.InitializeEmpty()
+	hs.DH.duplex.Absorb([]byte("some data that is longish"))
+	hs.DH.ephemeral.Generate()
+	_, err = rand.Read(hs.DH.remoteEphemeral[:])
 	assert.NilError(t, err)
 
-	oldPrivate := hs.ephemeral.Private
+	oldPrivate := hs.DH.ephemeral.Private
 
 	hs.remoteAddr = &net.UDPAddr{
 		IP:   net.ParseIP("192.168.1.1"),
 		Port: 8675,
 	}
-	hs.cookieKey = cookieKey
+	hs.DH.cookieKey = cookieKey
 	cookie := make([]byte, 2*CookieLen)
 	n, err := hs.writeCookie(cookie)
 	assert.Check(t, cmp.Equal(CookieLen, n))
@@ -187,5 +187,5 @@ func TestCookie(t *testing.T) {
 	bytesRead, err := hs.decryptCookie(cookie)
 	assert.Check(t, cmp.Equal(CookieLen, bytesRead))
 	assert.NilError(t, err)
-	assert.Check(t, cmp.Equal(oldPrivate, hs.ephemeral.Private))
+	assert.Check(t, cmp.Equal(oldPrivate, hs.DH.ephemeral.Private))
 }

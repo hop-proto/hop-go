@@ -16,17 +16,17 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// PublicKey is a 32-byte array
-type PublicKey [32]byte
+// DHPublicKey is a 32-byte array
+type DHPublicKey [32]byte
 
-// PrivateKey is a 32-byte array. It is a distinct type from PublicKey to
+// DHPrivateKey is a 32-byte array. It is a distinct type from PublicKey to
 // decrease the likelihood of the byte arrays getting confused.
-type PrivateKey [32]byte
+type DHPrivateKey [32]byte
 
 // X25519KeyPair contains a Public and Private X25519 key.
 type X25519KeyPair struct {
-	Public  PublicKey
-	Private PrivateKey
+	Public  DHPublicKey
+	Private DHPrivateKey
 }
 
 // Generate overwrites x with a randomly generated new key pair.
@@ -38,9 +38,9 @@ func (x *X25519KeyPair) Generate() {
 	curve25519.ScalarBaseMult((*[32]byte)(&x.Public), (*[32]byte)(&x.Private))
 }
 
-// DHPublicFromPrivate returns the PublicKey corresponding with a 32-byte DH private key.
-func DHPublicFromPrivate(private *PrivateKey) PublicKey {
-	var out PublicKey
+// DHPublicFromPrivate returns the DHPublicKey corresponding with a 32-byte DH private key.
+func DHPublicFromPrivate(private *DHPrivateKey) DHPublicKey {
+	var out DHPublicKey
 	curve25519.ScalarBaseMult((*[32]byte)(&out), (*[32]byte)(private))
 	return out
 }
@@ -67,10 +67,10 @@ func (x *X25519KeyPair) DH(other []byte) ([]byte, error) {
 // DHPublicKeyPrefix is the prefix used in public key files for Hop DH keys.
 const DHPublicKeyPrefix = "hop-dh-v1-"
 
-// String encodes a PublicKey to a custom format.
+// String encodes a DHPublicKey to a custom format.
 //
 // TODO(dadrian): Is this even a good format?
-func (p *PublicKey) String() string {
+func (p *DHPublicKey) String() string {
 	b64 := base64.StdEncoding.EncodeToString(p[:])
 	return fmt.Sprintf("%s%s", DHPublicKeyPrefix, b64)
 }
@@ -79,7 +79,7 @@ func (p *PublicKey) String() string {
 const PEMTypeDHPrivate = "HOP PROTOCOL DH PRIVATE KEY V1"
 
 // String encodes a PrivateKey to PEM.
-func (k *PrivateKey) String() string {
+func (k *DHPrivateKey) String() string {
 	block := pem.Block{
 		Type:  PEMTypeDHPrivate,
 		Bytes: k[:],
@@ -142,7 +142,7 @@ func ReadDHKeyFromPEMFileFS(path string, fs fs.FS) (*X25519KeyPair, error) {
 }
 
 // ParseDHPublicKey reads a text-encoded X25519 Hop DH public key.
-func ParseDHPublicKey(encoded string) (*PublicKey, error) {
+func ParseDHPublicKey(encoded string) (*DHPublicKey, error) {
 	if !strings.HasPrefix(encoded, DHPublicKeyPrefix) {
 		return nil, fmt.Errorf("bad prefix, expected %s", DHPublicKeyPrefix)
 	}
@@ -154,12 +154,12 @@ func ParseDHPublicKey(encoded string) (*PublicKey, error) {
 	if len(b) != 32 {
 		return nil, fmt.Errorf("invalid key length, got %d, expected 32", len(b))
 	}
-	out := new(PublicKey)
+	out := new(DHPublicKey)
 	copy(out[:], b)
 	return out, nil
 }
 
-func ReadDHKeyFromPubFile(serverPublicKeyPath string) (*PublicKey, error) {
+func ReadDHKeyFromPubFile(serverPublicKeyPath string) (*DHPublicKey, error) {
 	pubKeyBytes, err := os.ReadFile(serverPublicKeyPath)
 	if err != nil {
 		logrus.Errorf("could not read public key file: %s", err)

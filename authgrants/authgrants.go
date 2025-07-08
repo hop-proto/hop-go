@@ -25,14 +25,14 @@ type Authgrant struct {
 // AuthgrantMapSync holds current authgrants
 type AuthgrantMapSync struct {
 	// +checklocks:agLock
-	agMap  map[string]map[keys.PublicKey][]Authgrant
+	agMap  map[string]map[keys.DHPublicKey][]Authgrant
 	agLock sync.Mutex
 }
 
 // NewAuthgrantMapSync creates a new map
 func NewAuthgrantMapSync() *AuthgrantMapSync {
 	return &AuthgrantMapSync{
-		agMap:  make(map[string]map[keys.PublicKey][]Authgrant),
+		agMap:  make(map[string]map[keys.DHPublicKey][]Authgrant),
 		agLock: sync.Mutex{},
 	}
 }
@@ -43,14 +43,14 @@ func (m *AuthgrantMapSync) AddAuthGrant(i *Intent, p PrincipalID) {
 	defer m.agLock.Unlock()
 	user := i.TargetUsername
 	if _, ok := m.agMap[user]; !ok {
-		m.agMap[user] = make(map[keys.PublicKey][]Authgrant)
+		m.agMap[user] = make(map[keys.DHPublicKey][]Authgrant)
 	}
 	ag := newAuthgrant(i, p)
 	m.agMap[user][i.DelegateCert.PublicKey] = append(m.agMap[user][i.DelegateCert.PublicKey], ag)
 }
 
 // RemoveAuthgrants removes and returns authgrants for user:key if they exist
-func (m *AuthgrantMapSync) RemoveAuthgrants(user string, key keys.PublicKey) ([]Authgrant, error) {
+func (m *AuthgrantMapSync) RemoveAuthgrants(user string, key keys.DHPublicKey) ([]Authgrant, error) {
 	m.agLock.Lock()
 	defer m.agLock.Unlock()
 

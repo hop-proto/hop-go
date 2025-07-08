@@ -53,7 +53,7 @@ type ClientConfig struct {
 	KeepAlive          time.Duration
 
 	// ServerKey indicates the key used by the client to complete the hidden mode handshake
-	ServerKey *keys.PublicKey
+	ServerKey *keys.DHPublicKey
 }
 
 func (c *ClientConfig) maxBufferedPackets() int {

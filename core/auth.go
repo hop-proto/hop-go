@@ -18,7 +18,7 @@ type Authenticator interface {
 	// TODO(dadrian): This isn't actually the interface we want
 	GetVerifyConfig() transport.VerifyConfig
 	GetLeaf() *certs.Certificate
-	GetServerKey() *keys.PublicKey
+	GetServerKey() *keys.DHPublicKey
 }
 
 // TODO(baumanl): add another implementation of Authenticator for selfsign?
@@ -29,7 +29,7 @@ type InMemoryAuthenticator struct {
 	*keys.X25519KeyPair
 	VerifyConfig transport.VerifyConfig
 	Leaf         *certs.Certificate
-	ServerKey    *keys.PublicKey
+	ServerKey    *keys.DHPublicKey
 }
 
 // GetVerifyConfig implements Authenticator.
@@ -43,7 +43,7 @@ func (a InMemoryAuthenticator) GetLeaf() *certs.Certificate {
 }
 
 // GetServerKey implements Authenticator.
-func (a InMemoryAuthenticator) GetServerKey() *keys.PublicKey {
+func (a InMemoryAuthenticator) GetServerKey() *keys.DHPublicKey {
 	return a.ServerKey
 }
 
@@ -54,7 +54,7 @@ type AgentAuthenticator struct {
 	*agent.BoundClient
 	VerifyConfig transport.VerifyConfig
 	Leaf         *certs.Certificate
-	ServerKey    *keys.PublicKey
+	ServerKey    *keys.DHPublicKey
 }
 
 // GetVerifyConfig implements Authenticator.
@@ -68,7 +68,7 @@ func (a AgentAuthenticator) GetLeaf() *certs.Certificate {
 }
 
 // GetServerKey implements Authenticator.
-func (a AgentAuthenticator) GetServerKey() *keys.PublicKey {
+func (a AgentAuthenticator) GetServerKey() *keys.DHPublicKey {
 	return a.ServerKey
 }
 

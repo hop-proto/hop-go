@@ -339,7 +339,7 @@ func (s *HopServer) AddAuthGrant(intent *authgrants.Intent) error {
 
 // authorizeKey returns nil if the publicKey is in the authorized_keys file for
 // the user.
-func (s *HopServer) authorizeKey(user string, publicKey keys.PublicKey) error {
+func (s *HopServer) authorizeKey(user string, publicKey keys.DHPublicKey) error {
 	d, err := config.UserDirectoryFor(user)
 	if err != nil {
 		return err

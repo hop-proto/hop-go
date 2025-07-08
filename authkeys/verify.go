@@ -11,27 +11,27 @@ import (
 // SyncAuthKeySet is a set of trusted keys
 type SyncAuthKeySet struct {
 	// +checklocks:lock
-	keySet map[keys.PublicKey]bool
+	keySet map[keys.DHPublicKey]bool
 	lock   sync.Mutex
 }
 
 // NewSyncAuthKeySet returns a new store
 func NewSyncAuthKeySet() *SyncAuthKeySet {
 	return &SyncAuthKeySet{
-		keySet: make(map[keys.PublicKey]bool),
+		keySet: make(map[keys.DHPublicKey]bool),
 		lock:   sync.Mutex{},
 	}
 }
 
 // AddKey adds a key to set of trusted keys
-func (s *SyncAuthKeySet) AddKey(pk keys.PublicKey) {
+func (s *SyncAuthKeySet) AddKey(pk keys.DHPublicKey) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.keySet[pk] = true
 }
 
 // RemoveKey deletes key from trusted set
-func (s *SyncAuthKeySet) RemoveKey(pk keys.PublicKey) {
+func (s *SyncAuthKeySet) RemoveKey(pk keys.DHPublicKey) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	delete(s.keySet, pk)
