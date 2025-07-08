@@ -66,7 +66,7 @@ func (sess *hopSession) checkAuthorization() bool {
 	logrus.Info("S: client req to access as: ", username)
 
 	leaf := sess.transportConn.FetchClientLeaf()
-	k := keys.PublicKey(leaf.PublicKey)
+	k := keys.DHPublicKey(leaf.PublicKey)
 	logrus.Info("got userauth init message: ", k.String())
 
 	sess.usingAuthGrant = false

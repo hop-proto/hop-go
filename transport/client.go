@@ -155,21 +155,21 @@ func (c *Client) clientHandshakeLocked() error {
 	c.state.Store(clientStateHandshaking)
 	c.hs = new(HandshakeState)
 	c.hs.remoteAddr = c.dialAddr
-	c.hs.duplex.InitializeEmpty()
-	c.hs.ephemeral.Generate()
+	c.hs.DH.duplex.InitializeEmpty()
+	c.hs.DH.ephemeral.Generate()
 
 	var err error
 	c.hs.leaf, c.hs.intermediate, err = c.prepareCertificates()
 	if err != nil {
 		return err
 	}
-	c.hs.static = c.config.Exchanger
+	c.hs.DH.static = c.config.Exchanger
 	c.hs.certVerify = &c.config.Verify
 
 	// TODO(dadrian): This should be allocated smaller
 	buf := make([]byte, 65535)
 
-	logrus.Debugf("client: public ephemeral: %x", c.hs.ephemeral.Public)
+	logrus.Debugf("client: public ephemeral: %x", c.hs.DH.ephemeral.Public)
 
 	isClientHiddenHS := false
 
@@ -218,7 +218,7 @@ func (c *Client) clientHandshakeLocked() error {
 
 func (c *Client) beginDiscoverableHandshake(buf []byte) error {
 	// Protocol ID for the regular handshake
-	c.hs.duplex.Absorb([]byte(ProtocolName))
+	c.hs.DH.duplex.Absorb([]byte(ProtocolName))
 
 	n, err := writeClientHello(c.hs, buf)
 	if err != nil {
@@ -291,7 +291,7 @@ func (c *Client) beginDiscoverableHandshake(buf []byte) error {
 
 func (c *Client) beginHiddenHandshake(buf []byte) error {
 	// Protocol ID for the hidden handshake
-	c.hs.duplex.Absorb([]byte(HiddenProtocolName))
+	c.hs.DH.duplex.Absorb([]byte(HiddenProtocolName))
 
 	c.hs.RekeyFromSqueeze(HiddenProtocolName)
 
