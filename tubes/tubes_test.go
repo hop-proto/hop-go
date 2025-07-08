@@ -29,12 +29,14 @@ type ProbabalisticUDPMsgConn struct {
 
 var _ transport.MsgConn = &ProbabalisticUDPMsgConn{}
 
-// MakeUDPMsgConn converts a *net.UDPConn into a *UDPMsgConn.
+// MakeTestUDPMsgConn converts a *net.UDPConn into a *UDPMsgConn.
 // The bits parameter controls the bias of the deterministic coin flipper.
 // The seed selects the deterministic sequence.
-func MakeUDPMsgConn(bits int, seed uint64, underlying *net.UDPConn) *ProbabalisticUDPMsgConn {
+func MakeTestUDPMsgConn(bits int, seed uint64, underlying *net.UDPConn) *ProbabalisticUDPMsgConn {
 	return &ProbabalisticUDPMsgConn{
-		flipper: readers.NewDeterministicCoinFlipper(seed, bits),
+		// Consider 0 to be fully reliable, otherwise interpret the bits as the
+		// chance a packet gets dropped (i.e. that the flipper returns false).
+		flipper: readers.NewDeterministicCoinFlipper(seed, bits, bits == 0),
 		UDPConn: *underlying,
 	}
 }
@@ -64,11 +66,11 @@ func makeConn(bits int, rel bool, t testing.TB) (t1, t2 net.Conn, stop func(), r
 
 	c1UDP, err := net.Dial("udp", c2Addr.String())
 	assert.NilError(t, err)
-	c1 = MakeUDPMsgConn(bits, 1, c1UDP.(*net.UDPConn))
+	c1 = MakeTestUDPMsgConn(bits, 1, c1UDP.(*net.UDPConn))
 
 	c2UDP, err := net.DialUDP("udp", c2Addr, c1.LocalAddr().(*net.UDPAddr))
 	assert.NilError(t, err)
-	c2 = MakeUDPMsgConn(bits, 2, c2UDP)
+	c2 = MakeTestUDPMsgConn(bits, 2, c2UDP)
 
 	var muxer1 *Muxer
 	var muxer2 *Muxer
