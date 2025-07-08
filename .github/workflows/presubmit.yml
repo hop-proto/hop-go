@@ -23,6 +23,10 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
+      - name: install checklocks
+        run: go install gvisor.dev/gvisor/tools/checklocks/cmd/checklocks@go
+      - name: checklocks
+        run: make vet
       - name: build
         run: make build
       - name: test

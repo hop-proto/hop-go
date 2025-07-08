@@ -46,7 +46,6 @@ type Client struct {
 	underlyingConn UDPLike
 	dialAddr       *net.UDPAddr
 
-	// +checklocks:m
 	err          error
 	handshakeErr error
 	hs           *HandshakeState
@@ -152,9 +151,6 @@ func (c *Client) setHSDeadline() {
 	}
 }
 
-// +checklocks:c.m
-// +checklocks:c.readLock
-// +checklocks:c.writeLock
 func (c *Client) clientHandshakeLocked() error {
 	c.state.Store(clientStateHandshaking)
 	c.hs = new(HandshakeState)

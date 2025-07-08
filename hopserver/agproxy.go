@@ -49,10 +49,8 @@ type agProxy struct {
 	principals    map[int32]sessID
 	principalLock sync.Mutex
 
-	// +checklocks:runningCV.L
-	listener net.Listener
-	running  bool
-	// +checklocks::runningCV.L
+	listener  net.Listener
+	running   bool
 	runningCV sync.Cond
 
 	proxyWG      sync.WaitGroup
@@ -232,12 +230,8 @@ func (p *agProxy) proxy(conns *agpInstance) {
 	go func() {
 		defer close(done)
 
-		isRunning := func() bool {
-			return p.running
-		}
-
 		p.runningCV.L.Lock()
-		for isRunning() {
+		for p.running {
 			p.runningCV.Wait()
 		}
 		p.runningCV.L.Unlock()

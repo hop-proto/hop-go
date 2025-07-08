@@ -24,7 +24,8 @@ type SessionState struct {
 	clientToServerKey [KeyLen]byte
 	serverToClientKey [KeyLen]byte
 	handle            *Handle
-	readKey, writeKey *[KeyLen]byte
+	readKey           *[KeyLen]byte
+	writeKey          *[KeyLen]byte
 
 	// TODO(dadrian)[2023-09-09]: Should this be lock protected?
 	rawWrite bytes.Buffer
@@ -212,6 +213,7 @@ func (ss *SessionState) readPacketLocked(plaintext, pkt []byte, key *[KeyLen]byt
 	return plaintextLen, mt, nil
 }
 
+// +checklocks:ss.m
 func (ss *SessionState) handleControlLocked(msg []byte) (err error) {
 	if len(msg) != 1 {
 		logrus.Error("handle: invalid control message: ", msg)
@@ -231,6 +233,7 @@ func (ss *SessionState) handleControlLocked(msg []byte) (err error) {
 	}
 }
 
+// +checklocks:ss.m
 func (ss *SessionState) closeLocked() (err error) {
 	if ss.handleState == closed {
 		return nil

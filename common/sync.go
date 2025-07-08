@@ -127,7 +127,7 @@ type DeadlineChan[T any] struct {
 	deadline *Deadline
 	closed   atomic.Bool
 	m        sync.Mutex
-	C        chan T
+	C        chan T // +checklocksignore:m
 }
 
 // Recv reads one byte slice from the underlying channel

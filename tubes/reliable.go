@@ -34,6 +34,7 @@ const (
 
 // Reliable implements a reliable byte stream
 type Reliable struct {
+	// +checklocksignore
 	tType      TubeType
 	id         byte
 	localAddr  net.Addr
@@ -49,7 +50,7 @@ type Reliable struct {
 	lastAckTimer     *time.Timer
 	lastAckSent      atomic.Uint32
 	lastFrameSent    atomic.Uint32
-	lastRTRSent      atomic.Uint32
+	lastRTRSent      atomic.Uint32 // +checklocksignore
 	pendingRTRTimers sync.Map
 	closed           chan struct{}
 	initRecv         chan struct{}
@@ -182,7 +183,7 @@ func (r *Reliable) send() {
 	for ok {
 		select {
 		// find a way of having a logic retransmit ticker time and logic
-		case <-r.sender.RetransmitTicker.C:
+		case <-r.sender.RetransmitTicker.C: // +checklocksignore accessing channels is safe
 
 			r.l.Lock()
 
@@ -228,7 +229,7 @@ func (r *Reliable) send() {
 
 			r.l.Unlock()
 
-		case <-r.sender.windowOpen:
+		case <-r.sender.windowOpen: // +checklocksignore accessing channels is safe
 			r.l.Lock()
 			numFrames := r.sender.framesToSend(false, 0)
 			r.log.WithField("numFrames", numFrames).Trace("window open")
@@ -256,7 +257,7 @@ func (r *Reliable) send() {
 			}
 			r.l.Unlock()
 
-		case pkt, ok = <-r.sender.sendQueue:
+		case pkt, ok = <-r.sender.sendQueue: // +checklocksignore accessing channels is safe
 			if !ok {
 				break
 			}
@@ -605,6 +606,7 @@ func (r *Reliable) SetWriteDeadline(t time.Time) error {
 // An RTR frame is a frame that need to be processed in priority.
 // The flag RTR mention to the receiver that a frame is lost due to congestion
 // Or packet loss.
+// +checklocks:r.l
 func (r *Reliable) receiveRTRFrame(frame *frame) {
 	lastSentRTRNo := r.lastRTRSent.Load()
 	ackNo := frame.ackNo
@@ -644,6 +646,7 @@ func (r *Reliable) receiveRTRFrame(frame *frame) {
 }
 
 // scheduleRetransmission manages retransmission with a delay based on RTT
+// +checklocks:r.l
 func (r *Reliable) scheduleRetransmission(rtrFrame *frame, dataLength uint16, timeSinceQueued time.Duration, oldFrameIndex int) {
 
 	waitTime := r.sender.RTT - timeSinceQueued
@@ -673,7 +676,9 @@ func (r *Reliable) scheduleRetransmission(rtrFrame *frame, dataLength uint16, ti
 		r.sender.resetRetransmitTicker()
 
 		timer := time.AfterFunc(waitTime, func() {
+			r.l.Lock()
 			r.executeRetransmission(rtrFrame, dataLength, oldFrameIndex)
+			r.l.Unlock()
 		})
 
 		r.pendingRTRTimers.Store(rtrFrame.frameNo, timer)
@@ -684,6 +689,7 @@ func (r *Reliable) scheduleRetransmission(rtrFrame *frame, dataLength uint16, ti
 }
 
 // executeRetransmission actually sends the retransmission if no newer frame has arrived.
+// +checklocks:r.l
 func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, oldFrameIndex int) {
 	if r.lastRTRSent.Load() >= rtrFrame.frameNo {
 		if common.Debug {

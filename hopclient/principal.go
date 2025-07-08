@@ -65,8 +65,9 @@ func newPTProxyTubeQueue() *ptProxyTubeQueue {
 }
 
 func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable, pq *ptProxyTubeQueue) {
-	c.checkIntentLock.Lock()
 	ci := func(intent authgrants.Intent, cert *certs.Certificate) error {
+		c.checkIntentLock.Lock()
+		defer c.checkIntentLock.Unlock()
 		if c.ExecTube != nil {
 			c.ExecTube.SuspendPipes()
 		}
@@ -76,7 +77,6 @@ func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable, pq *ptPro
 		}
 		return err
 	}
-	c.checkIntentLock.Unlock()
 
 	var psubclient *principalSubclient
 	var err error
@@ -89,14 +89,10 @@ func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable, pq *ptPro
 		return
 	}
 
-	test := func(m map[byte]*tubes.Unreliable, b byte) bool {
-		_, ok := m[b]
-		return ok
-	}
 	// check (and keep checking on signal) for the unreliable tube with the id
 	pq.lock.Lock()
 	logrus.Info("principal: acquired pq.lock for the first time")
-	for !test(pq.tubes, tubeID) {
+	for _, ok := pq.tubes[tubeID]; ok; {
 		logrus.Info("tube not here yet. waiting...")
 		pq.cv.Wait()
 	}
@@ -157,7 +153,13 @@ func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable, ve
 	if err != nil {
 		return psubclient, err
 	}
-	err = client.SetCheckIntentCallback(c.checkIntent)
+
+	// TODO(hosono) this satisfies checklocks, but it feels like hack
+	c.checkIntentLock.Lock()
+	intent := c.checkIntent
+	c.checkIntentLock.Unlock()
+
+	err = client.SetCheckIntentCallback(intent)
 	if err != nil {
 		return psubclient, err
 	}
