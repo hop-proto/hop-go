@@ -19,9 +19,9 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	defer s.cookieLock.Unlock()
 
 	out := new(HandshakeState)
-	copy(out.remoteEphemeral[:], clientEphemeral)
+	copy(out.DH.remoteEphemeral[:], clientEphemeral)
 	out.remoteAddr = clientAddr
-	out.cookieKey = s.cookieKey
+	out.DH.cookieKey = s.cookieKey
 
 	// Pull the private key out of the cookie
 	n, err := out.decryptCookie(cookie)
@@ -34,25 +34,25 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	}
 
 	// Replay the duplex
-	out.duplex.InitializeEmpty()
-	out.duplex.Absorb([]byte(ProtocolName))
+	out.DH.duplex.InitializeEmpty()
+	out.DH.duplex.Absorb([]byte(ProtocolName))
 	// TODO(dadrian): The type conversion of MessageType are a little silly,
 	// maybe the constants should just be bytes?
-	out.duplex.Absorb([]byte{byte(MessageTypeClientHello), Version, 0, 0})
-	out.duplex.Absorb(clientEphemeral)
-	out.duplex.Squeeze(out.macBuf[:])
-	logrus.Debugf("server: regen ch mac: %x", out.macBuf[:])
-	out.duplex.Absorb([]byte{byte(MessageTypeServerHello), 0, 0, 0})
-	out.duplex.Absorb(out.ephemeral.Public[:])
-	out.ee, err = out.ephemeral.DH(out.remoteEphemeral[:])
-	logrus.Debugf("replay server ee: %x", out.ee)
+	out.DH.duplex.Absorb([]byte{byte(MessageTypeClientHello), Version, 0, 0})
+	out.DH.duplex.Absorb(clientEphemeral)
+	out.DH.duplex.Squeeze(out.DH.macBuf[:])
+	logrus.Debugf("server: regen ch mac: %x", out.DH.macBuf[:])
+	out.DH.duplex.Absorb([]byte{byte(MessageTypeServerHello), 0, 0, 0})
+	out.DH.duplex.Absorb(out.DH.ephemeral.Public[:])
+	out.DH.ee, err = out.DH.ephemeral.DH(out.DH.remoteEphemeral[:])
+	logrus.Debugf("replay server ee: %x", out.DH.ee)
 	if err != nil {
 		return nil, err
 	}
-	out.duplex.Absorb(out.ee)
-	out.duplex.Absorb(cookie)
-	out.duplex.Squeeze(out.macBuf[:])
-	logrus.Debugf("server: regen sh mac: %x", out.macBuf[:])
+	out.DH.duplex.Absorb(out.DH.ee)
+	out.DH.duplex.Absorb(cookie)
+	out.DH.duplex.Squeeze(out.DH.macBuf[:])
+	logrus.Debugf("server: regen sh mac: %x", out.DH.macBuf[:])
 	out.RekeyFromSqueeze(ProtocolName)
 	return out, nil
 }
