@@ -69,6 +69,7 @@ linters:
     staticcheck:
       checks:
          - "-QF1003"
+         - "U1000"
   exclusions:
     generated: lax
     rules:

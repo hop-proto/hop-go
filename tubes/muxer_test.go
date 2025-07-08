@@ -17,6 +17,8 @@ import (
 
 // makeMuxers creates two connected muxers running over UDP. Packet delivery is
 // controlled by a deterministic coin flipper with the provided bit bias.
+//
+//nolint:unused // used in commented out test
 func makeMuxers(bits int, t *testing.T) (m1, m2 *Muxer, stop func()) {
 
 	responderPacketConn := must.Do(net.ListenPacket("udp", "127.0.0.1:0"))
@@ -77,6 +79,7 @@ func makeMuxers(bits int, t *testing.T) (m1, m2 *Muxer, stop func()) {
 	return m1, m2, stop
 }
 
+//nolint:unused // used in commented out test
 func manyTubes(bits int, rel bool, waitForOpen bool, t *testing.T) {
 	// Each muxer can create exactly 128 Unreliable tubes and 128 Reliable tubes
 	// The server creates even numbered tubes. The client creates odd numbered tubes
