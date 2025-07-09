@@ -3,6 +3,7 @@ package transport
 import (
 	"errors"
 	"fmt"
+	"github.com/cloudflare/circl/kem/mlkem/mlkem512"
 	"os"
 
 	"golang.org/x/crypto/curve25519"
@@ -32,7 +33,7 @@ const (
 	CounterLen   = 8
 	TimestampLen = 8
 	// TODO KEM len
-	KemLen    = 256 // TODO random number put here tbd -> DHLen -> cipher size?
+	KemLen    = mlkem512.PublicKeySize
 	KemKeyLen = 256 // TODO random number put here tbd -> ctLen?
 )
 
@@ -49,7 +50,7 @@ const (
 	HelloLen          = HeaderLen + DHLen + MacLen
 	AssociatedDataLen = HeaderLen + SessionIDLen + CounterLen
 
-	PQHelloLen = 300 // TODO tbd
+	PQHelloLen = HeaderLen + KemLen + MacLen
 )
 
 // errTransportOnly is an error that should not leave the transport layer.

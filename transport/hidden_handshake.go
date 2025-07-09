@@ -167,10 +167,10 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 		bufCopy = bufCopy[encCertsLen:]
 
 		// Validate Tag (Client Static Auth Tag)
-		hs.duplex.Squeeze(hs.dh.macBuf[:])
-		logrus.Debugf("server: calculated hidden client request tag: %x", hs.dh.macBuf)
-		if !bytes.Equal(hs.dh.macBuf[:], bufCopy[:MacLen]) {
-			logrus.Debugf("server: hidden client request tag mismatch, got %x, wanted %x", bufCopy[:MacLen], hs.dh.macBuf)
+		hs.duplex.Squeeze(hs.macBuf[:])
+		logrus.Debugf("server: calculated hidden client request tag: %x", hs.macBuf)
+		if !bytes.Equal(hs.macBuf[:], bufCopy[:MacLen]) {
+			logrus.Debugf("server: hidden client request tag mismatch, got %x, wanted %x", bufCopy[:MacLen], hs.macBuf)
 			continue // Tag mismatch, move to the next certificate
 		}
 		bufCopy = bufCopy[MacLen:]
@@ -232,10 +232,10 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 	b = b[TimestampLen:]
 
 	// MAC (Client Static)
-	hs.duplex.Squeeze(hs.dh.macBuf[:])
-	logrus.Debugf("server: calculated hidden client request mac: %x", hs.dh.macBuf)
-	if !bytes.Equal(hs.dh.macBuf[:], b[:MacLen]) {
-		logrus.Debugf("server: hidden client request mac mismatch, got %x, wanted %x", b[:MacLen], hs.dh.macBuf)
+	hs.duplex.Squeeze(hs.macBuf[:])
+	logrus.Debugf("server: calculated hidden client request mac: %x", hs.macBuf)
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
+		logrus.Debugf("server: hidden client request mac mismatch, got %x, wanted %x", b[:MacLen], hs.macBuf)
 		return 0, ErrInvalidMessage
 	}
 
@@ -383,10 +383,10 @@ func (hs *HandshakeState) readServerResponseHidden(b []byte) (int, error) {
 	logrus.Debugf("client: leaf, intermediate: %x, %x", rawLeaf, rawIntermediate)
 
 	// Tag (Encrypted Certs)
-	hs.duplex.Squeeze(hs.dh.macBuf[:])
-	logrus.Debugf("client: calculated sa tag: %x", hs.dh.macBuf)
-	if !bytes.Equal(hs.dh.macBuf[:], b[:MacLen]) {
-		logrus.Debugf("client: sa tag mismatch, got %x, wanted %x", b[:MacLen], hs.dh.macBuf)
+	hs.duplex.Squeeze(hs.macBuf[:])
+	logrus.Debugf("client: calculated sa tag: %x", hs.macBuf)
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
+		logrus.Debugf("client: sa tag mismatch, got %x, wanted %x", b[:MacLen], hs.macBuf)
 		return 0, ErrInvalidMessage
 	}
 	b = b[MacLen:]
@@ -409,10 +409,10 @@ func (hs *HandshakeState) readServerResponseHidden(b []byte) (int, error) {
 	hs.duplex.Absorb(hs.dh.se)
 
 	// Mac
-	hs.duplex.Squeeze(hs.dh.macBuf[:])
-	logrus.Debugf("client: calculated sa mac: %x", hs.dh.macBuf)
-	if !bytes.Equal(hs.dh.macBuf[:], b[:MacLen]) {
-		logrus.Debugf("client: expected sa mac %x, got %x", hs.dh.macBuf, b[:MacLen])
+	hs.duplex.Squeeze(hs.macBuf[:])
+	logrus.Debugf("client: calculated sa mac: %x", hs.macBuf)
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
+		logrus.Debugf("client: expected sa mac %x, got %x", hs.macBuf, b[:MacLen])
 	}
 	// b = b[MacLen:]
 

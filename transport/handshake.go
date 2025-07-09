@@ -46,13 +46,13 @@ type HandshakeState struct {
 	remoteAddr *net.UDPAddr
 
 	duplex cyclist.Cyclist
+	macBuf [MacLen]byte
 }
 
 type dhState struct {
 	ephemeral keys.X25519KeyPair
 	static    keys.Exchangable
 
-	macBuf          [MacLen]byte
 	remoteEphemeral [DHLen]byte
 	handshakeKey    [KeyLen]byte
 
@@ -161,10 +161,10 @@ func readClientHello(hs *HandshakeState, b []byte) (int, error) {
 	copy(hs.dh.remoteEphemeral[:], b[:DHLen])
 	hs.duplex.Absorb(b[:DHLen])
 	b = b[DHLen:]
-	hs.duplex.Squeeze(hs.dh.macBuf[:])
+	hs.duplex.Squeeze(hs.macBuf[:])
 	// TODO(dadrian): #constanttime
-	logrus.Debugf("server: calculated client hello mac: %x", hs.dh.macBuf)
-	if !bytes.Equal(hs.dh.macBuf[:], b[:MacLen]) {
+	logrus.Debugf("server: calculated client hello mac: %x", hs.macBuf)
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
 		return 0, ErrInvalidMessage
 	}
 	return HelloLen, nil
@@ -247,9 +247,9 @@ func readServerHello(hs *HandshakeState, b []byte) (int, error) {
 	b = b[CookieLen:]
 
 	// Mac
-	hs.duplex.Squeeze(hs.dh.macBuf[:])
-	logrus.Debugf("client: sh mac %x", hs.dh.macBuf)
-	if !bytes.Equal(hs.dh.macBuf[:], b[:MacLen]) {
+	hs.duplex.Squeeze(hs.macBuf[:])
+	logrus.Debugf("client: sh mac %x", hs.macBuf)
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
 		return 0, ErrInvalidMessage
 	}
 
@@ -366,10 +366,10 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	logrus.Debugf("client: leaf, intermediate: %x, %x", rawLeaf, rawIntermediate)
 
 	// Tag (Encrypted Certs)
-	hs.duplex.Squeeze(hs.dh.macBuf[:])
-	logrus.Debugf("client: calculated sa tag: %x", hs.dh.macBuf)
-	if !bytes.Equal(hs.dh.macBuf[:], b[:MacLen]) {
-		logrus.Debugf("client: sa tag mismatch, got %x, wanted %x", b[:MacLen], hs.dh.macBuf)
+	hs.duplex.Squeeze(hs.macBuf[:])
+	logrus.Debugf("client: calculated sa tag: %x", hs.macBuf)
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
+		logrus.Debugf("client: sa tag mismatch, got %x, wanted %x", b[:MacLen], hs.macBuf)
 		return 0, ErrInvalidMessage
 	}
 	b = b[MacLen:]
@@ -391,10 +391,10 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	hs.duplex.Absorb(hs.dh.es)
 
 	// Mac
-	hs.duplex.Squeeze(hs.dh.macBuf[:])
-	logrus.Debugf("client: calculated sa mac: %x", hs.dh.macBuf)
-	if !bytes.Equal(hs.dh.macBuf[:], b[:MacLen]) {
-		logrus.Debugf("client: expected sa mac %x, got %x", hs.dh.macBuf, b[:MacLen])
+	hs.duplex.Squeeze(hs.macBuf[:])
+	logrus.Debugf("client: calculated sa mac: %x", hs.macBuf)
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
+		logrus.Debugf("client: expected sa mac %x, got %x", hs.macBuf, b[:MacLen])
 	}
 	// b = b[MacLen:]
 
