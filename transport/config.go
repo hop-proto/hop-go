@@ -44,6 +44,7 @@ type IdentityConfig struct {
 // ClientConfig contains client-specific configuration settings.
 type ClientConfig struct {
 	MaxBufferedPackets int
+	// is DH specific as well
 	Exchanger          keys.Exchangable
 	Verify             VerifyConfig
 	Leaf, Intermediate *certs.Certificate
@@ -54,6 +55,8 @@ type ClientConfig struct {
 
 	// ServerKey indicates the key used by the client to complete the hidden mode handshake
 	ServerKey *keys.DHPublicKey
+
+	IsPq bool
 }
 
 func (c *ClientConfig) maxBufferedPackets() int {

@@ -44,10 +44,11 @@ type HandshakeState struct {
 	parsedLeaf *certs.Certificate
 
 	remoteAddr *net.UDPAddr
+
+	duplex cyclist.Cyclist
 }
 
 type dhState struct {
-	duplex    cyclist.Cyclist
 	ephemeral keys.X25519KeyPair
 	static    keys.Exchangable
 
@@ -67,6 +68,18 @@ type dhState struct {
 }
 
 type kemState struct {
+	impl keys.KEM
+
+	ephemeral keys.KEMKeypair
+	static    keys.KEMKeypair
+
+	remoteEphemeral [KemLen]byte
+	handshakeKey    [KemKeyLen]byte
+
+	ee []byte
+	es []byte
+	se []byte
+	ss []byte
 }
 
 func (hs *HandshakeState) writeCookie(b []byte) (int, error) {
@@ -115,16 +128,16 @@ func writeClientHello(hs *HandshakeState, b []byte) (int, error) {
 	x[1] = Version                      // Version
 	x[2] = 0                            // Reserved
 	x[3] = 0                            // Reserved
-	hs.dh.duplex.Absorb(x[:HeaderLen])
+	hs.duplex.Absorb(x[:HeaderLen])
 	x = x[HeaderLen:]
 
 	// Ephemeral
 	copy(x, hs.dh.ephemeral.Public[:])
-	hs.dh.duplex.Absorb(hs.dh.ephemeral.Public[:])
+	hs.duplex.Absorb(hs.dh.ephemeral.Public[:])
 	x = x[DHLen:]
 
 	// Mac
-	hs.dh.duplex.Squeeze(x[:MacLen])
+	hs.duplex.Squeeze(x[:MacLen])
 	logrus.Debugf("client: client hello mac: %x", x[:MacLen])
 	return HelloLen, nil
 }
@@ -143,12 +156,12 @@ func readClientHello(hs *HandshakeState, b []byte) (int, error) {
 	if b[2] != 0 || b[3] != 0 {
 		return 0, ErrInvalidMessage
 	}
-	hs.dh.duplex.Absorb(b[:HeaderLen])
+	hs.duplex.Absorb(b[:HeaderLen])
 	b = b[HeaderLen:]
 	copy(hs.dh.remoteEphemeral[:], b[:DHLen])
-	hs.dh.duplex.Absorb(b[:DHLen])
+	hs.duplex.Absorb(b[:DHLen])
 	b = b[DHLen:]
-	hs.dh.duplex.Squeeze(hs.dh.macBuf[:])
+	hs.duplex.Squeeze(hs.dh.macBuf[:])
 	// TODO(dadrian): #constanttime
 	logrus.Debugf("server: calculated client hello mac: %x", hs.dh.macBuf)
 	if !bytes.Equal(hs.dh.macBuf[:], b[:MacLen]) {
@@ -167,12 +180,12 @@ func writeServerHello(hs *HandshakeState, b []byte) (int, error) {
 	b[1] = 0
 	b[2] = 0
 	b[3] = 0
-	hs.dh.duplex.Absorb(b[:HeaderLen])
+	hs.duplex.Absorb(b[:HeaderLen])
 	b = b[HeaderLen:]
 
 	// Ephemeral
 	copy(b, hs.dh.ephemeral.Public[:])
-	hs.dh.duplex.Absorb(b[:DHLen])
+	hs.duplex.Absorb(b[:DHLen])
 	b = b[DHLen:]
 
 	secret, err := hs.dh.ephemeral.DH(hs.dh.remoteEphemeral[:])
@@ -180,7 +193,7 @@ func writeServerHello(hs *HandshakeState, b []byte) (int, error) {
 		return 0, err
 	}
 	logrus.Debugf("server: ee: %x", secret)
-	hs.dh.duplex.Absorb(secret)
+	hs.duplex.Absorb(secret)
 
 	// Cookie
 	n, err := hs.writeCookie(b)
@@ -191,11 +204,11 @@ func writeServerHello(hs *HandshakeState, b []byte) (int, error) {
 	if n != CookieLen {
 		return 0, ErrBufOverflow
 	}
-	hs.dh.duplex.Absorb(b[:CookieLen])
+	hs.duplex.Absorb(b[:CookieLen])
 	b = b[CookieLen:]
 
 	// Mac
-	hs.dh.duplex.Squeeze(b[:MacLen])
+	hs.duplex.Squeeze(b[:MacLen])
 	logrus.Debugf("server: sh mac %x", b[:MacLen])
 
 	return HeaderLen + DHLen + CookieLen + MacLen, nil
@@ -213,28 +226,28 @@ func readServerHello(hs *HandshakeState, b []byte) (int, error) {
 	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
 		return 0, ErrInvalidMessage
 	}
-	hs.dh.duplex.Absorb(b[:HeaderLen])
+	hs.duplex.Absorb(b[:HeaderLen])
 	b = b[HeaderLen:]
 
 	// Server Ephemeral
 	copy(hs.dh.remoteEphemeral[:], b[:DHLen])
-	hs.dh.duplex.Absorb(b[:DHLen])
+	hs.duplex.Absorb(b[:DHLen])
 	b = b[DHLen:]
 	secret, err := hs.dh.ephemeral.DH(hs.dh.remoteEphemeral[:])
 	if err != nil {
 		return 0, err
 	}
-	hs.dh.duplex.Absorb(secret)
+	hs.duplex.Absorb(secret)
 
 	// Cookie
 	hs.dh.cookie = make([]byte, CookieLen)
 	copy(hs.dh.cookie, b[:CookieLen])
-	hs.dh.duplex.Absorb(hs.dh.cookie)
+	hs.duplex.Absorb(hs.dh.cookie)
 	logrus.Debugf("client: read cookie %x", hs.dh.cookie)
 	b = b[CookieLen:]
 
 	// Mac
-	hs.dh.duplex.Squeeze(hs.dh.macBuf[:])
+	hs.duplex.Squeeze(hs.dh.macBuf[:])
 	logrus.Debugf("client: sh mac %x", hs.dh.macBuf)
 	if !bytes.Equal(hs.dh.macBuf[:], b[:MacLen]) {
 		return 0, ErrInvalidMessage
@@ -246,8 +259,8 @@ func readServerHello(hs *HandshakeState, b []byte) (int, error) {
 // RekeyFromSqueeze squeezes out KeyLen bytes and then re-initializes the duplex
 // using the new key.
 func (hs *HandshakeState) RekeyFromSqueeze(protocolName string) {
-	hs.dh.duplex.Squeeze(hs.dh.handshakeKey[:])
-	hs.dh.duplex.Initialize(hs.dh.handshakeKey[:], []byte(protocolName), nil)
+	hs.duplex.Squeeze(hs.dh.handshakeKey[:])
+	hs.duplex.Initialize(hs.dh.handshakeKey[:], []byte(protocolName), nil)
 }
 
 // EncryptSNI encrypts the name to a buffer. The encrypted length is always
@@ -264,7 +277,7 @@ func (hs *HandshakeState) EncryptSNI(dst []byte, name certs.Name) error {
 	var b [SNILen]byte
 	copy(b[:], buf.Bytes())
 	logrus.Debugf("client: pre-encrypted SNI: %x", b)
-	hs.dh.duplex.Encrypt(dst, b[:])
+	hs.duplex.Encrypt(dst, b[:])
 	return nil
 }
 
@@ -279,12 +292,12 @@ func (hs *HandshakeState) writeClientAck(b []byte) (int, error) {
 	b[1] = 0
 	b[2] = 0
 	b[3] = 0
-	hs.dh.duplex.Absorb(b[:HeaderLen])
+	hs.duplex.Absorb(b[:HeaderLen])
 	b = b[HeaderLen:]
 
 	// DH
 	copy(b, hs.dh.ephemeral.Public[:DHLen])
-	hs.dh.duplex.Absorb(b[:DHLen])
+	hs.duplex.Absorb(b[:DHLen])
 	b = b[DHLen:]
 
 	// Cookie
@@ -293,7 +306,7 @@ func (hs *HandshakeState) writeClientAck(b []byte) (int, error) {
 		logrus.Debugf("unexpected cookie length: %d (expected %d)", n, CookieLen)
 		return HeaderLen + DHLen + n, ErrInvalidMessage
 	}
-	hs.dh.duplex.Absorb(b[:CookieLen])
+	hs.duplex.Absorb(b[:CookieLen])
 	b = b[CookieLen:]
 
 	// Encrypted SNI
@@ -304,7 +317,7 @@ func (hs *HandshakeState) writeClientAck(b []byte) (int, error) {
 	b = b[SNILen:]
 
 	// Mac
-	hs.dh.duplex.Squeeze(b[:MacLen])
+	hs.duplex.Squeeze(b[:MacLen])
 	// b = b[MacLen:]
 
 	return length, nil
@@ -331,12 +344,12 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	if len(b) < fullLength {
 		return 0, ErrBufOverflow
 	}
-	hs.dh.duplex.Absorb(b[:HeaderLen])
+	hs.duplex.Absorb(b[:HeaderLen])
 	b = b[HeaderLen:]
 
 	// SessionID
 	copy(hs.sessionID[:], b[:SessionIDLen])
-	hs.dh.duplex.Absorb(hs.sessionID[:])
+	hs.duplex.Absorb(hs.sessionID[:])
 	logrus.Debugf("client: got session ID %x", hs.sessionID)
 	b = b[SessionIDLen:]
 
@@ -345,7 +358,7 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	b = b[encryptedCertLen:]
 
 	// Decrypt the certificates, but don't read them yet
-	rawLeaf, rawIntermediate, err := DecryptCertificates(&hs.dh.duplex, encryptedCertificates)
+	rawLeaf, rawIntermediate, err := DecryptCertificates(&hs.duplex, encryptedCertificates)
 	if err != nil {
 		logrus.Debugf("client: error decrypting certificates: %s", err)
 		return 0, err
@@ -353,7 +366,7 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	logrus.Debugf("client: leaf, intermediate: %x, %x", rawLeaf, rawIntermediate)
 
 	// Tag (Encrypted Certs)
-	hs.dh.duplex.Squeeze(hs.dh.macBuf[:])
+	hs.duplex.Squeeze(hs.dh.macBuf[:])
 	logrus.Debugf("client: calculated sa tag: %x", hs.dh.macBuf)
 	if !bytes.Equal(hs.dh.macBuf[:], b[:MacLen]) {
 		logrus.Debugf("client: sa tag mismatch, got %x, wanted %x", b[:MacLen], hs.dh.macBuf)
@@ -375,10 +388,10 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 		return 0, err
 	}
 	logrus.Debugf("client: es: %x", hs.dh.es)
-	hs.dh.duplex.Absorb(hs.dh.es)
+	hs.duplex.Absorb(hs.dh.es)
 
 	// Mac
-	hs.dh.duplex.Squeeze(hs.dh.macBuf[:])
+	hs.duplex.Squeeze(hs.dh.macBuf[:])
 	logrus.Debugf("client: calculated sa mac: %x", hs.dh.macBuf)
 	if !bytes.Equal(hs.dh.macBuf[:], b[:MacLen]) {
 		logrus.Debugf("client: expected sa mac %x, got %x", hs.dh.macBuf, b[:MacLen])
@@ -400,19 +413,19 @@ func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
 	b[1] = 0
 	b[2] = byte(encCertLen >> 8)
 	b[3] = byte(encCertLen)
-	hs.dh.duplex.Absorb(b[:HeaderLen])
+	hs.duplex.Absorb(b[:HeaderLen])
 	b = b[HeaderLen:]
 
 	// SessionID
 	copy(b, hs.sessionID[:])
-	hs.dh.duplex.Absorb(hs.sessionID[:])
+	hs.duplex.Absorb(hs.sessionID[:])
 	b = b[SessionIDLen:]
 
 	// Encrypted Certificates
 	if len(hs.leaf) == 0 {
 		return HeaderLen + SessionIDLen, errors.New("client did not set leaf certificate")
 	}
-	encCerts, err := EncryptCertificates(&hs.dh.duplex, hs.leaf, hs.intermediate)
+	encCerts, err := EncryptCertificates(&hs.duplex, hs.leaf, hs.intermediate)
 	if err != nil {
 		return HeaderLen + SessionIDLen, err
 	}
@@ -423,7 +436,7 @@ func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
 	b = b[encCertLen:]
 
 	// Tag
-	hs.dh.duplex.Squeeze(b[:MacLen])
+	hs.duplex.Squeeze(b[:MacLen])
 	b = b[MacLen:]
 
 	// DH (se)
@@ -433,22 +446,22 @@ func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
 		return HeaderLen + SessionIDLen + encCertLen + MacLen, err
 	}
 	logrus.Debugf("client: se: %x", hs.dh.se)
-	hs.dh.duplex.Absorb(hs.dh.se)
+	hs.duplex.Absorb(hs.dh.se)
 
 	// Mac
-	hs.dh.duplex.Squeeze(b[:MacLen])
+	hs.duplex.Squeeze(b[:MacLen])
 	// b = b[MacLen:]
 
 	return length, nil
 }
 
 func (hs *HandshakeState) deriveFinalKeys(clientToServerKey, serverToClientKey *[KeyLen]byte) error {
-	hs.dh.duplex.Ratchet()
-	hs.dh.duplex.Absorb([]byte("client_to_server_key"))
-	hs.dh.duplex.Squeeze(clientToServerKey[:])
-	hs.dh.duplex.Ratchet()
-	hs.dh.duplex.Absorb([]byte("server_to_client_key"))
-	hs.dh.duplex.Squeeze(serverToClientKey[:])
+	hs.duplex.Ratchet()
+	hs.duplex.Absorb([]byte("client_to_server_key"))
+	hs.duplex.Squeeze(clientToServerKey[:])
+	hs.duplex.Ratchet()
+	hs.duplex.Absorb([]byte("server_to_client_key"))
+	hs.duplex.Squeeze(serverToClientKey[:])
 	logrus.Debugf("client_to_server_key: %x", *clientToServerKey)
 	logrus.Debugf("server_to_client_key: %x", *serverToClientKey)
 	return nil

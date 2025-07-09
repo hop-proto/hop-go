@@ -282,14 +282,14 @@ func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 	if err != nil {
 		return 0, nil, err
 	}
-	hs.dh.duplex.Absorb(header)
-	hs.dh.duplex.Absorb(ephemeral)
-	hs.dh.duplex.Absorb(cookie)
-	hs.dh.duplex.Decrypt(buf[:], b[:SNILen])
+	hs.duplex.Absorb(header)
+	hs.duplex.Absorb(ephemeral)
+	hs.duplex.Absorb(cookie)
+	hs.duplex.Decrypt(buf[:], b[:SNILen])
 	decryptedSNI := buf[:SNILen]
 	b = b[SNILen:]
 
-	hs.dh.duplex.Squeeze(hs.dh.macBuf[:])
+	hs.duplex.Squeeze(hs.dh.macBuf[:])
 	logrus.Debugf("server got client ack mac: %x, expected %x", b[:MacLen], hs.dh.macBuf)
 	if !bytes.Equal(hs.dh.macBuf[:], b[:MacLen]) {
 		return length, nil, ErrInvalidMessage
@@ -326,17 +326,17 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState) (int, error) {
 	x[1] = 0
 	x[2] = byte(encCertLen >> 8)
 	x[3] = byte(encCertLen)
-	hs.dh.duplex.Absorb(x[:HeaderLen])
+	hs.duplex.Absorb(x[:HeaderLen])
 	x = x[HeaderLen:]
 	pos += HeaderLen
 	copy(x, hs.sessionID[:])
 	if common.Debug {
 		logrus.Tracef("server: session ID %x", hs.sessionID[:])
 	}
-	hs.dh.duplex.Absorb(x[:SessionIDLen])
+	hs.duplex.Absorb(x[:SessionIDLen])
 	x = x[SessionIDLen:]
 	pos += SessionIDLen
-	encCerts, err := EncryptCertificates(&hs.dh.duplex, c.RawLeaf, c.RawIntermediate)
+	encCerts, err := EncryptCertificates(&hs.duplex, c.RawLeaf, c.RawIntermediate)
 	if err != nil {
 		return pos, err
 	}
@@ -346,7 +346,7 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState) (int, error) {
 	if len(x) < 2*MacLen {
 		return pos, ErrBufUnderflow
 	}
-	hs.dh.duplex.Squeeze(x[:MacLen])
+	hs.duplex.Squeeze(x[:MacLen])
 	logrus.Debugf("server: sa tag %x", x[:MacLen])
 	x = x[MacLen:]
 	pos += MacLen
@@ -356,8 +356,8 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState) (int, error) {
 		return pos, err
 	}
 	logrus.Debugf("server es: %x", hs.dh.es)
-	hs.dh.duplex.Absorb(hs.dh.es)
-	hs.dh.duplex.Squeeze(x[:MacLen])
+	hs.duplex.Absorb(hs.dh.es)
+	hs.duplex.Squeeze(x[:MacLen])
 	logrus.Debugf("server serverauth mac: %x", x[:MacLen])
 	// x = x[MacLen:]
 	pos += MacLen
@@ -388,7 +388,7 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		logrus.Debugf("server: no handshake state for handshake packet from %s", addr)
 		return pos, nil, ErrUnexpectedMessage
 	}
-	hs.dh.duplex.Absorb(x[:HeaderLen])
+	hs.duplex.Absorb(x[:HeaderLen])
 	x = x[HeaderLen:]
 	pos += HeaderLen
 	sessionID := x[:SessionIDLen]
@@ -396,17 +396,17 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		logrus.Debugf("server: mismatched session ID for %s: expected %x, got %x", addr, hs.sessionID, sessionID)
 		return pos, nil, ErrUnexpectedMessage
 	}
-	hs.dh.duplex.Absorb(sessionID)
+	hs.duplex.Absorb(sessionID)
 	x = x[SessionIDLen:]
 	pos += SessionIDLen
 	encCerts := x[:encCertsLen]
-	rawLeaf, rawIntermediate, err := DecryptCertificates(&hs.dh.duplex, encCerts)
+	rawLeaf, rawIntermediate, err := DecryptCertificates(&hs.duplex, encCerts)
 	if err != nil {
 		return pos, nil, err
 	}
 	x = x[encCertsLen:]
 	pos += encCertsLen
-	hs.dh.duplex.Squeeze(hs.dh.macBuf[:])
+	hs.duplex.Squeeze(hs.dh.macBuf[:])
 	clientTag := x[:MacLen]
 	if !bytes.Equal(hs.dh.macBuf[:], clientTag) {
 		logrus.Debugf("server: mismatched tag in client auth: expected %x, got %x", hs.dh.macBuf, clientTag)
@@ -429,8 +429,8 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		return pos, nil, err
 	}
 	logrus.Debugf("server: se %x", hs.dh.se)
-	hs.dh.duplex.Absorb(hs.dh.se)
-	hs.dh.duplex.Squeeze(hs.dh.macBuf[:]) // mac
+	hs.duplex.Absorb(hs.dh.se)
+	hs.duplex.Squeeze(hs.dh.macBuf[:]) // mac
 	clientMac := x[:MacLen]
 	if !bytes.Equal(hs.dh.macBuf[:], clientMac) {
 		logrus.Debugf("server: mismatched mac in client auth: expected %x, got %x", hs.dh.macBuf, clientMac)
@@ -547,8 +547,8 @@ func (s *Server) Serve() error {
 
 func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
 	scratchHS := &HandshakeState{}
-	scratchHS.dh.duplex.InitializeEmpty()
-	scratchHS.dh.duplex.Absorb([]byte(ProtocolName))
+	scratchHS.duplex.InitializeEmpty()
+	scratchHS.duplex.Absorb([]byte(ProtocolName))
 	n, err := readClientHello(scratchHS, b)
 	if err != nil {
 		return nil, err
@@ -604,10 +604,10 @@ func (s *Server) finishHandshake(hs *HandshakeState, isHidden bool) error {
 
 func (s *Server) handleClientRequestHidden(b []byte) (int, *HandshakeState, error) {
 	hs := &HandshakeState{}
-	hs.dh.duplex.InitializeEmpty()
+	hs.duplex.InitializeEmpty()
 	hs.dh.ephemeral.Generate()
 
-	hs.dh.duplex.Absorb([]byte(HiddenProtocolName))
+	hs.duplex.Absorb([]byte(HiddenProtocolName))
 	hs.RekeyFromSqueeze(HiddenProtocolName)
 
 	n, err := s.readClientRequestHidden(hs, b)
