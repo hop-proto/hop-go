@@ -18,6 +18,8 @@ var (
 
 // TODO paul: I did not implement Static-Ephemeral Entropy-Combination (SEEC) that has been implemented in that commit https://gitlab.com/yawning/nyquist/-/commit/5c086730589948e0429ec5f441141157f4112deb
 
+// TODO paul: ask david about "SEECGenKey is optional, and just using the raw entropy device is supported."
+
 // KEM is a Key Encapsulation Mechanism algorithm.
 type KEM interface {
 	fmt.Stringer

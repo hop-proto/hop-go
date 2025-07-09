@@ -40,8 +40,8 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	// maybe the constants should just be bytes?
 	out.duplex.Absorb([]byte{byte(MessageTypeClientHello), Version, 0, 0})
 	out.duplex.Absorb(clientEphemeral)
-	out.duplex.Squeeze(out.dh.macBuf[:])
-	logrus.Debugf("server: regen ch mac: %x", out.dh.macBuf[:])
+	out.duplex.Squeeze(out.macBuf[:])
+	logrus.Debugf("server: regen ch mac: %x", out.macBuf[:])
 	out.duplex.Absorb([]byte{byte(MessageTypeServerHello), 0, 0, 0})
 	out.duplex.Absorb(out.dh.ephemeral.Public[:])
 	out.dh.ee, err = out.dh.ephemeral.DH(out.dh.remoteEphemeral[:])
@@ -51,8 +51,8 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	}
 	out.duplex.Absorb(out.dh.ee)
 	out.duplex.Absorb(cookie)
-	out.duplex.Squeeze(out.dh.macBuf[:])
-	logrus.Debugf("server: regen sh mac: %x", out.dh.macBuf[:])
+	out.duplex.Squeeze(out.macBuf[:])
+	logrus.Debugf("server: regen sh mac: %x", out.macBuf[:])
 	out.RekeyFromSqueeze(ProtocolName)
 	return out, nil
 }
