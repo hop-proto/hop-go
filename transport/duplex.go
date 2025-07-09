@@ -34,24 +34,24 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	}
 
 	// Replay the duplex
-	out.dh.duplex.InitializeEmpty()
-	out.dh.duplex.Absorb([]byte(ProtocolName))
+	out.duplex.InitializeEmpty()
+	out.duplex.Absorb([]byte(ProtocolName))
 	// TODO(dadrian): The type conversion of MessageType are a little silly,
 	// maybe the constants should just be bytes?
-	out.dh.duplex.Absorb([]byte{byte(MessageTypeClientHello), Version, 0, 0})
-	out.dh.duplex.Absorb(clientEphemeral)
-	out.dh.duplex.Squeeze(out.dh.macBuf[:])
+	out.duplex.Absorb([]byte{byte(MessageTypeClientHello), Version, 0, 0})
+	out.duplex.Absorb(clientEphemeral)
+	out.duplex.Squeeze(out.dh.macBuf[:])
 	logrus.Debugf("server: regen ch mac: %x", out.dh.macBuf[:])
-	out.dh.duplex.Absorb([]byte{byte(MessageTypeServerHello), 0, 0, 0})
-	out.dh.duplex.Absorb(out.dh.ephemeral.Public[:])
+	out.duplex.Absorb([]byte{byte(MessageTypeServerHello), 0, 0, 0})
+	out.duplex.Absorb(out.dh.ephemeral.Public[:])
 	out.dh.ee, err = out.dh.ephemeral.DH(out.dh.remoteEphemeral[:])
 	logrus.Debugf("replay server ee: %x", out.dh.ee)
 	if err != nil {
 		return nil, err
 	}
-	out.dh.duplex.Absorb(out.dh.ee)
-	out.dh.duplex.Absorb(cookie)
-	out.dh.duplex.Squeeze(out.dh.macBuf[:])
+	out.duplex.Absorb(out.dh.ee)
+	out.duplex.Absorb(cookie)
+	out.duplex.Squeeze(out.dh.macBuf[:])
 	logrus.Debugf("server: regen sh mac: %x", out.dh.macBuf[:])
 	out.RekeyFromSqueeze(ProtocolName)
 	return out, nil

@@ -1,8 +1,10 @@
 package transport
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"hop.computer/hop/keys"
 	"io"
 	"net"
 	"sync"
@@ -154,22 +156,31 @@ func (c *Client) setHSDeadline() {
 func (c *Client) clientHandshakeLocked() error {
 	c.state.Store(clientStateHandshaking)
 	c.hs = new(HandshakeState)
-	c.hs.remoteAddr = c.dialAddr
-	c.hs.dh.duplex.InitializeEmpty()
-	c.hs.dh.ephemeral.Generate()
 
 	var err error
+	if c.config.IsPq {
+		c.hs.kem.ephemeral, err = keys.MlKem512.GenerateKeypair(rand.Reader)
+		if err != nil {
+			return err
+		}
+
+	} else {
+		c.hs.duplex.InitializeEmpty()
+		c.hs.dh.ephemeral.Generate()
+		c.hs.dh.static = c.config.Exchanger
+
+		logrus.Debugf("client: public ephemeral: %x", c.hs.dh.ephemeral.Public)
+	}
 	c.hs.leaf, c.hs.intermediate, err = c.prepareCertificates()
 	if err != nil {
 		return err
 	}
-	c.hs.dh.static = c.config.Exchanger
+
+	c.hs.remoteAddr = c.dialAddr
 	c.hs.certVerify = &c.config.Verify
 
 	// TODO(dadrian): This should be allocated smaller
 	buf := make([]byte, 65535)
-
-	logrus.Debugf("client: public ephemeral: %x", c.hs.dh.ephemeral.Public)
 
 	isClientHiddenHS := false
 
@@ -181,6 +192,14 @@ func (c *Client) clientHandshakeLocked() error {
 			return err
 		}
 		isClientHiddenHS = true
+	} else if c.config.IsPq {
+		logrus.Debug("---------- PQ HANDSHAKE MODE -------------")
+
+		err = c.beginPostQuantumDiscoverableHandshake(buf)
+		if err != nil {
+			return err
+		}
+
 	} else {
 		err := c.beginDiscoverableHandshake(buf)
 		if err != nil {
@@ -197,8 +216,11 @@ func (c *Client) clientHandshakeLocked() error {
 	}
 	c.ss.readKey = &c.ss.serverToClientKey
 	c.ss.writeKey = &c.ss.clientToServerKey
+
+	// Ensuring that the HandshakeState isn't inadvertently reused
 	c.hs = nil
 	c.dialAddr = nil
+
 	c.ss.isHiddenHS = isClientHiddenHS
 
 	// Set deadline of 0 to make the connection not timeout
@@ -218,7 +240,7 @@ func (c *Client) clientHandshakeLocked() error {
 
 func (c *Client) beginDiscoverableHandshake(buf []byte) error {
 	// Protocol ID for the regular handshake
-	c.hs.dh.duplex.Absorb([]byte(ProtocolName))
+	c.hs.duplex.Absorb([]byte(ProtocolName))
 
 	n, err := writeClientHello(c.hs, buf)
 	if err != nil {
@@ -291,7 +313,7 @@ func (c *Client) beginDiscoverableHandshake(buf []byte) error {
 
 func (c *Client) beginHiddenHandshake(buf []byte) error {
 	// Protocol ID for the hidden handshake
-	c.hs.dh.duplex.Absorb([]byte(HiddenProtocolName))
+	c.hs.duplex.Absorb([]byte(HiddenProtocolName))
 
 	c.hs.RekeyFromSqueeze(HiddenProtocolName)
 
@@ -322,6 +344,79 @@ func (c *Client) beginHiddenHandshake(buf []byte) error {
 		return ErrInvalidMessage
 	}
 
+	return nil
+}
+
+func (c *Client) beginPostQuantumDiscoverableHandshake(buf []byte) error {
+	// Protocol ID for the regular handshake
+	//c.hs.duplex.Absorb([]byte(ProtocolName))
+
+	n, err := writeClientHello(c.hs, buf)
+	if err != nil {
+		return err
+	}
+	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
+	if err != nil {
+		return err
+	}
+	c.setHSDeadline()
+
+	n, _, _, _, err = c.underlyingConn.ReadMsgUDP(buf, nil)
+	if err != nil {
+		return err
+	}
+	logrus.Debugf("client: recv %x", buf[:n])
+	if n < 4 {
+		return ErrInvalidMessage
+	}
+	shn, err := readServerHello(c.hs, buf)
+	if err != nil {
+		return err
+	}
+	if shn != n {
+		return fmt.Errorf("server hello too short. recevied %d bytes, SH only %d", n, shn)
+	}
+
+	// c.hs.RekeyFromSqueeze(ProtocolName)
+
+	// Client Ack
+	n, err = c.hs.writeClientAck(buf)
+	if err != nil {
+		return err
+	}
+
+	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
+	if err != nil {
+		return err
+	}
+	c.setHSDeadline()
+
+	// Server Auth
+	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(buf, nil)
+	if err != nil {
+		return err
+	}
+	logrus.Debugf("clinet: sa msgLen: %d", msgLen)
+
+	n, err = c.hs.readServerAuth(buf[:msgLen])
+	if err != nil {
+		return err
+	}
+	if n != msgLen {
+		logrus.Debugf("got sa packet of %d, only read %d", msgLen, n)
+		return ErrInvalidMessage
+	}
+
+	// Client Auth
+	n, err = c.hs.writeClientAuth(buf)
+	if err != nil {
+		return err
+	}
+	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
+	if err != nil {
+		logrus.Errorf("client: unable to send client auth: %s", err)
+		return err
+	}
 	return nil
 }
 
