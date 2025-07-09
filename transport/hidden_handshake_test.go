@@ -165,7 +165,7 @@ func TestClientServerHiddenHSWithAgent(t *testing.T) {
 func TestClientHelloHiddenLength(t *testing.T) {
 	buf := make([]byte, 65535)
 	hs := new(HandshakeState)
-	hs.dh.duplex.InitializeEmpty()
+	hs.duplex.InitializeEmpty()
 	hs.dh.ephemeral.Generate()
 	hs.RekeyFromSqueeze(HiddenProtocolName)
 

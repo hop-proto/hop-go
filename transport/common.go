@@ -13,6 +13,7 @@ import (
 // ProtocolName is the string representation of the parameters used in this version
 const ProtocolName = "hop_NN_XX_cyclist_keccak_p1600_12"
 const HiddenProtocolName = "hop_IK_cyclist_keccak_C512"
+const PostQuantumProtocolName = "hop_pqNN_XX_cyclist_keccak_p1600_12"
 
 // Version is the protocol version being used. Only one version is supported.
 const Version byte = 0x01
@@ -30,6 +31,9 @@ const (
 	SessionIDLen = 4
 	CounterLen   = 8
 	TimestampLen = 8
+	// TODO KEM len
+	KemLen    = 256 // TODO random number put here tbd -> DHLen -> cipher size?
+	KemKeyLen = 256 // TODO random number put here tbd -> ctLen?
 )
 
 // MaxTotalPacketSize is MaxUDPPacketSize minus bytes used by Ethernet frames and Wifi frames.
@@ -44,6 +48,8 @@ const MaxPlaintextSize = MaxTotalPacketSize - HeaderLen - SessionIDLen - Counter
 const (
 	HelloLen          = HeaderLen + DHLen + MacLen
 	AssociatedDataLen = HeaderLen + SessionIDLen + CounterLen
+
+	PQHelloLen = 300 // TODO tbd
 )
 
 // errTransportOnly is an error that should not leave the transport layer.
@@ -99,6 +105,7 @@ const (
 	MessageTypeClientRequestHidden  MessageType = 0x08
 	MessageTypeServerResponseHidden MessageType = 0x09
 	MessageTypeTransport            MessageType = 0x10
+	MessageTypePQClientHello        MessageType = 0x20
 	MessageTypeControl              MessageType = 0x80
 )
 
