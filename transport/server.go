@@ -289,9 +289,9 @@ func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 	decryptedSNI := buf[:SNILen]
 	b = b[SNILen:]
 
-	hs.duplex.Squeeze(hs.dh.macBuf[:])
-	logrus.Debugf("server got client ack mac: %x, expected %x", b[:MacLen], hs.dh.macBuf)
-	if !bytes.Equal(hs.dh.macBuf[:], b[:MacLen]) {
+	hs.duplex.Squeeze(hs.macBuf[:])
+	logrus.Debugf("server got client ack mac: %x, expected %x", b[:MacLen], hs.macBuf)
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
 		return length, nil, ErrInvalidMessage
 	}
 
@@ -406,10 +406,10 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	}
 	x = x[encCertsLen:]
 	pos += encCertsLen
-	hs.duplex.Squeeze(hs.dh.macBuf[:])
+	hs.duplex.Squeeze(hs.macBuf[:])
 	clientTag := x[:MacLen]
-	if !bytes.Equal(hs.dh.macBuf[:], clientTag) {
-		logrus.Debugf("server: mismatched tag in client auth: expected %x, got %x", hs.dh.macBuf, clientTag)
+	if !bytes.Equal(hs.macBuf[:], clientTag) {
+		logrus.Debugf("server: mismatched tag in client auth: expected %x, got %x", hs.macBuf, clientTag)
 		return pos, nil, ErrInvalidMessage
 	}
 	x = x[MacLen:]
@@ -430,10 +430,10 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	}
 	logrus.Debugf("server: se %x", hs.dh.se)
 	hs.duplex.Absorb(hs.dh.se)
-	hs.duplex.Squeeze(hs.dh.macBuf[:]) // mac
+	hs.duplex.Squeeze(hs.macBuf[:]) // mac
 	clientMac := x[:MacLen]
-	if !bytes.Equal(hs.dh.macBuf[:], clientMac) {
-		logrus.Debugf("server: mismatched mac in client auth: expected %x, got %x", hs.dh.macBuf, clientMac)
+	if !bytes.Equal(hs.macBuf[:], clientMac) {
+		logrus.Debugf("server: mismatched mac in client auth: expected %x, got %x", hs.macBuf, clientMac)
 		return pos, nil, ErrInvalidMessage
 	}
 	// x = x[MacLen:]
