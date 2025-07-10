@@ -32,9 +32,9 @@ const (
 	SessionIDLen = 4
 	CounterLen   = 8
 	TimestampLen = 8
-	// TODO KEM len
-	KemLen    = mlkem512.PublicKeySize
-	KemKeyLen = 256 // TODO random number put here tbd -> ctLen?
+	KemCtLen     = mlkem512.CiphertextSize // KemCtLen
+	KemKeyLen    = mlkem512.PublicKeySize
+	PQCookieLen  = KemCtLen + mlkem512.KeySeedSize // what seed do i wanna use here? the key or encaps
 )
 
 // MaxTotalPacketSize is MaxUDPPacketSize minus bytes used by Ethernet frames and Wifi frames.
@@ -50,7 +50,7 @@ const (
 	HelloLen          = HeaderLen + DHLen + MacLen
 	AssociatedDataLen = HeaderLen + SessionIDLen + CounterLen
 
-	PQHelloLen = HeaderLen + KemLen + MacLen
+	PQHelloLen = HeaderLen + KemKeyLen + MacLen
 )
 
 // errTransportOnly is an error that should not leave the transport layer.
@@ -105,9 +105,14 @@ const (
 	MessageTypeClientAuth           MessageType = 0x05
 	MessageTypeClientRequestHidden  MessageType = 0x08
 	MessageTypeServerResponseHidden MessageType = 0x09
-	MessageTypeTransport            MessageType = 0x10
-	MessageTypePQClientHello        MessageType = 0x20
-	MessageTypeControl              MessageType = 0x80
+	MessageTypePQClientHello        MessageType = 0x11 // PQ messages Handshake 0x2...
+	MessageTypePQServerHello        MessageType = 0x12
+	MessageTypePQClientAck          MessageType = 0x13
+	MessageTypePQServerAuth         MessageType = 0x14
+	MessageTypePQClientAuth         MessageType = 0x15
+
+	MessageTypeTransport MessageType = 0x20
+	MessageTypeControl   MessageType = 0x80
 )
 
 // ControlMessage specifies the bytes that indicate different control messages.

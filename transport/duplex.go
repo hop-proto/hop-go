@@ -21,7 +21,7 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	out := new(HandshakeState)
 	copy(out.dh.remoteEphemeral[:], clientEphemeral)
 	out.remoteAddr = clientAddr
-	out.dh.cookieKey = s.cookieKey
+	out.cookieKey = s.cookieKey
 
 	// Pull the private key out of the cookie
 	n, err := out.decryptCookie(cookie)
@@ -59,7 +59,8 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 
 // CookieAD generates byte array that can be used as the associated data for the
 // AEAD encrypted data in the cookie.
-func CookieAD(ephemeral *[DHLen]byte, clientAddr *net.UDPAddr) []byte {
+// TODO paul: ensure that this data copy is safe instead of the original pointer
+func CookieAD(ephemeral []byte, clientAddr *net.UDPAddr) []byte {
 	// TODO(dadrian): Remove the memory allocation
 	h := sha3.New256()
 	h.Write(ephemeral[:])

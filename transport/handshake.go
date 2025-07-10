@@ -47,6 +47,12 @@ type HandshakeState struct {
 
 	duplex cyclist.Cyclist
 	macBuf [MacLen]byte
+
+	handshakeKey [KeyLen]byte
+
+	cookieKey [KeyLen]byte // server only
+
+	cookie []byte // client only
 }
 
 type dhState struct {
@@ -54,11 +60,6 @@ type dhState struct {
 	static    keys.Exchangable
 
 	remoteEphemeral [DHLen]byte
-	handshakeKey    [KeyLen]byte
-
-	cookieKey [KeyLen]byte // server only
-
-	cookie []byte // client only
 
 	// TODO(dadrian): Rework APIs to make these arrays and avoid copies with the curve25519 API.
 	ee []byte
@@ -71,11 +72,13 @@ type kemState struct {
 	impl keys.KEM
 
 	ephemeral keys.KEMKeypair
-	static    keys.KEMKeypair
+	// TODO paul: here the interface Exchangable is not a key pair, thus figure out what to do
+	static keys.KEMKeypair
 
-	remoteEphemeral [KemLen]byte
-	handshakeKey    [KemKeyLen]byte
+	remoteEphemeral keys.PublicKey
+	remoteStatic    keys.PublicKey
 
+	// TODO, we actually maybe never need these
 	ee []byte
 	es []byte
 	se []byte
@@ -84,12 +87,12 @@ type kemState struct {
 
 func (hs *HandshakeState) writeCookie(b []byte) (int, error) {
 	// TODO(dadrian): Avoid allocating memory.
-	aead, err := kravatte.NewSANSE(hs.dh.cookieKey[:])
+	aead, err := kravatte.NewSANSE(hs.cookieKey[:])
 	if err != nil {
 		return 0, err
 	}
 	plaintextCookie := hs.dh.ephemeral.Private[:]
-	ad := CookieAD(&hs.dh.remoteEphemeral, hs.remoteAddr)
+	ad := CookieAD(hs.dh.remoteEphemeral[:], hs.remoteAddr)
 	enc := aead.Seal(b[:0], nil, plaintextCookie, ad)
 	if len(enc) != CookieLen {
 		logrus.Panicf("len(enc) != CookieLen: %d != %d. Not possible", len(enc), CookieLen)
@@ -101,12 +104,12 @@ func (hs *HandshakeState) decryptCookie(b []byte) (int, error) {
 	if len(b) < CookieLen {
 		return 0, ErrBufUnderflow
 	}
-	aead, err := kravatte.NewSANSE(hs.dh.cookieKey[:])
+	aead, err := kravatte.NewSANSE(hs.cookieKey[:])
 	if err != nil {
 		return 0, err
 	}
 	encryptedCookie := b[:CookieLen]
-	ad := CookieAD(&hs.dh.remoteEphemeral, hs.remoteAddr)
+	ad := CookieAD(hs.dh.remoteEphemeral[:], hs.remoteAddr)
 	out, err := aead.Open(hs.dh.ephemeral.Private[:0], nil, encryptedCookie, ad)
 	if err != nil {
 		return 0, ErrInvalidMessage
@@ -240,10 +243,10 @@ func readServerHello(hs *HandshakeState, b []byte) (int, error) {
 	hs.duplex.Absorb(secret)
 
 	// Cookie
-	hs.dh.cookie = make([]byte, CookieLen)
-	copy(hs.dh.cookie, b[:CookieLen])
-	hs.duplex.Absorb(hs.dh.cookie)
-	logrus.Debugf("client: read cookie %x", hs.dh.cookie)
+	hs.cookie = make([]byte, CookieLen)
+	copy(hs.cookie, b[:CookieLen])
+	hs.duplex.Absorb(hs.cookie)
+	logrus.Debugf("client: read cookie %x", hs.cookie)
 	b = b[CookieLen:]
 
 	// Mac
@@ -259,8 +262,8 @@ func readServerHello(hs *HandshakeState, b []byte) (int, error) {
 // RekeyFromSqueeze squeezes out KeyLen bytes and then re-initializes the duplex
 // using the new key.
 func (hs *HandshakeState) RekeyFromSqueeze(protocolName string) {
-	hs.duplex.Squeeze(hs.dh.handshakeKey[:])
-	hs.duplex.Initialize(hs.dh.handshakeKey[:], []byte(protocolName), nil)
+	hs.duplex.Squeeze(hs.handshakeKey[:])
+	hs.duplex.Initialize(hs.handshakeKey[:], []byte(protocolName), nil)
 }
 
 // EncryptSNI encrypts the name to a buffer. The encrypted length is always
@@ -301,7 +304,7 @@ func (hs *HandshakeState) writeClientAck(b []byte) (int, error) {
 	b = b[DHLen:]
 
 	// Cookie
-	n := copy(b, hs.dh.cookie)
+	n := copy(b, hs.cookie)
 	if n != CookieLen {
 		logrus.Debugf("unexpected cookie length: %d (expected %d)", n, CookieLen)
 		return HeaderLen + DHLen + n, ErrInvalidMessage
