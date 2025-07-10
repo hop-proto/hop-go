@@ -162,7 +162,7 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 			return err
 		}
 		logrus.Debugf("server: client ephemeral: %x", scratchHS.dh.remoteEphemeral)
-		scratchHS.dh.cookieKey = s.cookieKey
+		scratchHS.cookieKey = s.cookieKey
 		scratchHS.remoteAddr = addr
 		n, err := writeServerHello(scratchHS, handshakeWriteBuf)
 		if err != nil {

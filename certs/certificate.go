@@ -26,7 +26,7 @@ import (
 
 // Byte-length constants for cryptographic material
 const (
-	KeyLen       = 32
+	KeyLen       = 32 // TODO adapt they key len to PQ
 	SignatureLen = 64
 )
 

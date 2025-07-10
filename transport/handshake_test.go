@@ -178,7 +178,7 @@ func TestCookie(t *testing.T) {
 		IP:   net.ParseIP("192.168.1.1"),
 		Port: 8675,
 	}
-	hs.dh.cookieKey = cookieKey
+	hs.cookieKey = cookieKey
 	cookie := make([]byte, 2*CookieLen)
 	n, err := hs.writeCookie(cookie)
 	assert.Check(t, cmp.Equal(CookieLen, n))
