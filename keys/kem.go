@@ -59,6 +59,8 @@ type KEMKeypair interface {
 	// Public returns the public key of the keypair.
 	Public() PublicKey
 
+	Seed() []byte // TODO create a constant for that
+
 	// Dec decapsulates the ciphertext and returns the encapsulated key.
 	Dec(ct []byte) ([]byte, error)
 }
@@ -95,6 +97,7 @@ func (impl *kemCIRCL) GenerateKeypair(rng io.Reader) (KEMKeypair, error) {
 	return &keypairCIRCL{
 		privateKey: priv,
 		publicKey:  mustCirclToPublic(pub),
+		seed:       seed,
 	}, nil
 }
 
@@ -127,6 +130,7 @@ func (impl *kemCIRCL) ParsePrivateKey(data []byte) (KEMKeypair, error) {
 	kp := &keypairCIRCL{
 		privateKey: priv,
 		publicKey:  mustCirclToPublic(priv.Public()),
+		seed:       nil,
 	}
 
 	return kp, nil
@@ -161,6 +165,13 @@ func (impl *kemCIRCL) SharedKeySize() int {
 type keypairCIRCL struct {
 	privateKey kem.PrivateKey
 	publicKey  *publicKeyCIRCL
+	// The seed should only be used in the context of ephemeral keys.
+	// Is set to nil for static keypair
+	seed []byte
+}
+
+func (kp *keypairCIRCL) Seed() []byte {
+	return kp.seed
 }
 
 func (kp *keypairCIRCL) MarshalBinary() ([]byte, error) {
