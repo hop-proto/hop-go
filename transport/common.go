@@ -110,6 +110,7 @@ const (
 	MessageTypePQClientAck          MessageType = 0x13
 	MessageTypePQServerAuth         MessageType = 0x14
 	MessageTypePQClientAuth         MessageType = 0x15
+	MessageTypePQServerConf         MessageType = 0x16
 
 	MessageTypeTransport MessageType = 0x20
 	MessageTypeControl   MessageType = 0x80
