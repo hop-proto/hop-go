@@ -108,7 +108,7 @@ func writePQServerHello(hs *HandshakeState, b []byte) (int, error) {
 		return 0, ErrBufOverflow
 	}
 
-	copy(b, ct)
+	copy(b, ct[:])
 	hs.duplex.Absorb(b[:KemCtLen]) // public artifact encapsulating the shared secret
 	b = b[KemCtLen:]
 
@@ -467,7 +467,7 @@ func (hs *HandshakeState) writePQClientAuth(b []byte) (int, error) {
 		return 0, ErrBufOverflow
 	}
 
-	copy(b, ct)
+	copy(b, ct[:])
 	hs.duplex.Absorb(b[:KemCtLen]) // public artifact encapsulating the shared secret
 	b = b[KemCtLen:]
 
@@ -480,8 +480,177 @@ func (hs *HandshakeState) writePQClientAuth(b []byte) (int, error) {
 	return length, nil
 }
 
-// TODO paul ------> that should be okay up to down here
-// next is writePQClientAuth and write the server last message with the skem (ss?)
+func (s *Server) readPQClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeState, error) {
+	x := b
+	pos := 0
+	if len(b) < HeaderLen {
+		logrus.Debug("server: client auth missing header")
+		return 0, nil, ErrBufUnderflow
+	}
+	encCertsLen := (int(b[2]) << 8) + int(b[3])
+	if len(b) < HeaderLen+SessionIDLen+encCertsLen+MacLen {
+		logrus.Debug("server: client auth too short")
+		return 0, nil, ErrBufUnderflow
+	}
+
+	if mt := MessageType(b[0]); mt != MessageTypePQClientAuth {
+		return 0, nil, ErrUnexpectedMessage
+	}
+	if b[1] != 0 {
+		return 0, nil, ErrInvalidMessage
+	}
+	hs := s.fetchHandshakeState(addr)
+	if hs == nil {
+		logrus.Debugf("server: no handshake state for handshake packet from %s", addr)
+		return pos, nil, ErrUnexpectedMessage
+	}
+	hs.duplex.Absorb(x[:HeaderLen])
+	x = x[HeaderLen:]
+	pos += HeaderLen
+	sessionID := x[:SessionIDLen]
+	if !bytes.Equal(hs.sessionID[:], sessionID) {
+		logrus.Debugf("server: mismatched session ID for %s: expected %x, got %x", addr, hs.sessionID, sessionID)
+		return pos, nil, ErrUnexpectedMessage
+	}
+	hs.duplex.Absorb(sessionID)
+	x = x[SessionIDLen:]
+	pos += SessionIDLen
+	encCerts := x[:encCertsLen]
+	rawLeaf, rawIntermediate, err := DecryptCertificates(&hs.duplex, encCerts)
+	if err != nil {
+		return pos, nil, err
+	}
+	x = x[encCertsLen:]
+	pos += encCertsLen
+	hs.duplex.Squeeze(hs.macBuf[:])
+	clientTag := x[:MacLen]
+	if !bytes.Equal(hs.macBuf[:], clientTag) {
+		logrus.Debugf("server: mismatched tag in client auth: expected %x, got %x", hs.macBuf, clientTag)
+		return pos, nil, ErrInvalidMessage
+	}
+	x = x[MacLen:]
+	pos += MacLen
+
+	// Parse certificates
+	leaf, _, err := hs.certificateParserAndVerifier(rawLeaf, rawIntermediate)
+	if err != nil {
+		logrus.Debugf("server: error parsing client certificates: %s", err)
+		return pos, nil, err
+	}
+	hs.parsedLeaf = &leaf
+
+	hs.kem.remoteStatic, err = hs.kem.impl.ParsePublicKey(leaf.PublicKey[:])
+	if err != nil {
+		return 0, nil, err
+	}
+
+	// KEM CipherText
+	var ct []byte
+	copy(ct, b[:KemCtLen])
+	hs.duplex.Absorb(b[:KemCtLen])
+	b = b[KemCtLen:]
+
+	k, err := hs.kem.static.Dec(ct) // skem
+	if err != nil {
+		return 0, nil, err
+	}
+	hs.duplex.Absorb(k)
+
+	hs.duplex.Squeeze(hs.macBuf[:]) // mac
+	clientMac := x[:MacLen]
+	if !bytes.Equal(hs.macBuf[:], clientMac) {
+		logrus.Debugf("server: mismatched mac in client auth: expected %x, got %x", hs.macBuf, clientMac)
+		return pos, nil, ErrInvalidMessage
+	}
+	// x = x[MacLen:]
+	pos += MacLen
+	return pos, hs, nil
+}
+
+func (s *Server) writePQServerConf(b []byte, hs *HandshakeState) (int, error) {
+
+	length := HeaderLen + KemCtLen + MacLen
+
+	if len(b) < length {
+		return 0, ErrBufOverflow
+	}
+
+	x := b
+	pos := 0
+	x[0] = byte(MessageTypePQServerConf)
+	x[1] = 0
+	x[2] = 0
+	x[3] = 0
+	hs.duplex.Absorb(x[:HeaderLen])
+	x = x[HeaderLen:]
+	pos += HeaderLen
+
+	// KEM CipherText -> skem
+	ct, k, err := hs.kem.impl.Enc(rand.Reader, hs.kem.remoteStatic)
+	if err != nil {
+		return 0, err
+	}
+	if len(ct) != KemCtLen {
+		return 0, ErrBufOverflow
+	}
+	copy(x, ct[:])
+	hs.duplex.Absorb(x[:KemCtLen]) // public artifact encapsulating the shared secret
+	x = x[KemCtLen:]
+	pos += KemCtLen
+
+	hs.duplex.Absorb(k) // shared secret
+
+	hs.duplex.Squeeze(x[:MacLen])
+	logrus.Debugf("server serverauth mac: %x", x[:MacLen])
+	// x = x[MacLen:]
+	pos += MacLen
+
+	if pos != length {
+		return 0, ErrInvalidMessage
+	}
+
+	return pos, nil
+}
+
+func (hs *HandshakeState) readPQServerConf(b []byte) (int, error) {
+	length := HeaderLen + KemCtLen + MacLen
+	if len(b) < length {
+		return 0, ErrBufUnderflow
+	}
+	if mt := MessageType(b[0]); mt != MessageTypePQServerConf {
+		return 0, ErrUnexpectedMessage
+	}
+
+	// Header
+	if b[1] != 0 || b[2] != 0 || b[3] != 0 {
+		return 0, ErrUnexpectedMessage
+	}
+	header := b[:HeaderLen]
+	b = b[HeaderLen:]
+	hs.duplex.Absorb(header)
+
+	// KEM CipherText
+	var ct []byte
+	copy(ct, b[:KemCtLen])
+	hs.duplex.Absorb(b[:KemCtLen])
+	b = b[KemCtLen:]
+
+	k, err := hs.kem.static.Dec(ct) // skem
+	if err != nil {
+		return 0, err
+	}
+	hs.duplex.Absorb(k)
+
+	// Mac
+	hs.duplex.Squeeze(hs.macBuf[:])
+	logrus.Debugf("client: calculated sa mac: %x", hs.macBuf)
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
+		logrus.Debugf("client: expected sa mac %x, got %x", hs.macBuf, b[:MacLen])
+	}
+	// b = b[MacLen:]
+
+	return length, nil
+}
 
 func (hs *HandshakeState) writePQCookie(b []byte) (int, error) {
 	// TODO(dadrian): Avoid allocating memory.
