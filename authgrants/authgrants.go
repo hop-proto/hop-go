@@ -46,7 +46,7 @@ func (m *AuthgrantMapSync) AddAuthGrant(i *Intent, p PrincipalID) {
 		m.agMap[user] = make(map[keys.DHPublicKey][]Authgrant)
 	}
 	ag := newAuthgrant(i, p)
-	m.agMap[user][i.DelegateCert.PublicKey] = append(m.agMap[user][i.DelegateCert.PublicKey], ag)
+	m.agMap[user][keys.DHPublicKey(i.DelegateCert.PublicKey)] = append(m.agMap[user][keys.DHPublicKey(i.DelegateCert.PublicKey)], ag)
 }
 
 // RemoveAuthgrants removes and returns authgrants for user:key if they exist

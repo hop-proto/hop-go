@@ -35,7 +35,7 @@ func issue(parent *Certificate, child *Identity, certType CertificateType, durat
 		IDChunk: IDChunk{
 			Blocks: child.Names,
 		},
-		PublicKey: child.PublicKey,
+		PublicKey: child.PublicKey[:],
 		Parent:    parent.Fingerprint,
 	}
 	buf := bytes.Buffer{}
@@ -100,7 +100,6 @@ func selfSign(self *Identity, certificateType CertificateType, keyPair *keys.Sig
 			Blocks: self.Names,
 		},
 		PublicKey:   self.PublicKey,
-		PQPublicKey: self.PQPublicKey,
 		Fingerprint: zero,
 	}
 	buf := bytes.Buffer{}

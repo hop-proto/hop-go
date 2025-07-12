@@ -11,15 +11,14 @@ import (
 
 // Identity is a set of names associated with a public key.
 type Identity struct {
-	PublicKey   [KeyLen]byte
-	PQPublicKey [KemKeyLen]byte // TODO that allocs memory for nothing
-	Names       []Name
+	PublicKey []byte
+	Names     []Name
 }
 
 // SigningIdentity returns an Identity pointing to a public key with no name.
 func SigningIdentity(key *keys.SigningKeyPair) *Identity {
 	return &Identity{
-		PublicKey: key.Public,
+		PublicKey: key.Public[:],
 	}
 }
 
@@ -27,7 +26,7 @@ func SigningIdentity(key *keys.SigningKeyPair) *Identity {
 // names.
 func LeafIdentity(key *keys.X25519KeyPair, names ...Name) *Identity {
 	return &Identity{
-		PublicKey: key.Public,
+		PublicKey: key.Public[:],
 		Names:     names,
 	}
 }
@@ -69,7 +68,7 @@ func VerifyParent(child *Certificate, parent *Certificate) error {
 
 	tbsLen := child.raw.Len() - 64
 	tbs := child.raw.Bytes()[:tbsLen]
-	ok := keys.VerifySignature((*keys.SigningPublicKey)(&parent.PublicKey), tbs, &child.Signature)
+	ok := keys.VerifySignature((*keys.SigningPublicKey)(parent.PublicKey[:]), tbs, &child.Signature)
 	if !ok {
 		return errors.New("invalid signature")
 	}

@@ -95,6 +95,7 @@ func TestPQNoiseXXHandshake(t *testing.T) {
 	clientBuf = make([]byte, 65535)
 	n, err1 = client.hs.writePQClientAuth(clientBuf)
 	_, serverHs, err2 = server.readPQClientAuth(clientBuf[:n], raddr)
+
 	assert.NilError(t, err1)
 	assert.NilError(t, err2)
 
@@ -120,8 +121,8 @@ func newPQClientAuth(t assert.TestingT) (*keys.KEMKeypair, *certs.Certificate) {
 	k, err := keys.MlKem512.GenerateKeypair(rand.Reader)
 	pubKeyBytes := k.Public().Bytes()
 	c, err := certs.SelfSignLeaf(&certs.Identity{
-		PQPublicKey: [800]byte(pubKeyBytes),
-		Names:       []certs.Name{certs.RawStringName("testing")},
+		PublicKey: pubKeyBytes,
+		Names:     []certs.Name{certs.RawStringName("testing")},
 	})
 	assert.NilError(t, err)
 	return &k, c
@@ -133,7 +134,7 @@ func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDP
 	intermediateKey := keys.GenerateNewSigningKeyPair()
 
 	rootIdentity := certs.Identity{
-		PublicKey: rootKey.Public,
+		PublicKey: rootKey.Public[:],
 		Names:     []certs.Name{certs.RawStringName("Root")},
 	}
 
@@ -141,7 +142,7 @@ func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDP
 	root.ProvideKey((*[32]byte)(&rootKey.Private))
 
 	intermediateIdentity := certs.Identity{
-		PublicKey: intermediateKey.Public,
+		PublicKey: intermediateKey.Public[:],
 		Names:     []certs.Name{certs.RawStringName("Intermediate")},
 	}
 	intermediate, err := certs.IssueIntermediate(root, &intermediateIdentity)
@@ -178,8 +179,8 @@ func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermedi
 	pubKeyBytes := kp.Public().Bytes()
 
 	leafIdentity := certs.Identity{
-		PQPublicKey: [800]byte(pubKeyBytes),
-		Names:       []certs.Name{certs.RawStringName("Server Leaf")},
+		PublicKey: pubKeyBytes,
+		Names:     []certs.Name{certs.RawStringName("Server Leaf")},
 	}
 
 	c, err := certs.SelfSignLeaf(&leafIdentity)
@@ -306,7 +307,7 @@ func TestPQClientServerHSWithAgent(t *testing.T) {
 	}
 
 	leaf, err := certs.SelfSignLeaf(&certs.Identity{
-		PublicKey: public,
+		PublicKey: public[:],
 	})
 
 	assert.NilError(t, err)

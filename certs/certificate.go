@@ -93,15 +93,14 @@ var zeroSignature [SignatureLen]byte
 // bytes. A Certificate can optionally be associated with its corresponding
 // private key.
 type Certificate struct {
-	Version     byte
-	Type        CertificateType
-	IssuedAt    time.Time
-	ExpiresAt   time.Time
-	IDChunk     IDChunk
-	PublicKey   [KeyLen]byte
-	PQPublicKey [KemKeyLen]byte
-	Parent      SHA3Fingerprint
-	Signature   [SignatureLen]byte
+	Version   byte
+	Type      CertificateType
+	IssuedAt  time.Time
+	ExpiresAt time.Time
+	IDChunk   IDChunk
+	PublicKey []byte
+	Parent    SHA3Fingerprint
+	Signature [SignatureLen]byte
 
 	// Fingerprint is the 256-bit SHA3 of the certificate. It is populated when
 	// a certificate is read, or issued.
@@ -286,12 +285,116 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 	bytesRead += 8
 	c.ExpiresAt = time.Unix(int64(t), 0)
 
-	n, err := io.ReadFull(r, c.PublicKey[:])
+	// TODO fix this to make it compatible with DH
+	buf := make([]byte, KeyLen)
+	n, err := io.ReadFull(r, buf)
+	c.PublicKey = buf
+
 	bytesRead += int64(n)
 	if err != nil {
 		return bytesRead, err
 	}
+
 	if n != KeyLen {
+		return bytesRead, io.EOF
+	}
+
+	n, err = io.ReadFull(r, c.Parent[:])
+	bytesRead += int64(n)
+	if err != nil {
+		return bytesRead, err
+	}
+	if n != SHA3Len {
+		return bytesRead, io.EOF
+	}
+
+	chunkLen, err := c.IDChunk.ReadFrom(r)
+	bytesRead += chunkLen
+	if err != nil {
+		return bytesRead, err
+	}
+
+	n, err = io.ReadFull(r, c.Signature[:])
+	bytesRead += int64(n)
+	if err != nil {
+		return bytesRead, err
+	}
+	if n != SignatureLen {
+		return bytesRead, io.EOF
+	}
+
+	// The hash has been written via the TeeReader, read it out.
+	h.Sum(c.Fingerprint[:0])
+
+	return bytesRead, nil
+}
+
+// ReadFromPQ TODO remove it and find a nicer way to do it
+func (c *Certificate) ReadFromPQ(r io.Reader) (int64, error) {
+	var bytesRead int64
+	var err error
+
+	// Save the bytes
+	c.raw.Reset()
+	tee := io.TeeReader(r, &c.raw)
+
+	// Calculate hash as we read
+	h := sha3.New256()
+	r = io.TeeReader(tee, h)
+
+	err = binary.Read(r, binary.BigEndian, &c.Version)
+	if err != nil {
+		return bytesRead, err
+	}
+	bytesRead++
+
+	err = binary.Read(r, binary.BigEndian, &c.Type)
+	if err != nil {
+		return bytesRead, err
+	}
+	bytesRead++
+
+	var reserved uint16
+	err = binary.Read(r, binary.BigEndian, &reserved)
+	if err != nil {
+		return bytesRead, err
+	}
+	bytesRead += 2
+
+	var t uint64
+	err = binary.Read(r, binary.BigEndian, &t)
+	if err != nil {
+		return bytesRead, err
+	}
+	if t > math.MaxInt64 {
+		return bytesRead, errors.New("issue timestamp too large")
+	}
+	bytesRead += 8
+	c.IssuedAt = time.Unix(int64(t), 0)
+
+	err = binary.Read(r, binary.BigEndian, &t)
+	if err != nil {
+		return bytesRead, err
+	}
+	if t > math.MaxInt64 {
+		return bytesRead, errors.New("expires timestamp too large")
+	}
+	bytesRead += 8
+	c.ExpiresAt = time.Unix(int64(t), 0)
+
+	// TODO make readfull reading the pqkey length
+
+	buf := make([]byte, KemKeyLen)
+	n, err := io.ReadFull(r, buf)
+	c.PublicKey = buf
+
+	bytesRead += int64(n)
+	if err != nil {
+		return bytesRead, err
+	}
+
+	// TODO update the keylen here as well
+	if n != KemKeyLen {
 		return bytesRead, io.EOF
 	}
 

@@ -398,11 +398,30 @@ func (hs *HandshakeState) readPQServerAuth(b []byte) (int, error) {
 	}
 	// b = b[MacLen:]
 
+	// Parse the certificate
+	// We are parsing the certificate here as there is no need before while reading the server Auth
+	hs.certVerify.InsecureSkipVerify = true // TODO fix the certificates
+	leaf, _, err := hs.certificateParserAndVerifier(rawLeaf, rawIntermediate)
+	if err != nil {
+		logrus.Debugf("client: error parsing server certificates: %s", err)
+		return 0, err
+	}
+
+	remoteStaticBytes := leaf.PublicKey
+	hs.kem.remoteStatic, err = hs.kem.impl.ParsePublicKey(remoteStaticBytes[:])
+	if err != nil {
+		return 0, err
+	}
+
+	logrus.Debugf("Client: kem remote static: %v", leaf.PublicKey[:])
+	logrus.Debugf("Client: kem static: %v", hs.kem.static.Public().Bytes())
+
 	return fullLength, nil
 }
 
 func (hs *HandshakeState) writePQClientAuth(b []byte) (int, error) {
 	encCertLen := EncryptedCertificatesLength(hs.leaf, hs.intermediate)
+	// TODO this has a length of 1905 -> too large
 	length := HeaderLen + SessionIDLen + encCertLen + MacLen + MacLen + KemCtLen
 	if len(b) < length {
 		return 0, ErrBufUnderflow
@@ -446,21 +465,6 @@ func (hs *HandshakeState) writePQClientAuth(b []byte) (int, error) {
 	x = x[MacLen:]
 	pos += MacLen
 
-	// Parse the certificate
-	// We are parsing the certificate here as there is no need before while reading the server Auth
-	hs.certVerify.InsecureSkipVerify = true // TODO fix the certificates
-	leaf, _, err := hs.certificateParserAndVerifier(hs.leaf, hs.intermediate)
-	if err != nil {
-		logrus.Debugf("client: error parsing server certificates: %s", err)
-		return 0, err
-	}
-
-	remoteStaticBytes := leaf.PQPublicKey
-	hs.kem.remoteStatic, err = hs.kem.impl.ParsePublicKey(remoteStaticBytes[:])
-	if err != nil {
-		return pos, err
-	}
-
 	// KEM CipherText -> skem
 	ct, k, err := hs.kem.impl.Enc(rand.Reader, hs.kem.remoteStatic)
 	if err != nil {
@@ -477,6 +481,8 @@ func (hs *HandshakeState) writePQClientAuth(b []byte) (int, error) {
 	pos += KemCtLen
 
 	hs.duplex.Absorb(k) // shared secret
+	logrus.Debugf("Client: shared secret kem: %v", k)
+	// TODO this k is not the same on each side
 
 	// Mac
 	hs.duplex.Squeeze(x[:MacLen])
@@ -549,10 +555,12 @@ func (s *Server) readPQClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	}
 	hs.parsedLeaf = &leaf
 
-	hs.kem.remoteStatic, err = hs.kem.impl.ParsePublicKey(leaf.PQPublicKey[:])
+	hs.kem.remoteStatic, err = hs.kem.impl.ParsePublicKey(leaf.PublicKey[:])
 	if err != nil {
 		return 0, nil, err
 	}
+	logrus.Debugf("Server: kem remote static: %v", leaf.PublicKey[:])
+	logrus.Debugf("Server: kem static: %v", hs.kem.static.Public().Bytes())
 
 	// KEM CipherText
 	//hs.duplexAbsorbKem(b[:KemCtLen])
@@ -562,6 +570,9 @@ func (s *Server) readPQClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		return 0, nil, err
 	}
 	hs.duplex.Absorb(k)
+	logrus.Debugf("server: shared secret kem: %v", k)
+	// can be a wrong instantiation of the duplex object
+	// TODO this k is not the same on each side
 
 	b = b[KemCtLen:]
 
