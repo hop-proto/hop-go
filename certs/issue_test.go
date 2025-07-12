@@ -16,14 +16,14 @@ func TestIssueSelfSigned(t *testing.T) {
 	// Check that we can self-sign certs with and without names.
 	identities := []Identity{
 		{
-			PublicKey: k.Public,
+			PublicKey: k.Public[:],
 			Names: []Name{
 				DNSName("dadrian.io"),
 				RawStringName("d a v e"),
 			},
 		},
 		{
-			PublicKey: k.Public,
+			PublicKey: k.Public[:],
 		},
 	}
 
