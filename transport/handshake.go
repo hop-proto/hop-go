@@ -69,6 +69,7 @@ type dhState struct {
 }
 
 type kemState struct {
+	// TODO pointers and address
 	impl keys.KEM
 
 	ephemeral keys.KEMKeypair
@@ -78,11 +79,9 @@ type kemState struct {
 	remoteEphemeral keys.PublicKey
 	remoteStatic    keys.PublicKey
 
-	// TODO, we actually maybe never need these
-	ee []byte
-	es []byte
-	se []byte
-	ss []byte
+	k [32]byte // TODO (paul): I don't like storing this k for the ServerHello Replay.
+	// However we cannot deterministically re generate it. Storing the encapsulation seed
+	// would result to the same allocation
 }
 
 func (hs *HandshakeState) writeCookie(b []byte) (int, error) {

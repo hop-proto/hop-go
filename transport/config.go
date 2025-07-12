@@ -101,6 +101,7 @@ type ServerConfig struct {
 	HandshakeTimeout time.Duration
 
 	KeyPair      *keys.X25519KeyPair
+	KEMKeyPair   *keys.KEMKeypair
 	Certificate  *certs.Certificate
 	Intermediate *certs.Certificate
 
