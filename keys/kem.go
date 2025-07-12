@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	MlKem512 = mustCirclToKEM("MlKem512")
+	MlKem512 = mustCirclToKEM("ML-KEM-512")
 )
 
 // TODO paul: this entire file is the following implementation resulting form https://gitlab.com/yawning/nyquist/-/blob/experimental/pqnoise/kem/kem.go?ref_type=heads and using cloudflare circl kem schemes
@@ -27,6 +27,10 @@ type KEM interface {
 	// GenerateKeypair generates a new KEM keypair using the provided
 	// entropy source.
 	GenerateKeypair(rng io.Reader) (KEMKeypair, error)
+
+	// GenerateKeypairFromSeed generates a new KEM keypair using the
+	// provided seed
+	GenerateKeypairFromSeed(seed []byte) (KEMKeypair, error)
 
 	// Enc generates a shared key and ciphertext that encapsulates it
 	// for the provided public key using the provided entropy source,
@@ -92,6 +96,16 @@ func (impl *kemCIRCL) GenerateKeypair(rng io.Reader) (KEMKeypair, error) {
 		return nil, err
 	}
 
+	pub, priv := impl.scheme.DeriveKeyPair(seed)
+
+	return &keypairCIRCL{
+		privateKey: priv,
+		publicKey:  mustCirclToPublic(pub),
+		seed:       seed,
+	}, nil
+}
+
+func (impl *kemCIRCL) GenerateKeypairFromSeed(seed []byte) (KEMKeypair, error) {
 	pub, priv := impl.scheme.DeriveKeyPair(seed)
 
 	return &keypairCIRCL{

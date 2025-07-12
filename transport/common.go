@@ -34,7 +34,8 @@ const (
 	TimestampLen = 8
 	KemCtLen     = mlkem512.CiphertextSize // KemCtLen
 	KemKeyLen    = mlkem512.PublicKeySize
-	PQCookieLen  = KemCtLen + mlkem512.KeySeedSize // what seed do i wanna use here? the key or encaps
+	PQCookieLen  = 32 + mlkem512.KeySeedSize // 32 comes for the CookieAD function but should not be that small
+	PQSeedLen    = mlkem512.KeySeedSize      // 32 comes for the CookieAD function but should not be that small
 )
 
 // MaxTotalPacketSize is MaxUDPPacketSize minus bytes used by Ethernet frames and Wifi frames.

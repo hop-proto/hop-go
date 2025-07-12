@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"github.com/sirupsen/logrus"
 	"hop.computer/hop/certs"
-	"hop.computer/hop/common"
+	"hop.computer/hop/keys"
 	"hop.computer/hop/kravatte"
 	"net"
 )
@@ -38,7 +38,7 @@ func writePQClientHello(hs *HandshakeState, b []byte) (int, error) {
 	// Ephemeral
 	ephemeralBytes := hs.kem.ephemeral.Public().Bytes()
 	copy(x, ephemeralBytes[:])
-	hs.duplex.Absorb(x[:KemKeyLen])
+	//hs.duplexAbsorbKem(x[:KemKeyLen])
 	x = x[KemKeyLen:]
 
 	// Mac
@@ -49,7 +49,6 @@ func writePQClientHello(hs *HandshakeState, b []byte) (int, error) {
 
 func readPQClientHello(hs *HandshakeState, b []byte) (int, error) {
 
-	var ephemeralBytes []byte
 	var err error
 
 	logrus.Debug("read PQ client hello")
@@ -68,13 +67,12 @@ func readPQClientHello(hs *HandshakeState, b []byte) (int, error) {
 	hs.duplex.Absorb(b[:HeaderLen])
 	b = b[HeaderLen:]
 
-	copy(ephemeralBytes, b[:KemKeyLen])
-	hs.kem.remoteEphemeral, err = hs.kem.impl.ParsePublicKey(ephemeralBytes)
+	hs.kem.remoteEphemeral, err = hs.kem.impl.ParsePublicKey(b[:KemKeyLen])
 	if err != nil {
 		return 0, err
 	}
 
-	hs.duplex.Absorb(b[:KemKeyLen])
+	//hs.duplexAbsorbKem(b[:KemKeyLen])
 	b = b[KemKeyLen:]
 	hs.duplex.Squeeze(hs.macBuf[:])
 	logrus.Debugf("server: calculated client hello mac: %x", hs.macBuf)
@@ -85,7 +83,7 @@ func readPQClientHello(hs *HandshakeState, b []byte) (int, error) {
 }
 
 func writePQServerHello(hs *HandshakeState, b []byte) (int, error) {
-	if len(b) < HeaderLen+KemCtLen+PQCookieLen+MacLen {
+	if len(b) < HeaderLen+PQCookieLen+MacLen {
 		return 0, ErrBufOverflow
 	}
 
@@ -95,24 +93,6 @@ func writePQServerHello(hs *HandshakeState, b []byte) (int, error) {
 	b[3] = 0
 	hs.duplex.Absorb(b[:HeaderLen])
 	b = b[HeaderLen:]
-
-	// TODO paul: check the randomness generation over the keys
-
-	// KEM CipherText -> ekem
-	ct, k, err := hs.kem.impl.Enc(rand.Reader, hs.kem.remoteEphemeral)
-	if err != nil {
-		return 0, err
-	}
-
-	if len(ct) != KemCtLen {
-		return 0, ErrBufOverflow
-	}
-
-	copy(b, ct[:])
-	hs.duplex.Absorb(b[:KemCtLen]) // public artifact encapsulating the shared secret
-	b = b[KemCtLen:]
-
-	hs.duplex.Absorb(k) // shared secret
 
 	// Cookie
 	n, err := hs.writePQCookie(b)
@@ -130,11 +110,27 @@ func writePQServerHello(hs *HandshakeState, b []byte) (int, error) {
 	hs.duplex.Squeeze(b[:MacLen])
 	logrus.Debugf("server: sh mac %x", b[:MacLen])
 
-	return HeaderLen + KemCtLen + PQCookieLen + MacLen, nil
+	return HeaderLen + PQCookieLen + MacLen, nil
+}
+
+// the cyclist implementation has been thought to have absorption of max rKout 136 bytes
+// TODO be sure that this split ensure the duplex security
+// TODO we should not absorb Ct as non deterministic
+func (hs *HandshakeState) duplexAbsorbKem(key []byte) {
+	keyLen := len(key)
+	chunk := keyLen / 8
+
+	if chunk > 136 {
+		panic(errTruncatedEkem)
+	}
+
+	for i := 0; i < 8; i++ {
+		hs.duplex.Absorb(key[chunk*i : chunk*(i+1)])
+	}
 }
 
 func readPQServerHello(hs *HandshakeState, b []byte) (int, error) {
-	if len(b) < HeaderLen+KemCtLen+PQCookieLen+MacLen {
+	if len(b) < HeaderLen+PQCookieLen+MacLen {
 		return 0, ErrBufOverflow
 	}
 
@@ -147,19 +143,6 @@ func readPQServerHello(hs *HandshakeState, b []byte) (int, error) {
 	}
 	hs.duplex.Absorb(b[:HeaderLen])
 	b = b[HeaderLen:]
-
-	// KEM CipherText
-	var ct []byte
-	copy(ct, b[:KemCtLen])
-	hs.duplex.Absorb(b[:KemCtLen])
-	b = b[KemCtLen:]
-
-	k, err := hs.kem.ephemeral.Dec(ct)
-	if err != nil {
-		return 0, err
-	}
-
-	hs.duplex.Absorb(k)
 
 	// Cookie
 	hs.cookie = make([]byte, PQCookieLen)
@@ -175,7 +158,7 @@ func readPQServerHello(hs *HandshakeState, b []byte) (int, error) {
 		return 0, ErrInvalidMessage
 	}
 
-	return HeaderLen + KemCtLen + PQCookieLen + MacLen, nil
+	return HeaderLen + PQCookieLen + MacLen, nil
 }
 
 func (hs *HandshakeState) writePQClientAck(b []byte) (int, error) {
@@ -195,7 +178,7 @@ func (hs *HandshakeState) writePQClientAck(b []byte) (int, error) {
 	// Ephemeral
 	ephemeralBytes := hs.kem.ephemeral.Public().Bytes()
 	copy(b, ephemeralBytes[:])
-	hs.duplex.Absorb(b[:KemKeyLen])
+	//hs.duplexAbsorbKem(b[:KemKeyLen])
 	b = b[KemKeyLen:]
 
 	// Cookie
@@ -253,8 +236,8 @@ func (s *Server) readPQClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 	}
 
 	hs.duplex.Absorb(header)
-	hs.duplex.Absorb(ephemeral)
 	hs.duplex.Absorb(cookie)
+
 	hs.duplex.Decrypt(buf[:], b[:SNILen])
 	decryptedSNI := buf[:SNILen]
 	b = b[SNILen:]
@@ -279,6 +262,7 @@ func (s *Server) readPQClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 }
 
 func (s *Server) writePQServerAuth(b []byte, hs *HandshakeState) (int, error) {
+
 	c, err := s.config.GetCertificate(ClientHandshakeInfo{
 		ServerName: hs.sni,
 	})
@@ -287,7 +271,7 @@ func (s *Server) writePQServerAuth(b []byte, hs *HandshakeState) (int, error) {
 		return 0, err
 	}
 	encCertLen := EncryptedCertificatesLength(c.RawLeaf, c.RawIntermediate)
-	if len(b) < HeaderLen+SessionIDLen+encCertLen {
+	if len(b) < HeaderLen+SessionIDLen+KemCtLen+encCertLen {
 		return 0, ErrBufUnderflow
 	}
 	x := b
@@ -296,13 +280,14 @@ func (s *Server) writePQServerAuth(b []byte, hs *HandshakeState) (int, error) {
 	x[1] = 0
 	x[2] = byte(encCertLen >> 8)
 	x[3] = byte(encCertLen)
+
 	hs.duplex.Absorb(x[:HeaderLen])
 	x = x[HeaderLen:]
 	pos += HeaderLen
 	copy(x, hs.sessionID[:])
-	if common.Debug {
-		logrus.Tracef("server: session ID %x", hs.sessionID[:])
-	}
+
+	logrus.Debugf("server: session ID %x", hs.sessionID[:])
+
 	hs.duplex.Absorb(x[:SessionIDLen])
 	x = x[SessionIDLen:]
 	pos += SessionIDLen
@@ -326,11 +311,19 @@ func (s *Server) writePQServerAuth(b []byte, hs *HandshakeState) (int, error) {
 	pos += MacLen
 
 	// KEM CipherText -> ekem
-	/*
-		hs.duplex.Absorb(hs.kem.ct) // public artifact encapsulating the shared secret
-		hs.duplex.Absorb(hs.kem.k) // shared secret
-		// TODO i think there is no is as already absorbed in the hellos
-	*/
+	ct, k, err := hs.kem.impl.Enc(rand.Reader, hs.kem.remoteEphemeral)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(ct) != KemCtLen {
+		return 0, ErrBufOverflow
+	}
+
+	copy(x, ct[:])
+	x = x[KemCtLen:]
+	hs.duplex.Absorb(k) // shared secret
+	pos += KemCtLen
 
 	hs.duplex.Squeeze(x[:MacLen])
 	logrus.Debugf("server serverauth mac: %x", x[:MacLen])
@@ -340,7 +333,7 @@ func (s *Server) writePQServerAuth(b []byte, hs *HandshakeState) (int, error) {
 }
 
 func (hs *HandshakeState) readPQServerAuth(b []byte) (int, error) {
-	minLength := HeaderLen + SessionIDLen + 2*MacLen
+	minLength := HeaderLen + SessionIDLen + 2*MacLen + KemCtLen
 	if len(b) < minLength {
 		return 0, ErrBufUnderflow
 	}
@@ -388,11 +381,14 @@ func (hs *HandshakeState) readPQServerAuth(b []byte) (int, error) {
 	}
 	b = b[MacLen:]
 
-	/*
-		// KEM CipherText -> ekem // TODO is it necessary to store this again in the duplex object?
-		hs.duplex.Absorb(hs.kem.ct) // public artifact encapsulating the shared secret
-		hs.duplex.Absorb(hs.kem.k) // shared secret
-	*/
+	// eKEM CipherText
+	k, err := hs.kem.ephemeral.Dec(b[:KemCtLen])
+	if err != nil {
+		return 0, err
+	}
+
+	b = b[KemCtLen:]
+	hs.duplex.Absorb(k)
 
 	// Mac
 	hs.duplex.Squeeze(hs.macBuf[:])
@@ -407,79 +403,90 @@ func (hs *HandshakeState) readPQServerAuth(b []byte) (int, error) {
 
 func (hs *HandshakeState) writePQClientAuth(b []byte) (int, error) {
 	encCertLen := EncryptedCertificatesLength(hs.leaf, hs.intermediate)
-	length := HeaderLen + SessionIDLen + encCertLen + MacLen + MacLen
+	length := HeaderLen + SessionIDLen + encCertLen + MacLen + MacLen + KemCtLen
 	if len(b) < length {
 		return 0, ErrBufUnderflow
 	}
 
+	x := b
+	pos := 0
+
 	// Header
-	b[0] = byte(MessageTypePQClientAuth)
-	b[1] = 0
-	b[2] = byte(encCertLen >> 8)
-	b[3] = byte(encCertLen)
-	hs.duplex.Absorb(b[:HeaderLen])
-	b = b[HeaderLen:]
+	x[0] = byte(MessageTypePQClientAuth)
+	x[1] = 0
+	x[2] = byte(encCertLen >> 8)
+	x[3] = byte(encCertLen)
+	hs.duplex.Absorb(x[:HeaderLen])
+	x = x[HeaderLen:]
+	pos += HeaderLen
 
 	// SessionID
-	copy(b, hs.sessionID[:])
+	copy(x, hs.sessionID[:])
 	hs.duplex.Absorb(hs.sessionID[:])
-	b = b[SessionIDLen:]
+	x = x[SessionIDLen:]
+	pos += SessionIDLen
 
 	// Encrypted Certificates
 	if len(hs.leaf) == 0 {
-		return HeaderLen + SessionIDLen, errors.New("client did not set leaf certificate")
+		return pos, errors.New("client did not set leaf certificate")
 	}
 	encCerts, err := EncryptCertificates(&hs.duplex, hs.leaf, hs.intermediate)
 	if err != nil {
-		return HeaderLen + SessionIDLen, err
+		return pos, err
 	}
 	if len(encCerts) != encCertLen {
-		return HeaderLen + SessionIDLen, fmt.Errorf("certificates encrypted to unexpected length %d, expected %d", len(encCerts), encCertLen)
+		return pos, fmt.Errorf("certificates encrypted to unexpected length %d, expected %d", len(encCerts), encCertLen)
 	}
-	copy(b, encCerts)
-	b = b[encCertLen:]
+	copy(x, encCerts)
+	x = x[encCertLen:]
+	pos += encCertLen
 
 	// Tag
-	hs.duplex.Squeeze(b[:MacLen])
-	b = b[MacLen:]
+	hs.duplex.Squeeze(x[:MacLen])
+	x = x[MacLen:]
+	pos += MacLen
 
 	// Parse the certificate
 	// We are parsing the certificate here as there is no need before while reading the server Auth
+	hs.certVerify.InsecureSkipVerify = true // TODO fix the certificates
 	leaf, _, err := hs.certificateParserAndVerifier(hs.leaf, hs.intermediate)
 	if err != nil {
 		logrus.Debugf("client: error parsing server certificates: %s", err)
 		return 0, err
 	}
 
-	remoteStaticBytes := leaf.PublicKey // TODO update the certificate keys
+	remoteStaticBytes := leaf.PQPublicKey
 	hs.kem.remoteStatic, err = hs.kem.impl.ParsePublicKey(remoteStaticBytes[:])
 	if err != nil {
-		return 0, err
+		return pos, err
 	}
 
 	// KEM CipherText -> skem
 	ct, k, err := hs.kem.impl.Enc(rand.Reader, hs.kem.remoteStatic)
 	if err != nil {
-		return 0, err
+		return pos, err
 	}
 
 	if len(ct) != KemCtLen {
-		return 0, ErrBufOverflow
+		return pos, ErrBufOverflow
 	}
 
-	copy(b, ct[:])
-	hs.duplex.Absorb(b[:KemCtLen]) // public artifact encapsulating the shared secret
-	b = b[KemCtLen:]
+	copy(x, ct[:])
+	//hs.duplexAbsorbKem(b[:KemCtLen]) // public artifact encapsulating the shared secret
+	x = x[KemCtLen:]
+	pos += KemCtLen
 
 	hs.duplex.Absorb(k) // shared secret
 
 	// Mac
-	hs.duplex.Squeeze(b[:MacLen])
+	hs.duplex.Squeeze(x[:MacLen])
 	// b = b[MacLen:]
+	pos += MacLen
 
-	return length, nil
+	return pos, nil
 }
 
+// TODO fix read client auth from the test
 func (s *Server) readPQClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeState, error) {
 	x := b
 	pos := 0
@@ -487,8 +494,11 @@ func (s *Server) readPQClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 		logrus.Debug("server: client auth missing header")
 		return 0, nil, ErrBufUnderflow
 	}
+
+	logrus.Debugf("buf %v", b)
+
 	encCertsLen := (int(b[2]) << 8) + int(b[3])
-	if len(b) < HeaderLen+SessionIDLen+encCertsLen+MacLen {
+	if len(b) < HeaderLen+SessionIDLen+encCertsLen+MacLen+KemCtLen {
 		logrus.Debug("server: client auth too short")
 		return 0, nil, ErrBufUnderflow
 	}
@@ -539,22 +549,21 @@ func (s *Server) readPQClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	}
 	hs.parsedLeaf = &leaf
 
-	hs.kem.remoteStatic, err = hs.kem.impl.ParsePublicKey(leaf.PublicKey[:])
+	hs.kem.remoteStatic, err = hs.kem.impl.ParsePublicKey(leaf.PQPublicKey[:])
 	if err != nil {
 		return 0, nil, err
 	}
 
 	// KEM CipherText
-	var ct []byte
-	copy(ct, b[:KemCtLen])
-	hs.duplex.Absorb(b[:KemCtLen])
-	b = b[KemCtLen:]
+	//hs.duplexAbsorbKem(b[:KemCtLen])
 
-	k, err := hs.kem.static.Dec(ct) // skem
+	k, err := hs.kem.static.Dec(b[:KemCtLen]) // skem
 	if err != nil {
 		return 0, nil, err
 	}
 	hs.duplex.Absorb(k)
+
+	b = b[KemCtLen:]
 
 	hs.duplex.Squeeze(hs.macBuf[:]) // mac
 	clientMac := x[:MacLen]
@@ -594,7 +603,7 @@ func (s *Server) writePQServerConf(b []byte, hs *HandshakeState) (int, error) {
 		return 0, ErrBufOverflow
 	}
 	copy(x, ct[:])
-	hs.duplex.Absorb(x[:KemCtLen]) // public artifact encapsulating the shared secret
+	//hs.duplexAbsorbKem(x[:KemCtLen]) // public artifact encapsulating the shared secret
 	x = x[KemCtLen:]
 	pos += KemCtLen
 
@@ -630,16 +639,15 @@ func (hs *HandshakeState) readPQServerConf(b []byte) (int, error) {
 	hs.duplex.Absorb(header)
 
 	// KEM CipherText
-	var ct []byte
-	copy(ct, b[:KemCtLen])
-	hs.duplex.Absorb(b[:KemCtLen])
-	b = b[KemCtLen:]
+	//hs.duplexAbsorbKem(b[:KemCtLen])
 
-	k, err := hs.kem.static.Dec(ct) // skem
+	k, err := hs.kem.static.Dec(b[:KemCtLen]) // skem
 	if err != nil {
 		return 0, err
 	}
 	hs.duplex.Absorb(k)
+
+	b = b[KemCtLen:]
 
 	// Mac
 	hs.duplex.Squeeze(hs.macBuf[:])
@@ -663,8 +671,9 @@ func (hs *HandshakeState) writePQCookie(b []byte) (int, error) {
 		return 0, err
 	}
 
-	ad := CookieAD(hs.kem.ephemeral.Public().Bytes(), hs.remoteAddr)
-	enc := aead.Seal(b[:0], nil, seed, ad)
+	plaintextCookie := seed[:]
+	ad := CookieAD(hs.kem.remoteEphemeral.Bytes(), hs.remoteAddr) // TODO why does it return only 32 bytes
+	enc := aead.Seal(b[:0], nil, plaintextCookie, ad)
 	if len(enc) != PQCookieLen {
 		logrus.Panicf("len(enc) != PQCookieLen: %d != %d. Not possible", len(enc), PQCookieLen)
 	}
@@ -672,24 +681,32 @@ func (hs *HandshakeState) writePQCookie(b []byte) (int, error) {
 }
 
 func (hs *HandshakeState) decryptPQCookie(b []byte) (int, error) {
-	if len(b) < CookieLen {
+	if len(b) < PQCookieLen {
 		return 0, ErrBufUnderflow
 	}
 	aead, err := kravatte.NewSANSE(hs.cookieKey[:])
 	if err != nil {
 		return 0, err
 	}
-	encryptedCookie := b[:CookieLen]
-	ad := CookieAD(hs.dh.remoteEphemeral[:], hs.remoteAddr)
-	out, err := aead.Open(hs.dh.ephemeral.Private[:0], nil, encryptedCookie, ad)
+	encryptedCookie := b[:PQCookieLen]
+	remoteEphemeralBytes := hs.kem.remoteEphemeral.Bytes()
+	ad := CookieAD(remoteEphemeralBytes[:], hs.remoteAddr)
+
+	seed := make([]byte, PQSeedLen)
+	out, err := aead.Open(seed[:0], nil, encryptedCookie, ad)
 	if err != nil {
 		return 0, ErrInvalidMessage
 	}
-	if len(out) != DHLen {
+	if len(out) != PQSeedLen {
 		return 0, ErrInvalidMessage
 	}
-	hs.dh.ephemeral.PublicFromPrivate()
-	return CookieLen, nil
+
+	hs.kem.ephemeral, err = hs.kem.impl.GenerateKeypairFromSeed(seed)
+
+	if err != nil {
+		return 0, ErrInvalidMessage
+	}
+	return PQCookieLen, nil
 }
 
 // ReplayPQDuplexFromCookie does exactly like ReplayDuplexFromCookie with KEM
@@ -699,6 +716,8 @@ func (s *Server) ReplayPQDuplexFromCookie(cookie, clientEphemeralBytes []byte, c
 	defer s.cookieLock.Unlock()
 
 	out := new(HandshakeState)
+	out.kem = new(kemState)
+	out.kem.impl = keys.MlKem512
 
 	clientEphemeral, err := out.kem.impl.ParsePublicKey(clientEphemeralBytes)
 	if err != nil {
@@ -708,14 +727,15 @@ func (s *Server) ReplayPQDuplexFromCookie(cookie, clientEphemeralBytes []byte, c
 	out.kem.remoteEphemeral = clientEphemeral
 	out.remoteAddr = clientAddr
 	out.cookieKey = s.cookieKey
+	out.kem.static = *s.config.KEMKeyPair
 
 	// Pull the private key out of the cookie
-	n, err := out.decryptCookie(cookie)
+	n, err := out.decryptPQCookie(cookie)
 	if err != nil {
 		logrus.Errorf("unable to decrypt cookie: %s", err)
 		return nil, err
 	}
-	if n != CookieLen {
+	if n != PQCookieLen {
 		return nil, ErrInvalidMessage
 	}
 
@@ -725,24 +745,15 @@ func (s *Server) ReplayPQDuplexFromCookie(cookie, clientEphemeralBytes []byte, c
 	// Replay Client Hello
 	out.duplex.Absorb([]byte(PostQuantumProtocolName))
 	out.duplex.Absorb([]byte{byte(MessageTypePQClientHello), Version, 0, 0})
-	out.duplex.Absorb(clientEphemeralBytes)
 	out.duplex.Squeeze(out.macBuf[:])
 	logrus.Debugf("server: regen ch mac: %x", out.macBuf[:])
 
 	// Replay Server Hello
 	out.duplex.Absorb([]byte{byte(MessageTypePQServerHello), 0, 0, 0})
-	ct, k, err := out.kem.impl.Enc(rand.Reader, out.kem.remoteEphemeral)
-	logrus.Debugf("replay server ct: %x", ct)
-	if err != nil {
-		return nil, err
-	}
-	out.duplex.Absorb(ct)
-	out.duplex.Absorb(k)
-
-	// Cookie
 	out.duplex.Absorb(cookie)
 	out.duplex.Squeeze(out.macBuf[:])
 	logrus.Debugf("server: regen sh mac: %x", out.macBuf[:])
+
 	out.RekeyFromSqueeze(PostQuantumProtocolName)
 	return out, nil
 }
