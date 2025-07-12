@@ -26,7 +26,8 @@ import (
 
 // Byte-length constants for cryptographic material
 const (
-	KeyLen       = 32 // TODO adapt they key len to PQ
+	KeyLen       = 32
+	KemKeyLen    = 800 // TODO confim the key len
 	SignatureLen = 64
 )
 
@@ -92,14 +93,15 @@ var zeroSignature [SignatureLen]byte
 // bytes. A Certificate can optionally be associated with its corresponding
 // private key.
 type Certificate struct {
-	Version   byte
-	Type      CertificateType
-	IssuedAt  time.Time
-	ExpiresAt time.Time
-	IDChunk   IDChunk
-	PublicKey [KeyLen]byte
-	Parent    SHA3Fingerprint
-	Signature [SignatureLen]byte
+	Version     byte
+	Type        CertificateType
+	IssuedAt    time.Time
+	ExpiresAt   time.Time
+	IDChunk     IDChunk
+	PublicKey   [KeyLen]byte
+	PQPublicKey [KemKeyLen]byte
+	Parent      SHA3Fingerprint
+	Signature   [SignatureLen]byte
 
 	// Fingerprint is the 256-bit SHA3 of the certificate. It is populated when
 	// a certificate is read, or issued.

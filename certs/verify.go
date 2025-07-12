@@ -11,8 +11,9 @@ import (
 
 // Identity is a set of names associated with a public key.
 type Identity struct {
-	PublicKey [KeyLen]byte
-	Names     []Name
+	PublicKey   [KeyLen]byte
+	PQPublicKey [KemKeyLen]byte // TODO that allocs memory for nothing
+	Names       []Name
 }
 
 // SigningIdentity returns an Identity pointing to a public key with no name.

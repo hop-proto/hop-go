@@ -124,7 +124,7 @@ func (c *Client) Handshake() error {
 }
 
 func (c *Client) prepareCertificates() (leaf, intermediate []byte, err error) {
-	if c.config.Exchanger == nil {
+	if c.config.Exchanger == nil && !c.config.IsPq {
 		return nil, nil, errors.New("ClientConfig.Exchanger must be non-nil, you probably want to provide a keys.X25519KeyPair")
 	}
 
@@ -160,16 +160,18 @@ func (c *Client) setHSDeadline() {
 func (c *Client) clientHandshakeLocked() error {
 	c.state.Store(clientStateHandshaking)
 	c.hs = new(HandshakeState)
+	c.hs.duplex.InitializeEmpty()
 
 	var err error
 	if c.config.IsPq {
+		c.hs.kem = new(kemState)
 		c.hs.kem.ephemeral, err = keys.MlKem512.GenerateKeypair(rand.Reader)
 		if err != nil {
 			return err
 		}
 
 	} else {
-		c.hs.duplex.InitializeEmpty()
+		c.hs.dh = new(dhState)
 		c.hs.dh.ephemeral.Generate()
 		c.hs.dh.static = c.config.Exchanger
 
@@ -351,6 +353,7 @@ func (c *Client) beginHiddenHandshake(buf []byte) error {
 	return nil
 }
 
+// TODO paul write this pq friendly
 func (c *Client) beginPostQuantumDiscoverableHandshake(buf []byte) error {
 	// Protocol ID for the regular handshake
 	//c.hs.duplex.Absorb([]byte(ProtocolName))
