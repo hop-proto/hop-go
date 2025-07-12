@@ -101,7 +101,6 @@ func selfSign(self *Identity, certificateType CertificateType, keyPair *keys.Sig
 			Blocks: self.Names,
 		},
 		PublicKey:   self.PublicKey,
-		PQPublicKey: self.PQPublicKey,
 		Fingerprint: zero,
 	}
 	buf := bytes.Buffer{}
