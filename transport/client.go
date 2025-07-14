@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
 	"io"
 	"net"
@@ -124,7 +125,7 @@ func (c *Client) Handshake() error {
 }
 
 func (c *Client) prepareCertificates() (leaf, intermediate []byte, err error) {
-	if c.config.Exchanger == nil && !c.config.IsPq {
+	if c.config.Exchanger == nil && c.config.Leaf.Type != certs.PQLeaf { // TODO (paul): evaluate the config Exchanger situation
 		return nil, nil, errors.New("ClientConfig.Exchanger must be non-nil, you probably want to provide a keys.X25519KeyPair")
 	}
 
@@ -163,7 +164,7 @@ func (c *Client) clientHandshakeLocked() error {
 	c.hs.duplex.InitializeEmpty()
 
 	var err error
-	if c.config.IsPq {
+	if c.config.Leaf.Type != certs.PQLeaf {
 		c.hs.kem = new(kemState)
 		c.hs.kem.ephemeral, err = keys.MlKem512.GenerateKeypair(rand.Reader)
 		if err != nil {
@@ -198,7 +199,7 @@ func (c *Client) clientHandshakeLocked() error {
 			return err
 		}
 		isClientHiddenHS = true
-	} else if c.config.IsPq {
+	} else if c.config.Leaf.Type != certs.PQLeaf {
 		logrus.Debug("---------- PQ HANDSHAKE MODE -------------")
 
 		err = c.beginPostQuantumDiscoverableHandshake(buf)

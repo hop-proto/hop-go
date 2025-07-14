@@ -27,7 +27,7 @@ import (
 // Byte-length constants for cryptographic material
 const (
 	KeyLen       = 32
-	KemKeyLen    = 800 // TODO confim the key len
+	KemKeyLen    = 800 // ML-KEM 512 PublicKey size
 	SignatureLen = 64
 )
 
