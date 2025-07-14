@@ -318,7 +318,6 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 		Verify:    authenticator.GetVerifyConfig(),
 		Leaf:      authenticator.GetLeaf(),
 		ServerKey: authenticator.GetServerKey(),
-		IsPq:      true,
 	}
 	var err error
 	var dialer net.Dialer
