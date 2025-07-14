@@ -481,8 +481,6 @@ func (hs *HandshakeState) writePQClientAuth(b []byte) (int, error) {
 	pos += KemCtLen
 
 	hs.duplex.Absorb(k) // shared secret
-	logrus.Debugf("Client: shared secret kem: %v", k)
-	// TODO this k is not the same on each side
 
 	// Mac
 	hs.duplex.Squeeze(x[:MacLen])
@@ -565,16 +563,13 @@ func (s *Server) readPQClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	// KEM CipherText
 	//hs.duplexAbsorbKem(b[:KemCtLen])
 
-	k, err := hs.kem.static.Dec(b[:KemCtLen]) // skem
+	k, err := hs.kem.static.Dec(x[:KemCtLen]) // skem
 	if err != nil {
 		return 0, nil, err
 	}
 	hs.duplex.Absorb(k)
-	logrus.Debugf("server: shared secret kem: %v", k)
-	// can be a wrong instantiation of the duplex object
-	// TODO this k is not the same on each side
 
-	b = b[KemCtLen:]
+	x = x[KemCtLen:]
 
 	hs.duplex.Squeeze(hs.macBuf[:]) // mac
 	clientMac := x[:MacLen]
