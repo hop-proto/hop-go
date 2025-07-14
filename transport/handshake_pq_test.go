@@ -30,12 +30,15 @@ func TestPQNoiseXXHandshake(t *testing.T) {
 	client.hs.duplex.InitializeEmpty()
 	client.hs.duplex.Absorb([]byte(PostQuantumProtocolName))
 
+	client.ss = new(SessionState)
+
 	// init kem
 	client.hs.kem = new(kemState)
 	client.hs.kem.impl = keys.MlKem512
 	client.hs.kem.ephemeral, err = keys.MlKem512.GenerateKeypair(rand.Reader)
 	client.hs.leaf, client.hs.intermediate, err = client.prepareCertificates()
 	client.hs.kem.static = *clientKeypair
+
 	assert.Check(t, cmp.Equal(nil, err))
 
 	// TODO init a server instance and maybe a client one too
@@ -113,8 +116,8 @@ func TestPQNoiseXXHandshake(t *testing.T) {
 	assert.NilError(t, err)
 
 	// Check final keys
-	assert.Check(t, cmp.Equal(client.ss.serverToClientKey, &serverSs.serverToClientKey))
-	assert.Check(t, cmp.Equal(client.ss.clientToServerKey, &serverSs.clientToServerKey))
+	assert.Check(t, cmp.Equal(client.ss.serverToClientKey, serverSs.serverToClientKey))
+	assert.Check(t, cmp.Equal(client.ss.clientToServerKey, serverSs.clientToServerKey))
 }
 
 func newPQClientAuth(t assert.TestingT) (*keys.KEMKeypair, *certs.Certificate) {
