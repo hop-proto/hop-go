@@ -128,8 +128,8 @@ Server->Client: Server Hello [0x2]
 Client->Server: Client Ack [0x3]
 Server->Client: Server Auth [0x4]
 Client->Server: Client Auth [0x5]
-Client->Server: Transport Data [0x6]
-Server->Client: Transport Data [0x6]
+Client->Server: Transport Data [0x20]
+Server->Client: Transport Data [0x20]
 ```
 
 ### Message Structures
@@ -420,8 +420,8 @@ counter +=1
 ```sequence
 Client->Server: Client Auth [0x8]
 Server->Client: Server Auth [0x9]
-Client->Server: Transport Data [0x6]
-Server->Client: Transport Data [0x6]
+Client->Server: Transport Data [0x20]
+Server->Client: Transport Data [0x20]
 ```
 
 ### Message Structures
@@ -561,3 +561,272 @@ $$
 \mathcal{O}_\beta (X) = \mathcal{O}_{\alpha_1}\mathcal{O}_{\alpha_2}...\mathcal{O}_{\alpha_n}(X)
 $$
 Thus, to a remote party, the client appears to have local key pair $\beta, \beta G$.
+
+
+
+## Post Quantum Handshake Description
+
+### Discoverable Server Flow
+
+---
+
+```sequence
+Client->Server: Client Hello [0x11]
+Server->Client: Server Hello [0x12]
+Client->Server: Client Ack [0x13]
+Server->Client: Server Auth [0x14]
+Client->Server: Client Auth [0x15]
+Server->Client: Server Conf [0x16]
+Client->Server: Transport Data [0x20]
+Server->Client: Transport Data [0x20]
+```
+
+#### Client Hello Message
+
+---
+
+|        type $:=$ 0x11 (1 byte)        | Protocol Version (1 byte) | reserved $:= 0^2$ (2 bytes) |
+|:-------------------------------------:| :-----------------------: | --------------------------- |
+| Client ephemeral $:= e_c$ (800 bytes) |      mac (16 bytes)       |                             |
+
+##### Client Hello Construction
+
+---
+
+```python
+protocolName = “hop_pqNN_XX_cyclist_keccak_p1600_12” # 1-1 protocol version
+duplex = Cyclist()
+duplex.absorb(protocolName)
+
+duplex.absorb([type + version + reserved])
+duplex.absorb(ephemeral)
+mac = duplex.squeeze()
+```
+
+##### Server Logic
+
+---
+
+```python
+duplex = Cyclist()
+duplex.absorb(protocolName)
+duplex.absorb([type + version +reserved])
+duplex.absorb(e_c)
+mac = duplex.squeeze()
+```
+
+- Calculated mac ?= client mac
+  - If so, send Server Hello
+  - Else: do not respond
+
+#### Server Hello Message
+
+---
+
+|                                 type $:=$ 0x12 (1 byte)                                 |                 reserved $:= 0^3$ (3 bytes)                  |
+|:---------------------------------------------------------------------------------------:| :----------------------------------------------------------: |
+| cookie = AEAD($K_r$, $ML-KEM Key seed$, H($e_c$, clientIP, clientPort)) (32 + 64 bytes) |            mac (16 bytes)            |
+
+##### Server Hello Construction
+
+---
+
+- $K_r$ is a key that is rotated every N minutes or M connections
+
+```python
+# Continuing from duplex prior
+duplex.absorb(type + reserved)
+
+# AEAD Construction
+H = SHA3.256
+aead = SANE_init(K_r)
+cookie = aead.seal(plaintext=e_s.seed, ad=H(e_c, clientIP, clientPort))
+duplex.absorb(cookie)
+mac = duplex.squeeze()
+```
+
+##### Client Logic
+
+---
+
+```python
+# Continuing from duplex prior
+duplex.absorb([type + reserved])
+duplex.absorb(cookie)
+mac = duplex.squeeze()
+```
+
+- Is the mac the same?
+
+#### Client Ack
+
+---
+
+| type $:=$ 0x13 (1 byte) | reserved $:= 0^3$ (3 bytes) |
+|:-----------------------:|:---------------------------:|
+|    $e_c$ (800 bytes)    |      cookie (96 bytes)      |
+|     SNI (256 bytes)     |       mac (16 bytes)        |
+
+##### Client Construction
+
+---
+
+- SNI is an IDBlock from the certificate spec
+  - Server ID is the expected ID of the server
+
+```python
+# Continuing from duplex prior
+duplex.absorb([type + reserved])
+duplex.absorb(cookie)
+sni = padTo(serverID, 256) # pad serverID to 256 bytes
+duplex.enc(sni)
+mac = duplex.squeeze()
+```
+
+##### Server Logic
+
+---
+
+```python
+# Use cookie AEAD construction
+seed = aead_open(ciphertext=cookie, ad=H(e_c, clientIP, clientPort))
+e_s = kem.GenerateKeypairFromSeed(seed)
+# ... Resimulate duplex up until this point ...
+duplex.absorb([type + reserved])
+duplex.absorb(cookie)
+sni = duplex.decrypt(encrypted_sni)
+name = unPad(sni)
+duplex.squeeze()
+```
+
+- Use SNI to located certificate to serve, verify all macs
+- Limit max number of handshakes with a given IP
+- Only read the SNI if the Mac matches
+
+#### Server Auth
+
+---
+
+| type $:=$ 0x14 (1 byte) |     Reserved := 0 (1 byte)     | Certs Len (2 bytes)                    |
+|:-----------------------:|:------------------------------:|----------------------------------------|
+|   SessionID (4 bytes)   | Leaf Certificate (2 + n bytes) | Intermediate Certificate (2 + n bytes) |
+|     tag (16 bytes)      |      eKEM CT (768 bytes)       | mac (16 bytes)                         |
+|                         |                                |                                        |
+
+- Certs Len is the length of the encrypted section
+- Each certificate is encoded as a vector with a 2-byte length prepended
+  - Total `certsLen := 4 + len(leaf) + len(intermediate)`
+- SessionID is a random unique 4 byte opaque string, generated by the server
+
+##### Server Auth Construction
+
+---
+
+```python
+# Continuing from duplex prior
+duplex.absorb(type + reserved + certsLen)
+duplex.absorb(sessionID)
+certificates := [len(leaf), leaf, len(intermediate), intermediate]
+encCerts = duplex.encrypt(certificates)
+tag = duplex.squeeze()
+ct, k = kem.Enc(e_c)
+duplex.absorb(k)
+mac = duplex.squeeze()
+```
+
+Client Logic
+
+---
+
+```python
+# Continuing from duplex prior
+duplex.absorb(type + reserved + certsLen)
+duplex.absorb(SessionID)
+certificates = duplex.decrypt(encCerts)
+tag = duplex.squeeze()
+# verify tag
+# verify certs, extract server s
+k = kem.Dec(ct)
+duplex.absorb(k)
+mac = duplex.squeeze()
+```
+
+- Verify the tag before parsing the certs
+- Quit the handshake if the certs are invalid
+- Is the mac the same (after KEM)
+
+#### Client Auth
+
+| type $:=$ 0x15 (1 byte) |     Reserved := 0 (1 byte)     | Certs Len (2 bytes)                    |
+|:-----------------------:|:------------------------------:| -------------------------------------- |
+|   SessionID (4 bytes)   | Leaf Certificate (2 + n bytes) | Intermediate Certificate (2 + n bytes) |
+|     tag (16 bytes)      |      sKEM CT (768 bytes)       |                 mac (16 bytes)                        |
+|                         |                                |                                        |
+
+
+##### Client Auth Construction
+
+
+```python
+# Continuing from duplex prior
+duplex.absorb(type + reserved + certsLen)
+duplex.absorb(sessionID)
+certificates := [len(leaf), leaf, len(intermediate), intermediate]
+encCerts = duplex.encrypt(certificates)
+tag = duplex.squeeze()
+ct, k = kem.Enc(s_s)
+duplex.absorb(k)
+mac = duplex.squeeze()
+```
+
+
+##### Server Logic
+
+---
+
+```python
+# Continuing from duplex prior
+duplex.absorb(type +  reserved + certsLen)
+duplex.absorb(SessionID)
+certificates = duplex.decrypt(encCerts)
+tag = duplex.squeeze()
+# verify tag
+# verify certs, extract server s
+k = kem.Dec(ct)
+duplex.absorb(k)
+mac = duplex.squeeze()
+```
+- Verify the tag before parsing the certs
+- Quit the handshake if the certs are invalid
+- Is the mac the same (after KEM)
+
+
+#### Server Conf
+
+| type $:=$ 0x16 (1 byte) | reserved $:= 0^3$ (3 bytes) |
+|:-----------------------:|:---------------------------:|
+|   sKEM CT (768 bytes)   |       mac (16 bytes)       |
+
+
+##### Server Construction
+
+```python
+duplex.absorb([type + reserved])
+ct, k = kem.Enc(c_s)
+duplex.absorb(k)
+mac = duplex.squeeze()
+```
+
+##### Client Logic
+
+---
+
+```python
+duplex.absorb([type + reserved])
+k = kem.Dec(ct)
+duplex.absorb(k)
+mac = duplex.squeeze()
+```
+
+- Is the mac the same (after KEM)
+- Derives the keys and use regular transport messages

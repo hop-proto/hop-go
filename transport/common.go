@@ -27,7 +27,7 @@ const (
 	TagLen       = 32
 	KeyLen       = 16
 	DHLen        = curve25519.PointSize
-	CookieLen    = DHLen + kravatte.TagSize
+	CookieLen    = DHLen + kravatte.TagSize // TODO (paul): why in the paper we describe it as being 48bytes?
 	SNILen       = 256
 	SessionIDLen = 4
 	CounterLen   = 8
@@ -106,7 +106,7 @@ const (
 	MessageTypeClientAuth           MessageType = 0x05
 	MessageTypeClientRequestHidden  MessageType = 0x08
 	MessageTypeServerResponseHidden MessageType = 0x09
-	MessageTypePQClientHello        MessageType = 0x11 // PQ messages Handshake 0x2...
+	MessageTypePQClientHello        MessageType = 0x11 // PQ messages Handshake 0x1...
 	MessageTypePQServerHello        MessageType = 0x12
 	MessageTypePQClientAck          MessageType = 0x13
 	MessageTypePQServerAuth         MessageType = 0x14
