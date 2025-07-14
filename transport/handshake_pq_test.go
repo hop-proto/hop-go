@@ -118,7 +118,7 @@ func TestPQNoiseXXHandshake(t *testing.T) {
 func newPQClientAuth(t assert.TestingT) (*keys.KEMKeypair, *certs.Certificate) {
 	k, err := keys.MlKem512.GenerateKeypair(rand.Reader)
 	pubKeyBytes := k.Public().Bytes()
-	c, err := certs.SelfSignLeaf(&certs.Identity{
+	c, err := certs.SelfSignPQLeaf(&certs.Identity{
 		PublicKey: pubKeyBytes,
 		Names:     []certs.Name{certs.RawStringName("testing")},
 	})
@@ -181,7 +181,7 @@ func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermedi
 		Names:     []certs.Name{certs.RawStringName("Server Leaf")},
 	}
 
-	c, err := certs.SelfSignLeaf(&leafIdentity)
+	c, err := certs.SelfSignPQLeaf(&leafIdentity)
 
 	server := ServerConfig{
 		KEMKeyPair:       &kp,

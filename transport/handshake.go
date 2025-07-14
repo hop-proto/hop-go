@@ -505,7 +505,7 @@ func (hs *HandshakeState) certificateParserAndVerifier(rawLeaf []byte, rawInterm
 	leaf := certs.Certificate{}
 	intermediate := certs.Certificate{}
 
-	leafLen, err := leaf.ReadFromPQ(bytes.NewBuffer(rawLeaf))
+	leafLen, err := leaf.ReadFrom(bytes.NewBuffer(rawLeaf))
 	if err != nil {
 		return leaf, intermediate, err
 	}
