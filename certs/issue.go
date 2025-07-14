@@ -157,3 +157,8 @@ func IssueIntermediate(root *Certificate, intermediate *Identity) (*Certificate,
 func SelfSignLeaf(identity *Identity, cType CertificateType) (*Certificate, error) {
 	return selfSign(identity, cType, nil)
 }
+
+// SelfSignPQLeaf issues self-signed leaf certificate using only ML-KEM key.
+func SelfSignPQLeaf(identity *Identity) (*Certificate, error) {
+	return selfSign(identity, PQLeaf, nil)
+}
