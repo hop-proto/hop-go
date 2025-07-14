@@ -19,9 +19,9 @@ func (hs *HandshakeState) writeClientRequestHidden(b []byte, serverPublicKey *ke
 
 	logrus.Debug("client: sending client request (hidden mode)")
 
-	encCertLen := EncryptedCertificatesLength(hs.leaf, hs.intermediate)
+	encCertsLen := EncryptedCertificatesLength(hs.leaf, hs.intermediate)
 
-	length := HeaderLen + DHLen + encCertLen + MacLen + TimestampLen + MacLen
+	length := HeaderLen + DHLen + encCertsLen + MacLen + TimestampLen + MacLen
 
 	if len(b) < length {
 		return 0, ErrBufUnderflow
@@ -32,8 +32,8 @@ func (hs *HandshakeState) writeClientRequestHidden(b []byte, serverPublicKey *ke
 	// Header
 	b[0] = byte(MessageTypeClientRequestHidden)
 	b[1] = Version
-	b[2] = byte(encCertLen >> 8)
-	b[3] = byte(encCertLen)
+	b[2] = byte(encCertsLen >> 8)
+	b[3] = byte(encCertsLen)
 
 	hs.duplex.Absorb(b[:HeaderLen])
 	b = b[HeaderLen:]
@@ -63,12 +63,12 @@ func (hs *HandshakeState) writeClientRequestHidden(b []byte, serverPublicKey *ke
 	if err != nil {
 		return pos, err
 	}
-	if len(encCerts) != encCertLen {
-		return pos, fmt.Errorf("client: certificates encrypted to unexpected length %d, expected %d", len(encCerts), encCertLen)
+	if len(encCerts) != encCertsLen {
+		return pos, fmt.Errorf("client: certificates encrypted to unexpected length %d, expected %d", len(encCerts), encCertsLen)
 	}
 	copy(b, encCerts)
-	b = b[encCertLen:]
-	pos += encCertLen
+	b = b[encCertsLen:]
+	pos += encCertsLen
 
 	// Client Static Authentication Tag
 	hs.duplex.Squeeze(b[:MacLen])
@@ -175,13 +175,15 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 		}
 		bufCopy = bufCopy[MacLen:]
 
-		c = cert
-		vhostName := cert.HostName
-		if vhostName == "" {
-			logrus.Debugf("server: unable to retrieve sni: %s", err)
+		vhostNames := cert.HostNames
+
+		if len(vhostNames) == 0 {
+			logrus.Debugf("server: unable to retrieve any sni")
 			continue // Skip to the next certificate on error
 		}
-		hs.sni = certs.RawStringName(vhostName)
+
+		hs.sni = certs.RawStringName(vhostNames[0]) // get the first vhost liked to the cert
+		c = cert
 
 		break
 	}
@@ -221,10 +223,8 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 	timeBytes := binary.BigEndian.Uint64(decryptedTimestamp[:TimestampLen])
 	now := time.Now().Unix()
 
-	// TODO (paul) 5 sec is a way too long, evaluate the time need for a connection
-	// TODO (paul) what is considered a reasonable time range for a timestamp to prevent replay attack?
 	// Time comparison to prevent replay attacks
-	if timeBytes > uint64(now) || now-int64(timeBytes) > 5 {
+	if timeBytes > uint64(now) || now-int64(timeBytes) > HiddenModeTimestampExpiration {
 		logrus.Debugf("server: hidden client request timestamp doen't match")
 		return 0, ErrInvalidMessage
 	}
@@ -413,6 +413,7 @@ func (hs *HandshakeState) readServerResponseHidden(b []byte) (int, error) {
 	logrus.Debugf("client: calculated sa mac: %x", hs.macBuf)
 	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
 		logrus.Debugf("client: expected sa mac %x, got %x", hs.macBuf, b[:MacLen])
+		return 0, ErrInvalidMessage
 	}
 	// b = b[MacLen:]
 

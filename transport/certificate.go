@@ -14,7 +14,7 @@ type Certificate struct {
 	Exchanger keys.Exchangable
 	Leaf      *certs.Certificate // TODO(dadrian): Do we eve need this field?
 
-	HostName string
+	HostNames []string
 }
 
 func MakeCert(keyPair *keys.X25519KeyPair, leaf, intermdiate *certs.Certificate) (*Certificate, error) {
