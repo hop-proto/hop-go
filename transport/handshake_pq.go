@@ -666,6 +666,7 @@ func (hs *HandshakeState) readPQServerConf(b []byte) (int, error) {
 	return length, nil
 }
 
+// TODO write a if statement in the original function
 func (hs *HandshakeState) writePQCookie(b []byte) (int, error) {
 	// TODO(dadrian): Avoid allocating memory.
 	aead, err := kravatte.NewSANSE(hs.cookieKey[:])
@@ -685,7 +686,6 @@ func (hs *HandshakeState) writePQCookie(b []byte) (int, error) {
 	}
 	return len(enc), nil // PQCookieLen
 }
-
 func (hs *HandshakeState) decryptPQCookie(b []byte) (int, error) {
 	if len(b) < PQCookieLen {
 		return 0, ErrBufUnderflow
