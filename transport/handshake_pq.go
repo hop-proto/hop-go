@@ -8,7 +8,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
-	"hop.computer/hop/kravatte"
 	"net"
 )
 
@@ -95,7 +94,7 @@ func writePQServerHello(hs *HandshakeState, b []byte) (int, error) {
 	b = b[HeaderLen:]
 
 	// Cookie
-	n, err := hs.writePQCookie(b)
+	n, err := hs.writeCookie(b)
 	logrus.Debugf("server: generated cookie %x", b[:n])
 	if err != nil {
 		return 0, err
@@ -666,55 +665,6 @@ func (hs *HandshakeState) readPQServerConf(b []byte) (int, error) {
 	return length, nil
 }
 
-// TODO write a if statement in the original function
-func (hs *HandshakeState) writePQCookie(b []byte) (int, error) {
-	// TODO(dadrian): Avoid allocating memory.
-	aead, err := kravatte.NewSANSE(hs.cookieKey[:])
-	if err != nil {
-		return 0, err
-	}
-	seed := hs.kem.ephemeral.Seed()
-	if seed == nil {
-		return 0, err
-	}
-
-	plaintextCookie := seed[:]
-	ad := CookieAD(hs.kem.remoteEphemeral.Bytes(), hs.remoteAddr) // TODO why does it return only 32 bytes
-	enc := aead.Seal(b[:0], nil, plaintextCookie, ad)
-	if len(enc) != PQCookieLen {
-		logrus.Panicf("len(enc) != PQCookieLen: %d != %d. Not possible", len(enc), PQCookieLen)
-	}
-	return len(enc), nil // PQCookieLen
-}
-func (hs *HandshakeState) decryptPQCookie(b []byte) (int, error) {
-	if len(b) < PQCookieLen {
-		return 0, ErrBufUnderflow
-	}
-	aead, err := kravatte.NewSANSE(hs.cookieKey[:])
-	if err != nil {
-		return 0, err
-	}
-	encryptedCookie := b[:PQCookieLen]
-	remoteEphemeralBytes := hs.kem.remoteEphemeral.Bytes()
-	ad := CookieAD(remoteEphemeralBytes[:], hs.remoteAddr)
-
-	seed := make([]byte, PQSeedLen)
-	out, err := aead.Open(seed[:0], nil, encryptedCookie, ad)
-	if err != nil {
-		return 0, ErrInvalidMessage
-	}
-	if len(out) != PQSeedLen {
-		return 0, ErrInvalidMessage
-	}
-
-	hs.kem.ephemeral, err = hs.kem.impl.GenerateKeypairFromSeed(seed)
-
-	if err != nil {
-		return 0, ErrInvalidMessage
-	}
-	return PQCookieLen, nil
-}
-
 // ReplayPQDuplexFromCookie does exactly like ReplayDuplexFromCookie with KEM
 // TODO write the description or refactor
 func (s *Server) ReplayPQDuplexFromCookie(cookie, clientEphemeralBytes []byte, clientAddr *net.UDPAddr) (*HandshakeState, error) {
@@ -736,7 +686,7 @@ func (s *Server) ReplayPQDuplexFromCookie(cookie, clientEphemeralBytes []byte, c
 	out.kem.static = *s.config.KEMKeyPair
 
 	// Pull the private key out of the cookie
-	n, err := out.decryptPQCookie(cookie)
+	n, err := out.decryptCookie(cookie)
 	if err != nil {
 		logrus.Errorf("unable to decrypt cookie: %s", err)
 		return nil, err
