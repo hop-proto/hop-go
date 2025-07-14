@@ -69,7 +69,7 @@ func main() {
 			logrus.Fatalf("unable to parse DH public key: %s", err)
 		}
 		identity := certs.Identity{
-			PublicKey: *pubKey,
+			PublicKey: pubKey[:],
 		}
 		if dnsName != "" {
 			identity.Names = append(identity.Names, certs.DNSName(dnsName))
@@ -88,12 +88,12 @@ func main() {
 			if err != nil {
 				logrus.Fatalf("bad private key: %s", err)
 			}
-			leaf, err = certs.IssueLeaf(parent, &identity)
+			leaf, err = certs.IssueLeaf(parent, &identity, certs.Leaf)
 			if err != nil {
 				logrus.Fatalf("unable to issue leaf: %s", err)
 			}
 		} else {
-			leaf, err = certs.SelfSignLeaf(&identity)
+			leaf, err = certs.SelfSignLeaf(&identity, certs.Leaf)
 			if err != nil {
 				logrus.Fatalf("unable to self-sign leaf: %s", err)
 			}
@@ -125,7 +125,7 @@ func main() {
 			logrus.Fatalf("unable to parse signing public key: %s", err)
 		}
 		identity := certs.Identity{
-			PublicKey: *pubKey,
+			PublicKey: pubKey[:],
 			Names:     []certs.Name{certs.DNSName(dnsName)},
 		}
 		intermediate, err := certs.IssueIntermediate(parent, &identity)
@@ -139,7 +139,7 @@ func main() {
 		output.Write(pemBytes)
 	case certs.Root:
 		identity := certs.Identity{
-			PublicKey: signingKeyPair.Public,
+			PublicKey: signingKeyPair.Public[:],
 			Names:     []certs.Name{certs.DNSName(dnsName)},
 		}
 		root, err := certs.SelfSignRoot(&identity, signingKeyPair)

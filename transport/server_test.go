@@ -22,7 +22,7 @@ func newClientAuth(t assert.TestingT) (*keys.X25519KeyPair, *certs.Certificate) 
 	k := keys.GenerateNewX25519KeyPair()
 	c, err := certs.SelfSignLeaf(&certs.Identity{
 		PublicKey: k.Public[:],
-	})
+	}, certs.Leaf)
 	assert.NilError(t, err)
 	return k, c
 }

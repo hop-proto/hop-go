@@ -231,11 +231,11 @@ func (c *HopClient) authenticatorSetupLocked() error {
 func selfSignLeaf(public *keys.DHPublicKey, address core.URL) *certs.Certificate {
 	logrus.Infof("auto self-signing leaf for user %q", address.User)
 	leaf, err := certs.SelfSignLeaf(&certs.Identity{
-		PublicKey: *public,
+		PublicKey: public[:],
 		Names: []certs.Name{
 			certs.RawStringName(address.User),
 		},
-	})
+	}, certs.Leaf)
 	if err != nil {
 		logrus.Fatalf("unable to self-sign certificate: %s", err)
 	}
@@ -318,7 +318,6 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 		Verify:    authenticator.GetVerifyConfig(),
 		Leaf:      authenticator.GetLeaf(),
 		ServerKey: authenticator.GetServerKey(),
-		IsPq:      true,
 	}
 	var err error
 	var dialer net.Dialer

@@ -578,11 +578,16 @@ func (hs *HandshakeState) certificateParserAndVerifier(rawLeaf []byte, rawInterm
 		var errAuthkeys error
 		if hs.certVerify.AuthKeysAllowed {
 			logrus.Debug("Authkeys are allowed. attempting to validate self-signed cert")
-			errAuthkeys = hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
+			if hs.kem != nil {
+				errAuthkeys = hs.certVerify.AuthKeys.VerifyPQLeaf(&leaf, opts)
+			} else {
+				errAuthkeys = hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
+			}
+
 		}
 		if !hs.certVerify.AuthKeysAllowed || errAuthkeys != nil {
 			logrus.Debug("performing certificate validation")
-			err := hs.certVerify.Store.VerifyLeaf(&leaf, opts)
+			err = hs.certVerify.Store.VerifyLeaf(&leaf, opts)
 			if err != nil {
 				logrus.Errorf("failed to verify certificate: %s", err)
 				return leaf, intermediate, err

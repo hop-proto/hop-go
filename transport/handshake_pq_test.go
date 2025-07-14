@@ -115,13 +115,13 @@ func TestPQNoiseXXHandshake(t *testing.T) {
 	assert.Check(t, cmp.Equal(client.ss.clientToServerKey, serverSs.clientToServerKey))
 }
 
-func newPQClientAuth(t assert.TestingT) (*keys.KEMKeypair, *certs.Certificate) {
+func newPQClientAuth(t assert.TestingT, certificate *certs.Certificate) (*keys.KEMKeypair, *certs.Certificate) {
 	k, err := keys.MlKem512.GenerateKeypair(rand.Reader)
 	pubKeyBytes := k.Public().Bytes()
-	c, err := certs.SelfSignPQLeaf(&certs.Identity{
+	c, err := certs.IssueLeaf(certificate, &certs.Identity{
 		PublicKey: pubKeyBytes,
 		Names:     []certs.Name{certs.RawStringName("testing")},
-	})
+	}, certs.PQLeaf)
 	assert.NilError(t, err)
 	return &k, c
 }
@@ -154,7 +154,7 @@ func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDP
 	assert.NilError(t, err)
 	go s.Serve()
 
-	clientStatic, leaf := newPQClientAuth(t) // TODO when generating the keys, what do we do with them
+	clientStatic, leaf := newPQClientAuth(t, intermediate) // TODO when generating the keys, what do we do with them
 	clientConfig := ClientConfig{
 		Verify:       *verifyConfig,
 		Exchanger:    nil, // TODO when generating the keys, what do we do with them
@@ -177,10 +177,10 @@ func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermedi
 
 	leafIdentity := certs.Identity{
 		PublicKey: pubKeyBytes,
-		Names:     []certs.Name{certs.RawStringName("Server Leaf")},
+		Names:     []certs.Name{certs.RawStringName("testing")},
 	}
 
-	c, err := certs.SelfSignPQLeaf(&leafIdentity)
+	c, err := certs.IssueLeaf(intermediate, &leafIdentity, certs.PQLeaf)
 
 	server := ServerConfig{
 		KEMKeyPair:       &kp,
