@@ -19,7 +19,7 @@ func TestPQNoiseXXHandshake(t *testing.T) {
 	var err error
 	logrus.SetLevel(logrus.DebugLevel)
 
-	client, server, raddr, clientKeypair := newPQClientAndServerForBench(t)
+	client, server, raddr, clientKeypair, _ := newPQClientAndServerForBench(t)
 
 	client.hs = new(HandshakeState)
 	client.hs.duplex.InitializeEmpty()
@@ -115,6 +115,78 @@ func TestPQNoiseXXHandshake(t *testing.T) {
 	assert.Check(t, cmp.Equal(client.ss.clientToServerKey, serverSs.clientToServerKey))
 }
 
+// +checklocksignore
+func TestPQNoiseIKHandshake(t *testing.T) {
+	var err error
+	logrus.SetLevel(logrus.DebugLevel)
+
+	client, server, raddr, clientKeypair, serverStatic := newPQClientAndServerForBench(t)
+
+	client.hs = new(HandshakeState)
+	client.hs.duplex.InitializeEmpty()
+	client.hs.duplex.Absorb([]byte(PostQuantumHiddenProtocolName))
+	client.hs.RekeyFromSqueeze(PostQuantumHiddenProtocolName)
+
+	client.ss = new(SessionState)
+
+	// init kem
+	client.hs.kem = new(kemState)
+	client.hs.kem.impl = keys.MlKem512
+	client.hs.kem.ephemeral, err = keys.MlKem512.GenerateKeypair(rand.Reader)
+	client.hs.leaf, client.hs.intermediate, err = client.prepareCertificates()
+	client.hs.kem.static = *clientKeypair
+
+	client.hs.kem.remoteStatic = *serverStatic
+
+	assert.Check(t, cmp.Equal(nil, err))
+
+	serverHs := new(HandshakeState)
+	serverHs.duplex.InitializeEmpty()
+	serverHs.duplex.Absorb([]byte(PostQuantumHiddenProtocolName))
+	serverHs.RekeyFromSqueeze(PostQuantumHiddenProtocolName)
+
+	// init kem
+	serverHs.kem = new(kemState)
+	serverHs.kem.impl = keys.MlKem512
+	serverHs.kem.ephemeral, err = keys.MlKem512.GenerateKeypair(rand.Reader)
+	serverHs.kem.static = *server.config.KEMKeyPair
+
+	serverHs.remoteAddr = raddr
+	serverHs.cookieKey = server.cookieKey
+	serverHs.sni = certs.RawStringName("testing")
+	client.hs.remoteAddr = raddr
+	client.hs.certVerify = &client.config.Verify
+
+	server.createSessionFromHandshakeLocked(serverHs)
+	server.setHandshakeState(raddr, serverHs)
+
+	assert.Check(t, cmp.Equal(nil, err))
+
+	// Client Request
+	clientBuf := make([]byte, 65535)
+	n, err1 := client.hs.writePQClientRequestHidden(clientBuf)
+	_, err2 := server.readPQClientRequestHidden(serverHs, clientBuf[:n])
+	assert.NilError(t, err1)
+	assert.NilError(t, err2)
+
+	// Server Response
+	serverBuf := make([]byte, 65535)
+	n, err1 = server.writePQServerResponseHidden(serverHs, serverBuf)
+	_, err2 = client.hs.readPQServerResponseHidden(serverBuf[:n])
+	assert.NilError(t, err1)
+	assert.NilError(t, err2)
+
+	err = client.hs.deriveFinalKeys(&client.ss.clientToServerKey, &client.ss.serverToClientKey)
+
+	serverSs := server.fetchSessionLocked(serverHs.sessionID)
+	err = serverHs.deriveFinalKeys(&serverSs.clientToServerKey, &serverSs.serverToClientKey)
+	assert.NilError(t, err)
+
+	// Check final keys
+	assert.Check(t, cmp.Equal(client.ss.serverToClientKey, serverSs.serverToClientKey))
+	assert.Check(t, cmp.Equal(client.ss.clientToServerKey, serverSs.clientToServerKey))
+}
+
 func newPQClientAuth(t assert.TestingT, certificate *certs.Certificate) (*keys.KEMKeypair, *certs.Certificate) {
 	k, err := keys.MlKem512.GenerateKeypair(rand.Reader)
 	pubKeyBytes := k.Public().Bytes()
@@ -126,7 +198,7 @@ func newPQClientAuth(t assert.TestingT, certificate *certs.Certificate) (*keys.K
 	return &k, c
 }
 
-func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDPAddr, *keys.KEMKeypair) {
+func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDPAddr, *keys.KEMKeypair, *keys.PublicKey) {
 
 	rootKey := keys.GenerateNewSigningKeyPair()
 	intermediateKey := keys.GenerateNewSigningKeyPair()
@@ -149,7 +221,7 @@ func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDP
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
 	serverConn := pc.(*net.UDPConn)
-	serverConfig, verifyConfig := newPQTestServerConfig(t, root, intermediate)
+	serverConfig, verifyConfig, serverPubStatic := newPQTestServerConfig(t, root, intermediate)
 	s, err := NewServer(serverConn, *serverConfig)
 	assert.NilError(t, err)
 	go s.Serve()
@@ -167,16 +239,16 @@ func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDP
 	c, err := NewClient(inner.(*net.UDPConn), raddr, clientConfig), nil
 
 	assert.NilError(t, err)
-	return c, s, raddr, clientStatic
+	return c, s, raddr, clientStatic, serverPubStatic
 }
 
-func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermediate *certs.Certificate) (*ServerConfig, *VerifyConfig) {
+func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermediate *certs.Certificate) (*ServerConfig, *VerifyConfig, *keys.PublicKey) {
 
 	kp, err := keys.MlKem512.GenerateKeypair(rand.Reader)
-	pubKeyBytes := kp.Public().Bytes()
+	pubKey := kp.Public()
 
 	leafIdentity := certs.Identity{
-		PublicKey: pubKeyBytes,
+		PublicKey: pubKey.Bytes(),
 		Names:     []certs.Name{certs.RawStringName("testing")},
 	}
 
@@ -195,5 +267,5 @@ func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermedi
 	verify.Name = certs.RawStringName("testing")
 
 	assert.Check(t, cmp.Equal(nil, err))
-	return &server, &verify
+	return &server, &verify, &pubKey
 }

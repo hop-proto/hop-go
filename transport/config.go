@@ -107,6 +107,8 @@ type ServerConfig struct {
 
 	GetCertificate func(ClientHandshakeInfo) (*Certificate, error)
 	GetCertList    func() ([]*Certificate, error)
+
+	HiddenModeVHostNames []string
 }
 
 func (c *ServerConfig) maxPendingConnections() int {

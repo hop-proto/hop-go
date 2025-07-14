@@ -15,6 +15,7 @@ import (
 const ProtocolName = "hop_NN_XX_cyclist_keccak_p1600_12"
 const HiddenProtocolName = "hop_IK_cyclist_keccak_C512"
 const PostQuantumProtocolName = "hop_pqNN_XX_cyclist_keccak_p1600_12"
+const PostQuantumHiddenProtocolName = "hop_pqIK_cyclist_keccak_C512"
 
 // Version is the protocol version being used. Only one version is supported.
 const Version byte = 0x01
@@ -36,6 +37,10 @@ const (
 	KemKeyLen    = mlkem512.PublicKeySize
 	PQCookieLen  = 32 + mlkem512.KeySeedSize // 32 comes for the CookieAD function but should not be that small
 	PQSeedLen    = mlkem512.KeySeedSize
+
+	// HiddenModeTimestampExpiration TODO (paul) 5 sec is a way too long, evaluate the time need for a connection
+	// TODO (paul) what is considered a reasonable time range for a timestamp to prevent replay attack?
+	HiddenModeTimestampExpiration = 5
 )
 
 // MaxTotalPacketSize is MaxUDPPacketSize minus bytes used by Ethernet frames and Wifi frames.
@@ -99,19 +104,21 @@ type MessageType byte
 
 // MessageType constants for each type of handshake and transport message.
 const (
-	MessageTypeClientHello          MessageType = 0x01
-	MessageTypeServerHello          MessageType = 0x02
-	MessageTypeClientAck            MessageType = 0x03
-	MessageTypeServerAuth           MessageType = 0x04
-	MessageTypeClientAuth           MessageType = 0x05
-	MessageTypeClientRequestHidden  MessageType = 0x08
-	MessageTypeServerResponseHidden MessageType = 0x09
-	MessageTypePQClientHello        MessageType = 0x11 // PQ messages Handshake 0x1...
-	MessageTypePQServerHello        MessageType = 0x12
-	MessageTypePQClientAck          MessageType = 0x13
-	MessageTypePQServerAuth         MessageType = 0x14
-	MessageTypePQClientAuth         MessageType = 0x15
-	MessageTypePQServerConf         MessageType = 0x16
+	MessageTypeClientHello            MessageType = 0x01
+	MessageTypeServerHello            MessageType = 0x02
+	MessageTypeClientAck              MessageType = 0x03
+	MessageTypeServerAuth             MessageType = 0x04
+	MessageTypeClientAuth             MessageType = 0x05
+	MessageTypeClientRequestHidden    MessageType = 0x08
+	MessageTypeServerResponseHidden   MessageType = 0x09
+	MessageTypePQClientHello          MessageType = 0x11 // PQ messages Handshake 0x1...
+	MessageTypePQServerHello          MessageType = 0x12
+	MessageTypePQClientAck            MessageType = 0x13
+	MessageTypePQServerAuth           MessageType = 0x14
+	MessageTypePQClientAuth           MessageType = 0x15
+	MessageTypePQServerConf           MessageType = 0x16
+	MessageTypePQClientRequestHidden  MessageType = 0x18
+	MessageTypePQServerResponseHidden MessageType = 0x19
 
 	MessageTypeTransport MessageType = 0x20
 	MessageTypeControl   MessageType = 0x80
