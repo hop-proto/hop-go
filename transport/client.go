@@ -350,77 +350,8 @@ func (c *Client) beginHiddenHandshake(buf []byte) error {
 	return nil
 }
 
-// TODO paul write this pq friendly
 func (c *Client) beginPostQuantumDiscoverableHandshake(buf []byte) error {
-	// Protocol ID for the regular handshake
-	//c.hs.duplex.Absorb([]byte(ProtocolName))
-
-	n, err := writeClientHello(c.hs, buf)
-	if err != nil {
-		return err
-	}
-	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
-	if err != nil {
-		return err
-	}
-	c.setHSDeadline()
-
-	n, _, _, _, err = c.underlyingConn.ReadMsgUDP(buf, nil)
-	if err != nil {
-		return err
-	}
-	logrus.Debugf("client: recv %x", buf[:n])
-	if n < 4 {
-		return ErrInvalidMessage
-	}
-	shn, err := readServerHello(c.hs, buf)
-	if err != nil {
-		return err
-	}
-	if shn != n {
-		return fmt.Errorf("server hello too short. recevied %d bytes, SH only %d", n, shn)
-	}
-
-	// c.hs.RekeyFromSqueeze(ProtocolName)
-
-	// Client Ack
-	n, err = c.hs.writeClientAck(buf)
-	if err != nil {
-		return err
-	}
-
-	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
-	if err != nil {
-		return err
-	}
-	c.setHSDeadline()
-
-	// Server Auth
-	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(buf, nil)
-	if err != nil {
-		return err
-	}
-	logrus.Debugf("clinet: sa msgLen: %d", msgLen)
-
-	n, err = c.hs.readServerAuth(buf[:msgLen])
-	if err != nil {
-		return err
-	}
-	if n != msgLen {
-		logrus.Debugf("got sa packet of %d, only read %d", msgLen, n)
-		return ErrInvalidMessage
-	}
-
-	// Client Auth
-	n, err = c.hs.writeClientAuth(buf)
-	if err != nil {
-		return err
-	}
-	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
-	if err != nil {
-		logrus.Errorf("client: unable to send client auth: %s", err)
-		return err
-	}
+	// TODO (paul)
 	return nil
 }
 
