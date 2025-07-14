@@ -42,7 +42,7 @@ const (
 	Leaf         CertificateType = 1
 	Intermediate CertificateType = 2
 	Root         CertificateType = 3
-	Ephemeral    CertificateType = 4 // ?????
+	PQLeaf       CertificateType = 4
 )
 
 // String implements Stringer for CertificateType.
@@ -54,6 +54,8 @@ func (t CertificateType) String() string {
 		return "intermediate"
 	case Root:
 		return "root"
+	case PQLeaf:
+		return "pqleaf"
 	default:
 		return "unknown"
 	}
@@ -70,6 +72,8 @@ func CertificateTypeFromString(typeStr string) (CertificateType, error) {
 		return Intermediate, nil
 	case "root":
 		return Root, nil
+	case "pqleaf":
+		return PQLeaf, nil
 	default:
 		return 0, fmt.Errorf("unknown certificate type: %s", typeStr)
 	}
@@ -285,8 +289,12 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 	bytesRead += 8
 	c.ExpiresAt = time.Unix(int64(t), 0)
 
-	// TODO fix this to make it compatible with DH
-	buf := make([]byte, KeyLen)
+	publicKeyLen := KeyLen
+
+	if c.Type == PQLeaf {
+		publicKeyLen = KemKeyLen
+	}
+	buf := make([]byte, publicKeyLen)
 	n, err := io.ReadFull(r, buf)
 	c.PublicKey = buf
 
@@ -295,106 +303,7 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 		return bytesRead, err
 	}
 
-	if n != KeyLen {
-		return bytesRead, io.EOF
-	}
-
-	n, err = io.ReadFull(r, c.Parent[:])
-	bytesRead += int64(n)
-	if err != nil {
-		return bytesRead, err
-	}
-	if n != SHA3Len {
-		return bytesRead, io.EOF
-	}
-
-	chunkLen, err := c.IDChunk.ReadFrom(r)
-	bytesRead += chunkLen
-	if err != nil {
-		return bytesRead, err
-	}
-
-	n, err = io.ReadFull(r, c.Signature[:])
-	bytesRead += int64(n)
-	if err != nil {
-		return bytesRead, err
-	}
-	if n != SignatureLen {
-		return bytesRead, io.EOF
-	}
-
-	// The hash has been written via the TeeReader, read it out.
-	h.Sum(c.Fingerprint[:0])
-
-	return bytesRead, nil
-}
-
-// ReadFromPQ TODO remove it and find a nicer way to do it
-func (c *Certificate) ReadFromPQ(r io.Reader) (int64, error) {
-	var bytesRead int64
-	var err error
-
-	// Save the bytes
-	c.raw.Reset()
-	tee := io.TeeReader(r, &c.raw)
-
-	// Calculate hash as we read
-	h := sha3.New256()
-	r = io.TeeReader(tee, h)
-
-	err = binary.Read(r, binary.BigEndian, &c.Version)
-	if err != nil {
-		return bytesRead, err
-	}
-	bytesRead++
-
-	err = binary.Read(r, binary.BigEndian, &c.Type)
-	if err != nil {
-		return bytesRead, err
-	}
-	bytesRead++
-
-	var reserved uint16
-	err = binary.Read(r, binary.BigEndian, &reserved)
-	if err != nil {
-		return bytesRead, err
-	}
-	bytesRead += 2
-
-	var t uint64
-	err = binary.Read(r, binary.BigEndian, &t)
-	if err != nil {
-		return bytesRead, err
-	}
-	if t > math.MaxInt64 {
-		return bytesRead, errors.New("issue timestamp too large")
-	}
-	bytesRead += 8
-	c.IssuedAt = time.Unix(int64(t), 0)
-
-	err = binary.Read(r, binary.BigEndian, &t)
-	if err != nil {
-		return bytesRead, err
-	}
-	if t > math.MaxInt64 {
-		return bytesRead, errors.New("expires timestamp too large")
-	}
-	bytesRead += 8
-	c.ExpiresAt = time.Unix(int64(t), 0)
-
-	// TODO make readfull reading the pqkey length
-
-	buf := make([]byte, KemKeyLen)
-	n, err := io.ReadFull(r, buf)
-	c.PublicKey = buf
-
-	bytesRead += int64(n)
-	if err != nil {
-		return bytesRead, err
-	}
-
-	// TODO update the keylen here as well
-	if n != KemKeyLen {
+	if n != publicKeyLen {
 		return bytesRead, io.EOF
 	}
 
