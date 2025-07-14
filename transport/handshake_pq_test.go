@@ -160,7 +160,6 @@ func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDP
 		Exchanger:    nil, // TODO when generating the keys, what do we do with them
 		Leaf:         leaf,
 		Intermediate: intermediate,
-		IsPq:         true,
 	}
 
 	inner, err := net.ListenPacket(udp, ":0")

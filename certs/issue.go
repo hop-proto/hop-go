@@ -87,7 +87,7 @@ func IssueLeaf(parent *Certificate, child *Identity) (*Certificate, error) {
 }
 
 func selfSign(self *Identity, certificateType CertificateType, keyPair *keys.SigningKeyPair) (*Certificate, error) {
-	if keyPair != nil && !bytes.Equal(self.PublicKey[:], keyPair.Public[:]) { // TODO make it pq spec
+	if keyPair != nil && !bytes.Equal(self.PublicKey[:], keyPair.Public[:]) {
 		return nil, errors.New("key pair does not match identity")
 	}
 	now := time.Now()
