@@ -55,8 +55,6 @@ type ClientConfig struct {
 
 	// ServerKey indicates the key used by the client to complete the hidden mode handshake
 	ServerKey *keys.DHPublicKey
-
-	IsPq bool
 }
 
 func (c *ClientConfig) maxBufferedPackets() int {
