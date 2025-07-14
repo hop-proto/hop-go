@@ -90,34 +90,79 @@ func (hs *HandshakeState) writeCookie(b []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	plaintextCookie := hs.dh.ephemeral.Private[:]
-	ad := CookieAD(hs.dh.remoteEphemeral[:], hs.remoteAddr)
-	enc := aead.Seal(b[:0], nil, plaintextCookie, ad)
-	if len(enc) != CookieLen {
-		logrus.Panicf("len(enc) != CookieLen: %d != %d. Not possible", len(enc), CookieLen)
+
+	var plaintextCookie []byte
+	var ad []byte
+	var cookieLen int
+
+	if hs.kem != nil {
+		seed := hs.kem.ephemeral.Seed()
+		plaintextCookie = seed[:]
+		ad = CookieAD(hs.kem.remoteEphemeral.Bytes(), hs.remoteAddr)
+		cookieLen = PQCookieLen
+
+	} else {
+		plaintextCookie = hs.dh.ephemeral.Private[:]
+		ad = CookieAD(hs.dh.remoteEphemeral[:], hs.remoteAddr)
+		cookieLen = CookieLen
 	}
-	return len(enc), nil // CookieLen
+
+	enc := aead.Seal(b[:0], nil, plaintextCookie, ad)
+	if len(enc) != cookieLen {
+		logrus.Panicf("len(enc) != CookieLen: %d != %d. Not possible", len(enc), cookieLen)
+	}
+	return len(enc), nil // cookieLen
 }
 
 func (hs *HandshakeState) decryptCookie(b []byte) (int, error) {
-	if len(b) < CookieLen {
+	var cookieLen int
+
+	if hs.kem != nil {
+		cookieLen = PQCookieLen
+
+	} else {
+		cookieLen = CookieLen
+	}
+
+	if len(b) < cookieLen {
 		return 0, ErrBufUnderflow
 	}
 	aead, err := kravatte.NewSANSE(hs.cookieKey[:])
 	if err != nil {
 		return 0, err
 	}
-	encryptedCookie := b[:CookieLen]
-	ad := CookieAD(hs.dh.remoteEphemeral[:], hs.remoteAddr)
-	out, err := aead.Open(hs.dh.ephemeral.Private[:0], nil, encryptedCookie, ad)
-	if err != nil {
-		return 0, ErrInvalidMessage
+	encryptedCookie := b[:cookieLen]
+
+	if hs.kem != nil {
+		remoteEphemeralBytes := hs.kem.remoteEphemeral.Bytes()
+		ad := CookieAD(remoteEphemeralBytes[:], hs.remoteAddr)
+		seed := make([]byte, PQSeedLen)
+		out, err := aead.Open(seed[:0], nil, encryptedCookie, ad)
+		if err != nil {
+			return 0, ErrInvalidMessage
+		}
+		if len(out) != PQSeedLen {
+			return 0, ErrInvalidMessage
+		}
+
+		hs.kem.ephemeral, err = hs.kem.impl.GenerateKeypairFromSeed(seed)
+		if err != nil {
+			return 0, ErrInvalidMessage
+		}
+
+	} else {
+		ad := CookieAD(hs.dh.remoteEphemeral[:], hs.remoteAddr)
+		out, err := aead.Open(hs.dh.ephemeral.Private[:0], nil, encryptedCookie, ad)
+		if err != nil {
+			return 0, ErrInvalidMessage
+		}
+		if len(out) != DHLen {
+			return 0, ErrInvalidMessage
+		}
+		hs.dh.ephemeral.PublicFromPrivate()
 	}
-	if len(out) != DHLen {
-		return 0, ErrInvalidMessage
-	}
-	hs.dh.ephemeral.PublicFromPrivate()
-	return CookieLen, nil
+
+	return cookieLen, nil
 }
 
 func writeClientHello(hs *HandshakeState, b []byte) (int, error) {
