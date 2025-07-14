@@ -131,7 +131,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 
 		for _, vhostName := range sc.HiddenModeVHostNames {
 			if h := vhosts.Match(vhostName); h != nil {
-				h.Certificate.HostName = vhostName
+				h.Certificate.HostNames = append(h.Certificate.HostNames, vhostName)
 				certificates = append(certificates, &h.Certificate)
 			}
 
@@ -144,10 +144,11 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	}
 
 	tconf := transport.ServerConfig{
-		GetCertificate:   getCert,
-		HandshakeTimeout: sc.HandshakeTimeout,
-		ClientVerify:     &transport.VerifyConfig{},
-		GetCertList:      getAllowedCerts,
+		GetCertificate:       getCert,
+		HandshakeTimeout:     sc.HandshakeTimeout,
+		ClientVerify:         &transport.VerifyConfig{},
+		GetCertList:          getAllowedCerts,
+		HiddenModeVHostNames: sc.HiddenModeVHostNames,
 	}
 
 	// serverConfig options inform verify config settings
@@ -332,7 +333,7 @@ func (s *HopServer) AddAuthGrant(intent *authgrants.Intent) error {
 	s.agMap.AddAuthGrant(intent, authgrants.PrincipalID(NoSession))
 
 	// add delegate key from cert to transport server authorized key pool
-	s.keyStore.AddKey(intent.DelegateCert.PublicKey)
+	s.keyStore.AddKey(keys.DHPublicKey(intent.DelegateCert.PublicKey))
 
 	return nil
 }

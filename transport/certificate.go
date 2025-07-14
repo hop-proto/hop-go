@@ -14,5 +14,5 @@ type Certificate struct {
 	Exchanger keys.Exchangable
 	Leaf      *certs.Certificate // TODO(dadrian): Do we eve need this field?
 
-	HostName string
+	HostNames []string
 }

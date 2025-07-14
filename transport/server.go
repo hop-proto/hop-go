@@ -753,10 +753,18 @@ func (s *Server) init() error {
 				return err
 			}
 		}
+
+		var nameList []string
+
+		for _, b := range s.config.Certificate.IDChunk.Blocks {
+			nameList = append(nameList, b.String())
+		}
+
 		c := &Certificate{
 			RawLeaf:         cert.Bytes(),
 			RawIntermediate: intermediate.Bytes(),
 			Exchanger:       s.config.KeyPair,
+			HostNames:       nameList,
 		}
 		s.config.GetCertificate = func(ClientHandshakeInfo) (*Certificate, error) {
 			return c, nil

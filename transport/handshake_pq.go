@@ -3,12 +3,14 @@ package transport
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/sirupsen/logrus"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/keys"
 	"net"
+	"time"
 )
 
 func writePQClientHello(hs *HandshakeState, b []byte) (int, error) {
@@ -60,9 +62,9 @@ func readPQClientHello(hs *HandshakeState, b []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-
 	//hs.duplexAbsorbKem(b[:KemKeyLen])
 	b = b[KemKeyLen:]
+
 	hs.duplex.Squeeze(hs.macBuf[:])
 	logrus.Debugf("server: calculated client hello mac: %x", hs.macBuf)
 	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
@@ -410,7 +412,7 @@ func (hs *HandshakeState) readPQServerAuth(b []byte) (int, error) {
 
 func (hs *HandshakeState) writePQClientAuth(b []byte) (int, error) {
 	encCertLen := EncryptedCertificatesLength(hs.leaf, hs.intermediate)
-	// TODO (paul): The clien Auth has a length of 1905 bytes. This is too large for 1 UDP packet
+	// TODO (paul): The client Auth has a length of 1905 bytes. This is too large for 1 UDP packet
 	length := HeaderLen + SessionIDLen + encCertLen + MacLen + MacLen + KemCtLen
 	if len(b) < length {
 		return 0, ErrBufUnderflow
@@ -703,4 +705,405 @@ func (s *Server) ReplayPQDuplexFromCookie(cookie, clientEphemeralBytes []byte, c
 
 	out.RekeyFromSqueeze(PostQuantumProtocolName)
 	return out, nil
+}
+
+func (hs *HandshakeState) writePQClientRequestHidden(b []byte) (int, error) {
+
+	logrus.Debug("client: sending client request (hidden mode)")
+
+	encCertsLen := EncryptedCertificatesLength(hs.leaf, hs.intermediate)
+
+	length := HeaderLen + KemCtLen + encCertsLen + MacLen + KemKeyLen + TimestampLen + MacLen
+
+	if len(b) < length {
+		return 0, ErrBufUnderflow
+	}
+
+	pos := 0
+
+	// Header
+	b[0] = byte(MessageTypePQClientRequestHidden)
+	b[1] = Version
+	b[2] = byte(encCertsLen >> 8)
+	b[3] = byte(encCertsLen)
+
+	hs.duplex.Absorb(b[:HeaderLen])
+	b = b[HeaderLen:]
+	pos += HeaderLen
+
+	// KEM CipherText -> skem
+	ct, k, err := hs.kem.impl.Enc(rand.Reader, hs.kem.remoteStatic) // TODO write in hs.kem the remote static from the file
+	if err != nil {
+		return pos, err
+	}
+	if len(ct) != KemCtLen {
+		return pos, ErrBufOverflow
+	}
+	copy(b, ct[:])
+	//hs.duplexAbsorbKem(b[:KemCtLen]) // public artifact encapsulating the shared secret
+	b = b[KemCtLen:]
+	pos += KemCtLen
+	hs.duplex.Absorb(k) // shared secret
+
+	// Encrypted Certificates (s)
+	if len(hs.leaf) == 0 {
+		return pos, errors.New("client: client did not set leaf certificate")
+	}
+	encCerts, err := EncryptCertificates(&hs.duplex, hs.leaf, hs.intermediate)
+	if err != nil {
+		return pos, err
+	}
+	if len(encCerts) != encCertsLen {
+		return pos, fmt.Errorf("client: certificates encrypted to unexpected length %d, expected %d", len(encCerts), encCertsLen)
+	}
+	copy(b, encCerts)
+	b = b[encCertsLen:]
+	pos += encCertsLen
+
+	// Client Static Authentication Tag
+	hs.duplex.Squeeze(b[:MacLen])
+	logrus.Debugf("client: hidden handshake tag %x", b[:MacLen])
+	b = b[MacLen:]
+	pos += MacLen
+
+	// Client Ephemeral
+	ephemeralBytes := hs.kem.ephemeral.Public().Bytes()
+	copy(b, ephemeralBytes[:])
+	//hs.duplexAbsorbKem(x[:KemKeyLen])
+	b = b[KemKeyLen:]
+	pos += KemKeyLen
+
+	now := time.Now().Unix()
+	timeBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(timeBytes, uint64(now))
+	hs.duplex.Encrypt(b, timeBytes[:])
+	b = b[TimestampLen:]
+	pos += TimestampLen
+
+	// Mac
+	hs.duplex.Squeeze(b[:MacLen])
+	logrus.Debugf("client: calculated hidden client request mac: %x", b[:MacLen])
+	// b = b[MacLen:]
+	pos += MacLen
+
+	return pos, err
+}
+
+func (s *Server) readPQClientRequestHidden(hs *HandshakeState, b []byte) (int, error) {
+
+	logrus.Debug("server: read client request hidden")
+
+	var err error
+	encCertsLen := (int(b[2]) << 8) + int(b[3])
+	length := HeaderLen + KemCtLen + encCertsLen + MacLen + KemKeyLen + TimestampLen + MacLen
+
+	if len(b) < length {
+		return 0, ErrBufUnderflow
+	}
+
+	var timestampBuf [TimestampLen]byte
+
+	if MessageType(b[0]) != MessageTypePQClientRequestHidden {
+		return 0, ErrUnexpectedMessage
+	}
+	if b[1] != Version {
+		return 0, ErrUnsupportedVersion
+	}
+
+	certList, err := s.config.GetCertList()
+
+	if err != nil {
+		logrus.Debugf("server: unable to get cert list hidden mode, %s", err)
+		return 0, ErrInvalidMessage
+	}
+
+	var (
+		rawLeaf, rawIntermediate []byte
+		c                        *Certificate
+	)
+	bufCopy := make([]byte, len(b))
+
+	for _, cert := range certList {
+		// Copy buffer for processing
+		copy(bufCopy, b)
+
+		// Absorb Header
+		hs.duplex.Absorb(bufCopy[:HeaderLen])
+		bufCopy = bufCopy[HeaderLen:]
+
+		k, err := hs.kem.static.Dec(bufCopy[:KemCtLen]) // skem
+		if err != nil {
+			logrus.Debugf("server: unable to calculate skem: %s", err)
+			continue // Proceed to the next certificate on error
+		}
+		hs.duplex.Absorb(k)
+		bufCopy = bufCopy[KemCtLen:]
+
+		// Decrypt Client Encrypted Certificates
+		encCerts := bufCopy[:encCertsLen]
+		rawLeaf, rawIntermediate, err = DecryptCertificates(&hs.duplex, encCerts)
+		if err != nil {
+			logrus.Debugf("server: unable to decrypt certificates: %s", err)
+			continue // Skip to the next certificate on error
+		}
+		bufCopy = bufCopy[encCertsLen:]
+
+		// Validate Tag (Client Static Auth Tag)
+		hs.duplex.Squeeze(hs.macBuf[:])
+		logrus.Debugf("server: calculated hidden client request tag: %x", hs.macBuf)
+		if !bytes.Equal(hs.macBuf[:], bufCopy[:MacLen]) {
+			logrus.Debugf("server: hidden client request tag mismatch, got %x, wanted %x", bufCopy[:MacLen], hs.macBuf)
+			continue // Tag mismatch, move to the next certificate
+		}
+		bufCopy = bufCopy[MacLen:]
+
+		vhostNames := cert.HostNames
+
+		if len(vhostNames) == 0 {
+			logrus.Debugf("server: unable to retrieve any sni")
+			continue // Skip to the next certificate on error
+		}
+
+		c = cert
+		hs.sni = certs.RawStringName(vhostNames[0]) // get the first vhost liked to the cert
+
+		break
+	}
+
+	if c == nil {
+		logrus.Debugf("server: No valid certificate found")
+		return 0, ErrInvalidMessage
+	}
+
+	copy(b, bufCopy)
+
+	// Parse certificates
+	leaf, _, err := hs.certificateParserAndVerifier(rawLeaf, rawIntermediate)
+	if err != nil {
+		logrus.Debugf("server: error parsing client certificates: %s", err)
+		return 0, err
+	}
+	hs.parsedLeaf = &leaf
+
+	remoteStaticBytes := leaf.PublicKey
+	hs.kem.remoteStatic, err = hs.kem.impl.ParsePublicKey(remoteStaticBytes[:])
+	if err != nil {
+		return 0, err
+	}
+
+	// Handle Client Ephemeral Key
+	hs.kem.remoteEphemeral, err = hs.kem.impl.ParsePublicKey(b[:KemKeyLen])
+	if err != nil {
+		return 0, err
+	}
+	//hs.duplexAbsorbKem(b[:KemKeyLen])
+	b = b[KemKeyLen:]
+
+	// Timestamp
+	hs.duplex.Decrypt(timestampBuf[:], b[:TimestampLen])
+	decryptedTimestamp := timestampBuf[:TimestampLen]
+	if len(decryptedTimestamp) < TimestampLen {
+		logrus.Debugf("server: decrypted timestamp too short")
+		return 0, ErrInvalidMessage
+	}
+
+	timeBytes := binary.BigEndian.Uint64(decryptedTimestamp[:TimestampLen])
+	now := time.Now().Unix()
+
+	if timeBytes > uint64(now) || now-int64(timeBytes) > HiddenModeTimestampExpiration {
+		logrus.Debugf("server: hidden client request timestamp doen't match")
+		return 0, ErrInvalidMessage
+	}
+	logrus.Debugf("The time is %v and we got %v", now, timeBytes)
+
+	b = b[TimestampLen:]
+
+	// MAC (Client Static)
+	hs.duplex.Squeeze(hs.macBuf[:])
+	logrus.Debugf("server: calculated hidden client request mac: %x", hs.macBuf)
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
+		logrus.Debugf("server: hidden client request mac mismatch, got %x, wanted %x", b[:MacLen], hs.macBuf)
+		return 0, ErrInvalidMessage
+	}
+
+	return length, err
+}
+
+func (s *Server) writePQServerResponseHidden(hs *HandshakeState, b []byte) (int, error) {
+
+	c, err := s.config.GetCertificate(ClientHandshakeInfo{
+		ServerName: hs.sni,
+	})
+
+	if err != nil {
+		logrus.Debugf("server: hidden mode no cert found in hs")
+		return 0, ErrInvalidMessage
+	}
+
+	encCertLen := EncryptedCertificatesLength(c.RawLeaf, c.RawIntermediate)
+
+	length := HeaderLen + SessionIDLen + 2*KemCtLen + encCertLen + 2*MacLen
+
+	if len(b) < length {
+		return 0, ErrBufUnderflow
+	}
+
+	pos := 0
+
+	// Header
+	b[0] = byte(MessageTypePQServerResponseHidden)
+	b[1] = 0
+	b[2] = byte(encCertLen >> 8)
+	b[3] = byte(encCertLen)
+	hs.duplex.Absorb(b[:HeaderLen])
+	b = b[HeaderLen:]
+	pos += HeaderLen
+
+	copy(b, hs.sessionID[:])
+	logrus.Debugf("server: session ID %x", hs.sessionID[:])
+	hs.duplex.Absorb(b[:SessionIDLen])
+	b = b[SessionIDLen:]
+	pos += SessionIDLen
+
+	// KEM CipherText -> ekem
+	ect, ek, err := hs.kem.impl.Enc(rand.Reader, hs.kem.remoteEphemeral)
+	if err != nil {
+		return 0, err
+	}
+	if len(ect) != KemCtLen {
+		return 0, ErrBufOverflow
+	}
+	copy(b, ect[:])
+	b = b[KemCtLen:]
+	hs.duplex.Absorb(ek) // shared secret
+	pos += KemCtLen
+
+	// Server Certificates (s)
+	encCerts, err := EncryptCertificates(&hs.duplex, c.RawLeaf, c.RawIntermediate)
+	if err != nil {
+		return pos, err
+	}
+	copy(b, encCerts)
+	b = b[encCertLen:]
+	pos += encCertLen
+
+	if len(b) < 2*MacLen {
+		return pos, ErrBufUnderflow
+	}
+
+	// Certificate Authentication Tag
+	hs.duplex.Squeeze(b[:MacLen])
+	logrus.Debugf("server: sa tag %x", b[:MacLen])
+	b = b[MacLen:]
+	pos += MacLen
+
+	// KEM CipherText -> skem
+	sct, sk, err := hs.kem.impl.Enc(rand.Reader, hs.kem.remoteStatic)
+	if err != nil {
+		return pos, err
+	}
+	if len(sct) != KemCtLen {
+		return pos, ErrBufOverflow
+	}
+	copy(b, sct[:])
+	//hs.duplexAbsorbKem(b[:KemCtLen]) // public artifact encapsulating the shared secret
+	b = b[KemCtLen:]
+	hs.duplex.Absorb(sk) // shared secret
+	pos += KemCtLen
+
+	// MAC
+	hs.duplex.Squeeze(b[:MacLen])
+	logrus.Debugf("server hidden mac: %x", b[:MacLen])
+	// b = b[MacLen:]
+	pos += MacLen
+	return pos, nil
+}
+
+func (hs *HandshakeState) readPQServerResponseHidden(b []byte) (int, error) {
+
+	minLength := HeaderLen + SessionIDLen + 2*KemCtLen + 2*MacLen
+
+	if len(b) < minLength {
+		return 0, ErrBufUnderflow
+	}
+
+	// Header
+	if mt := MessageType(b[0]); mt != MessageTypePQServerResponseHidden {
+		return 0, ErrUnexpectedMessage
+	}
+	if b[1] != 0 {
+		return 0, ErrInvalidMessage
+	}
+	encryptedCertLen := (int(b[2]) << 8) + int(b[3])
+	logrus.Debugf("client: got encrypted cert length %d", encryptedCertLen)
+	fullLength := minLength + encryptedCertLen
+	if len(b) < fullLength {
+		return 0, ErrBufOverflow
+	}
+	hs.duplex.Absorb(b[:HeaderLen])
+	b = b[HeaderLen:]
+
+	// SessionID
+	copy(hs.sessionID[:], b[:SessionIDLen])
+	hs.duplex.Absorb(hs.sessionID[:])
+	logrus.Debugf("client: got session ID %x", hs.sessionID)
+	b = b[SessionIDLen:]
+
+	// eKEM CipherText
+	ek, err := hs.kem.ephemeral.Dec(b[:KemCtLen])
+	if err != nil {
+		return 0, err
+	}
+
+	b = b[KemCtLen:]
+	hs.duplex.Absorb(ek)
+
+	// Certs
+	encryptedCertificates := b[:encryptedCertLen]
+	b = b[encryptedCertLen:]
+
+	// Decrypt the certificates, but don't read them yet
+	rawLeaf, rawIntermediate, err := DecryptCertificates(&hs.duplex, encryptedCertificates)
+	if err != nil {
+		logrus.Debugf("client: error decrypting certificates: %s", err)
+		return 0, err
+	}
+	logrus.Debugf("client: leaf, intermediate: %x, %x", rawLeaf, rawIntermediate)
+
+	// Tag (Encrypted Certs)
+	hs.duplex.Squeeze(hs.macBuf[:])
+	logrus.Debugf("client: calculated sa tag: %x", hs.macBuf)
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
+		logrus.Debugf("client: sa tag mismatch, got %x, wanted %x", b[:MacLen], hs.macBuf)
+		return 0, ErrInvalidMessage
+	}
+	b = b[MacLen:]
+
+	// Parse certificates
+	leaf, _, err := hs.certificateParserAndVerifier(rawLeaf, rawIntermediate)
+	if err != nil {
+		logrus.Debugf("client: error parsing server certificates: %s", err)
+		return 0, err
+	}
+	hs.parsedLeaf = &leaf
+
+	// KEM CipherText
+	//hs.duplexAbsorbKem(b[:KemCtLen])
+	sk, err := hs.kem.static.Dec(b[:KemCtLen]) // skem
+	if err != nil {
+		return 0, err
+	}
+	hs.duplex.Absorb(sk)
+	b = b[KemCtLen:]
+
+	// Mac
+	hs.duplex.Squeeze(hs.macBuf[:])
+	logrus.Debugf("client: calculated sa mac: %x", hs.macBuf)
+	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
+		logrus.Debugf("client: expected sa mac %x, got %x", hs.macBuf, b[:MacLen])
+		return 0, ErrInvalidMessage
+	}
+	// b = b[MacLen:]
+
+	return fullLength, nil
 }
