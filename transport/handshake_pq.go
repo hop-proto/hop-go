@@ -11,16 +11,6 @@ import (
 	"net"
 )
 
-var (
-	errTruncatedEkem = errors.New("nyquist/HandshakeState/ReadMessage/ekem: truncated message")
-	errTruncatedSkem = errors.New("nyquist/HandshakeState/ReadMessage/skem: truncated message")
-
-	errMissingRe = errors.New("nyquist/HandshakeState/WriteMessage/ekem: re not set")
-	errMissingRs = errors.New("nyquist/HandshakeState/WriteMessage/skem: rs not set")
-)
-
-// TODO paul: there are many many duplications, needs to refactor these with if statements, whenever the PQ would work
-
 func writePQClientHello(hs *HandshakeState, b []byte) (int, error) {
 	if len(b) < PQHelloLen {
 		return 0, ErrBufOverflow
@@ -112,15 +102,16 @@ func writePQServerHello(hs *HandshakeState, b []byte) (int, error) {
 	return HeaderLen + PQCookieLen + MacLen, nil
 }
 
-// the cyclist implementation has been thought to have absorption of max rKout 136 bytes
-// TODO be sure that this split ensure the duplex security
-// TODO we should not absorb Ct as non deterministic
+// Cyclist's implementation has been thought to have absorption of max rKout 136 bytes
+// TODO (paul) be sure that this chunk split keep the duplex security
+// However we should not absorb Ct as non-deterministic
+// There is actually no use of duplexAbsorbKem (to be removed if never used)
 func (hs *HandshakeState) duplexAbsorbKem(key []byte) {
 	keyLen := len(key)
 	chunk := keyLen / 8
 
 	if chunk > 136 {
-		panic(errTruncatedEkem)
+		panic("Cyclist Duplex can't absorbe KEM. Chunk's size is too large")
 	}
 
 	for i := 0; i < 8; i++ {
@@ -420,7 +411,7 @@ func (hs *HandshakeState) readPQServerAuth(b []byte) (int, error) {
 
 func (hs *HandshakeState) writePQClientAuth(b []byte) (int, error) {
 	encCertLen := EncryptedCertificatesLength(hs.leaf, hs.intermediate)
-	// TODO this has a length of 1905 -> too large
+	// TODO (paul): The clien Auth has a length of 1905 bytes. This is too large for 1 UDP packet
 	length := HeaderLen + SessionIDLen + encCertLen + MacLen + MacLen + KemCtLen
 	if len(b) < length {
 		return 0, ErrBufUnderflow
@@ -489,7 +480,6 @@ func (hs *HandshakeState) writePQClientAuth(b []byte) (int, error) {
 	return pos, nil
 }
 
-// TODO fix read client auth from the test
 func (s *Server) readPQClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeState, error) {
 	x := b
 	pos := 0
@@ -665,8 +655,10 @@ func (hs *HandshakeState) readPQServerConf(b []byte) (int, error) {
 	return length, nil
 }
 
-// ReplayPQDuplexFromCookie does exactly like ReplayDuplexFromCookie with KEM
-// TODO write the description or refactor
+// ReplayPQDuplexFromCookie reads a cookie containing an encrypted KEM private key
+// seed, and returns a HandshakeState with the duplex replayed to a state
+// equivalent after the server sent the Server Hello message. The returned
+// duplex has not yet processed the Client Ack as in ReplayDuplexFromCookie.
 func (s *Server) ReplayPQDuplexFromCookie(cookie, clientEphemeralBytes []byte, clientAddr *net.UDPAddr) (*HandshakeState, error) {
 	s.cookieLock.Lock()
 	defer s.cookieLock.Unlock()
