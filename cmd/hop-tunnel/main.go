@@ -46,7 +46,7 @@ func issueCerts() (leaf, intermediate *certs.Certificate, keyPair *keys.X25519Ke
 	rootKeyPair := keys.GenerateNewSigningKeyPair()
 	rootIdentity := certs.Identity{
 		Names:     []certs.Name{},
-		PublicKey: rootKeyPair.Public,
+		PublicKey: rootKeyPair.Public[:],
 	}
 	root, err := certs.SelfSignRoot(&rootIdentity, rootKeyPair)
 	if err != nil {
@@ -57,7 +57,7 @@ func issueCerts() (leaf, intermediate *certs.Certificate, keyPair *keys.X25519Ke
 	intermediateKeyPair := keys.GenerateNewSigningKeyPair()
 	intermediateIdentity := certs.Identity{
 		Names:     []certs.Name{},
-		PublicKey: intermediateKeyPair.Public,
+		PublicKey: intermediateKeyPair.Public[:],
 	}
 	intermediate, err = certs.IssueIntermediate(root, &intermediateIdentity)
 	if err != nil {
@@ -67,9 +67,9 @@ func issueCerts() (leaf, intermediate *certs.Certificate, keyPair *keys.X25519Ke
 	keyPair = keys.GenerateNewX25519KeyPair()
 	identity := certs.Identity{
 		Names:     []certs.Name{certs.DNSName("hop.local")},
-		PublicKey: keyPair.Public,
+		PublicKey: keyPair.Public[:],
 	}
-	leaf, err = certs.IssueLeaf(intermediate, &identity)
+	leaf, err = certs.IssueLeaf(intermediate, &identity, certs.Leaf)
 	if err != nil {
 		logrus.Fatalf("unable to issue leaf certificate: %s", err)
 	}

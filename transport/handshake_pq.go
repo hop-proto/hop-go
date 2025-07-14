@@ -390,7 +390,6 @@ func (hs *HandshakeState) readPQServerAuth(b []byte) (int, error) {
 
 	// Parse the certificate
 	// We are parsing the certificate here as there is no need before while reading the server Auth
-	hs.certVerify.InsecureSkipVerify = true // TODO fix the certificates
 	leaf, _, err := hs.certificateParserAndVerifier(rawLeaf, rawIntermediate)
 	if err != nil {
 		logrus.Debugf("client: error parsing server certificates: %s", err)

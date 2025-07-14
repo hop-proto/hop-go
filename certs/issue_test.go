@@ -28,7 +28,7 @@ func TestIssueSelfSigned(t *testing.T) {
 	}
 
 	for i := range identities {
-		c, err := SelfSignLeaf(&identities[i])
+		c, err := SelfSignLeaf(&identities[i], Leaf)
 		assert.NilError(t, err)
 		assert.Check(t, cmp.DeepEqual(c.Signature, zeroSignature), i)
 		assert.Check(t, c.Fingerprint != zero)

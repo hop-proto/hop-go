@@ -36,7 +36,7 @@ func LeafIdentity(key *keys.X25519KeyPair, names ...Name) *Identity {
 // failures.
 func VerifyParent(child *Certificate, parent *Certificate) error {
 	switch child.Type {
-	case Leaf:
+	case Leaf, PQLeaf:
 		if parent.Type != Intermediate {
 			return errors.New("leaf cert parent must be an intermediate")
 		}
@@ -81,7 +81,7 @@ func VerifyParent(child *Certificate, parent *Certificate) error {
 // TODO(dadrian): Add support for wildcard certificates.
 func (c *Certificate) MatchesName(name Name) bool {
 	switch c.Type {
-	case Leaf:
+	case Leaf, PQLeaf:
 		for _, b := range c.IDChunk.Blocks {
 			if bytes.Equal(b.Label, name.Label) && b.Type == name.Type {
 				return true
@@ -225,7 +225,8 @@ type VerifyOptions struct {
 //
 // TODO(dadrian): Name constraints
 func (s Store) VerifyLeaf(leaf *Certificate, opts VerifyOptions) error {
-	if leaf.Type != Leaf {
+	// TODO separate the Leaf and the PQLeaf
+	if leaf.Type != Leaf && leaf.Type != PQLeaf {
 		return unexpectedTypeError(leaf, Leaf)
 	}
 	if !opts.Name.IsZero() && !leaf.MatchesName(opts.Name) {
@@ -271,7 +272,7 @@ func (s Store) VerifyLeaf(leaf *Certificate, opts VerifyOptions) error {
 
 // VerifyLeafFormat is used to check self-signed cert well formatted
 func VerifyLeafFormat(leaf *Certificate, opts VerifyOptions) error {
-	if leaf.Type != Leaf {
+	if leaf.Type != Leaf && leaf.Type != PQLeaf {
 		return unexpectedTypeError(leaf, Leaf)
 	}
 	if !opts.Name.IsZero() && !leaf.MatchesName(opts.Name) {
