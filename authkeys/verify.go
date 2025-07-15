@@ -11,7 +11,8 @@ import (
 // SyncAuthKeySet is a set of trusted keys
 type SyncAuthKeySet struct {
 	// +checklocks:lock
-	keySet   map[keys.DHPublicKey]bool
+	keySet map[keys.DHPublicKey]bool
+	// +checklocks:lock
 	pqKeySet map[keys.PublicKey]bool // ML-KEM keys
 	lock     sync.Mutex
 }
