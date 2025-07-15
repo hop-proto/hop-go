@@ -9,9 +9,7 @@ require (
 	github.com/BurntSushi/toml v1.2.0
 	github.com/charmbracelet/bubbletea v1.3.4
 	github.com/charmbracelet/lipgloss v1.0.0
-	github.com/cloudflare/circl v1.6.1
 	github.com/creack/pty v1.1.18
-	github.com/gosuri/uilive v0.0.4
 	github.com/mattn/go-isatty v0.0.20
 	github.com/muesli/cancelreader v0.2.2
 	github.com/pkg/errors v0.9.1
@@ -39,10 +37,13 @@ require (
 	golang.org/x/lint v0.0.0-20200302205851-738671d3881b // indirect
 	golang.org/x/sync v0.11.0 // indirect
 	golang.org/x/text v0.11.0 // indirect
+	golang.org/x/tools v0.13.0 // indirect
 )
 
 require (
-	github.com/google/go-cmp v0.5.8
+	github.com/cloudflare/circl v1.6.1
+	github.com/google/go-cmp v0.5.9
+	github.com/gosuri/uilive v0.0.4
 	github.com/mitchellh/go-ps v1.0.0
 	go.uber.org/goleak v1.2.0
 )
