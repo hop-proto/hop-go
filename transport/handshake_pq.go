@@ -680,7 +680,7 @@ func (s *Server) ReplayPQDuplexFromCookie(cookie, clientEphemeralBytes []byte, c
 	out.kem.remoteEphemeral = clientEphemeral
 	out.remoteAddr = clientAddr
 	out.cookieKey = s.cookieKey
-	out.kem.static = *s.config.KEMKeyPair
+	out.kem.static = s.config.KEMKeyPair
 
 	// Pull the private key out of the cookie
 	n, err := out.decryptCookie(cookie)
