@@ -763,6 +763,7 @@ func (s *Server) init() error {
 			RawLeaf:         cert.Bytes(),
 			RawIntermediate: intermediate.Bytes(),
 			Exchanger:       s.config.KeyPair,
+			KemKeyPair:      *s.config.KEMKeyPair,
 			HostNames:       nameList,
 		}
 		s.config.GetCertificate = func(ClientHandshakeInfo) (*Certificate, error) {

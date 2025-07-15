@@ -840,7 +840,7 @@ func (s *Server) readPQClientRequestHidden(hs *HandshakeState, b []byte) (int, e
 		hs.duplex.Absorb(bufCopy[:HeaderLen])
 		bufCopy = bufCopy[HeaderLen:]
 
-		k, err := hs.kem.static.Dec(bufCopy[:KemCtLen]) // skem
+		k, err := cert.KemKeyPair.Dec(bufCopy[:KemCtLen]) // skem
 		if err != nil {
 			logrus.Debugf("server: unable to calculate skem: %s", err)
 			continue // Proceed to the next certificate on error
