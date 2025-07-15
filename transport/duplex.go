@@ -19,6 +19,7 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	defer s.cookieLock.Unlock()
 
 	out := new(HandshakeState)
+	out.dh = new(dhState)
 	copy(out.dh.remoteEphemeral[:], clientEphemeral)
 	out.remoteAddr = clientAddr
 	out.cookieKey = s.cookieKey

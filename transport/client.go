@@ -164,7 +164,7 @@ func (c *Client) clientHandshakeLocked() error {
 	c.hs.duplex.InitializeEmpty()
 
 	var err error
-	if c.config.Leaf.Type != certs.PQLeaf {
+	if c.config.Leaf.Type == certs.PQLeaf {
 		c.hs.kem = new(kemState)
 		c.hs.kem.ephemeral, err = keys.MlKem512.GenerateKeypair(rand.Reader)
 		if err != nil {
@@ -199,7 +199,7 @@ func (c *Client) clientHandshakeLocked() error {
 			return err
 		}
 		isClientHiddenHS = true
-	} else if c.config.Leaf.Type != certs.PQLeaf {
+	} else if c.config.Leaf.Type == certs.PQLeaf {
 		logrus.Debug("---------- PQ HANDSHAKE MODE -------------")
 
 		err = c.beginPostQuantumDiscoverableHandshake(buf)

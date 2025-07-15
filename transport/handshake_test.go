@@ -154,6 +154,7 @@ func TestClientServerHSWithAgent(t *testing.T) {
 func TestBufferSizes(t *testing.T) {
 	short := make([]byte, HeaderLen+4)
 	hs := new(HandshakeState)
+	hs.dh = new(dhState)
 	hs.duplex.InitializeEmpty()
 	hs.dh.ephemeral.Generate()
 	n, err := writeClientHello(hs, short)
@@ -166,6 +167,7 @@ func TestCookie(t *testing.T) {
 	_, err := rand.Read(cookieKey[:])
 	assert.NilError(t, err)
 	hs := HandshakeState{}
+	hs.dh = new(dhState)
 	hs.duplex.InitializeEmpty()
 	hs.duplex.Absorb([]byte("some data that is longish"))
 	hs.dh.ephemeral.Generate()
