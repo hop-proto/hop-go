@@ -607,11 +607,7 @@ func (s *Server) finishHandshake(hs *HandshakeState, isHidden bool) error {
 func (s *Server) handleClientRequestHidden(b []byte) (int, *HandshakeState, error) {
 	hs := &HandshakeState{}
 	hs.dh = new(dhState)
-	hs.duplex.InitializeEmpty()
 	hs.dh.ephemeral.Generate()
-
-	hs.duplex.Absorb([]byte(HiddenProtocolName))
-	hs.RekeyFromSqueeze(HiddenProtocolName)
 
 	n, err := s.readClientRequestHidden(hs, b)
 
