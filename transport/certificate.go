@@ -11,8 +11,9 @@ type Certificate struct {
 	RawLeaf         []byte
 	RawIntermediate []byte
 
-	Exchanger keys.Exchangable
-	Leaf      *certs.Certificate // TODO(dadrian): Do we eve need this field?
+	Exchanger  keys.Exchangable
+	KemKeyPair keys.KEMKeypair
+	Leaf       *certs.Certificate // TODO(dadrian): Do we eve need this field?
 
 	HostNames []string
 }

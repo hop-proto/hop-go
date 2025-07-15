@@ -73,15 +73,10 @@ type kemState struct {
 	impl keys.KEM
 
 	ephemeral keys.KEMKeypair
-	// TODO paul: here the interface Exchangable is not a key pair, thus figure out what to do
-	static keys.KEMKeypair
+	static    keys.KEMKeypair
 
 	remoteEphemeral keys.PublicKey
 	remoteStatic    keys.PublicKey
-
-	//k [32]byte // TODO (paul): I don't like storing this k for the ServerHello Replay.
-	// However we cannot deterministically re generate it. Storing the encapsulation seed
-	// would result to the same allocation
 }
 
 func (hs *HandshakeState) writeCookie(b []byte) (int, error) {
