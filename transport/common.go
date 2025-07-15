@@ -3,9 +3,9 @@ package transport
 import (
 	"errors"
 	"fmt"
-	"github.com/cloudflare/circl/kem/mlkem/mlkem512"
 	"os"
 
+	"github.com/cloudflare/circl/kem/mlkem/mlkem512"
 	"golang.org/x/crypto/curve25519"
 
 	"hop.computer/hop/kravatte"

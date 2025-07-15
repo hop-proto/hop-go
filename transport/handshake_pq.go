@@ -6,11 +6,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/sirupsen/logrus"
-	"hop.computer/hop/certs"
-	"hop.computer/hop/keys"
 	"net"
 	"time"
+
+	"github.com/sirupsen/logrus"
+
+	"hop.computer/hop/certs"
+	"hop.computer/hop/keys"
 )
 
 func writePQClientHello(hs *HandshakeState, b []byte) (int, error) {
@@ -108,6 +110,7 @@ func writePQServerHello(hs *HandshakeState, b []byte) (int, error) {
 // TODO (paul) be sure that this chunk split keep the duplex security
 // However we should not absorb Ct as non-deterministic
 // There is actually no use of duplexAbsorbKem (to be removed if never used)
+/*
 func (hs *HandshakeState) duplexAbsorbKem(key []byte) {
 	keyLen := len(key)
 	chunk := keyLen / 8
@@ -120,6 +123,7 @@ func (hs *HandshakeState) duplexAbsorbKem(key []byte) {
 		hs.duplex.Absorb(key[chunk*i : chunk*(i+1)])
 	}
 }
+*/
 
 func readPQServerHello(hs *HandshakeState, b []byte) (int, error) {
 	if len(b) < HeaderLen+PQCookieLen+MacLen {
@@ -966,14 +970,14 @@ func (s *Server) writePQServerResponseHidden(hs *HandshakeState, b []byte) (int,
 	pos += SessionIDLen
 
 	// KEM CipherText -> ekem
-	ect, ek, err := hs.kem.impl.Enc(rand.Reader, hs.kem.remoteEphemeral)
+	eCt, ek, err := hs.kem.impl.Enc(rand.Reader, hs.kem.remoteEphemeral)
 	if err != nil {
 		return 0, err
 	}
-	if len(ect) != KemCtLen {
+	if len(eCt) != KemCtLen {
 		return 0, ErrBufOverflow
 	}
-	copy(b, ect[:])
+	copy(b, eCt[:])
 	b = b[KemCtLen:]
 	hs.duplex.Absorb(ek) // shared secret
 	pos += KemCtLen
@@ -998,14 +1002,14 @@ func (s *Server) writePQServerResponseHidden(hs *HandshakeState, b []byte) (int,
 	pos += MacLen
 
 	// KEM CipherText -> skem
-	sct, sk, err := hs.kem.impl.Enc(rand.Reader, hs.kem.remoteStatic)
+	sCt, sk, err := hs.kem.impl.Enc(rand.Reader, hs.kem.remoteStatic)
 	if err != nil {
 		return pos, err
 	}
-	if len(sct) != KemCtLen {
+	if len(sCt) != KemCtLen {
 		return pos, ErrBufOverflow
 	}
-	copy(b, sct[:])
+	copy(b, sCt[:])
 	//hs.duplexAbsorbKem(b[:KemCtLen]) // public artifact encapsulating the shared secret
 	b = b[KemCtLen:]
 	hs.duplex.Absorb(sk) // shared secret

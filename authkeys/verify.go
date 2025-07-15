@@ -79,6 +79,10 @@ func (s *SyncAuthKeySet) VerifyPQLeaf(leaf *certs.Certificate, opts certs.Verify
 
 	KEMpublicKey, err := keys.MlKem512.ParsePublicKey(leaf.PublicKey[:])
 
+	if err != nil {
+		return err
+	}
+
 	if _, isPresent := s.pqKeySet[KEMpublicKey]; !isPresent {
 		return errors.New("client static not found in authorized key set")
 	}
