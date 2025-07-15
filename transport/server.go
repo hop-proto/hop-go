@@ -549,6 +549,8 @@ func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
 	scratchHS := &HandshakeState{}
 	scratchHS.duplex.InitializeEmpty()
 	scratchHS.duplex.Absorb([]byte(ProtocolName))
+	scratchHS.dh = new(dhState)
+
 	n, err := readClientHello(scratchHS, b)
 	if err != nil {
 		return nil, err
@@ -604,6 +606,7 @@ func (s *Server) finishHandshake(hs *HandshakeState, isHidden bool) error {
 
 func (s *Server) handleClientRequestHidden(b []byte) (int, *HandshakeState, error) {
 	hs := &HandshakeState{}
+	hs.dh = new(dhState)
 	hs.duplex.InitializeEmpty()
 	hs.dh.ephemeral.Generate()
 
