@@ -428,7 +428,7 @@ Server->Client: Transport Data [0x20]
 
 ---
 
-##### Client Auth Message
+##### Client Request Message
 
 ---
 
@@ -440,15 +440,14 @@ Server->Client: Transport Data [0x20]
 |                                   |             Timestamp (8 bytes)             |                                           |
 |                                   |               MAC (16 bytes)                |                                           |
 
-##### Client Auth Construction
+##### Client Request Construction
 
 ---
 
-TODO check the protocol ID in the code and here
 
 ```python
 # server’s static key is cached from a previous discoverable mode handshake, or distributed out-of-band
-protocolID = “noise_IK_cyclist_keccak_C512”
+protocolID = “hop_IK_cyclist_keccak_C512”
 duplex = Cyclist()
 duplex.absorb(protocolID)
 duplex.absorb([type + protocol + reserved])
@@ -466,26 +465,30 @@ mac = duplex.squeeze()
 ---
 
 ```python
-protocolID = “noise_IK_cyclist_keccak_C512”
-duplex = Cyclist()
-duplex.absorb(protocolID)
-duplex.absorb([type + protocol + reserved])
-duplex.absorb(ClientEphemeral)
-duplex.absorb(DH(es))
-certificates = duplex.decrypt(ClientEncCerts)
-tag = duplex.squeeze()
-# verify tag
+protocolID = “hop_IK_cyclist_keccak_C512”
+for vmCert in certList:
+    duplex = Cyclist()
+    duplex.absorb(protocolID)
+    duplex.absorb([type + protocol + reserved])
+    duplex.absorb(ClientEphemeral)
+    duplex.absorb(DH(es)) # with vmCert.Static
+    certificates = duplex.decrypt(ClientEncCerts)
+    tag = duplex.squeeze()
+    # verify tag if equal break
+    
 # verify certs, extract client static
 duplex.absorb(ss)
 timestamp = duplex.decrypt(time.Now().Unix())
 mac = duplex.squeeze()
 ```
 
-- Is the static a static of a valid client? (what do we consider as a valid client?)
+- Is the static a public key of a valid client and server VM?
 - Is the timestamp greater than the last timestamp seen from the last valid handshake from the client?
-- Search up certificate related to serverID for that serverID type (not implemented yet -> server will loop in the SNI to find the corresponding key)
+- Verify the tag before parsing the certs
+- Quit the handshake if the certs are invalid
+- Is the mac the same (after DH)
 
-#### Server Auth Message
+#### Server Response Message
 
 ---
 
@@ -499,7 +502,7 @@ mac = duplex.squeeze()
 |                                   |            MAC (16 bytes)            |                                           |
 
 
-##### Server Auth Construction
+##### Server Response Construction
 
 ---
 
@@ -533,7 +536,10 @@ duplex.absorb(DH(se))
 mac = duplex.squeeze()
 ```
 
-- Are the certificates valid? (TODO paul)
+- Verify the tag before parsing the certs
+- Quit the handshake if the certs are invalid
+- Is the mac the same (after DH)
+
 
 #### Transport Message
 
@@ -579,6 +585,17 @@ Client->Server: Client Auth [0x15]
 Server->Client: Server Conf [0x16]
 Client->Server: Transport Data [0x20]
 Server->Client: Transport Data [0x20]
+```
+
+#### Hop Noise PQ XX Pattern
+
+```sequence
+-> e
+<- cookie
+-> sni + cookie + e
+<- sessID + s (certs) + ekem
+-> sessID + s (certs) + skem
+<- skem
 ```
 
 #### Client Hello Message
@@ -729,7 +746,7 @@ duplex.absorb(sessionID)
 certificates := [len(leaf), leaf, len(intermediate), intermediate]
 encCerts = duplex.encrypt(certificates)
 tag = duplex.squeeze()
-ct, k = kem.Enc(e_c)
+ct, k = kem.Enc(e_c) #ekem
 duplex.absorb(k)
 mac = duplex.squeeze()
 ```
@@ -746,7 +763,7 @@ certificates = duplex.decrypt(encCerts)
 tag = duplex.squeeze()
 # verify tag
 # verify certs, extract server s
-k = kem.Dec(ct)
+k = kem.e_c.Dec(ct) #ekem
 duplex.absorb(k)
 mac = duplex.squeeze()
 ```
@@ -774,7 +791,7 @@ duplex.absorb(sessionID)
 certificates := [len(leaf), leaf, len(intermediate), intermediate]
 encCerts = duplex.encrypt(certificates)
 tag = duplex.squeeze()
-ct, k = kem.Enc(s_s)
+ct, k = kem.Enc(s_s) #skem
 duplex.absorb(k)
 mac = duplex.squeeze()
 ```
@@ -792,7 +809,7 @@ certificates = duplex.decrypt(encCerts)
 tag = duplex.squeeze()
 # verify tag
 # verify certs, extract server s
-k = kem.Dec(ct)
+k = kem.s_s.Dec(ct) #skem
 duplex.absorb(k)
 mac = duplex.squeeze()
 ```
@@ -812,7 +829,7 @@ mac = duplex.squeeze()
 
 ```python
 duplex.absorb([type + reserved])
-ct, k = kem.Enc(c_s)
+ct, k = kem.Enc(c_s) #skem
 duplex.absorb(k)
 mac = duplex.squeeze()
 ```
@@ -823,10 +840,139 @@ mac = duplex.squeeze()
 
 ```python
 duplex.absorb([type + reserved])
-k = kem.Dec(ct)
+k = kem.c_s.Dec(ct) #skem
 duplex.absorb(k)
 mac = duplex.squeeze()
 ```
 
 - Is the mac the same (after KEM)
 - Derives the keys and use regular transport messages
+
+
+### Hidden Server Flow
+
+---
+
+
+```sequence
+Client->Server: Client Auth [0x18]
+Server->Client: Server Auth [0x19]
+Client->Server: Transport Data [0x20]
+Server->Client: Transport Data [0x20]
+```
+#### Hop Noise PQ IK Pattern
+
+```sequence
+<- s
+...
+-> skem, e, s (certs)
+<- ekem, skem, s(certs)
+```
+
+
+### Message Structures
+
+---
+
+##### Client Request Message
+
+---
+
+|      type $:=$ 0x18 (1 byte)      |          Protocol Version (1 byte)          |       Certs Len $:= 0^2$ (2 bytes)        |
+|:---------------------------------:|:-------------------------------------------:|:-----------------------------------------:|
+|                                   |         Client sKEM CT (768 bytes)          |                                           |
+| Client Leaf Certificate (* bytes) |                                             | Client Intermediate Certificate (* bytes) |
+|                                   | Client Static Authentication Tag (16 bytes) |                                           |
+|                                   |    Client  Ephemeral ML-KEM (800 bytes)     |                                           |
+|                                   |             Timestamp (8 bytes)             |                                           |
+|                                   |               MAC (16 bytes)                |                                           |
+
+##### Client Request Construction
+
+---
+
+```python
+# server’s static key is cached from a previous discoverable mode handshake, or distributed out-of-band
+protocolID = “hop_pqIK_cyclist_keccak_C512”
+duplex = Cyclist()
+duplex.absorb(protocolID)
+duplex.absorb([type + protocol + reserved])
+ct, k = kem.Enc(s_s) #skem
+duplex.absorb(k)
+ClientEncCerts = duplex.encrypt(certificates)
+tag = duplex.squeeze()
+timestamp = duplex.encrypt(time.Now().Unix())
+mac = duplex.squeeze()
+```
+
+##### Server Logic
+
+---
+
+```python
+protocolID = “hop_pqIK_cyclist_keccak_C512”
+for vmCert in certList:
+  duplex = Cyclist()
+  duplex.absorb(protocolID)
+  duplex.absorb([type + protocol + reserved])
+  k = vmCert.s_s.Dec(ct) # skem
+  duplex.absorb(k)
+  certificates = duplex.decrypt(ClientEncCerts)
+  tag = duplex.squeeze()
+  # verify tag if equal break
+
+# verify certs, extract client static
+timestamp = duplex.decrypt(time.Now().Unix())
+mac = duplex.squeeze()
+```
+
+#### Server Auth Message
+
+---
+
+
+|      type $:=$ 0x8 (1 byte)       |       Reserved $:= 0$ (1 byte)       |       Certs Len $:= 0^2$ (2 bytes)        |
+|:---------------------------------:|:------------------------------------:|:-----------------------------------------:|
+|                                   |         SessionID (4 bytes)          |                                           |
+|                                   |      Server eKEM CT (768 bytes)      |                                           |
+| Server Leaf Certificate (* bytes) |                                      | Server Intermediate Certificate (* bytes) |
+|                                   | Server Authentication Tag (16 bytes) |                                           |
+|                                   |      Server sKEM CT (768 bytes)      |                                           |
+|                                   |            MAC (16 bytes)            |                                           |
+
+
+##### Server Auth Construction
+
+---
+
+```python
+# Continuing from duplex prior
+duplex.absorb([type + reserved + Certs Len])
+duplex.absorb(SessionID)
+eCt, ek = kem.Enc(e_c) #ekem
+duplex.absorb(ek)
+ServerEncCerts = duplex.encrypt(certificates)
+tag = duplex.squeeze()
+sCt, sk = kem.Enc(e_s) #skem
+duplex.absorb(sk)
+mac = duplex.squeeze()
+```
+
+##### Client Logic
+
+---
+
+```python
+# Continuing from duplex prior
+duplex.absorb([type + reserved + Certs Len])
+duplex.absorb(SessionID)
+ek = kem.e_c.Dec(ct) # ekem
+duplex.absorb(ek)
+certificates = duplex.decrypt(ServerEncCerts)
+tag = duplex.squeeze()
+# verify tag
+# verify certs, extract server static
+sk = kem.e_s.Dec(ct) # skem
+duplex.absorb(sk)
+mac = duplex.squeeze()
+```
