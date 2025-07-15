@@ -139,6 +139,11 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 		// Copy buffer for processing
 		copy(bufCopy, b)
 
+		// Recreate the duplex at each loop
+		hs.duplex.InitializeEmpty()
+		hs.duplex.Absorb([]byte(HiddenProtocolName))
+		hs.RekeyFromSqueeze(HiddenProtocolName)
+
 		// Absorb Header
 		hs.duplex.Absorb(bufCopy[:HeaderLen])
 		bufCopy = bufCopy[HeaderLen:]

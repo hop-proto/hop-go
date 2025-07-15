@@ -831,6 +831,11 @@ func (s *Server) readPQClientRequestHidden(hs *HandshakeState, b []byte) (int, e
 		// Copy buffer for processing
 		copy(bufCopy, b)
 
+		// Recreate duplex at each VM loop
+		hs.duplex.InitializeEmpty()
+		hs.duplex.Absorb([]byte(PostQuantumHiddenProtocolName))
+		hs.RekeyFromSqueeze(PostQuantumHiddenProtocolName)
+
 		// Absorb Header
 		hs.duplex.Absorb(bufCopy[:HeaderLen])
 		bufCopy = bufCopy[HeaderLen:]

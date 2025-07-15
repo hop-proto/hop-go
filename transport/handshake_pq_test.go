@@ -145,9 +145,6 @@ func TestPQNoiseIKHandshake(t *testing.T) {
 	assert.Check(t, cmp.Equal(nil, err))
 
 	serverHs := new(HandshakeState)
-	serverHs.duplex.InitializeEmpty()
-	serverHs.duplex.Absorb([]byte(PostQuantumHiddenProtocolName))
-	serverHs.RekeyFromSqueeze(PostQuantumHiddenProtocolName)
 
 	// init kem
 	serverHs.kem = new(kemState)
