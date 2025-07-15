@@ -4,8 +4,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"hop.computer/hop/certs"
-	"hop.computer/hop/keys"
 	"io"
 	"net"
 	"sync"
@@ -14,7 +12,9 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
+	"hop.computer/hop/keys"
 )
 
 // UDPLike interface standardizes Reliable channels and UDPConn.
