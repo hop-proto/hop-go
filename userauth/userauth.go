@@ -3,8 +3,9 @@ package userauth
 
 import (
 	"encoding/binary"
-	"github.com/sirupsen/logrus"
 	"io"
+
+	"github.com/sirupsen/logrus"
 
 	"hop.computer/hop/tubes"
 )
@@ -54,7 +55,7 @@ func GetInitMsg(ch *tubes.Reliable) string {
 	io.ReadFull(ch, lbuf)
 	length := binary.BigEndian.Uint16(lbuf[:])
 	if length == 0 {
-		logrus.Debugf("S: get init message user auth has a lenght of 0")
+		logrus.Debugf("S: get init message user auth has a length of 0")
 	}
 	buf := make([]byte, length)
 	io.ReadFull(ch, buf)
