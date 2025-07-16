@@ -3,6 +3,7 @@ package userauth
 
 import (
 	"encoding/binary"
+	"github.com/sirupsen/logrus"
 	"io"
 
 	"hop.computer/hop/tubes"
@@ -11,7 +12,7 @@ import (
 const (
 	headerLen         = 4
 	usernameLenOffset = 0
-	usernameOffset    = 4
+	usernameOffset    = 2
 )
 
 type userAuthInitMsg struct {
@@ -49,10 +50,16 @@ func RequestAuthorization(ch *tubes.Reliable, username string) bool {
 
 // GetInitMsg lets the hop server read a user auth request
 func GetInitMsg(ch *tubes.Reliable) string {
-	lbuf := make([]byte, 4)
+	lbuf := make([]byte, 2)
 	io.ReadFull(ch, lbuf)
 	length := binary.BigEndian.Uint16(lbuf[:])
+	if length == 0 {
+		logrus.Debugf("S: get init message user auth has a lenght of 0")
+	}
 	buf := make([]byte, length)
 	io.ReadFull(ch, buf)
+	if string(buf) == "" {
+		logrus.Debugf("S: get init message user auth has a empty string username")
+	}
 	return string(buf)
 }
