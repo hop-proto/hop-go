@@ -230,10 +230,9 @@ func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDP
 	s, err := NewServer(serverConn, *serverConfig)
 	assert.NilError(t, err)
 
-	clientStatic, leaf := newPQClientAuth(t, intermediate) // TODO when generating the keys, what do we do with them
+	clientStatic, leaf := newPQClientAuth(t, intermediate)
 	clientConfig := ClientConfig{
 		Verify:       *verifyConfig,
-		Exchanger:    nil, // TODO when generating the keys, what do we do with them
 		Leaf:         leaf,
 		Intermediate: intermediate,
 	}

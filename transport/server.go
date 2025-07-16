@@ -735,7 +735,7 @@ func (s *Server) init() error {
 	s.m.Lock()
 	defer s.m.Unlock()
 
-	if s.config.KeyPair == nil && &s.config.KEMKeyPair == nil && s.config.GetCertificate == nil {
+	if s.config.KeyPair == nil && len(s.config.KEMKeyPair.Public().Bytes()) == 0 && s.config.GetCertificate == nil {
 		return errors.New("config.KeyPair, or s.config.KEMKeyPair, or config.GetCertificate must be set")
 	}
 	if s.config.Certificate == nil && s.config.GetCertificate == nil {
