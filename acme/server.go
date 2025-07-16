@@ -1,7 +1,7 @@
 package acme
 
 import (
-	"crypto/rand"
+	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
@@ -19,7 +19,6 @@ import (
 	"hop.computer/hop/config"
 	"hop.computer/hop/hopclient"
 	"hop.computer/hop/hopserver"
-	"hop.computer/hop/keys"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
 )
@@ -30,7 +29,7 @@ type AcmeServerConfig struct {
 	*config.ServerConfig
 	SigningCertificate *certs.Certificate
 	IsChallengeServer  bool
-	ChallengeString    string
+	Challenge          []byte
 	Log                *logrus.Entry
 }
 
@@ -119,7 +118,7 @@ func (s *AcmeSession) StartChallenge() error {
 	if err != nil {
 		return err
 	}
-	_, err = tube.Write([]byte(s.server.Config.ChallengeString))
+	_, err = tube.Write(s.server.Config.Challenge)
 	if err != nil {
 		return err
 	}
@@ -145,23 +144,19 @@ func (s *AcmeSession) Start() error {
 	}
 	domain := domainAndKey.DomainName
 
-	// Step 2: CA sends deployment key and a random challenge token
-	s.log.Info("Step 2. CA sends new deployment key and random challenge token")
-	challenge := make([]byte, ChallengeLen)
-	rand.Read(challenge)
-	challengeString := base64.StdEncoding.EncodeToString(challenge)
+	// Step 2: CA sends deployment cert and a random challenge token
+	s.log.Info("Step 2. CA sends new deployment cert and random challenge token")
 
-	keyPair := keys.GenerateNewX25519KeyPair()
-
-	_, err = tube.Write(keyPair.Public[:])
+	challenge, err := MakeChallenge()
 	if err != nil {
 		return err
 	}
-	_, err = tube.Write([]byte(challengeString))
+	_, err = challenge.WriteTo(tube)
 	if err != nil {
 		return err
 	}
-	s.log.Infof("challenge: %s\npubkey: %s\n", challengeString, base64.StdEncoding.EncodeToString(keyPair.Public[:]))
+
+	s.log.Infof("challenge: %x\npubkey: %s\n", challenge.Challenge, base64.StdEncoding.EncodeToString(challenge.keyPair.Public[:]))
 
 	// Step 3: Wait for confirmation that challenge is ready
 	s.log.Info("Step 3. Wait for confirmation that challenge is ready")
@@ -195,7 +190,7 @@ func (s *AcmeSession) Start() error {
 		return err
 	}
 
-	keyBytes := keyPair.Private.String()
+	keyBytes := challenge.keyPair.Private.String()
 	client.Fsystem = fstest.MapFS{
 		keyPath: &fstest.MapFile{
 			Data: []byte(keyBytes + "\n"),
@@ -213,16 +208,16 @@ func (s *AcmeSession) Start() error {
 		return err
 	}
 
-	challengeResponse := make([]byte, base64.StdEncoding.EncodedLen(ChallengeLen))
+	challengeResponse := make([]byte, ChallengeLen)
 	s.log.Info("waiting for client response")
 	_, err = io.ReadFull(innerTube, challengeResponse)
-	s.log.Infof("expected challenge: %s\n", challengeString)
-	s.log.Infof("finished pipe read: %s\n", string(challengeResponse))
+	s.log.Infof("expected challenge: %x\n", challenge.Challenge)
+	s.log.Infof("finished pipe read: %x\n", challengeResponse)
 	if err != nil {
 		return err
 	}
 
-	if challengeString != string(challengeResponse) {
+	if !bytes.Equal(challenge.Challenge, challengeResponse) {
 		s.log.Warn("CHALLENGE RESPONSE DID NOT MATCH")
 		return fmt.Errorf("challenge response did not match")
 	} else {

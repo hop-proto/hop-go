@@ -2,6 +2,8 @@
 package acme
 
 import (
+	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -21,14 +23,15 @@ type DomainNameAndKey struct {
 	PublicKey  [certs.KeyLen]byte
 }
 
-func (d *DomainNameAndKey) Write(w io.Writer) (int, error) {
+func (d *DomainNameAndKey) WriteTo(w io.Writer) (int64, error) {
 	buf := make([]byte, len(d.DomainName)+len(d.PublicKey)+4)
 	binary.BigEndian.PutUint16(buf, uint16(len(d.DomainName)))
 	copy(buf[2:], []byte(d.DomainName))
 	binary.BigEndian.PutUint16(buf[2+len(d.DomainName):], d.Port)
 	copy(buf[4+len(d.DomainName):], d.PublicKey[:])
 
-	return w.Write(buf)
+	n, err := w.Write(buf)
+	return int64(n), err
 }
 
 func (d *DomainNameAndKey) Read(r io.Reader) error {
@@ -49,6 +52,80 @@ func (d *DomainNameAndKey) Read(r io.Reader) error {
 	_, err = io.ReadFull(r, d.PublicKey[:])
 
 	return err
+}
+
+type CertAndChallenge struct {
+	keyPair   *keys.X25519KeyPair
+	Cert      *certs.Certificate
+	Challenge []byte
+}
+
+func MakeChallenge() (*CertAndChallenge, error) {
+	challenge := make([]byte, ChallengeLen)
+	rand.Read(challenge)
+
+	keyPair := keys.GenerateNewX25519KeyPair()
+	leaf, err := certs.SelfSignLeaf(&certs.Identity{
+		PublicKey: keyPair.Public,
+		Names:     []certs.Name{certs.RawStringName(AcmeUser)},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &CertAndChallenge{
+		keyPair:   keyPair,
+		Cert:      leaf,
+		Challenge: challenge,
+	}, nil
+}
+
+func (cr *CertAndChallenge) WriteTo(w io.Writer) (int64, error) {
+	certBytes, err := cr.Cert.Marshal()
+	if err != nil {
+		return 0, err
+	}
+	certLen := len(certBytes)
+
+	buf := make([]byte, 2+certLen+ChallengeLen)
+
+	copy(buf, cr.Challenge)
+	binary.BigEndian.PutUint16(buf[ChallengeLen:], uint16(certLen))
+	copy(buf[2+ChallengeLen:], certBytes)
+
+	n, err := w.Write(buf)
+
+	return int64(n), err
+}
+
+func (cr *CertAndChallenge) ReadFrom(r io.Reader) (int64, error) {
+	cr.Challenge = make([]byte, ChallengeLen)
+	n := 0
+
+	err := binary.Read(r, binary.BigEndian, cr.Challenge)
+	n += len(cr.Challenge)
+	if err != nil {
+		return int64(n), err
+	}
+
+	var certLen uint16
+	err = binary.Read(r, binary.BigEndian, &certLen)
+	n += 2
+	if err != nil {
+		return int64(n), err
+	}
+
+	certBytes := make([]byte, certLen)
+	err = binary.Read(r, binary.BigEndian, certBytes)
+	n += len(certBytes)
+	if err != nil {
+		return int64(n), err
+	}
+
+	cr.Cert = &certs.Certificate{}
+	cr.Cert.ReadFrom(bytes.NewBuffer(certBytes))
+
+	return int64(n), err
 }
 
 type CertificateRequest struct {

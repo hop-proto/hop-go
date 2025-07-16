@@ -1,15 +1,14 @@
 package acme
 
 import (
-	"encoding/base64"
 	"encoding/binary"
 	"fmt"
-	"io"
 	"strconv"
 	"time"
 
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/authgrants"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
 	"hop.computer/hop/config"
@@ -47,7 +46,7 @@ func (c *AcmeClient) Dial() error {
 	return c.HopClient.Dial()
 }
 
-func (c *AcmeClient) startChallengeServer(listenAddr, challengeString string, ourKeys *keys.X25519KeyPair, caPubKey keys.PublicKey) (*AcmeServer, error) {
+func (c *AcmeClient) startChallengeServer(listenAddr string, challenge []byte, ourKeys *keys.X25519KeyPair, caCert *certs.Certificate) (*AcmeServer, error) {
 	root, intermediate, leaf, err := createCertChain(c.Config.DomainName, ourKeys)
 	if err != nil {
 		return nil, err
@@ -55,18 +54,18 @@ func (c *AcmeClient) startChallengeServer(listenAddr, challengeString string, ou
 
 	config := &AcmeServerConfig{
 		ServerConfig: &config.ServerConfig{
-			Key:                ourKeys,
-			Certificate:        leaf,
-			Intermediate:       intermediate,
-			ListenAddress:      listenAddr,
-			HandshakeTimeout:   5 * time.Minute,
-			DataTimeout:        5 * time.Minute,
-			CACerts:            []*certs.Certificate{root, intermediate},
-			InsecureSkipVerify: true, // TODO(hosono) only allow the CA to see the challenge
+			Key:              ourKeys,
+			Certificate:      leaf,
+			Intermediate:     intermediate,
+			ListenAddress:    listenAddr,
+			HandshakeTimeout: 5 * time.Minute,
+			DataTimeout:      5 * time.Minute,
+			CACerts:          []*certs.Certificate{root, intermediate},
+			EnableAuthgrants: true,
 		},
 		SigningCertificate: nil,
 		IsChallengeServer:  true,
-		ChallengeString:    challengeString,
+		Challenge:          challenge,
 		Log:                c.log.WithField("challengeServer", ""),
 	}
 
@@ -74,6 +73,14 @@ func (c *AcmeClient) startChallengeServer(listenAddr, challengeString string, ou
 	if err != nil {
 		return nil, err
 	}
+
+	server.AddAuthGrant(&authgrants.Intent{
+		GrantType:      authgrants.Acme,
+		StartTime:      time.Now(),
+		ExpTime:        time.Now().Add(time.Hour),
+		TargetUsername: AcmeUser,
+		DelegateCert:   *caCert,
+	})
 
 	go server.Serve()
 
@@ -95,31 +102,25 @@ func (c *AcmeClient) Run() (*certs.Certificate, error) {
 		Port:       c.Config.ChallengePort,
 		PublicKey:  reqKeyPair.Public,
 	}
-	_, err = domainAndKey.Write(tube)
+	_, err = domainAndKey.WriteTo(tube)
 	if err != nil {
 		return nil, err
 	}
 
-	// Step 2: Receive public key and challenge from server
-	c.log.Info("Step 2: Receive public key and challenge from server")
-	caPubKey := keys.PublicKey{}
-	_, err = tube.Read(caPubKey[:])
+	// Step 2: Receive certificate and challenge from server
+	c.log.Info("Step 2: Receive certificate and challenge from server")
+	challenge := &CertAndChallenge{}
+	_, err = challenge.ReadFrom(tube)
 	if err != nil {
 		return nil, err
 	}
 
-	challenge := make([]byte, base64.StdEncoding.EncodedLen(ChallengeLen))
-	_, err = io.ReadFull(tube, challenge)
-	if err != nil {
-		return nil, err
-	}
-	challengeString := string(challenge)
-	c.log.Infof("client got challenge string: %s\n", challengeString)
+	c.log.Infof("client got challenge: %x\n", challenge.Challenge)
 
 	// Step 3: Requester informs CA that challenge is complete
 	c.log.Info("Step 3: Requester informs CA that challenge is complete")
 	localAddr := "localhost:" + strconv.Itoa(int(c.Config.ChallengePort))
-	server, err := c.startChallengeServer(localAddr, challengeString, reqKeyPair, caPubKey)
+	server, err := c.startChallengeServer(localAddr, challenge.Challenge, reqKeyPair, challenge.Cert)
 	if err != nil {
 		return nil, err
 	}
