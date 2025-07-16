@@ -119,6 +119,9 @@ func (s *AcmeSession) StartChallenge() error {
 	s.log.Info("checking authgrant")
 
 	t, err := s.tubeMuxer.Accept()
+	if err != nil {
+		return err
+	}
 	uaTube, ok := t.(*tubes.Reliable)
 	if !ok || uaTube.Type() != common.UserAuthTube {
 		return fmt.Errorf("did not get userauth tube")
