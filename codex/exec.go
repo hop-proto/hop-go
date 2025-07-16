@@ -168,14 +168,14 @@ func NewExecTube(c Config) (*ExecTube, error) {
 
 	go func(ex *ExecTube) {
 		defer c.WaitGroup.Done()
-		_, err := pausableCopy(c.StdinTube, inPipe, ex.lock)
+		n, err := pausableCopy(c.StdinTube, inPipe, ex.lock)
 		if err != nil {
 			logrus.Errorf("codex: error copying from stdin to tube: %s", err)
 		}
 		if oldState != nil {
 			term.Restore(int(os.Stdin.Fd()), oldState)
 		}
-		logrus.Info("Stopped io.Copy(StdinTube, InPipe)")
+		logrus.WithField("bytes", n).Info("Stopped io.Copy(StdinTube, InPipe)")
 		c.StdinTube.Close()
 		logrus.Info("closed stdin tube")
 	}(&ex)
