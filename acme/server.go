@@ -39,7 +39,8 @@ type AcmeServerConfig struct {
 // AcmeServer represents the state of a server engaging in the acme protocol
 type AcmeServer struct {
 	*hopserver.HopServer
-	Config        *AcmeServerConfig
+	Config *AcmeServerConfig
+	// +checklocks:sessionLock
 	sessions      map[sessID]*AcmeSession
 	nextSessionID atomic.Uint32
 	sessionLock   sync.Mutex
