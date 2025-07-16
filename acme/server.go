@@ -14,13 +14,16 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/authgrants"
 	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
 	"hop.computer/hop/config"
 	"hop.computer/hop/hopclient"
 	"hop.computer/hop/hopserver"
+	"hop.computer/hop/keys"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
+	"hop.computer/hop/userauth"
 )
 
 type sessID uint32
@@ -113,6 +116,31 @@ func (s *AcmeServer) newSession(serverConn *transport.Handle) {
 }
 
 func (s *AcmeSession) StartChallenge() error {
+	s.log.Info("checking authgrant")
+
+	t, err := s.tubeMuxer.Accept()
+	uaTube, ok := t.(*tubes.Reliable)
+	if !ok || uaTube.Type() != common.UserAuthTube {
+		return fmt.Errorf("did not get userauth tube")
+	}
+	defer uaTube.Close()
+
+	username := userauth.GetInitMsg(uaTube) // client sends desired username
+	leaf := s.transportConn.FetchClientLeaf()
+	k := keys.PublicKey(leaf.PublicKey)
+	s.log.Info("got userauth init message: ", k.String())
+
+	ags, err := s.server.AuthorizeKeyAuthGrant(username, k)
+	if err != nil {
+		return err
+	}
+	if len(ags) == 1 && ags[0].GrantType == authgrants.Acme && time.Now().Before(ags[0].ExpTime) {
+		s.log.Info("client authorized to receive challenge")
+		uaTube.Write([]byte{userauth.UserAuthConf})
+	} else {
+		return fmt.Errorf("client is not authorized to receive challenge")
+	}
+
 	s.log.Info("sending challenge")
 	tube, err := s.tubeMuxer.Accept()
 	if err != nil {
@@ -172,7 +200,6 @@ func (s *AcmeSession) Start() error {
 	// Step 4: CA checks that client controls identifier
 	s.log.Info("Step 4. CA checks that client controls identifier")
 	t := true
-	f := false
 	username := AcmeUser
 	keyPath := "id_hop.pem"
 	hc := &config.HostConfigOptional{
@@ -182,7 +209,7 @@ func (s *AcmeSession) Start() error {
 		Port:                 8888,
 		User:                 &username,
 		InsecureSkipVerify:   &t,
-		RequestAuthorization: &f,
+		RequestAuthorization: &t,
 	}
 	clientConfig := hc.Unwrap()
 	client, err := hopclient.NewHopClient(clientConfig)

@@ -70,10 +70,10 @@ func (sess *hopSession) checkAuthorization() bool {
 	logrus.Info("got userauth init message: ", k.String())
 
 	sess.usingAuthGrant = false
-	err = sess.server.authorizeKey(username, k)
+	err = sess.server.AuthorizeKey(username, k)
 	if err != nil {
 		if sess.server.config.EnableAuthgrants {
-			actions, err := sess.server.authorizeKeyAuthGrant(username, k)
+			actions, err := sess.server.AuthorizeKeyAuthGrant(username, k)
 			if err != nil {
 				logrus.Errorf("rejecting key for %q: %s", username, err)
 				return false
