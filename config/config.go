@@ -12,8 +12,10 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/sirupsen/logrus"
 
+	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
 	"hop.computer/hop/core"
+	"hop.computer/hop/keys"
 	"hop.computer/hop/pkg/glob"
 	"hop.computer/hop/pkg/thunks"
 	"hop.computer/hop/portforwarding"
@@ -29,11 +31,11 @@ type ClientConfig struct {
 
 // ServerConfig represents a parsed server configuration.
 type ServerConfig struct {
-	Key          string
-	Certificate  string
-	Intermediate string
+	Key          *keys.X25519KeyPair
+	Certificate  *certs.Certificate
+	Intermediate *certs.Certificate
 
-	AutoSelfSign  *bool
+	AutoSelfSign  bool
 	ListenAddress string
 
 	Names                []NameConfig
@@ -43,7 +45,44 @@ type ServerConfig struct {
 	DataTimeout      time.Duration
 
 	// transport layer client validation options
-	CAFiles                      []string // root and intermediate certs
+	CACerts                      []*certs.Certificate // root and intermediate certs
+	InsecureSkipVerify           bool
+	DisableCertificateValidation bool
+	EnableAuthorizedKeys         bool
+	Users                        []string // users for whom to load their authorized_keys files into transport layer
+
+	EnableAuthgrants    bool // as an authgrant Target this server will approve authgrants and as an authgrant Delegate server will proxy ag intent requests
+	AgProxyListenSocket *string
+}
+
+// NameConfig defines the keys and certificates presented by the server for a
+// given name.
+type NameConfig struct {
+	Pattern      string
+	Key          *keys.X25519KeyPair
+	Certificate  *certs.Certificate
+	Intermediate *certs.Certificate
+	AutoSelfSign bool
+	// TODO(dadrian): User mapping
+}
+
+// serverConfigSchema represents a server config file in a way that TOML can parse
+type serverConfigSchema struct {
+	Key          string // the path the the key file
+	Certificate  string // path to the certificate
+	Intermediate string // path to the intermediate cert
+
+	AutoSelfSign  *bool
+	ListenAddress string
+
+	Names                []nameConfigSchema
+	HiddenModeVHostNames []string
+
+	HandshakeTimeout time.Duration
+	DataTimeout      time.Duration
+
+	// transport layer client validation options
+	CAFiles                      []string // root and intermediate cert paths
 	InsecureSkipVerify           *bool
 	DisableCertificateValidation *bool
 	EnableAuthorizedKeys         *bool
@@ -53,80 +92,82 @@ type ServerConfig struct {
 	AgProxyListenSocket *string
 }
 
-// HostConfigOptional contains a definition of a host pattern in a client
-// configuration; strings and bools are represented as pointers so that a
-// default value can be distinguished from a set zero-value; users should
-// convert to a `HostConfig` (via .Unwrap) before reading the values
-type HostConfigOptional struct {
-	AgentURL         *string
-	AutoSelfSign     *bool
-	CAFiles          []string
-	ServerName       *string
-	ServerKey        *string
-	ServerIPv4       *string
-	ServerIPv6       *string
-	Certificate      *string
-	Cmd              *string // what command to run on connect
-	DisableAgent     *bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
-	Headless         *bool   // run without command
-	Hostname         *string
-	Intermediate     *string
-	Key              *string
-	Patterns         []string
-	Port             int
-	RemoteFwds       *portforwarding.Forward
-	LocalFwds        *portforwarding.Forward
-	User             *string
-	IsDelegate       *bool // If set then client will initiate authgrant protocol
-	IsPrincipal      *bool // If set then client will respond to authgrant requests
-	UsePty           *bool
-	HandshakeTimeout int
-	DataTimeout      int
-	Input            io.Reader
-	Output           io.Writer
-}
-
-// HostConfig contains a definition of a host pattern in a client configuration
-type HostConfig struct {
-	AgentURL         string
-	AutoSelfSign     bool
-	CAFiles          []string
-	ServerName       string // expected name on server cert
-	ServerKey        string // Server Public key to enable Hidden mode
-	ServerIPv4       string
-	ServerIPv6       string
-	Certificate      string
-	Cmd              string // what command to run on connect
-	DisableAgent     bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
-	Headless         bool   // run without command
-	Hostname         string
-	Intermediate     string
-	Key              string
-	Port             int
-	RemoteFwds       *portforwarding.Forward
-	LocalFwds        *portforwarding.Forward
-	User             string
-	IsDelegate       bool
-	IsPrincipal      bool
-	UsePty           bool
-	HandshakeTimeout time.Duration
-	DataTimeout      time.Duration
-	// The source from which data will be read and sent to the server
-	Input io.Reader
-	// The destination where data from the server will be written
-	Output io.Writer
-}
-
 // NameConfig defines the keys and certificates presented by the server for a
 // given name.
-type NameConfig struct {
+type nameConfigSchema struct {
 	Pattern      string
 	Key          string
 	Certificate  string
 	Intermediate string
 	AutoSelfSign *bool
+}
 
-	// TODO(dadrian): User mapping
+// HostConfigOptional contains a definition of a host pattern in a client
+// configuration; strings and bools are represented as pointers so that a
+// default value can be distinguished from a set zero-value; users should
+// convert to a `HostConfig` (via .Unwrap) before reading the values
+type HostConfigOptional struct {
+	AgentURL             *string
+	AutoSelfSign         *bool
+	CAFiles              []string
+	ServerName           *string
+	ServerKey            *string
+	ServerIPv4           *string
+	ServerIPv6           *string
+	Certificate          *string
+	Cmd                  *string // what command to run on connect
+	DisableAgent         *bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
+	Headless             *bool   // run without command
+	Hostname             *string
+	Intermediate         *string
+	Key                  *string
+	Patterns             []string
+	Port                 int
+	RemoteFwds           *portforwarding.Forward
+	LocalFwds            *portforwarding.Forward
+	User                 *string
+	IsDelegate           *bool // If set then client will initiate authgrant protocol
+	IsPrincipal          *bool // If set then client will respond to authgrant requests
+	UsePty               *bool
+	HandshakeTimeout     int
+	DataTimeout          int
+	InsecureSkipVerify   *bool // If set, the client will not verify the server's certificate
+	RequestAuthorization *bool
+	Input                io.Reader
+	Output               io.Writer
+}
+
+// HostConfig contains a definition of a host pattern in a client configuration
+type HostConfig struct {
+	AgentURL             string
+	AutoSelfSign         bool
+	CAFiles              []string
+	ServerName           string // expected name on server cert
+	ServerKey            string // Server Public key to enable Hidden mode
+	ServerIPv4           string
+	ServerIPv6           string
+	Certificate          string
+	Cmd                  string // what command to run on connect
+	DisableAgent         bool   // TODO(baumanl): figure out a better way to get a running agent to not interfere with other tests
+	Headless             bool   // run without command
+	Hostname             string
+	Intermediate         string
+	Key                  string
+	Port                 int
+	RemoteFwds           *portforwarding.Forward
+	LocalFwds            *portforwarding.Forward
+	User                 string
+	IsDelegate           bool
+	IsPrincipal          bool
+	UsePty               bool
+	HandshakeTimeout     time.Duration
+	DataTimeout          time.Duration
+	InsecureSkipVerify   bool
+	RequestAuthorization bool // whether or not the client will open a userauth tube to login as a user
+	// The source from which data will be read and sent to the server
+	Input io.Reader
+	// The destination where data from the server will be written
+	Output io.Writer
 }
 
 // MergeWith takes non-default values in another HostConfigOptional and overwrites them
@@ -200,10 +241,11 @@ func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
 func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	//TODO(drebelsky): consider using reflection
 	newHC := HostConfig{
-		HandshakeTimeout: 15 * time.Second,
-		DataTimeout:      15 * time.Second,
-		Input:            os.Stdin,
-		Output:           os.Stdout,
+		HandshakeTimeout:     15 * time.Second,
+		DataTimeout:          15 * time.Second,
+		Input:                os.Stdin,
+		Output:               os.Stdout,
+		RequestAuthorization: true,
 	}
 	if hc.AgentURL != nil {
 		newHC.AgentURL = *hc.AgentURL
@@ -267,6 +309,12 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	if hc.DataTimeout != 0 {
 		newHC.DataTimeout = time.Duration(hc.DataTimeout) * time.Second
 	}
+	if hc.InsecureSkipVerify != nil {
+		newHC.InsecureSkipVerify = *hc.InsecureSkipVerify
+	}
+	if hc.RequestAuthorization != nil {
+		newHC.RequestAuthorization = *hc.RequestAuthorization
+	}
 	if hc.Input != nil {
 		newHC.Input = hc.Input
 	}
@@ -284,7 +332,11 @@ func LoadClientConfigFromFile(path string) (*ClientConfig, error) {
 }
 
 func loadClientConfigFromFile(c *ClientConfig, path string) (*ClientConfig, error) {
-	meta, err := toml.DecodeFile(path, c)
+	file, err := fileSystem.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	meta, err := toml.NewDecoder(file).Decode(c)
 	keys, lines := meta.UndecodedWithLines()
 	for i, key := range keys {
 		logrus.Warnf("While parsing config, encountered unknown key `%v` at %v:%v", key, path, lines[i])
@@ -300,13 +352,119 @@ func LoadServerConfigFromFile(path string) (*ServerConfig, error) {
 }
 
 func loadServerConfigFromFile(c *ServerConfig, path string) (*ServerConfig, error) {
-	meta, err := toml.DecodeFile(path, c)
-	keys, lines := meta.UndecodedWithLines()
-	for i, key := range keys {
+	parsed := &serverConfigSchema{}
+	file, err := fileSystem.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	meta, err := toml.NewDecoder(file).Decode(parsed)
+	if err != nil {
+		return nil, err
+	}
+	tomlKeys, lines := meta.UndecodedWithLines()
+	for i, key := range tomlKeys {
 		logrus.Warnf("While parsing config, encountered unknown key `%v` at %v:%v", key, path, lines[i])
 	}
-	c.HandshakeTimeout *= time.Second
-	c.DataTimeout *= time.Second
+
+	key, err := keys.ReadDHKeyFromPEMFileFS(parsed.Key, fileSystem)
+	if err != nil {
+		return nil, err
+	}
+	c.Key = key
+
+	cert, err := certs.ReadCertificatePEMFileFS(parsed.Certificate, fileSystem)
+	if err != nil {
+		return nil, err
+	}
+	c.Certificate = cert
+
+	if parsed.Intermediate != "" {
+		intermediate, err := certs.ReadCertificatePEMFileFS(parsed.Intermediate, fileSystem)
+		if err != nil {
+			return nil, err
+		}
+		c.Intermediate = intermediate
+	}
+
+	c.AutoSelfSign = false
+	if parsed.AutoSelfSign != nil {
+		c.AutoSelfSign = *parsed.AutoSelfSign
+	}
+
+	c.ListenAddress = parsed.ListenAddress
+
+	c.Names = make([]NameConfig, 0)
+	for _, nameConf := range parsed.Names {
+		key, err := keys.ReadDHKeyFromPEMFileFS(nameConf.Key, fileSystem)
+		if err != nil {
+			return nil, err
+		}
+		cert, err := certs.ReadCertificatePEMFileFS(nameConf.Certificate, fileSystem)
+		if err != nil {
+			return nil, err
+		}
+		intermediate, err := certs.ReadCertificatePEMFileFS(nameConf.Intermediate, fileSystem)
+		if err != nil {
+			return nil, err
+		}
+		autoSelfSign := false
+		if nameConf.AutoSelfSign != nil {
+			autoSelfSign = *nameConf.AutoSelfSign
+		}
+		name := NameConfig{
+			Pattern:      nameConf.Pattern,
+			Key:          key,
+			Certificate:  cert,
+			Intermediate: intermediate,
+			AutoSelfSign: autoSelfSign,
+		}
+		c.Names = append(c.Names, name)
+	}
+
+	c.HiddenModeVHostNames = parsed.HiddenModeVHostNames
+
+	c.HandshakeTimeout = time.Second
+	if parsed.HandshakeTimeout != 0 {
+		c.HandshakeTimeout = parsed.HandshakeTimeout
+	}
+
+	c.DataTimeout = time.Second
+	if parsed.DataTimeout != 0 {
+		c.DataTimeout = parsed.DataTimeout
+	}
+
+	c.CACerts = make([]*certs.Certificate, 0)
+	for _, certPath := range parsed.CAFiles {
+		cert, err := certs.ReadCertificatePEMFileFS(certPath, fileSystem)
+		if err != nil {
+			return nil, err
+		}
+		c.CACerts = append(c.CACerts, cert)
+	}
+
+	c.InsecureSkipVerify = false
+	if parsed.InsecureSkipVerify != nil {
+		c.InsecureSkipVerify = *parsed.InsecureSkipVerify
+	}
+
+	c.DisableCertificateValidation = false
+	if parsed.DisableCertificateValidation != nil {
+		c.DisableCertificateValidation = *parsed.DisableCertificateValidation
+	}
+
+	c.EnableAuthorizedKeys = false
+	if parsed.EnableAuthorizedKeys != nil {
+		c.EnableAuthorizedKeys = *parsed.EnableAuthorizedKeys
+	}
+
+	c.Users = parsed.Users
+
+	c.EnableAuthgrants = false
+	if parsed.EnableAuthgrants != nil {
+		c.EnableAuthgrants = *parsed.EnableAuthgrants
+	}
+	c.AgProxyListenSocket = parsed.AgProxyListenSocket
+
 	return c, err
 }
 

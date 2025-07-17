@@ -70,10 +70,10 @@ func (sess *hopSession) checkAuthorization() bool {
 	logrus.Info("got userauth init message: ", k.String())
 
 	sess.usingAuthGrant = false
-	err = sess.server.authorizeKey(username, k)
+	err = sess.server.AuthorizeKey(username, k)
 	if err != nil {
-		if sess.server.config.EnableAuthgrants != nil && *sess.server.config.EnableAuthgrants {
-			actions, err := sess.server.authorizeKeyAuthGrant(username, k)
+		if sess.server.config.EnableAuthgrants {
+			actions, err := sess.server.AuthorizeKeyAuthGrant(username, k)
 			if err != nil {
 				logrus.Errorf("rejecting key for %q: %s", username, err)
 				return false
@@ -177,7 +177,7 @@ func (sess *hopSession) handleAgc(tube *tubes.Reliable) {
 	logrus.Info("target: received authgrant tube")
 
 	// Check server config (coarse grained enable/disable)
-	if sess.server.config.EnableAuthgrants == nil || !*sess.server.config.EnableAuthgrants { // AuthGrants not enabled
+	if !sess.server.config.EnableAuthgrants { // AuthGrants not enabled
 		authgrants.WriteIntentDenied(tube, authgrants.TargetDenial)
 	} else {
 		logrus.Info("target: starting target instance")
@@ -305,7 +305,7 @@ func (sess *hopSession) startCodex(t1, t2 *tubes.Reliable) {
 
 	codex.SendSuccess(stdoutTube)
 	go func() {
-		c.Process.Wait()
+		c.Wait()
 		logrus.Info("command done. closing tubes")
 		stdoutTube.Close()
 		stdinTube.Close()

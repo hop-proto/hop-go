@@ -24,8 +24,8 @@ import (
 // - checking all client actions if authorized using an authgrant and updating
 //   authorized actions accordingly
 
-func (s *HopServer) authorizeKeyAuthGrant(user string, publicKey keys.PublicKey) ([]authgrants.Authgrant, error) {
-	if s.config.EnableAuthgrants != nil && *s.config.EnableAuthgrants {
+func (s *HopServer) AuthorizeKeyAuthGrant(user string, publicKey keys.PublicKey) ([]authgrants.Authgrant, error) {
+	if s.config.EnableAuthgrants {
 		ags, err := s.agMap.RemoveAuthgrants(user, publicKey)
 		if err == nil {
 			// remove from transport layer key set

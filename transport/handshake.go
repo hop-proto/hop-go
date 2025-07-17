@@ -525,7 +525,7 @@ func (hs *HandshakeState) certificateParserAndVerifier(rawLeaf []byte, rawInterm
 			logrus.Info("Used an authorized key to authenticate")
 		}
 	} else {
-		logrus.Debug("InsecureSkipVerify set. Not verifying server certificate")
+		logrus.Debug("InsecureSkipVerify set. Not verifying certificate")
 	}
 
 	if hs.certVerify != nil && hs.certVerify.AddVerifyCallback != nil {

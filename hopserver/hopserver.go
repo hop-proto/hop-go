@@ -49,7 +49,7 @@ type HopServer struct {
 
 	fsystem fs.FS
 
-	server   *transport.Server
+	Server   *transport.Server
 	keyStore *authkeys.SyncAuthKeySet
 	authsock net.Listener //nolint TODO(hosono) add linting back
 }
@@ -82,13 +82,12 @@ func NewHopServerExt(underlying *transport.Server, config *config.ServerConfig, 
 
 		config: config,
 
-		server: underlying,
+		Server: underlying,
 
 		fsystem: os.DirFS("/"),
 	}
 
-	if (config.EnableAuthorizedKeys != nil && *config.EnableAuthorizedKeys) ||
-		(config.EnableAuthgrants != nil && *config.EnableAuthgrants) {
+	if config.EnableAuthorizedKeys || config.EnableAuthgrants {
 		server.keyStore = ks
 	} else {
 		server.keyStore = authkeys.NewSyncAuthKeySet()
@@ -158,24 +157,18 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 	// 4. Authorized keys only: cert validation explicitly disabled and auth keys explicitly enabled
 
 	// Explicitly setting sc.InsecureSkipVerify overrides everything else
-	if sc.InsecureSkipVerify != nil && *sc.InsecureSkipVerify {
+	if sc.InsecureSkipVerify {
 		tconf.ClientVerify.InsecureSkipVerify = true
 	} else {
 		// Cert validation enabled by default (must be explicitly disabled)
-		if sc.DisableCertificateValidation == nil || !*sc.DisableCertificateValidation {
+		if !sc.DisableCertificateValidation {
 			tconf.ClientVerify.Store = certs.Store{}
-			for _, s := range sc.CAFiles {
-				cert, err := certs.ReadCertificatePEMFile(s)
-				if err != nil {
-					logrus.Fatalf("server: error loading cert at %s: %s", s, err)
-					continue
-				}
-				logrus.Debugf("server: loaded cert with fingerprint: %x", cert.Fingerprint)
-				tconf.ClientVerify.Store.AddCertificate(cert)
+			for _, caCert := range sc.CACerts {
+				tconf.ClientVerify.Store.AddCertificate(caCert)
 			}
 		}
 		// Authgrants disabled by default (must be explicitly enabled)
-		if sc.EnableAuthgrants != nil && *sc.EnableAuthgrants {
+		if sc.EnableAuthgrants {
 			// Create an empty key set for authgrant keys to be added to
 			logrus.Debug("created authkeys sync set")
 			tconf.ClientVerify.AuthKeys = authkeys.NewSyncAuthKeySet()
@@ -183,7 +176,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		}
 
 		// Authorized keys disabled by default (must be explicitly enabled)
-		if sc.EnableAuthorizedKeys != nil && *sc.EnableAuthorizedKeys {
+		if sc.EnableAuthorizedKeys {
 			logrus.Debug("hopserver: authorized keys are enabled")
 			if tconf.ClientVerify.AuthKeys == nil {
 				// Create key set if one doesn't already exist from Authgrants being enabled
@@ -223,7 +216,7 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 // Serve listens for incoming hop connection requests and starts
 // corresponding agproxy on unix socket
 func (s *HopServer) Serve() {
-	go s.server.Serve() // start transport layer server
+	go s.Server.Serve() // start transport layer server
 	logrus.Info("hop server starting")
 
 	// start dpproxy
@@ -239,7 +232,7 @@ func (s *HopServer) Serve() {
 	}
 
 	for {
-		serverConn, err := s.server.AcceptTimeout(30 * time.Minute)
+		serverConn, err := s.Server.AcceptTimeout(30 * time.Minute)
 		// io.EOF indicates the server was closed, which is ok
 		if errors.Is(err, io.EOF) {
 			return
@@ -282,10 +275,10 @@ func (s *HopServer) SetFSystem(fsystem fstest.MapFS) {
 func (s *HopServer) ListenAddress() net.Addr {
 	s.m.Lock()
 	defer s.m.Unlock()
-	if s.server == nil {
+	if s.Server == nil {
 		return &net.UDPAddr{}
 	}
-	return s.server.Addr()
+	return s.Server.Addr()
 }
 
 // Close stops the underlying connection and cleans up all resources
@@ -305,13 +298,13 @@ func (s *HopServer) Close() error {
 	}
 	wg.Wait()
 	s.dpProxy.stop()
-	return s.server.Close()
+	return s.Server.Close()
 }
 
 func (s *HopServer) AddAuthGrant(intent *authgrants.Intent) error {
 	// TODO(hosono) should authgrants be disabled by default?
 	// Can we give the server more fine-grained control over what intents it allows?
-	if s.config.EnableAuthgrants != nil && !*s.config.EnableAuthgrants {
+	if !s.config.EnableAuthgrants {
 		logrus.Warn("Tried to add authgrant, but authgrants are not enabled")
 		return fmt.Errorf("authgrants not enabled")
 	}
@@ -337,9 +330,9 @@ func (s *HopServer) AddAuthGrant(intent *authgrants.Intent) error {
 	return nil
 }
 
-// authorizeKey returns nil if the publicKey is in the authorized_keys file for
+// AuthorizeKey returns nil if the publicKey is in the authorized_keys file for
 // the user.
-func (s *HopServer) authorizeKey(user string, publicKey keys.PublicKey) error {
+func (s *HopServer) AuthorizeKey(user string, publicKey keys.PublicKey) error {
 	d, err := config.UserDirectoryFor(user)
 	if err != nil {
 		return err
@@ -370,31 +363,6 @@ type VirtualHost struct {
 	Certificate transport.Certificate
 }
 
-func transportCert(keyPath, certPath, intermediatePath string) (*transport.Certificate, error) {
-	keyPair, err := keys.ReadDHKeyFromPEMFile(keyPath)
-	if err != nil {
-		return nil, err
-	}
-	leaf, rawLeaf, err := certs.ReadCertificateBytesFromPEMFile(certPath)
-	if err != nil {
-		return nil, err
-	}
-	var rawIntermediate []byte
-	if intermediatePath != "" {
-		_, rawIntermediate, err = certs.ReadCertificateBytesFromPEMFile(intermediatePath)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return &transport.Certificate{
-		RawLeaf:         rawLeaf,
-		RawIntermediate: rawIntermediate,
-		Exchanger:       keyPair,
-		Leaf:            leaf,
-	}, nil
-
-}
-
 // NewVirtualHosts constructs a VirtualHost object from a server
 // configmap[string]transport.Certificate{}.
 func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fallbackCert *certs.Certificate) (VirtualHosts, error) {
@@ -403,7 +371,7 @@ func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fa
 		// TODO(dadrian)[2022-12-26]: If certs are shared, we'll re-parse all
 		// these. We could use some kind of content-addressable store to cache
 		// these after a single load pass across the whole config.
-		tc, err := transportCert(block.Key, block.Certificate, block.Intermediate)
+		tc, err := transport.MakeCert(block.Key, block.Certificate, block.Intermediate)
 		if err != nil {
 			return nil, err
 		}
@@ -412,10 +380,20 @@ func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fa
 			Certificate: *tc,
 		})
 	}
-	if c.Key != "" {
-		tc, err := transportCert(c.Key, c.Certificate, c.Intermediate)
+	if c.Key != nil {
+		rawLeaf, err := c.Certificate.Marshal()
 		if err != nil {
 			return nil, err
+		}
+		rawIntermediate, err := c.Intermediate.Marshal()
+		if err != nil {
+			return nil, err
+		}
+		tc := &transport.Certificate{
+			RawLeaf:         rawLeaf,
+			RawIntermediate: rawIntermediate,
+			Exchanger:       c.Key,
+			Leaf:            c.Certificate,
 		}
 		out = append(out, VirtualHost{
 			Pattern:     "*",

@@ -102,6 +102,8 @@ func (r *Reliable) initiate(req bool) {
 				return
 			}
 		}
+	} else {
+		<-r.initRecv
 	}
 
 	go r.send()
