@@ -553,7 +553,10 @@ func TestSelfAuthGrant(t *testing.T) {
 	err = s.Server.Close()
 	assert.NilError(t, err)
 
-	outString := output.String()
+	buf := make([]byte, len(testString))
+	_, err = output.Read(buf)
+	assert.NilError(t, err)
+	outString := string(buf)
 	logrus.Info(outString)
 	assert.Equal(t, outString, testString)
 }
