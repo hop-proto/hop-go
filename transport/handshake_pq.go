@@ -31,7 +31,7 @@ func writePQClientHello(hs *HandshakeState, b []byte) (int, error) {
 	// Ephemeral
 	ephemeralBytes := hs.kem.ephemeral.Public().Bytes()
 	copy(x, ephemeralBytes[:])
-	//hs.duplexAbsorbKem(x[:KemKeyLen])
+	hs.duplex.Absorb(x[:KemKeyLen])
 	x = x[KemKeyLen:]
 
 	// Mac
@@ -64,7 +64,7 @@ func readPQClientHello(hs *HandshakeState, b []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	//hs.duplexAbsorbKem(b[:KemKeyLen])
+	hs.duplex.Absorb(b[:KemKeyLen])
 	b = b[KemKeyLen:]
 
 	hs.duplex.Squeeze(hs.macBuf[:])
@@ -105,25 +105,6 @@ func writePQServerHello(hs *HandshakeState, b []byte) (int, error) {
 
 	return HeaderLen + PQCookieLen + MacLen, nil
 }
-
-// Cyclist's implementation has been thought to have absorption of max rKout 136 bytes
-// TODO (paul) be sure that this chunk split keep the duplex security
-// However we should not absorb Ct as non-deterministic
-// There is actually no use of duplexAbsorbKem (to be removed if never used)
-/*
-func (hs *HandshakeState) duplexAbsorbKem(key []byte) {
-	keyLen := len(key)
-	chunk := keyLen / 8
-
-	if chunk > 136 {
-		panic("Cyclist Duplex can't absorbe KEM. Chunk's size is too large")
-	}
-
-	for i := 0; i < 8; i++ {
-		hs.duplex.Absorb(key[chunk*i : chunk*(i+1)])
-	}
-}
-*/
 
 func readPQServerHello(hs *HandshakeState, b []byte) (int, error) {
 	if len(b) < HeaderLen+PQCookieLen+MacLen {
@@ -174,7 +155,7 @@ func (hs *HandshakeState) writePQClientAck(b []byte) (int, error) {
 	// Ephemeral
 	ephemeralBytes := hs.kem.ephemeral.Public().Bytes()
 	copy(b, ephemeralBytes[:])
-	//hs.duplexAbsorbKem(b[:KemKeyLen])
+	hs.duplex.Absorb(b[:KemKeyLen])
 	b = b[KemKeyLen:]
 
 	// Cookie
@@ -232,6 +213,7 @@ func (s *Server) readPQClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 	}
 
 	hs.duplex.Absorb(header)
+	hs.duplex.Absorb(ephemeral)
 	hs.duplex.Absorb(cookie)
 
 	hs.duplex.Decrypt(buf[:], b[:SNILen])
@@ -698,6 +680,7 @@ func (s *Server) ReplayPQDuplexFromCookie(cookie, clientEphemeralBytes []byte, c
 	// Replay Client Hello
 	out.duplex.Absorb([]byte(PostQuantumProtocolName))
 	out.duplex.Absorb([]byte{byte(MessageTypePQClientHello), Version, 0, 0})
+	out.duplex.Absorb(clientEphemeralBytes)
 	out.duplex.Squeeze(out.macBuf[:])
 	logrus.Debugf("server: regen ch mac: %x", out.macBuf[:])
 
@@ -735,6 +718,13 @@ func (hs *HandshakeState) writePQClientRequestHidden(b []byte) (int, error) {
 	b = b[HeaderLen:]
 	pos += HeaderLen
 
+	// Client Ephemeral
+	ephemeralBytes := hs.kem.ephemeral.Public().Bytes()
+	copy(b, ephemeralBytes[:])
+	hs.duplex.Absorb(b[:KemKeyLen])
+	b = b[KemKeyLen:]
+	pos += KemKeyLen
+
 	// KEM CipherText -> skem
 	ct, k, err := hs.kem.impl.Enc(rand.Reader, hs.kem.remoteStatic) // TODO write in hs.kem the remote static from the file
 	if err != nil {
@@ -744,7 +734,6 @@ func (hs *HandshakeState) writePQClientRequestHidden(b []byte) (int, error) {
 		return pos, ErrBufOverflow
 	}
 	copy(b, ct[:])
-	//hs.duplexAbsorbKem(b[:KemCtLen]) // public artifact encapsulating the shared secret
 	b = b[KemCtLen:]
 	pos += KemCtLen
 	hs.duplex.Absorb(k) // shared secret
@@ -770,13 +759,7 @@ func (hs *HandshakeState) writePQClientRequestHidden(b []byte) (int, error) {
 	b = b[MacLen:]
 	pos += MacLen
 
-	// Client Ephemeral
-	ephemeralBytes := hs.kem.ephemeral.Public().Bytes()
-	copy(b, ephemeralBytes[:])
-	//hs.duplexAbsorbKem(x[:KemKeyLen])
-	b = b[KemKeyLen:]
-	pos += KemKeyLen
-
+	// Timestamp
 	now := time.Now().Unix()
 	timeBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(timeBytes, uint64(now))
@@ -822,8 +805,8 @@ func (s *Server) readPQClientRequestHidden(hs *HandshakeState, b []byte) (int, e
 	}
 
 	var (
-		rawLeaf, rawIntermediate []byte
-		c                        *Certificate
+		rawLeaf, rawIntermediate, remoteEphemeralBytes []byte
+		c                                              *Certificate
 	)
 	bufCopy := make([]byte, len(b))
 
@@ -839,6 +822,11 @@ func (s *Server) readPQClientRequestHidden(hs *HandshakeState, b []byte) (int, e
 		// Absorb Header
 		hs.duplex.Absorb(bufCopy[:HeaderLen])
 		bufCopy = bufCopy[HeaderLen:]
+
+		// Handle Client Ephemeral Key
+		remoteEphemeralBytes = bufCopy[:KemKeyLen]
+		hs.duplex.Absorb(bufCopy[:KemKeyLen])
+		bufCopy = bufCopy[KemKeyLen:]
 
 		k, err := cert.KemKeyPair.Dec(bufCopy[:KemCtLen]) // skem
 		if err != nil {
@@ -886,6 +874,12 @@ func (s *Server) readPQClientRequestHidden(hs *HandshakeState, b []byte) (int, e
 
 	copy(b, bufCopy)
 
+	// save remote in the hs object
+	hs.kem.remoteEphemeral, err = hs.kem.impl.ParsePublicKey(remoteEphemeralBytes)
+	if err != nil {
+		return 0, err
+	}
+
 	// Parse certificates
 	leaf, _, err := hs.certificateParserAndVerifier(rawLeaf, rawIntermediate)
 	if err != nil {
@@ -899,14 +893,6 @@ func (s *Server) readPQClientRequestHidden(hs *HandshakeState, b []byte) (int, e
 	if err != nil {
 		return 0, err
 	}
-
-	// Handle Client Ephemeral Key
-	hs.kem.remoteEphemeral, err = hs.kem.impl.ParsePublicKey(b[:KemKeyLen])
-	if err != nil {
-		return 0, err
-	}
-	//hs.duplexAbsorbKem(b[:KemKeyLen])
-	b = b[KemKeyLen:]
 
 	// Timestamp
 	hs.duplex.Decrypt(timestampBuf[:], b[:TimestampLen])
@@ -927,7 +913,7 @@ func (s *Server) readPQClientRequestHidden(hs *HandshakeState, b []byte) (int, e
 
 	b = b[TimestampLen:]
 
-	// MAC (Client Static)
+	// MAC
 	hs.duplex.Squeeze(hs.macBuf[:])
 	logrus.Debugf("server: calculated hidden client request mac: %x", hs.macBuf)
 	if !bytes.Equal(hs.macBuf[:], b[:MacLen]) {
@@ -1015,7 +1001,6 @@ func (s *Server) writePQServerResponseHidden(hs *HandshakeState, b []byte) (int,
 		return pos, ErrBufOverflow
 	}
 	copy(b, sCt[:])
-	//hs.duplexAbsorbKem(b[:KemCtLen]) // public artifact encapsulating the shared secret
 	b = b[KemCtLen:]
 	hs.duplex.Absorb(sk) // shared secret
 	pos += KemCtLen
@@ -1097,7 +1082,6 @@ func (hs *HandshakeState) readPQServerResponseHidden(b []byte) (int, error) {
 	hs.parsedLeaf = &leaf
 
 	// KEM CipherText
-	//hs.duplexAbsorbKem(b[:KemCtLen])
 	sk, err := hs.kem.static.Dec(b[:KemCtLen]) // skem
 	if err != nil {
 		return 0, err

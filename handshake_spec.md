@@ -616,8 +616,8 @@ duplex = Cyclist()
 duplex.absorb(protocolName)
 
 duplex.absorb([type + version + reserved])
+duplex.absorb(e_c)
 mac = duplex.squeeze()
-# TDB if we absorbe the e_c key
 ```
 
 ##### Server Logic
@@ -628,6 +628,7 @@ mac = duplex.squeeze()
 duplex = Cyclist()
 duplex.absorb(protocolName)
 duplex.absorb([type + version +reserved])
+duplex.absorb(e_c)
 mac = duplex.squeeze()
 ```
 
@@ -693,6 +694,7 @@ mac = duplex.squeeze()
 ```python
 # Continuing from duplex prior
 duplex.absorb([type + reserved])
+duplex.absorb(e_c)
 duplex.absorb(cookie)
 sni = padTo(serverID, 256) # pad serverID to 256 bytes
 duplex.enc(sni)
@@ -709,6 +711,7 @@ seed = aead_open(ciphertext=cookie, ad=H(e_c, clientIP, clientPort))
 e_s = kem.GenerateKeypairFromSeed(seed)
 # ... Resimulate duplex up until this point ...
 duplex.absorb([type + reserved])
+duplex.absorb(e_c)
 duplex.absorb(cookie)
 sni = duplex.decrypt(encrypted_sni)
 name = unPad(sni)
@@ -879,10 +882,10 @@ Server->Client: Transport Data [0x20]
 
 |      type $:=$ 0x18 (1 byte)      |          Protocol Version (1 byte)          |       Certs Len $:= 0^2$ (2 bytes)        |
 |:---------------------------------:|:-------------------------------------------:|:-----------------------------------------:|
+|                                   |    Client  Ephemeral ML-KEM (800 bytes)     |                                           |
 |                                   |         Client sKEM CT (768 bytes)          |                                           |
 | Client Leaf Certificate (* bytes) |                                             | Client Intermediate Certificate (* bytes) |
 |                                   | Client Static Authentication Tag (16 bytes) |                                           |
-|                                   |    Client  Ephemeral ML-KEM (800 bytes)     |                                           |
 |                                   |             Timestamp (8 bytes)             |                                           |
 |                                   |               MAC (16 bytes)                |                                           |
 
@@ -896,6 +899,7 @@ protocolID = “hop_pqIK_cyclist_keccak_C512”
 duplex = Cyclist()
 duplex.absorb(protocolID)
 duplex.absorb([type + protocol + reserved])
+duplex.absorb(e_c)
 ct, k = kem.Enc(s_s) #skem
 duplex.absorb(k)
 ClientEncCerts = duplex.encrypt(certificates)
@@ -914,6 +918,7 @@ for vmCert in certList:
   duplex = Cyclist()
   duplex.absorb(protocolID)
   duplex.absorb([type + protocol + reserved])
+  duplex.absorb(e_c)
   k = vmCert.s_s.Dec(ct) # skem
   duplex.absorb(k)
   certificates = duplex.decrypt(ClientEncCerts)
