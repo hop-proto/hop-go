@@ -157,7 +157,7 @@ func (c *Cyclist) absorbAny(x []byte, r int, cd byte) {
 			c.up(nil, 0x00)
 		}
 		splitLen := min(xLen, r)
-		c.down(x[start:splitLen], cd)
+		c.down(x[start:start+splitLen], cd)
 		cd = 0
 		start += splitLen
 		xLen -= splitLen
@@ -222,7 +222,7 @@ func (c *Cyclist) squeezeAny(y []byte, cu byte) {
 	for yLen != 0 {
 		c.down(nil, 0)
 		upLen = min(yLen, c.rSqueeze)
-		c.up(y[start:upLen], 0x00)
+		c.up(y[start:start+upLen], 0x00)
 		start += upLen
 		yLen -= upLen
 	}
