@@ -616,8 +616,8 @@ duplex = Cyclist()
 duplex.absorb(protocolName)
 
 duplex.absorb([type + version + reserved])
-duplex.absorb(ephemeral)
 mac = duplex.squeeze()
+# TDB if we absorbe the e_c key
 ```
 
 ##### Server Logic
@@ -628,7 +628,6 @@ mac = duplex.squeeze()
 duplex = Cyclist()
 duplex.absorb(protocolName)
 duplex.absorb([type + version +reserved])
-duplex.absorb(e_c)
 mac = duplex.squeeze()
 ```
 
