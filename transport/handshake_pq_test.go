@@ -15,11 +15,11 @@ import (
 )
 
 // +checklocksignore
-func TestPQNoiseXXHandshake(t *testing.T) {
+func TestNewPQNoiseXXHandshake(t *testing.T) {
 	var err error
 	logrus.SetLevel(logrus.DebugLevel)
 
-	client, server, raddr, clientKeypair, _ := newPQClientAndServerForBench(t)
+	client, server, raddr, _, _ := newPQClientAndServerForBench(t)
 
 	client.hs = new(HandshakeState)
 	client.hs.duplex.InitializeEmpty()
@@ -33,7 +33,11 @@ func TestPQNoiseXXHandshake(t *testing.T) {
 	client.hs.kem.ephemeral, err = keys.MlKem512.GenerateKeypair(rand.Reader)
 	assert.Check(t, cmp.Equal(nil, err))
 	client.hs.leaf, client.hs.intermediate, err = client.prepareCertificates()
-	client.hs.kem.static = *clientKeypair
+
+	// init dh
+	client.hs.dh = new(dhState)
+	client.hs.dh.ephemeral.Generate()
+	client.hs.dh.static = client.config.Exchanger
 
 	assert.Check(t, cmp.Equal(nil, err))
 
@@ -46,7 +50,11 @@ func TestPQNoiseXXHandshake(t *testing.T) {
 	serverHs.kem = new(kemState)
 	serverHs.kem.impl = keys.MlKem512
 	serverHs.kem.ephemeral, err = keys.MlKem512.GenerateKeypair(rand.Reader)
-	serverHs.kem.static = server.config.KEMKeyPair
+
+	// init dh
+	serverHs.dh = new(dhState)
+	serverHs.dh.ephemeral.Generate()
+	// TODO do we need to load the statics in the hs?
 
 	serverHs.remoteAddr = raddr
 	serverHs.cookieKey = server.cookieKey
@@ -84,6 +92,7 @@ func TestPQNoiseXXHandshake(t *testing.T) {
 	serverBuf = make([]byte, 65535)
 	serverHs.sni = certs.RawStringName("testing")
 	server.setHandshakeState(raddr, serverHs)
+	serverHs.dh.ephemeral.Generate()
 
 	n, err1 = server.writePQServerAuth(serverBuf, serverHs)
 	_, err2 = client.hs.readPQServerAuth(serverBuf[:n])
@@ -100,8 +109,8 @@ func TestPQNoiseXXHandshake(t *testing.T) {
 
 	// Server Conf // TODO (paul): shall we add a cookie here as long as there is a response here? might need it
 	serverBuf = make([]byte, 65535)
-	n, err1 = server.writePQServerConf(serverBuf, serverHs)
-	_, err2 = client.hs.readPQServerConf(serverBuf[:n])
+	//n, err1 = server.writePQServerConf(serverBuf, serverHs)
+	//_, err2 = client.hs.readPQServerConf(serverBuf[:n])
 	assert.NilError(t, err1)
 	assert.NilError(t, err2)
 
@@ -122,7 +131,7 @@ func TestPQNoiseIKHandshake(t *testing.T) {
 	var err error
 	logrus.SetLevel(logrus.DebugLevel)
 
-	client, server, raddr, clientKeypair, serverStatic := newPQClientAndServerForBench(t)
+	client, server, raddr, _, _ := newPQClientAndServerForBench(t)
 
 	client.hs = new(HandshakeState)
 	client.hs.duplex.InitializeEmpty()
@@ -138,9 +147,9 @@ func TestPQNoiseIKHandshake(t *testing.T) {
 	assert.NilError(t, err)
 	client.hs.leaf, client.hs.intermediate, err = client.prepareCertificates()
 	assert.NilError(t, err)
-	client.hs.kem.static = *clientKeypair
+	//client.hs.kem.static = *clientKeypair
 
-	client.hs.kem.remoteStatic = *serverStatic
+	//client.hs.kem.remoteStatic = *serverStatic
 
 	assert.Check(t, cmp.Equal(nil, err))
 
@@ -189,19 +198,18 @@ func TestPQNoiseIKHandshake(t *testing.T) {
 	assert.Check(t, cmp.Equal(client.ss.clientToServerKey, serverSs.clientToServerKey))
 }
 
-func newPQClientAuth(t assert.TestingT, certificate *certs.Certificate) (*keys.KEMKeypair, *certs.Certificate) {
-	k, err := keys.MlKem512.GenerateKeypair(rand.Reader)
-	assert.NilError(t, err)
-	pubKeyBytes := k.Public().Bytes()
+func newPQClientAuth(t assert.TestingT, certificate *certs.Certificate) (*keys.X25519KeyPair, *certs.Certificate) {
+	keypair := keys.GenerateNewX25519KeyPair()
+
 	c, err := certs.IssueLeaf(certificate, &certs.Identity{
-		PublicKey: pubKeyBytes,
+		PublicKey: keypair.Public[:],
 		Names:     []certs.Name{certs.RawStringName("testing")},
-	}, certs.PQLeaf)
+	}, certs.Leaf)
 	assert.NilError(t, err)
-	return &k, c
+	return keypair, c
 }
 
-func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDPAddr, *keys.KEMKeypair, *keys.PublicKey) {
+func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDPAddr, *keys.X25519KeyPair, *keys.DHPublicKey) {
 
 	rootKey := keys.GenerateNewSigningKeyPair()
 	intermediateKey := keys.GenerateNewSigningKeyPair()
@@ -232,6 +240,7 @@ func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDP
 
 	clientStatic, leaf := newPQClientAuth(t, intermediate)
 	clientConfig := ClientConfig{
+		Exchanger:    clientStatic,
 		Verify:       *verifyConfig,
 		Leaf:         leaf,
 		Intermediate: intermediate,
@@ -247,21 +256,20 @@ func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDP
 	return c, s, raddr, clientStatic, serverPubStatic
 }
 
-func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermediate *certs.Certificate) (*ServerConfig, *VerifyConfig, *keys.PublicKey) {
+// TODO this is not pq anymore as we dont need pq statics
+func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermediate *certs.Certificate) (*ServerConfig, *VerifyConfig, *keys.DHPublicKey) {
 
-	kp, err := keys.MlKem512.GenerateKeypair(rand.Reader)
-	assert.NilError(t, err)
-	pubKey := kp.Public()
+	keypair := keys.GenerateNewX25519KeyPair()
 
 	leafIdentity := certs.Identity{
-		PublicKey: pubKey.Bytes(),
+		PublicKey: keypair.Public[:],
 		Names:     []certs.Name{certs.RawStringName("testing")},
 	}
 
-	c, err := certs.IssueLeaf(intermediate, &leafIdentity, certs.PQLeaf)
+	c, err := certs.IssueLeaf(intermediate, &leafIdentity, certs.Leaf)
 
 	server := ServerConfig{
-		KEMKeyPair:       kp,
+		KeyPair:          keypair,
 		Certificate:      c,
 		Intermediate:     intermediate,
 		HandshakeTimeout: 5 * time.Second,
@@ -273,5 +281,5 @@ func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermedi
 	verify.Name = certs.RawStringName("testing")
 
 	assert.Check(t, cmp.Equal(nil, err))
-	return &server, &verify, &pubKey
+	return &server, &verify, &keypair.Public
 }

@@ -93,7 +93,7 @@ func (hs *HandshakeState) writeCookie(b []byte) (int, error) {
 	if hs.kem != nil {
 		seed := hs.kem.ephemeral.Seed()
 		plaintextCookie = seed[:]
-		ad = CookieAD(hs.kem.remoteEphemeral.Bytes(), hs.remoteAddr)
+		ad = CookieAD(hs.dh.remoteEphemeral[:], hs.remoteAddr)
 		cookieLen = PQCookieLen
 
 	} else {
@@ -128,9 +128,9 @@ func (hs *HandshakeState) decryptCookie(b []byte) (int, error) {
 	}
 	encryptedCookie := b[:cookieLen]
 
+	// TODO (paul): remove this condition
 	if hs.kem != nil {
-		remoteEphemeralBytes := hs.kem.remoteEphemeral.Bytes()
-		ad := CookieAD(remoteEphemeralBytes[:], hs.remoteAddr)
+		ad := CookieAD(hs.dh.remoteEphemeral[:], hs.remoteAddr)
 		seed := make([]byte, PQSeedLen)
 		out, err := aead.Open(seed[:0], nil, encryptedCookie, ad)
 		if err != nil {
