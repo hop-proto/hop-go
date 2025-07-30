@@ -15,6 +15,14 @@ import (
 	"hop.computer/hop/keys"
 )
 
+// Hop Noise XX pattern
+// --------------------
+// -> e
+// <- ekem, cookie
+// -> e, cookie, Encaps(ekem), Encrypt(SNI)
+// <- e, Encrypt(certs (s))  // compute DH(es)
+// -> Encrypt(certs (s))     // compute DH(se)
+
 func writePQClientHello(hs *HandshakeState, b []byte) (int, error) {
 	if len(b) < DHLen+HeaderLen+MacLen {
 		return 0, ErrBufOverflow
@@ -628,11 +636,13 @@ func (s *Server) ReplayPQDuplexFromCookie(cookie, clientEphemeralBytes []byte, c
 	return out, nil
 }
 
-// TODO implement the following pattern:
+// Hop Noise IK pattern
+// --------------------
 // <- skem
 // …
-// -> ekem, Encaps(skem), Enc(certs (s))
-// <- Enc(certs (s)), Encaps(ekem) // DH (ss)
+// -> ekem, Encaps(skem), Encrypt(certs (s))
+// <- Encaps(ekem), Encrypt(certs (s)) // DH (ss)
+
 func (hs *HandshakeState) writePQClientRequestHidden(b []byte) (int, error) {
 
 	logrus.Debug("client: sending client request (hidden mode)")
