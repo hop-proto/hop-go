@@ -19,7 +19,7 @@ func TestNewPQNoiseXXHandshake(t *testing.T) {
 	var err error
 	logrus.SetLevel(logrus.DebugLevel)
 
-	client, server, raddr, _, _ := newPQClientAndServerForBench(t)
+	client, server, raddr, _, _, _ := newPQClientAndServerForBench(t)
 
 	client.hs = new(HandshakeState)
 	client.hs.duplex.InitializeEmpty()
@@ -127,11 +127,11 @@ func TestNewPQNoiseXXHandshake(t *testing.T) {
 }
 
 // +checklocksignore
-func TestPQNoiseIKHandshake(t *testing.T) {
+func TestNewPQNoiseIKHandshake(t *testing.T) {
 	var err error
 	logrus.SetLevel(logrus.DebugLevel)
 
-	client, server, raddr, _, _ := newPQClientAndServerForBench(t)
+	client, server, raddr, _, _, kemServerPubStatic := newPQClientAndServerForBench(t)
 
 	client.hs = new(HandshakeState)
 	client.hs.duplex.InitializeEmpty()
@@ -147,9 +147,12 @@ func TestPQNoiseIKHandshake(t *testing.T) {
 	assert.NilError(t, err)
 	client.hs.leaf, client.hs.intermediate, err = client.prepareCertificates()
 	assert.NilError(t, err)
-	//client.hs.kem.static = *clientKeypair
 
-	//client.hs.kem.remoteStatic = *serverStatic
+	client.hs.kem.remoteStatic = *kemServerPubStatic
+
+	// init dh
+	client.hs.dh = new(dhState)
+	client.hs.dh.static = client.config.Exchanger
 
 	assert.Check(t, cmp.Equal(nil, err))
 
@@ -160,6 +163,10 @@ func TestPQNoiseIKHandshake(t *testing.T) {
 	serverHs.kem.impl = keys.MlKem512
 	serverHs.kem.ephemeral, err = keys.MlKem512.GenerateKeypair(rand.Reader)
 	serverHs.kem.static = server.config.KEMKeyPair
+
+	// init dh
+	serverHs.dh = new(dhState)
+	serverHs.dh.static = server.config.KeyPair
 
 	serverHs.remoteAddr = raddr
 	serverHs.cookieKey = server.cookieKey
@@ -209,7 +216,7 @@ func newPQClientAuth(t assert.TestingT, certificate *certs.Certificate) (*keys.X
 	return keypair, c
 }
 
-func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDPAddr, *keys.X25519KeyPair, *keys.DHPublicKey) {
+func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDPAddr, *keys.X25519KeyPair, *keys.DHPublicKey, *keys.PublicKey) {
 
 	rootKey := keys.GenerateNewSigningKeyPair()
 	intermediateKey := keys.GenerateNewSigningKeyPair()
@@ -234,7 +241,7 @@ func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDP
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
 	serverConn := pc.(*net.UDPConn)
-	serverConfig, verifyConfig, serverPubStatic := newPQTestServerConfig(t, root, intermediate)
+	serverConfig, verifyConfig, serverPubStatic, kemServerPubStatic := newPQTestServerConfig(t, root, intermediate)
 	s, err := NewServer(serverConn, *serverConfig)
 	assert.NilError(t, err)
 
@@ -253,13 +260,17 @@ func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDP
 	c, err := NewClient(inner.(*net.UDPConn), raddr, clientConfig), nil
 
 	assert.NilError(t, err)
-	return c, s, raddr, clientStatic, serverPubStatic
+	return c, s, raddr, clientStatic, serverPubStatic, kemServerPubStatic
 }
 
 // TODO this is not pq anymore as we dont need pq statics
-func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermediate *certs.Certificate) (*ServerConfig, *VerifyConfig, *keys.DHPublicKey) {
+func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermediate *certs.Certificate) (*ServerConfig, *VerifyConfig, *keys.DHPublicKey, *keys.PublicKey) {
 
 	keypair := keys.GenerateNewX25519KeyPair()
+
+	kemKp, err := keys.MlKem512.GenerateKeypair(rand.Reader)
+	assert.NilError(t, err)
+	kemPubKey := kemKp.Public()
 
 	leafIdentity := certs.Identity{
 		PublicKey: keypair.Public[:],
@@ -269,6 +280,7 @@ func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermedi
 	c, err := certs.IssueLeaf(intermediate, &leafIdentity, certs.Leaf)
 
 	server := ServerConfig{
+		KEMKeyPair:       kemKp,
 		KeyPair:          keypair,
 		Certificate:      c,
 		Intermediate:     intermediate,
@@ -281,5 +293,5 @@ func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermedi
 	verify.Name = certs.RawStringName("testing")
 
 	assert.Check(t, cmp.Equal(nil, err))
-	return &server, &verify, &keypair.Public
+	return &server, &verify, &keypair.Public, &kemPubKey
 }

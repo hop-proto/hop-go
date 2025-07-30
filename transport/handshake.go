@@ -60,6 +60,7 @@ type dhState struct {
 	static    keys.Exchangable
 
 	remoteEphemeral [DHLen]byte
+	remoteStatic    [DHLen]byte
 
 	// TODO(dadrian): Rework APIs to make these arrays and avoid copies with the curve25519 API.
 	ee []byte
