@@ -336,13 +336,13 @@ func (s *Server) writePQServerAuth(b []byte, hs *HandshakeState) (int, error) {
 	pos += MacLen
 
 	// DH (es)
-	hs.dh.es, err = c.Exchanger.Agree(hs.dh.remoteEphemeral[:])
+	dhEs, err := c.Exchanger.Agree(hs.dh.remoteEphemeral[:])
 	if err != nil {
 		logrus.Debug("could not calculate DH(es)")
 		return pos, err
 	}
-	logrus.Debugf("server es: %x", hs.dh.es)
-	hs.duplex.Absorb(hs.dh.es)
+	logrus.Debugf("server es: %x", dhEs)
+	hs.duplex.Absorb(dhEs)
 
 	// MAC
 	hs.duplex.Squeeze(x[:MacLen])
@@ -415,13 +415,13 @@ func (hs *HandshakeState) readPQServerAuth(b []byte) (int, error) {
 	}
 
 	// DH (es)
-	hs.dh.es, err = hs.dh.ephemeral.DH(leaf.PublicKey[:])
+	dhEs, err := hs.dh.ephemeral.DH(leaf.PublicKey[:])
 	if err != nil {
 		logrus.Debugf("client: could not calculate es: %s", err)
 		return 0, err
 	}
-	logrus.Debugf("client: es: %x", hs.dh.es)
-	hs.duplex.Absorb(hs.dh.es)
+	logrus.Debugf("client: es: %x", dhEs)
+	hs.duplex.Absorb(dhEs)
 
 	// Mac
 	hs.duplex.Squeeze(hs.macBuf[:])
@@ -480,13 +480,13 @@ func (hs *HandshakeState) writePQClientAuth(b []byte) (int, error) {
 	pos += MacLen
 
 	// DH (se)
-	hs.dh.se, err = hs.dh.static.Agree(hs.dh.remoteEphemeral[:])
+	dhSe, err := hs.dh.static.Agree(hs.dh.remoteEphemeral[:])
 	if err != nil {
 		logrus.Debugf("client: unable to calculate se: %s", err)
 		return HeaderLen + SessionIDLen + encCertLen + MacLen, err
 	}
-	logrus.Debugf("client: se: %x", hs.dh.se)
-	hs.duplex.Absorb(hs.dh.se)
+	logrus.Debugf("client: se: %x", dhSe)
+	hs.duplex.Absorb(dhSe)
 
 	// Mac
 	hs.duplex.Squeeze(x[:MacLen])
@@ -566,13 +566,13 @@ func (s *Server) readPQClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	hs.parsedLeaf = &leaf
 
 	// DH (se)
-	hs.dh.se, err = hs.dh.ephemeral.DH(leaf.PublicKey[:])
+	dhSe, err := hs.dh.ephemeral.DH(leaf.PublicKey[:])
 	if err != nil {
 		logrus.Debugf("server: unable to calculated se: %s", err)
 		return pos, nil, err
 	}
-	logrus.Debugf("server: se %x", hs.dh.se)
-	hs.duplex.Absorb(hs.dh.se)
+	logrus.Debugf("server: se %x", dhSe)
+	hs.duplex.Absorb(dhSe)
 
 	// Mac
 	hs.duplex.Squeeze(hs.macBuf[:])
@@ -941,13 +941,13 @@ func (s *Server) writePQServerResponseHidden(hs *HandshakeState, b []byte) (int,
 	pos += MacLen
 
 	// DH (ss)
-	hs.dh.ss, err = hs.dh.static.Agree(hs.dh.remoteStatic[:])
+	dhSs, err := hs.dh.static.Agree(hs.dh.remoteStatic[:])
 	if err != nil {
 		logrus.Debugf("server: unable to calculate ss: %s", err)
 		return 0, err
 	}
-	logrus.Debugf("server: ss: %x", hs.dh.ss)
-	hs.duplex.Absorb(hs.dh.ss)
+	logrus.Debugf("server: ss: %x", dhSs)
+	hs.duplex.Absorb(dhSs)
 
 	// MAC
 	hs.duplex.Squeeze(b[:MacLen])
@@ -1026,13 +1026,13 @@ func (hs *HandshakeState) readPQServerResponseHidden(b []byte) (int, error) {
 	hs.parsedLeaf = &leaf
 
 	// DH (ss)
-	hs.dh.ss, err = hs.dh.static.Agree(leaf.PublicKey[:])
+	dhSs, err := hs.dh.static.Agree(leaf.PublicKey[:])
 	if err != nil {
 		logrus.Debugf("client: could not calculate ss: %s", err)
 		return 0, err
 	}
-	logrus.Debugf("client: ss: %x", hs.dh.ss)
-	hs.duplex.Absorb(hs.dh.ss)
+	logrus.Debugf("client: ss: %x", dhSs)
+	hs.duplex.Absorb(dhSs)
 
 	// Mac
 	hs.duplex.Squeeze(hs.macBuf[:])
