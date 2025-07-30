@@ -628,13 +628,18 @@ func (s *Server) ReplayPQDuplexFromCookie(cookie, clientEphemeralBytes []byte, c
 	return out, nil
 }
 
+// TODO implement the following pattern:
+// <- skem
+// …
+// -> ekem, Encaps(skem), Enc(certs (s))
+// <- Enc(certs (s)), Encaps(ekem) // DH (ss)
 func (hs *HandshakeState) writePQClientRequestHidden(b []byte) (int, error) {
 
 	logrus.Debug("client: sending client request (hidden mode)")
 
 	encCertsLen := EncryptedCertificatesLength(hs.leaf, hs.intermediate)
 
-	length := HeaderLen + KemCtLen + encCertsLen + MacLen + KemKeyLen + TimestampLen + MacLen
+	length := HeaderLen + KemCtLen + KemKeyLen + encCertsLen + MacLen + TimestampLen + MacLen
 
 	if len(b) < length {
 		return 0, ErrBufUnderflow
@@ -652,14 +657,14 @@ func (hs *HandshakeState) writePQClientRequestHidden(b []byte) (int, error) {
 	b = b[HeaderLen:]
 	pos += HeaderLen
 
-	// Client Ephemeral
+	// PQ Ephemeral -> ekem
 	ephemeralBytes := hs.kem.ephemeral.Public().Bytes()
 	copy(b, ephemeralBytes[:])
 	hs.duplex.Absorb(b[:KemKeyLen])
 	b = b[KemKeyLen:]
 	pos += KemKeyLen
 
-	// KEM CipherText -> skem
+	// skem CipherText
 	ct, k, err := hs.kem.impl.Enc(rand.Reader, hs.kem.remoteStatic) // TODO write in hs.kem the remote static from the file
 	if err != nil {
 		return pos, err
@@ -757,12 +762,12 @@ func (s *Server) readPQClientRequestHidden(hs *HandshakeState, b []byte) (int, e
 		hs.duplex.Absorb(bufCopy[:HeaderLen])
 		bufCopy = bufCopy[HeaderLen:]
 
-		// Handle Client Ephemeral Key
+		// Handle PQ client Ephemeral Key -> ekem
 		remoteEphemeralBytes = bufCopy[:KemKeyLen]
 		hs.duplex.Absorb(bufCopy[:KemKeyLen])
 		bufCopy = bufCopy[KemKeyLen:]
 
-		k, err := cert.KemKeyPair.Dec(bufCopy[:KemCtLen]) // skem
+		k, err := cert.KemKeyPair.Dec(bufCopy[:KemCtLen]) // skem CipherText
 		if err != nil {
 			logrus.Debugf("server: unable to calculate skem: %s", err)
 			continue // Proceed to the next certificate on error
@@ -822,8 +827,7 @@ func (s *Server) readPQClientRequestHidden(hs *HandshakeState, b []byte) (int, e
 	}
 	hs.parsedLeaf = &leaf
 
-	remoteStaticBytes := leaf.PublicKey
-	hs.kem.remoteStatic, err = hs.kem.impl.ParsePublicKey(remoteStaticBytes[:])
+	hs.dh.remoteStatic = [32]byte(leaf.PublicKey)
 	if err != nil {
 		return 0, err
 	}
@@ -871,7 +875,7 @@ func (s *Server) writePQServerResponseHidden(hs *HandshakeState, b []byte) (int,
 
 	encCertLen := EncryptedCertificatesLength(c.RawLeaf, c.RawIntermediate)
 
-	length := HeaderLen + SessionIDLen + 2*KemCtLen + encCertLen + 2*MacLen
+	length := HeaderLen + SessionIDLen + KemCtLen + encCertLen + 2*MacLen
 
 	if len(b) < length {
 		return 0, ErrBufUnderflow
@@ -926,18 +930,14 @@ func (s *Server) writePQServerResponseHidden(hs *HandshakeState, b []byte) (int,
 	b = b[MacLen:]
 	pos += MacLen
 
-	// KEM CipherText -> skem
-	sCt, sk, err := hs.kem.impl.Enc(rand.Reader, hs.kem.remoteStatic)
+	// DH (ss)
+	hs.dh.ss, err = hs.dh.static.Agree(hs.dh.remoteStatic[:])
 	if err != nil {
-		return pos, err
+		logrus.Debugf("server: unable to calculate ss: %s", err)
+		return 0, err
 	}
-	if len(sCt) != KemCtLen {
-		return pos, ErrBufOverflow
-	}
-	copy(b, sCt[:])
-	b = b[KemCtLen:]
-	hs.duplex.Absorb(sk) // shared secret
-	pos += KemCtLen
+	logrus.Debugf("server: ss: %x", hs.dh.ss)
+	hs.duplex.Absorb(hs.dh.ss)
 
 	// MAC
 	hs.duplex.Squeeze(b[:MacLen])
@@ -949,7 +949,7 @@ func (s *Server) writePQServerResponseHidden(hs *HandshakeState, b []byte) (int,
 
 func (hs *HandshakeState) readPQServerResponseHidden(b []byte) (int, error) {
 
-	minLength := HeaderLen + SessionIDLen + 2*KemCtLen + 2*MacLen
+	minLength := HeaderLen + SessionIDLen + KemCtLen + 2*MacLen
 
 	if len(b) < minLength {
 		return 0, ErrBufUnderflow
@@ -1015,13 +1015,14 @@ func (hs *HandshakeState) readPQServerResponseHidden(b []byte) (int, error) {
 	}
 	hs.parsedLeaf = &leaf
 
-	// KEM CipherText
-	sk, err := hs.kem.static.Dec(b[:KemCtLen]) // skem
+	// DH (ss)
+	hs.dh.ss, err = hs.dh.static.Agree(leaf.PublicKey[:])
 	if err != nil {
+		logrus.Debugf("client: could not calculate ss: %s", err)
 		return 0, err
 	}
-	hs.duplex.Absorb(sk)
-	b = b[KemCtLen:]
+	logrus.Debugf("client: ss: %x", hs.dh.ss)
+	hs.duplex.Absorb(hs.dh.ss)
 
 	// Mac
 	hs.duplex.Squeeze(hs.macBuf[:])
