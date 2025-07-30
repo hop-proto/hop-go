@@ -61,16 +61,9 @@ type dhState struct {
 
 	remoteEphemeral [DHLen]byte
 	remoteStatic    [DHLen]byte
-
-	// TODO(dadrian): Rework APIs to make these arrays and avoid copies with the curve25519 API.
-	ee []byte
-	es []byte
-	se []byte
-	ss []byte
 }
 
 type kemState struct {
-	// TODO pointers and address
 	impl keys.KEM
 
 	ephemeral keys.KEMKeypair
@@ -425,13 +418,13 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	}
 
 	// DH
-	hs.dh.es, err = hs.dh.ephemeral.DH(leaf.PublicKey[:])
+	dhEs, err := hs.dh.ephemeral.DH(leaf.PublicKey[:])
 	if err != nil {
 		logrus.Debugf("client: could not calculate es: %s", err)
 		return 0, err
 	}
-	logrus.Debugf("client: es: %x", hs.dh.es)
-	hs.duplex.Absorb(hs.dh.es)
+	logrus.Debugf("client: es: %x", dhEs)
+	hs.duplex.Absorb(dhEs)
 
 	// Mac
 	hs.duplex.Squeeze(hs.macBuf[:])
@@ -483,13 +476,13 @@ func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
 	b = b[MacLen:]
 
 	// DH (se)
-	hs.dh.se, err = hs.dh.static.Agree(hs.dh.remoteEphemeral[:])
+	dhSe, err := hs.dh.static.Agree(hs.dh.remoteEphemeral[:])
 	if err != nil {
 		logrus.Debugf("client: unable to calculate se: %s", err)
 		return HeaderLen + SessionIDLen + encCertLen + MacLen, err
 	}
-	logrus.Debugf("client: se: %x", hs.dh.se)
-	hs.duplex.Absorb(hs.dh.se)
+	logrus.Debugf("client: se: %x", dhSe)
+	hs.duplex.Absorb(dhSe)
 
 	// Mac
 	hs.duplex.Squeeze(b[:MacLen])

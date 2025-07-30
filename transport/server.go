@@ -350,13 +350,13 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState) (int, error) {
 	logrus.Debugf("server: sa tag %x", x[:MacLen])
 	x = x[MacLen:]
 	pos += MacLen
-	hs.dh.es, err = c.Exchanger.Agree(hs.dh.remoteEphemeral[:])
+	dhEs, err := c.Exchanger.Agree(hs.dh.remoteEphemeral[:])
 	if err != nil {
 		logrus.Debug("could not calculate DH(es)")
 		return pos, err
 	}
-	logrus.Debugf("server es: %x", hs.dh.es)
-	hs.duplex.Absorb(hs.dh.es)
+	logrus.Debugf("server es: %x", dhEs)
+	hs.duplex.Absorb(dhEs)
 	hs.duplex.Squeeze(x[:MacLen])
 	logrus.Debugf("server serverauth mac: %x", x[:MacLen])
 	// x = x[MacLen:]
@@ -423,13 +423,13 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	}
 	hs.parsedLeaf = &leaf
 
-	hs.dh.se, err = hs.dh.ephemeral.DH(leaf.PublicKey[:])
+	dhSe, err := hs.dh.ephemeral.DH(leaf.PublicKey[:])
 	if err != nil {
 		logrus.Debugf("server: unable to calculated se: %s", err)
 		return pos, nil, err
 	}
-	logrus.Debugf("server: se %x", hs.dh.se)
-	hs.duplex.Absorb(hs.dh.se)
+	logrus.Debugf("server: se %x", dhSe)
+	hs.duplex.Absorb(dhSe)
 	hs.duplex.Squeeze(hs.macBuf[:]) // mac
 	clientMac := x[:MacLen]
 	if !bytes.Equal(hs.macBuf[:], clientMac) {

@@ -77,13 +77,13 @@ func (hs *HandshakeState) writeClientRequestHidden(b []byte, serverPublicKey *ke
 	pos += MacLen
 
 	// DH (ss)
-	hs.dh.ss, err = hs.dh.static.Agree(serverPublicKey[:])
+	dhSs, err := hs.dh.static.Agree(serverPublicKey[:])
 	if err != nil {
 		logrus.Debugf("client: unable to calculate ss: %s", err)
 		return 0, err
 	}
-	logrus.Debugf("client: ss: %x", hs.dh.ss)
-	hs.duplex.Absorb(hs.dh.ss)
+	logrus.Debugf("client: ss: %x", dhSs)
+	hs.duplex.Absorb(dhSs)
 
 	now := time.Now().Unix()
 	timeBytes := make([]byte, 8)
@@ -154,13 +154,13 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 		bufCopy = bufCopy[DHLen:]
 
 		// Derive DH (es)
-		hs.dh.es, err = cert.Exchanger.Agree(hs.dh.remoteEphemeral[:])
+		dhEs, err := cert.Exchanger.Agree(hs.dh.remoteEphemeral[:])
 		if err != nil {
 			logrus.Debugf("server: unable to calculate es: %s", err)
 			continue // Proceed to the next certificate on error
 		}
-		logrus.Debugf("server: es: %x", hs.dh.es)
-		hs.duplex.Absorb(hs.dh.es)
+		logrus.Debugf("server: es: %x", dhEs)
+		hs.duplex.Absorb(dhEs)
 
 		// Decrypt Client Encrypted Certificates
 		encCerts := bufCopy[:encCertsLen]
@@ -209,13 +209,13 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 	hs.parsedLeaf = &leaf
 
 	// DH (ss)
-	hs.dh.ss, err = c.Exchanger.Agree(leaf.PublicKey[:])
+	dhSs, err := c.Exchanger.Agree(leaf.PublicKey[:])
 	if err != nil {
 		logrus.Debugf("server: could not calculate ss: %s", err)
 		return 0, err
 	}
-	logrus.Debugf("server: ss: %x", hs.dh.ss)
-	hs.duplex.Absorb(hs.dh.ss)
+	logrus.Debugf("server: ss: %x", dhSs)
+	hs.duplex.Absorb(dhSs)
 
 	// Timestamp
 	hs.duplex.Decrypt(timestampBuf[:], b[:TimestampLen])
@@ -317,13 +317,13 @@ func (s *Server) writeServerResponseHidden(hs *HandshakeState, b []byte) (int, e
 	pos += MacLen
 
 	// DH (se)
-	hs.dh.se, err = c.Exchanger.Agree(hs.dh.remoteEphemeral[:])
+	dhSe, err := c.Exchanger.Agree(hs.dh.remoteEphemeral[:])
 	if err != nil {
 		logrus.Debug("could not calculate DH(se)")
 		return pos, err
 	}
-	logrus.Debugf("server se: %x", hs.dh.se)
-	hs.duplex.Absorb(hs.dh.se)
+	logrus.Debugf("server se: %x", dhSe)
+	hs.duplex.Absorb(dhSe)
 
 	// MAC
 	hs.duplex.Squeeze(b[:MacLen])
@@ -405,13 +405,13 @@ func (hs *HandshakeState) readServerResponseHidden(b []byte) (int, error) {
 	hs.parsedLeaf = &leaf
 
 	// DH (se)
-	hs.dh.se, err = hs.dh.ephemeral.DH(leaf.PublicKey[:])
+	dhSe, err := hs.dh.ephemeral.DH(leaf.PublicKey[:])
 	if err != nil {
 		logrus.Debugf("client: could not calculate se: %s", err)
 		return 0, err
 	}
-	logrus.Debugf("client: se: %x", hs.dh.se)
-	hs.duplex.Absorb(hs.dh.se)
+	logrus.Debugf("client: se: %x", dhSe)
+	hs.duplex.Absorb(dhSe)
 
 	// Mac
 	hs.duplex.Squeeze(hs.macBuf[:])
