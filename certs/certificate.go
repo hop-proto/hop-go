@@ -27,7 +27,6 @@ import (
 // Byte-length constants for cryptographic material
 const (
 	KeyLen       = 32
-	KemKeyLen    = 800 // ML-KEM 512 PublicKey size
 	SignatureLen = 64
 )
 
@@ -42,7 +41,6 @@ const (
 	Leaf         CertificateType = 1
 	Intermediate CertificateType = 2
 	Root         CertificateType = 3
-	PQLeaf       CertificateType = 4
 )
 
 // String implements Stringer for CertificateType.
@@ -54,8 +52,6 @@ func (t CertificateType) String() string {
 		return "intermediate"
 	case Root:
 		return "root"
-	case PQLeaf:
-		return "pqleaf"
 	default:
 		return "unknown"
 	}
@@ -72,8 +68,6 @@ func CertificateTypeFromString(typeStr string) (CertificateType, error) {
 		return Intermediate, nil
 	case "root":
 		return Root, nil
-	case "pqleaf":
-		return PQLeaf, nil
 	default:
 		return 0, fmt.Errorf("unknown certificate type: %s", typeStr)
 	}
@@ -291,9 +285,6 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 
 	publicKeyLen := KeyLen
 
-	if c.Type == PQLeaf {
-		publicKeyLen = KemKeyLen
-	}
 	buf := make([]byte, publicKeyLen)
 	n, err := io.ReadFull(r, buf)
 	c.PublicKey = buf

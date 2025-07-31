@@ -12,7 +12,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
 	"hop.computer/hop/keys"
 )
@@ -124,7 +123,7 @@ func (c *Client) Handshake() error {
 }
 
 func (c *Client) prepareCertificates() (leaf, intermediate []byte, err error) {
-	if c.config.Exchanger == nil && c.config.Leaf.Type != certs.PQLeaf { // TODO (paul): evaluate the config Exchanger situation
+	if c.config.Exchanger == nil {
 		return nil, nil, errors.New("ClientConfig.Exchanger must be non-nil, you probably want to provide a keys.X25519KeyPair")
 	}
 
