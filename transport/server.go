@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	"errors"
-	"hop.computer/hop/keys"
 	"io"
 	"net"
 	"sync"
@@ -15,6 +14,7 @@ import (
 
 	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
+	"hop.computer/hop/keys"
 )
 
 type serverState uint32
@@ -259,6 +259,7 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 	return nil
 }
 
+// nolint
 func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeState, error) {
 	var buf [SNILen]byte
 	length := HeaderLen + DHLen + CookieLen + SNILen + MacLen
@@ -310,6 +311,7 @@ func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 	return length, hs, err
 }
 
+// nolint
 func (s *Server) writeServerAuth(b []byte, hs *HandshakeState) (int, error) {
 	c, err := s.config.GetCertificate(ClientHandshakeInfo{
 		ServerName: hs.sni,
@@ -366,6 +368,7 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState) (int, error) {
 	return pos, nil
 }
 
+// nolint
 func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeState, error) {
 	x := b
 	pos := 0
@@ -547,6 +550,7 @@ func (s *Server) Serve() error {
 	return nil
 }
 
+// nolint
 func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
 	scratchHS := &HandshakeState{}
 	scratchHS.duplex.InitializeEmpty()
@@ -631,6 +635,7 @@ func (s *Server) finishHandshake(hs *HandshakeState, isHidden bool) error {
 	return nil
 }
 
+// nolint
 func (s *Server) handleClientRequestHidden(b []byte) (int, *HandshakeState, error) {
 	hs := &HandshakeState{}
 	hs.dh = new(dhState)

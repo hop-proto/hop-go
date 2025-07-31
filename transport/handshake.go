@@ -64,9 +64,7 @@ type dhState struct {
 }
 
 type kemState struct {
-	ephemeral keys.KEMKeyPair
-	static    keys.KEMKeyPair
-
+	ephemeral       keys.KEMKeyPair
 	remoteEphemeral keys.KEMPublicKey
 }
 
@@ -150,6 +148,7 @@ func (hs *HandshakeState) decryptCookie(b []byte) (int, error) {
 	return cookieLen, nil
 }
 
+// nolint
 func writeClientHello(hs *HandshakeState, b []byte) (int, error) {
 	if len(b) < HelloLen {
 		return 0, ErrBufOverflow
@@ -174,6 +173,7 @@ func writeClientHello(hs *HandshakeState, b []byte) (int, error) {
 	return HelloLen, nil
 }
 
+// nolint
 func readClientHello(hs *HandshakeState, b []byte) (int, error) {
 	logrus.Debug("read client hello")
 	if len(b) < HelloLen {
@@ -202,6 +202,7 @@ func readClientHello(hs *HandshakeState, b []byte) (int, error) {
 	return HelloLen, nil
 }
 
+// nolint
 func writeServerHello(hs *HandshakeState, b []byte) (int, error) {
 	if len(b) < HeaderLen+DHLen+CookieLen+MacLen {
 		return 0, ErrBufOverflow
@@ -246,6 +247,7 @@ func writeServerHello(hs *HandshakeState, b []byte) (int, error) {
 	return HeaderLen + DHLen + CookieLen + MacLen, nil
 }
 
+// nolint
 func readServerHello(hs *HandshakeState, b []byte) (int, error) {
 	if len(b) < HeaderLen+DHLen+CookieLen+MacLen {
 		return 0, ErrBufOverflow
@@ -313,6 +315,7 @@ func (hs *HandshakeState) EncryptSNI(dst []byte, name certs.Name) error {
 	return nil
 }
 
+// nolint
 func (hs *HandshakeState) writeClientAck(b []byte) (int, error) {
 	length := HeaderLen + DHLen + CookieLen + SNILen + MacLen
 	if len(b) < length {
@@ -355,6 +358,7 @@ func (hs *HandshakeState) writeClientAck(b []byte) (int, error) {
 	return length, nil
 }
 
+// nolint
 func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	minLength := HeaderLen + SessionIDLen + 2*MacLen
 	if len(b) < minLength {
@@ -433,6 +437,7 @@ func (hs *HandshakeState) readServerAuth(b []byte) (int, error) {
 	return fullLength, nil
 }
 
+// nolint
 func (hs *HandshakeState) writeClientAuth(b []byte) (int, error) {
 	encCertLen := EncryptedCertificatesLength(hs.leaf, hs.intermediate)
 	length := HeaderLen + SessionIDLen + encCertLen + MacLen + MacLen

@@ -3,11 +3,11 @@ package transport
 import (
 	"errors"
 	"fmt"
-	"hop.computer/hop/keys"
 	"os"
 
 	"golang.org/x/crypto/curve25519"
 
+	"hop.computer/hop/keys"
 	"hop.computer/hop/kravatte"
 )
 

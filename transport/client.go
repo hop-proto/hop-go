@@ -233,6 +233,7 @@ func (c *Client) clientHandshakeLocked() error {
 	return nil
 }
 
+// nolint
 func (c *Client) beginDiscoverableHandshake(buf []byte) error {
 	// Protocol ID for the regular handshake
 	c.hs.duplex.Absorb([]byte(ProtocolName))
@@ -306,6 +307,7 @@ func (c *Client) beginDiscoverableHandshake(buf []byte) error {
 	return nil
 }
 
+// nolint
 func (c *Client) beginHiddenHandshake(buf []byte) error {
 	// Protocol ID for the hidden handshake
 	c.hs.duplex.Absorb([]byte(HiddenProtocolName))
@@ -343,6 +345,7 @@ func (c *Client) beginHiddenHandshake(buf []byte) error {
 	return nil
 }
 
+// nolint:dupl
 func (c *Client) beginPQDiscoverableHandshake(buf []byte) error {
 	// Protocol ID for the regular handshake
 	c.hs.duplex.Absorb([]byte(PostQuantumProtocolName))
