@@ -18,7 +18,7 @@ type Authenticator interface {
 	// TODO(dadrian): This isn't actually the interface we want
 	GetVerifyConfig() transport.VerifyConfig
 	GetLeaf() *certs.Certificate
-	GetServerKey() *keys.KEMPublicKey
+	GetServerKEMKey() *keys.KEMPublicKey
 }
 
 // TODO(baumanl): add another implementation of Authenticator for selfsign?
@@ -42,8 +42,8 @@ func (a InMemoryAuthenticator) GetLeaf() *certs.Certificate {
 	return a.Leaf
 }
 
-// GetServerKey implements Authenticator.
-func (a InMemoryAuthenticator) GetServerKey() *keys.KEMPublicKey {
+// GetServerKEMKey implements Authenticator.
+func (a InMemoryAuthenticator) GetServerKEMKey() *keys.KEMPublicKey {
 	return a.ServerKEMKey
 }
 
@@ -67,8 +67,8 @@ func (a AgentAuthenticator) GetLeaf() *certs.Certificate {
 	return a.Leaf
 }
 
-// GetServerKey implements Authenticator.
-func (a AgentAuthenticator) GetServerKey() *keys.KEMPublicKey {
+// GetServerKEMKey implements Authenticator.
+func (a AgentAuthenticator) GetServerKEMKey() *keys.KEMPublicKey {
 	return a.ServerKEMKey
 }
 
