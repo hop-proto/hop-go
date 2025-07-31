@@ -371,7 +371,7 @@ type VirtualHost struct {
 	Certificate transport.Certificate
 }
 
-func transportCert(keyPath, certPath, intermediatePath string) (*transport.Certificate, error) {
+func transportCert(keyPath, certPath, intermediatePath, kemKeyPath string) (*transport.Certificate, error) {
 	keyPair, err := keys.ReadDHKeyFromPEMFile(keyPath)
 	if err != nil {
 		return nil, err
@@ -387,12 +387,23 @@ func transportCert(keyPath, certPath, intermediatePath string) (*transport.Certi
 			return nil, err
 		}
 	}
-	return &transport.Certificate{
+
+	c := &transport.Certificate{
 		RawLeaf:         rawLeaf,
 		RawIntermediate: rawIntermediate,
 		Exchanger:       keyPair,
 		Leaf:            leaf,
-	}, nil
+	}
+
+	if kemKeyPath != "" {
+		kemKeyPair, err := keys.ReadKEMKeyFromPEMFile(kemKeyPath)
+		if err != nil {
+			return nil, err
+		}
+		c.KEMKeyPair = *kemKeyPair
+	}
+
+	return c, nil
 
 }
 
@@ -404,7 +415,7 @@ func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fa
 		// TODO(dadrian)[2022-12-26]: If certs are shared, we'll re-parse all
 		// these. We could use some kind of content-addressable store to cache
 		// these after a single load pass across the whole config.
-		tc, err := transportCert(block.Key, block.Certificate, block.Intermediate)
+		tc, err := transportCert(block.Key, block.Certificate, block.Intermediate, block.KEMKey)
 		if err != nil {
 			return nil, err
 		}
@@ -414,7 +425,7 @@ func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fa
 		})
 	}
 	if c.Key != "" {
-		tc, err := transportCert(c.Key, c.Certificate, c.Intermediate)
+		tc, err := transportCert(c.Key, c.Certificate, c.Intermediate, c.KEMKey)
 		if err != nil {
 			return nil, err
 		}

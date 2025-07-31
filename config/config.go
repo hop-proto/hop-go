@@ -30,6 +30,7 @@ type ClientConfig struct {
 // ServerConfig represents a parsed server configuration.
 type ServerConfig struct {
 	Key          string
+	KEMKey       string
 	Certificate  string
 	Intermediate string
 
@@ -72,6 +73,7 @@ type HostConfigOptional struct {
 	Hostname         *string
 	Intermediate     *string
 	Key              *string
+	KEMKey           *string
 	Patterns         []string
 	Port             int
 	RemoteFwds       *portforwarding.Forward
@@ -102,6 +104,7 @@ type HostConfig struct {
 	Hostname         string
 	Intermediate     string
 	Key              string
+	KEMKey           string
 	Port             int
 	RemoteFwds       *portforwarding.Forward
 	LocalFwds        *portforwarding.Forward
@@ -122,6 +125,7 @@ type HostConfig struct {
 type NameConfig struct {
 	Pattern      string
 	Key          string
+	KEMKey       string
 	Certificate  string
 	Intermediate string
 	AutoSelfSign *bool
@@ -172,6 +176,9 @@ func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
 	}
 	if other.Key != nil {
 		hc.Key = other.Key
+	}
+	if other.KEMKey != nil {
+		hc.KEMKey = other.KEMKey
 	}
 	// don't need to merge Patterns
 	if other.Port != 0 {
@@ -238,6 +245,9 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	}
 	if hc.Key != nil {
 		newHC.Key = *hc.Key
+	}
+	if hc.KEMKey != nil {
+		newHC.KEMKey = *hc.KEMKey
 	}
 	if hc.LocalFwds != nil {
 		newHC.LocalFwds = hc.LocalFwds
