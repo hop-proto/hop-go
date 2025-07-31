@@ -283,9 +283,7 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 	bytesRead += 8
 	c.ExpiresAt = time.Unix(int64(t), 0)
 
-	publicKeyLen := KeyLen
-
-	buf := make([]byte, publicKeyLen)
+	buf := make([]byte, KeyLen)
 	n, err := io.ReadFull(r, buf)
 	c.PublicKey = buf
 
@@ -294,7 +292,7 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 		return bytesRead, err
 	}
 
-	if n != publicKeyLen {
+	if n != KeyLen {
 		return bytesRead, io.EOF
 	}
 
