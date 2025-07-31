@@ -171,10 +171,10 @@ func (c *HopClient) setupTargetClient(targURL core.URL, dt *tubes.Unreliable, ve
 	}
 
 	transportConfig := transport.ClientConfig{
-		Exchanger: client.authenticator,
-		Verify:    client.authenticator.GetVerifyConfig(),
-		Leaf:      client.authenticator.GetLeaf(),
-		ServerKey: client.authenticator.GetServerKey(),
+		Exchanger:    client.authenticator,
+		Verify:       client.authenticator.GetVerifyConfig(),
+		Leaf:         client.authenticator.GetLeaf(),
+		ServerKEMKey: client.authenticator.GetServerKey(),
 	}
 
 	transportConfig.Verify.AddVerifyCallback = transport.AdditionalVerifyCallback(verifyCallback)

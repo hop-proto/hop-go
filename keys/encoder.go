@@ -22,3 +22,12 @@ func EncodeSigningKeyToPEM(w io.Writer, key *SigningKeyPair) error {
 	}
 	return pem.Encode(w, &p)
 }
+
+// EncodeKEMKeyToPEM writes a ML-KEM 512 Seed to PEM format.
+func EncodeKEMKeyToPEM(w io.Writer, key KEMKeyPair) error {
+	p := pem.Block{
+		Type:  PEMTypeKEMSeed,
+		Bytes: key.Seed,
+	}
+	return pem.Encode(w, &p)
+}

@@ -1,132 +1,89 @@
 package keys
 
 import (
-	"encoding"
+	"encoding/base64"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
+	"strings"
 
 	"github.com/cloudflare/circl/kem"
 	"github.com/cloudflare/circl/kem/schemes"
-)
+	"github.com/sirupsen/logrus"
 
-var (
-	MlKem512 = mustCirclToKEM("ML-KEM-512")
+	cpapke "github.com/cloudflare/circl/pke/kyber/kyber512"
 )
 
 // TODO paul: this entire file is the following implementation resulting form https://gitlab.com/yawning/nyquist/-/blob/experimental/pqnoise/kem/kem.go?ref_type=heads and using cloudflare circl kem schemes
 
-// TODO paul: I did not implement Static-Ephemeral Entropy-Combination (SEEC) that has been implemented in that commit https://gitlab.com/yawning/nyquist/-/commit/5c086730589948e0429ec5f441141157f4112deb
+var (
+	MlKem512 = schemes.ByName("ML-KEM-512")
+)
 
-// TODO paul: ask david about "SEECGenKey is optional, and just using the raw entropy device is supported."
+const (
+	// MlKem512KeySeedSize Size of seed for NewKeyFromSeed
+	MlKem512KeySeedSize = cpapke.KeySeedSize + 32
 
-// KEM is a Key Encapsulation Mechanism algorithm.
-type KEM interface {
-	fmt.Stringer
+	// MlKem512CiphertextSize Size of the encapsulated shared key.
+	MlKem512CiphertextSize = cpapke.CiphertextSize
 
-	// GenerateKeypair generates a new KEM keypair using the provided
-	// entropy source.
-	GenerateKeypair(rng io.Reader) (KEMKeypair, error)
+	// MlKem512PublicKeySize Size of a packed public key.
+	MlKem512PublicKeySize = cpapke.PublicKeySize
 
-	// GenerateKeypairFromSeed generates a new KEM keypair using the
-	// provided seed
-	GenerateKeypairFromSeed(seed []byte) (KEMKeypair, error)
+	// MlKem512PrivateKeySize Size of a packed private key.
+	MlKem512PrivateKeySize = cpapke.PrivateKeySize + cpapke.PublicKeySize + 64
+)
 
-	// Enc generates a shared key and ciphertext that encapsulates it
-	// for the provided public key using the provided entropy source,
-	// and returns the shared key and ciphertext.
-	Enc(rng io.Reader, dest PublicKey) ([]byte, []byte, error)
+type KEMPublicKey struct {
+	inner      kem.PublicKey
+	innerBytes []byte
+}
+type KEMPrivateKey kem.PrivateKey
+type KEMSeed []byte
 
-	// ParsePrivateKey parses a binary encoded private key.
-	ParsePrivateKey(data []byte) (KEMKeypair, error)
-
-	// ParsePublicKey parses a binary encoded public key.
-	ParsePublicKey(data []byte) (PublicKey, error)
-
-	// PrivateKeySize returns the size of private keys in bytes.
-	PrivateKeySize() int
-
-	// PublicKeySize returns the size of public keys in bytes.
-	PublicKeySize() int
-
-	// CiphertextSize returns the size of encapsualted ciphertexts in bytes.
-	CiphertextSize() int
-
-	// SharedKeySize returns the size of the shared output in bytes.
-	SharedKeySize() int
+type KEMKeyPair struct {
+	Public  KEMPublicKey
+	Private KEMPrivateKey
+	Seed    KEMSeed
 }
 
-// keys.KEMKeypair is a KEM keypair.
-type KEMKeypair interface {
-	encoding.BinaryMarshaler
-
-	// Public returns the public key of the keypair.
-	Public() PublicKey
-
-	Seed() []byte // TODO create a constant for that
-
-	// Dec decapsulates the ciphertext and returns the encapsulated key.
-	Dec(ct []byte) ([]byte, error)
-}
-
-// PublicKey is a KEM public key.
-type PublicKey interface {
-	encoding.BinaryMarshaler
-
-	// Bytes returns the binary serialized public key.
-	//
-	// Warning: Altering the returned slice is unsupported and will lead
-	// to unexpected behavior.
-	Bytes() []byte
-}
-
-// kemCIRCL is a generic wrapper around a KEM scheme provided by CIRCL.
-type kemCIRCL struct {
-	name   string
-	scheme kem.Scheme
-}
-
-func (impl *kemCIRCL) String() string {
-	return impl.name
-}
-
-func (impl *kemCIRCL) GenerateKeypair(rng io.Reader) (KEMKeypair, error) {
-	seed := make([]byte, impl.scheme.SeedSize())
+func GenerateKEMKeyPair(rng io.Reader) (KEMKeyPair, error) {
+	seed := make([]byte, 64)
 	if _, err := io.ReadFull(rng, seed); err != nil {
-		return nil, err
+		return KEMKeyPair{}, err
 	}
 
-	pub, priv := impl.scheme.DeriveKeyPair(seed)
+	pub, priv := MlKem512.DeriveKeyPair(seed)
 
-	return &keypairCIRCL{
-		privateKey: priv,
-		publicKey:  mustCirclToPublic(pub),
-		seed:       seed,
+	return KEMKeyPair{
+		Private: priv,
+		Public:  mustCirclToPublic(pub),
+		Seed:    KEMSeed(seed),
 	}, nil
 }
 
-func (impl *kemCIRCL) GenerateKeypairFromSeed(seed []byte) (KEMKeypair, error) {
-	pub, priv := impl.scheme.DeriveKeyPair(seed)
+func GenerateKEMKeyPairFromSeed(seed []byte) (KEMKeyPair, error) {
+	pub, priv := MlKem512.DeriveKeyPair(seed)
 
-	return &keypairCIRCL{
-		privateKey: priv,
-		publicKey:  mustCirclToPublic(pub),
-		seed:       seed,
+	return KEMKeyPair{
+		Private: priv,
+		Public:  mustCirclToPublic(pub),
+		Seed:    KEMSeed(seed),
 	}, nil
 }
 
-func (impl *kemCIRCL) Enc(rng io.Reader, dest PublicKey) ([]byte, []byte, error) {
-	pubTo, ok := dest.(*publicKeyCIRCL)
-	if !ok || pubTo.inner.Scheme() != impl.scheme {
-		return nil, nil, errors.New("KEM: mismatched public key")
-	}
+func Encapsulate(rng io.Reader, dest KEMPublicKey) ([]byte, []byte, error) {
+	pubTo := dest.inner
 
-	seed := make([]byte, impl.scheme.EncapsulationSeedSize())
+	seed := make([]byte, MlKem512.EncapsulationSeedSize())
 	if _, err := io.ReadFull(rng, seed); err != nil {
 		return nil, nil, err
 	}
 
-	ct, ss, err := impl.scheme.EncapsulateDeterministically(pubTo.inner, seed)
+	ct, ss, err := MlKem512.EncapsulateDeterministically(pubTo, seed)
 	if err != nil {
 		// This should NEVER happen.
 		panic("KEM: failed to encapsulate: " + err.Error())
@@ -135,71 +92,49 @@ func (impl *kemCIRCL) Enc(rng io.Reader, dest PublicKey) ([]byte, []byte, error)
 	return ct, ss, nil
 }
 
-func (impl *kemCIRCL) ParsePrivateKey(data []byte) (KEMKeypair, error) {
-	priv, err := impl.scheme.UnmarshalBinaryPrivateKey(data)
+func ParseKEMPrivateKeyFromBytes(data []byte) (*KEMKeyPair, error) {
+	priv, err := MlKem512.UnmarshalBinaryPrivateKey(data)
 	if err != nil {
 		return nil, errors.New("KEM: malformed public key")
 	}
 
-	kp := &keypairCIRCL{
-		privateKey: priv,
-		publicKey:  mustCirclToPublic(priv.Public()),
-		seed:       nil,
+	kp := &KEMKeyPair{
+		Private: priv,
+		Public:  mustCirclToPublic(priv.Public()),
 	}
 
 	return kp, nil
 }
 
-func (impl *kemCIRCL) ParsePublicKey(data []byte) (PublicKey, error) {
-	pub, err := impl.scheme.UnmarshalBinaryPublicKey(data)
+func ParseKEMPublicKeyFromBytes(data []byte) (KEMPublicKey, error) {
+	pub, err := MlKem512.UnmarshalBinaryPublicKey(data)
 	if err != nil {
-		return nil, errors.New("KEM: public key cannot be parsed from the buffer")
+		return KEMPublicKey{}, errors.New("KEM: public key cannot be parsed from the buffer")
 	}
 
 	return mustCirclToPublic(pub), nil
 }
 
-func (impl *kemCIRCL) PrivateKeySize() int {
-	return impl.scheme.PrivateKeySize()
+func mustCirclToPublic(inner kem.PublicKey) KEMPublicKey {
+	innerBytes, _ := inner.MarshalBinary()
+	return KEMPublicKey{
+		inner:      inner,
+		innerBytes: (innerBytes),
+	}
 }
 
-func (impl *kemCIRCL) PublicKeySize() int {
-	return impl.scheme.PublicKeySize()
+func (kp *KEMKeyPair) MarshalBinary() ([]byte, error) {
+	return kp.Private.MarshalBinary()
 }
 
-func (impl *kemCIRCL) CiphertextSize() int {
-	return impl.scheme.CiphertextSize()
-}
-
-func (impl *kemCIRCL) SharedKeySize() int {
-	return impl.scheme.SharedKeySize()
-}
-
-// keypairCIRCL is a generic wrapper around a keypair backed by CIRCL.
-type keypairCIRCL struct {
-	privateKey kem.PrivateKey
-	publicKey  *publicKeyCIRCL
-	// The seed should only be used in the context of ephemeral keys.
-	// Is set to nil for static keypair
-	seed []byte
-}
-
-func (kp *keypairCIRCL) Seed() []byte {
-	return kp.seed
-}
-
-func (kp *keypairCIRCL) MarshalBinary() ([]byte, error) {
-	return kp.privateKey.MarshalBinary()
-}
-
-func (kp *keypairCIRCL) Dec(ct []byte) ([]byte, error) {
-	kpScheme := kp.privateKey.Scheme()
+func (kp *KEMKeyPair) Decapsulate(ct []byte) ([]byte, error) {
+	kpScheme := kp.Private.Scheme()
 
 	if len(ct) != kpScheme.CiphertextSize() {
 		return nil, errors.New("KEM: malformed ciphertext")
 	}
 
-	ss, err := kpScheme.Decapsulate(kp.privateKey, ct)
+	ss, err := kpScheme.Decapsulate(kp.Private, ct)
 	if err != nil {
 		// This should NEVER happen, all KEMs that are currently still
 		// in the NIST competition return a deterministic random value
@@ -210,39 +145,120 @@ func (kp *keypairCIRCL) Dec(ct []byte) ([]byte, error) {
 	return ss, nil
 }
 
-func (kp *keypairCIRCL) Public() PublicKey {
-	return kp.publicKey
-}
-
-// publicKeyCIRCL is a generic wrapper around a public key backed by CIRCL.
-type publicKeyCIRCL struct {
-	inner      kem.PublicKey
-	innerBytes []byte
-}
-
-func (pubKey *publicKeyCIRCL) MarshalBinary() ([]byte, error) {
+func (pubKey KEMPublicKey) MarshalBinary() ([]byte, error) {
 	return pubKey.inner.MarshalBinary()
 }
 
-func (pubKey *publicKeyCIRCL) Bytes() []byte {
+func (pubKey KEMPublicKey) Bytes() []byte {
 	return pubKey.innerBytes
 }
 
-func mustCirclToKEM(s string) *kemCIRCL {
-	scheme := schemes.ByName(s)
-	if scheme == nil {
-		panic("KEM: invalid scheme: " + s)
-	}
-	return &kemCIRCL{
-		name:   s,
-		scheme: scheme,
-	}
+// KEMPublicKeyPrefix is the prefix used in public key files for Hop KEM keys.
+const KEMPublicKeyPrefix = "hop-kem-v1-"
+
+// String encodes a KEMPublicKey to a custom format.
+func (pubKey KEMPublicKey) String() string {
+	b64 := base64.StdEncoding.EncodeToString(pubKey.Bytes())
+	return fmt.Sprintf("%s%s", KEMPublicKeyPrefix, b64)
 }
 
-func mustCirclToPublic(inner kem.PublicKey) *publicKeyCIRCL {
-	innerBytes, _ := inner.MarshalBinary()
-	return &publicKeyCIRCL{
-		inner:      inner,
-		innerBytes: innerBytes,
+// PEMTypeKEMSeed is the PEM header for Hop KEM seed
+const PEMTypeKEMSeed = "HOP PROTOCOL ML-KEM SEED V1"
+
+// String encodes a PrivateKey to PEM.
+func (seed KEMSeed) String() string {
+	block := pem.Block{
+		Type:  PEMTypeKEMSeed,
+		Bytes: seed[:],
 	}
+	return string(pem.EncodeToMemory(&block))
+}
+
+// KEMKeyFromPEM parses a PEM block into a KEMKeyPair. The header must match,
+// and the data must be the correct length.
+func KEMKeyFromPEM(p *pem.Block) (*KEMKeyPair, error) {
+	if p.Type != PEMTypeKEMSeed {
+		return nil, fmt.Errorf("wront PEM type %q, want %q", p.Type, PEMTypeKEMSeed)
+	}
+	if len(p.Bytes) != MlKem512KeySeedSize { // TODO check the size of the seed
+		return nil, fmt.Errorf("invalid key length, got %d, expected 64", len(p.Bytes))
+	}
+	out, err := GenerateKEMKeyPairFromSeed(p.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ReadKEMKeyFromPEMFile reads the first PEM-encoded Hop KEM key at the provided
+// path.
+func ReadKEMKeyFromPEMFile(path string) (*KEMKeyPair, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+	p, _ := pem.Decode(b)
+	if p == nil {
+		return nil, errors.New("not a PEM file")
+	}
+	return KEMKeyFromPEM(p)
+}
+
+// ReadKEMKeyFromPEMFileFS reads the first PEM-encoded Hop KEM key from the
+// file.
+func ReadKEMKeyFromPEMFileFS(path string, fs fs.FS) (*KEMKeyPair, error) {
+	if fs == nil {
+		return ReadKEMKeyFromPEMFile(path)
+	}
+	f, err := fs.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+	p, _ := pem.Decode(b)
+	if p == nil {
+		return nil, errors.New("not a PEM file")
+	}
+	return KEMKeyFromPEM(p)
+}
+
+func ReadKEMKeyFromPubFile(serverPublicKeyPath string) (*KEMPublicKey, error) {
+	pubKeyBytes, err := os.ReadFile(serverPublicKeyPath)
+	if err != nil {
+		logrus.Errorf("could not read public key file: %s", err)
+		return nil, err
+	}
+	pubKey, err := ParseKEMPublicKey(string(pubKeyBytes))
+	if err != nil {
+		logrus.Errorf("client: unable to parse the server public key file: %s", err)
+		return nil, err
+	}
+	return pubKey, nil
+}
+
+// ParseKEMPublicKey reads a text-encoded ML-KEM 512 Hop public key.
+func ParseKEMPublicKey(encoded string) (*KEMPublicKey, error) {
+	if !strings.HasPrefix(encoded, KEMPublicKeyPrefix) {
+		return nil, fmt.Errorf("bad prefix, expected %s", KEMPublicKeyPrefix)
+	}
+	rest := encoded[len(KEMPublicKeyPrefix):]
+	b, err := base64.StdEncoding.DecodeString(rest)
+	if err != nil {
+		return nil, err
+	}
+	if len(b) != 800 {
+		return nil, fmt.Errorf("invalid key length, got %d, expected 800", len(b))
+	}
+	out, err := ParseKEMPublicKeyFromBytes(b)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }

@@ -160,20 +160,20 @@ func (c *Client) clientHandshakeLocked() error {
 	c.hs.duplex.InitializeEmpty()
 
 	var err error
-	if c.config.Leaf.Type == certs.PQLeaf {
-		c.hs.kem = new(kemState)
-		c.hs.kem.ephemeral, err = keys.MlKem512.GenerateKeypair(rand.Reader)
-		if err != nil {
-			return err
-		}
 
-	} else {
-		c.hs.dh = new(dhState)
-		c.hs.dh.ephemeral.Generate()
-		c.hs.dh.static = c.config.Exchanger
+	// init DH State
+	c.hs.dh = new(dhState)
+	c.hs.dh.ephemeral.Generate()
+	c.hs.dh.static = c.config.Exchanger
+	logrus.Debugf("client: public ephemeral: %x", c.hs.dh.ephemeral.Public)
 
-		logrus.Debugf("client: public ephemeral: %x", c.hs.dh.ephemeral.Public)
+	// init KEM State
+	c.hs.kem = new(kemState)
+	c.hs.kem.ephemeral, err = keys.GenerateKEMKeyPair(rand.Reader)
+	if err != nil {
+		return err
 	}
+
 	c.hs.leaf, c.hs.intermediate, err = c.prepareCertificates()
 	if err != nil {
 		return err
@@ -187,24 +187,16 @@ func (c *Client) clientHandshakeLocked() error {
 
 	isClientHiddenHS := false
 
-	if c.config.ServerKey != nil {
+	if c.config.ServerKEMKey != nil {
 		logrus.Debug("---------- HIDDEN HANDSHAKE MODE -------------")
 
-		err := c.beginHiddenHandshake(buf)
+		err := c.beginPQHiddenHandshake(buf)
 		if err != nil {
 			return err
 		}
 		isClientHiddenHS = true
-	} else if c.config.Leaf.Type == certs.PQLeaf {
-		logrus.Debug("---------- PQ HANDSHAKE MODE -------------")
-
-		err = c.beginPostQuantumDiscoverableHandshake(buf)
-		if err != nil {
-			return err
-		}
-
 	} else {
-		err := c.beginDiscoverableHandshake(buf)
+		err := c.beginPQDiscoverableHandshake(buf)
 		if err != nil {
 			return err
 		}
@@ -320,7 +312,8 @@ func (c *Client) beginHiddenHandshake(buf []byte) error {
 
 	c.hs.RekeyFromSqueeze(HiddenProtocolName)
 
-	n, err := c.hs.writeClientRequestHidden(buf, c.config.ServerKey)
+	serverKey := keys.DHPublicKey{} // should come from the client config
+	n, err := c.hs.writeClientRequestHidden(buf, &serverKey)
 
 	if err != nil {
 		return err
@@ -350,8 +343,112 @@ func (c *Client) beginHiddenHandshake(buf []byte) error {
 	return nil
 }
 
-func (c *Client) beginPostQuantumDiscoverableHandshake(buf []byte) error {
-	// TODO (paul)
+func (c *Client) beginPQDiscoverableHandshake(buf []byte) error {
+	// Protocol ID for the regular handshake
+	c.hs.duplex.Absorb([]byte(PostQuantumProtocolName))
+
+	n, err := writePQClientHello(c.hs, buf)
+	if err != nil {
+		return err
+	}
+	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
+	if err != nil {
+		return err
+	}
+	c.setHSDeadline()
+
+	n, _, _, _, err = c.underlyingConn.ReadMsgUDP(buf, nil)
+	if err != nil {
+		return err
+	}
+	logrus.Debugf("client: recv %x", buf[:n])
+	if n < 4 {
+		return ErrInvalidMessage
+	}
+	shn, err := readPQServerHello(c.hs, buf)
+	if err != nil {
+		return err
+	}
+	if shn != n {
+		return fmt.Errorf("server hello too short. recevied %d bytes, SH only %d", n, shn)
+	}
+
+	c.hs.RekeyFromSqueeze(PostQuantumProtocolName)
+
+	// Client Ack
+	n, err = c.hs.writePQClientAck(buf)
+	if err != nil {
+		return err
+	}
+
+	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
+	if err != nil {
+		return err
+	}
+	c.setHSDeadline()
+
+	// Server Auth
+	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(buf, nil)
+	if err != nil {
+		return err
+	}
+	logrus.Debugf("clinet: sa msgLen: %d", msgLen)
+
+	n, err = c.hs.readPQServerAuth(buf[:msgLen])
+	if err != nil {
+		return err
+	}
+	if n != msgLen {
+		logrus.Debugf("got sa packet of %d, only read %d", msgLen, n)
+		return ErrInvalidMessage
+	}
+
+	// Client Auth
+	n, err = c.hs.writePQClientAuth(buf)
+	if err != nil {
+		return err
+	}
+	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
+	if err != nil {
+		logrus.Errorf("client: unable to send client auth: %s", err)
+		return err
+	}
+	return nil
+}
+
+func (c *Client) beginPQHiddenHandshake(buf []byte) error {
+	// Protocol ID for the hidden handshake
+	c.hs.duplex.Absorb([]byte(PostQuantumHiddenProtocolName))
+
+	c.hs.RekeyFromSqueeze(PostQuantumHiddenProtocolName)
+
+	n, err := c.hs.writePQClientRequestHidden(buf, c.config.ServerKEMKey)
+
+	if err != nil {
+		return err
+	}
+	_, _, err = c.underlyingConn.WriteMsgUDP(buf[:n], nil, c.hs.remoteAddr)
+	if err != nil {
+		logrus.Errorf("client: unable to make a hidden request: %s", err)
+		return err
+	}
+
+	// Server Response hidden
+	msgLen, _, _, _, err := c.underlyingConn.ReadMsgUDP(buf, nil)
+	if err != nil {
+		return err
+	}
+	logrus.Debugf("client: Server response hidden msgLen: %d", msgLen)
+
+	n, err = c.hs.readPQServerResponseHidden(buf[:msgLen])
+	if err != nil {
+		return err
+	}
+	if n != msgLen {
+		logrus.Debugf("client: Server response hidden packet of %d, only read %d", msgLen, n)
+		return ErrInvalidMessage
+	}
+
 	return nil
 }
 

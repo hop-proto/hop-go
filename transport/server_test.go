@@ -40,6 +40,8 @@ func newClientAuthAndConfig(t assert.TestingT, verifyConfig *VerifyConfig) (*key
 func newTestServerConfig(t assert.TestingT) (*ServerConfig, *VerifyConfig) {
 	keyPair, err := keys.ReadDHKeyFromPEMFile("testdata/leaf-key.pem")
 	assert.NilError(t, err)
+	KemKeyPair, err := keys.ReadKEMKeyFromPEMFile("testdata/kem_hop.pem")
+	assert.NilError(t, err)
 	certificate, err := certs.ReadCertificatePEMFile("testdata/leaf.pem")
 	assert.NilError(t, err)
 	intermediate, err := certs.ReadCertificatePEMFile("testdata/intermediate.pem")
@@ -47,6 +49,7 @@ func newTestServerConfig(t assert.TestingT) (*ServerConfig, *VerifyConfig) {
 	root, err := certs.ReadCertificatePEMFile("testdata/root.pem")
 	assert.NilError(t, err)
 	server := ServerConfig{
+		KEMKeyPair:       KemKeyPair,
 		KeyPair:          keyPair,
 		Certificate:      certificate,
 		Intermediate:     intermediate,

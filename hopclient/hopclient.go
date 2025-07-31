@@ -142,18 +142,18 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		return c.getAuthorization(verifyConfig)
 	}
 
-	var serverKey *keys.DHPublicKey
+	var ServerKEMKey *keys.KEMPublicKey
 	var err error
 
 	if hc.ServerKey != "" {
 		logrus.Infof("client: server Key loaded to complete Hidden Mode handshake")
 
 		serverKeyPath := combinators.StringOr(hc.ServerKey, config.DefaultKeyPath())
-		serverKey, err = loadServerPublicKey(serverKeyPath)
+		ServerKEMKey, err = loadServerPublicKEMKey(serverKeyPath)
 
 		if err != nil {
 			logrus.Errorf("client: unable to load the server public key file: %v", err)
-			serverKey = nil
+			ServerKEMKey = nil
 		}
 	}
 
@@ -196,7 +196,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 			BoundClient:  bc,
 			VerifyConfig: verifyConfig,
 			Leaf:         leaf,
-			ServerKey:    serverKey,
+			ServerKEMKey: ServerKEMKey,
 		}
 		logrus.Info("leaf: ", leaf)
 	} else {
@@ -219,7 +219,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 			X25519KeyPair: keypair,
 			VerifyConfig:  verifyConfig,
 			Leaf:          leaf,
-			ServerKey:     serverKey,
+			ServerKEMKey:  ServerKEMKey,
 		}
 	}
 	c.authenticator = authenticator
@@ -314,10 +314,10 @@ func (c *HopClient) Close() error {
 func (c *HopClient) startUnderlying(address string, authenticator core.Authenticator) error {
 	// TODO(dadrian): Update this once the authenticator interface is set.
 	transportConfig := transport.ClientConfig{
-		Exchanger: authenticator,
-		Verify:    authenticator.GetVerifyConfig(),
-		Leaf:      authenticator.GetLeaf(),
-		ServerKey: authenticator.GetServerKey(),
+		Exchanger:    authenticator,
+		Verify:       authenticator.GetVerifyConfig(),
+		Leaf:         authenticator.GetLeaf(),
+		ServerKEMKey: authenticator.GetServerKey(),
 	}
 	var err error
 	var dialer net.Dialer
@@ -433,14 +433,14 @@ func (c *HopClient) HandleTubes() {
 	}
 }
 
-func loadServerPublicKey(serverKeyPath string) (*keys.DHPublicKey, error) {
+func loadServerPublicKEMKey(serverKeyPath string) (*keys.KEMPublicKey, error) {
 
 	keyBytes, err := os.ReadFile(serverKeyPath)
 	if err != nil {
 		logrus.Errorf("client: could not read server key file: %s", err)
 		return nil, err
 	}
-	pubKey, err := keys.ParseDHPublicKey(string(keyBytes))
+	pubKey, err := keys.ParseKEMPublicKey(string(keyBytes))
 	if err != nil {
 		logrus.Errorf("client: unable to parse the server key file: %s", err)
 		return nil, err

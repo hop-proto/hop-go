@@ -3,9 +3,9 @@ package transport
 import (
 	"errors"
 	"fmt"
+	"hop.computer/hop/keys"
 	"os"
 
-	"github.com/cloudflare/circl/kem/mlkem/mlkem512"
 	"golang.org/x/crypto/curve25519"
 
 	"hop.computer/hop/kravatte"
@@ -33,10 +33,10 @@ const (
 	SessionIDLen = 4
 	CounterLen   = 8
 	TimestampLen = 8
-	KemCtLen     = mlkem512.CiphertextSize // KemCtLen
-	KemKeyLen    = mlkem512.PublicKeySize
-	PQCookieLen  = 32 + mlkem512.KeySeedSize // 32 comes for the CookieAD function but should not be that small
-	PQSeedLen    = mlkem512.KeySeedSize
+	KemCtLen     = keys.MlKem512CiphertextSize // KemCtLen
+	KemKeyLen    = keys.MlKem512PublicKeySize
+	PQCookieLen  = 32 + keys.MlKem512KeySeedSize // 32 comes for the CookieAD function but should not be that small
+	PQSeedLen    = keys.MlKem512KeySeedSize
 
 	// HiddenModeTimestampExpiration TODO (paul) 5 sec is a way too long, evaluate the time need for a connection
 	// TODO (paul) what is considered a reasonable time range for a timestamp to prevent replay attack?
