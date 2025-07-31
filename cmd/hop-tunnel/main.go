@@ -69,7 +69,7 @@ func issueCerts() (leaf, intermediate *certs.Certificate, keyPair *keys.X25519Ke
 		Names:     []certs.Name{certs.DNSName("hop.local")},
 		PublicKey: keyPair.Public[:],
 	}
-	leaf, err = certs.IssueLeaf(intermediate, &identity, certs.Leaf)
+	leaf, err = certs.IssueLeaf(intermediate, &identity)
 	if err != nil {
 		logrus.Fatalf("unable to issue leaf certificate: %s", err)
 	}

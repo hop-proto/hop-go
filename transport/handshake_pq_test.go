@@ -204,7 +204,7 @@ func newPQClientAuth(t assert.TestingT, certificate *certs.Certificate) (*keys.X
 	c, err := certs.IssueLeaf(certificate, &certs.Identity{
 		PublicKey: keypair.Public[:],
 		Names:     []certs.Name{certs.RawStringName("testing")},
-	}, certs.Leaf)
+	})
 	assert.NilError(t, err)
 	return keypair, c
 }
@@ -270,7 +270,7 @@ func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermedi
 		Names:     []certs.Name{certs.RawStringName("testing")},
 	}
 
-	c, err := certs.IssueLeaf(intermediate, &leafIdentity, certs.Leaf)
+	c, err := certs.IssueLeaf(intermediate, &leafIdentity)
 
 	server := ServerConfig{
 		KEMKeyPair:       &kemKp,

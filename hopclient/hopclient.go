@@ -231,7 +231,7 @@ func selfSignLeaf(public *keys.DHPublicKey, address core.URL) *certs.Certificate
 		Names: []certs.Name{
 			certs.RawStringName(address.User),
 		},
-	}, certs.Leaf)
+	})
 	if err != nil {
 		logrus.Fatalf("unable to self-sign certificate: %s", err)
 	}

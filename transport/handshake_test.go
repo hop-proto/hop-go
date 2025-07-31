@@ -126,7 +126,7 @@ func TestClientServerHSWithAgent(t *testing.T) {
 
 	leaf, err := certs.SelfSignLeaf(&certs.Identity{
 		PublicKey: public[:],
-	}, certs.Leaf)
+	})
 
 	assert.NilError(t, err)
 	c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{

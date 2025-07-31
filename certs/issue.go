@@ -78,11 +78,11 @@ func issue(parent *Certificate, child *Identity, certType CertificateType, durat
 //
 // TODO(dadrian): Should we just use XEdDSA so that we don't need to have two
 // different key types, in exchange for having to implement more cryptography?
-func IssueLeaf(parent *Certificate, child *Identity, cType CertificateType) (*Certificate, error) {
+func IssueLeaf(parent *Certificate, child *Identity) (*Certificate, error) {
 	if parent.Type != Intermediate {
 		return nil, errors.New("IssueLeaf requires the parent to be an intermediate")
 	}
-	return issue(parent, child, cType, week)
+	return issue(parent, child, Leaf, week)
 }
 
 func selfSign(self *Identity, certificateType CertificateType, keyPair *keys.SigningKeyPair) (*Certificate, error) {
@@ -152,6 +152,6 @@ func IssueIntermediate(root *Certificate, intermediate *Identity) (*Certificate,
 }
 
 // SelfSignLeaf issues self-signed leaf certificate using only a key.
-func SelfSignLeaf(identity *Identity, cType CertificateType) (*Certificate, error) {
-	return selfSign(identity, cType, nil)
+func SelfSignLeaf(identity *Identity) (*Certificate, error) {
+	return selfSign(identity, Leaf, nil)
 }

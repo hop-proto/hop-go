@@ -88,12 +88,12 @@ func main() {
 			if err != nil {
 				logrus.Fatalf("bad private key: %s", err)
 			}
-			leaf, err = certs.IssueLeaf(parent, &identity, certs.Leaf)
+			leaf, err = certs.IssueLeaf(parent, &identity)
 			if err != nil {
 				logrus.Fatalf("unable to issue leaf: %s", err)
 			}
 		} else {
-			leaf, err = certs.SelfSignLeaf(&identity, certs.Leaf)
+			leaf, err = certs.SelfSignLeaf(&identity)
 			if err != nil {
 				logrus.Fatalf("unable to self-sign leaf: %s", err)
 			}
