@@ -400,7 +400,8 @@ func transportCert(keyPath, certPath, intermediatePath, kemKeyPath string) (*tra
 		if err != nil {
 			return nil, err
 		}
-		c.KEMKeyPair = *kemKeyPair
+		c.KEMKeyPair = kemKeyPair
+		logrus.Debug("Read kem key from PEM file Hidden Mode activated")
 	}
 
 	return c, nil
