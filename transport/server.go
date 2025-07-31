@@ -224,6 +224,12 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 
 	case MessageTypeClientRequestHidden:
 		logrus.Debug("server: receiving a hidden client request to handle")
+
+		if s.config.KEMKeyPair == nil {
+			logrus.Debug("server: can't handle hidden client request. Sever does not have KEM key pair")
+			return errTransportOnly
+		}
+
 		n, hs, err := s.handlePQClientRequestHidden(rawRead[:msgLen])
 		if err != nil {
 			logrus.Debugf("server: unable to handle client hidden request: %s", err)
