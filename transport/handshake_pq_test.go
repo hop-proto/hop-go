@@ -29,8 +29,7 @@ func TestNewPQNoiseXXHandshake(t *testing.T) {
 
 	// init kem
 	client.hs.kem = new(kemState)
-	client.hs.kem.impl = keys.MlKem512
-	client.hs.kem.ephemeral, err = keys.MlKem512.GenerateKeypair(rand.Reader)
+	client.hs.kem.ephemeral, err = keys.GenerateKEMKeyPair(rand.Reader)
 	assert.Check(t, cmp.Equal(nil, err))
 	client.hs.leaf, client.hs.intermediate, err = client.prepareCertificates()
 
@@ -48,8 +47,7 @@ func TestNewPQNoiseXXHandshake(t *testing.T) {
 
 	// init kem
 	serverHs.kem = new(kemState)
-	serverHs.kem.impl = keys.MlKem512
-	serverHs.kem.ephemeral, err = keys.MlKem512.GenerateKeypair(rand.Reader)
+	serverHs.kem.ephemeral, err = keys.GenerateKEMKeyPair(rand.Reader)
 
 	// init dh
 	serverHs.dh = new(dhState)
@@ -142,13 +140,10 @@ func TestNewPQNoiseIKHandshake(t *testing.T) {
 
 	// init kem
 	client.hs.kem = new(kemState)
-	client.hs.kem.impl = keys.MlKem512
-	client.hs.kem.ephemeral, err = keys.MlKem512.GenerateKeypair(rand.Reader)
+	client.hs.kem.ephemeral, err = keys.GenerateKEMKeyPair(rand.Reader)
 	assert.NilError(t, err)
 	client.hs.leaf, client.hs.intermediate, err = client.prepareCertificates()
 	assert.NilError(t, err)
-
-	client.hs.kem.remoteStatic = *kemServerPubStatic
 
 	// init dh
 	client.hs.dh = new(dhState)
@@ -160,9 +155,8 @@ func TestNewPQNoiseIKHandshake(t *testing.T) {
 
 	// init kem
 	serverHs.kem = new(kemState)
-	serverHs.kem.impl = keys.MlKem512
-	serverHs.kem.ephemeral, err = keys.MlKem512.GenerateKeypair(rand.Reader)
-	serverHs.kem.static = server.config.KEMKeyPair
+	serverHs.kem.ephemeral, err = keys.GenerateKEMKeyPair(rand.Reader)
+	serverHs.kem.static = *server.config.KEMKeyPair
 
 	// init dh
 	serverHs.dh = new(dhState)
@@ -181,7 +175,7 @@ func TestNewPQNoiseIKHandshake(t *testing.T) {
 
 	// Client Request
 	clientBuf := make([]byte, 65535)
-	n, err1 := client.hs.writePQClientRequestHidden(clientBuf)
+	n, err1 := client.hs.writePQClientRequestHidden(clientBuf, kemServerPubStatic)
 	_, err2 := server.readPQClientRequestHidden(serverHs, clientBuf[:n])
 	assert.NilError(t, err1)
 	assert.NilError(t, err2)
@@ -216,7 +210,7 @@ func newPQClientAuth(t assert.TestingT, certificate *certs.Certificate) (*keys.X
 	return keypair, c
 }
 
-func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDPAddr, *keys.X25519KeyPair, *keys.DHPublicKey, *keys.PublicKey) {
+func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDPAddr, *keys.X25519KeyPair, *keys.DHPublicKey, *keys.KEMPublicKey) {
 
 	rootKey := keys.GenerateNewSigningKeyPair()
 	intermediateKey := keys.GenerateNewSigningKeyPair()
@@ -264,13 +258,13 @@ func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDP
 }
 
 // TODO this is not pq anymore as we dont need pq statics
-func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermediate *certs.Certificate) (*ServerConfig, *VerifyConfig, *keys.DHPublicKey, *keys.PublicKey) {
+func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermediate *certs.Certificate) (*ServerConfig, *VerifyConfig, *keys.DHPublicKey, *keys.KEMPublicKey) {
 
 	keypair := keys.GenerateNewX25519KeyPair()
 
-	kemKp, err := keys.MlKem512.GenerateKeypair(rand.Reader)
+	kemKp, err := keys.GenerateKEMKeyPair(rand.Reader)
 	assert.NilError(t, err)
-	kemPubKey := kemKp.Public()
+	kemPubKey := kemKp.Public
 
 	leafIdentity := certs.Identity{
 		PublicKey: keypair.Public[:],
@@ -280,7 +274,7 @@ func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermedi
 	c, err := certs.IssueLeaf(intermediate, &leafIdentity, certs.Leaf)
 
 	server := ServerConfig{
-		KEMKeyPair:       kemKp,
+		KEMKeyPair:       &kemKp,
 		KeyPair:          keypair,
 		Certificate:      c,
 		Intermediate:     intermediate,

@@ -64,13 +64,10 @@ type dhState struct {
 }
 
 type kemState struct {
-	impl keys.KEM
+	ephemeral keys.KEMKeyPair
+	static    keys.KEMKeyPair
 
-	ephemeral keys.KEMKeypair
-	static    keys.KEMKeypair
-
-	remoteEphemeral keys.PublicKey
-	remoteStatic    keys.PublicKey
+	remoteEphemeral keys.KEMPublicKey
 }
 
 func (hs *HandshakeState) writeCookie(b []byte) (int, error) {
@@ -85,8 +82,7 @@ func (hs *HandshakeState) writeCookie(b []byte) (int, error) {
 	var cookieLen int
 
 	if hs.kem != nil {
-		seed := hs.kem.ephemeral.Seed()
-		plaintextCookie = seed[:]
+		plaintextCookie = hs.kem.ephemeral.Seed[:]
 		ad = CookieAD(hs.dh.remoteEphemeral[:], hs.remoteAddr)
 		cookieLen = PQCookieLen
 
@@ -134,7 +130,7 @@ func (hs *HandshakeState) decryptCookie(b []byte) (int, error) {
 			return 0, ErrInvalidMessage
 		}
 
-		hs.kem.ephemeral, err = hs.kem.impl.GenerateKeypairFromSeed(seed)
+		hs.kem.ephemeral, err = keys.GenerateKEMKeyPairFromSeed(seed)
 		if err != nil {
 			return 0, ErrInvalidMessage
 		}
@@ -567,11 +563,8 @@ func (hs *HandshakeState) certificateParserAndVerifier(rawLeaf []byte, rawInterm
 		var errAuthkeys error
 		if hs.certVerify.AuthKeysAllowed {
 			logrus.Debug("Authkeys are allowed. attempting to validate self-signed cert")
-			if hs.kem != nil {
-				errAuthkeys = hs.certVerify.AuthKeys.VerifyPQLeaf(&leaf, opts)
-			} else {
-				errAuthkeys = hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
-			}
+
+			errAuthkeys = hs.certVerify.AuthKeys.VerifyLeaf(&leaf, opts)
 
 		}
 		if !hs.certVerify.AuthKeysAllowed || errAuthkeys != nil {

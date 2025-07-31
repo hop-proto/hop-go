@@ -31,15 +31,15 @@ func TestClientServerCompatibilityHiddenHandshake(t *testing.T) {
 	assert.NilError(t, err)
 	go s.Serve()
 
-	serverPublicKey, err := keys.ReadDHKeyFromPubFile("testdata/leaf.pub")
+	serverPublicKey, err := keys.ReadKEMKeyFromPubFile("testdata/kem_hop.pub")
 	assert.NilError(t, err)
 
 	ckp, leaf := newClientAuth(t)
 	clientConfig := ClientConfig{
-		Verify:    *vc,
-		Exchanger: ckp,
-		Leaf:      leaf,
-		ServerKey: serverPublicKey,
+		Verify:       *vc,
+		Exchanger:    ckp,
+		Leaf:         leaf,
+		ServerKEMKey: serverPublicKey,
 	}
 	c, err := Dial("udp", s.Addr().String(), clientConfig)
 	assert.NilError(t, err)
@@ -130,15 +130,15 @@ func TestClientServerHiddenHSWithAgent(t *testing.T) {
 	assert.NilError(t, err)
 
 	// Hidden mode serverPublic key reading
-	serverKey, err := keys.ReadDHKeyFromPubFile("testdata/leaf.pub")
+	serverKey, err := keys.ReadKEMKeyFromPubFile("testdata/kem_hop.pub")
 	assert.NilError(t, err)
 
 	// adding the serverPublicKey to the client config enabling the hiddenHS
 	c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{
-		Verify:    *verifyConfig,
-		Exchanger: bc,
-		Leaf:      leaf,
-		ServerKey: serverKey,
+		Verify:       *verifyConfig,
+		Exchanger:    bc,
+		Leaf:         leaf,
+		ServerKEMKey: serverKey,
 	})
 	defer func() {
 		err := c.Close()
@@ -161,6 +161,8 @@ func TestClientServerHiddenHSWithAgent(t *testing.T) {
 	assert.NilError(t, s.Close())
 	assert.NilError(t, c.Close())
 }
+
+// TODO obsolete, has to be updated with PQ
 
 func TestClientHelloHiddenLength(t *testing.T) {
 	buf := make([]byte, 65535)
