@@ -142,10 +142,10 @@ func (c *HopClient) authenticatorSetupLocked() error {
 	var ServerKEMKey *keys.KEMPublicKey
 	var err error
 
-	if hc.ServerKey != "" {
+	if hc.ServerKEMKey != "" {
 		logrus.Infof("client: server Key loaded to complete Hidden Mode handshake")
 
-		serverKeyPath := combinators.StringOr(hc.ServerKey, config.DefaultKeyPath())
+		serverKeyPath := combinators.StringOr(hc.ServerKEMKey, config.DefaultKeyPath())
 		ServerKEMKey, err = loadServerPublicKEMKey(serverKeyPath)
 
 		if err != nil {
@@ -313,7 +313,7 @@ func (c *HopClient) startUnderlying(address string, authenticator core.Authentic
 		Exchanger:    authenticator,
 		Verify:       authenticator.GetVerifyConfig(),
 		Leaf:         authenticator.GetLeaf(),
-		ServerKEMKey: authenticator.GetServerKey(),
+		ServerKEMKey: authenticator.GetServerKEMKey(),
 	}
 	var err error
 	var dialer net.Dialer

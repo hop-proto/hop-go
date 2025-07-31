@@ -13,7 +13,7 @@ func TestLoadClientConfig(t *testing.T) {
 	cert := "/path/to/cert.pem"
 	hostname := "example.localhost"
 	autoSelfSign := false
-	serverKey := "/path/to/serverKey.pub"
+	ServerKEMKey := "/path/to/serverKey.pub"
 	expected := &ClientConfig{
 		Global: HostConfigOptional{
 			CAFiles:     []string{"/path/to/ca.pem", "/path/to/other.pem"},
@@ -25,7 +25,7 @@ func TestLoadClientConfig(t *testing.T) {
 			AutoSelfSign: &autoSelfSign,
 			Hostname:     &hostname,
 			Port:         1234,
-			ServerKey:    &serverKey,
+			ServerKEMKey: &ServerKEMKey,
 		}},
 	}
 	assert.DeepEqual(t, c, expected)
