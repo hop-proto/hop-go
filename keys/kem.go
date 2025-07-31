@@ -17,7 +17,10 @@ import (
 	cpapke "github.com/cloudflare/circl/pke/kyber/kyber512"
 )
 
-// TODO paul: this entire file is the following implementation resulting form https://gitlab.com/yawning/nyquist/-/blob/experimental/pqnoise/kem/kem.go?ref_type=heads and using cloudflare circl kem schemes
+// This kem implementation is using the Cloudflare CIRCL ML-KEM 512 implementation,
+// is highly inspired by the work done in the following repository
+// https://gitlab.com/yawning/nyquist/-/blob/experimental/pqnoise/kem/kem.go?ref_type=heads
+// and has been adapted to Hop use.
 
 var (
 	MlKem512 = schemes.ByName("ML-KEM-512")

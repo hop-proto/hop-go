@@ -44,7 +44,6 @@ type IdentityConfig struct {
 // ClientConfig contains client-specific configuration settings.
 type ClientConfig struct {
 	MaxBufferedPackets int
-	// is DH specific as well
 	Exchanger          keys.Exchangable
 	Verify             VerifyConfig
 	Leaf, Intermediate *certs.Certificate
