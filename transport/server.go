@@ -225,11 +225,6 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 	case MessageTypeClientRequestHidden:
 		logrus.Debug("server: receiving a hidden client request to handle")
 
-		if s.config.KEMKeyPair == nil {
-			logrus.Debug("server: can't handle hidden client request. Sever does not have KEM key pair")
-			return errTransportOnly
-		}
-
 		n, hs, err := s.handlePQClientRequestHidden(rawRead[:msgLen])
 		if err != nil {
 			logrus.Debugf("server: unable to handle client hidden request: %s", err)
@@ -659,7 +654,6 @@ func (s *Server) handlePQClientRequestHidden(b []byte) (int, *HandshakeState, er
 
 	// init kem
 	hs.kem = new(kemState)
-	hs.kem.static = *s.config.KEMKeyPair
 
 	n, err := s.readPQClientRequestHidden(hs, b)
 
@@ -819,7 +813,7 @@ func (s *Server) init() error {
 		}
 
 		if s.config.KEMKeyPair != nil {
-			c.KEMKeyPair = *s.config.KEMKeyPair
+			c.KEMKeyPair = s.config.KEMKeyPair
 		}
 
 		s.config.GetCertificate = func(ClientHandshakeInfo) (*Certificate, error) {

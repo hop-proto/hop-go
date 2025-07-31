@@ -156,7 +156,6 @@ func TestNewPQNoiseIKHandshake(t *testing.T) {
 	// init kem
 	serverHs.kem = new(kemState)
 	serverHs.kem.ephemeral, err = keys.GenerateKEMKeyPair(rand.Reader)
-	serverHs.kem.static = *server.config.KEMKeyPair
 
 	// init dh
 	serverHs.dh = new(dhState)

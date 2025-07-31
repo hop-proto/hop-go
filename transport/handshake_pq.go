@@ -779,6 +779,11 @@ func (s *Server) readPQClientRequestHidden(hs *HandshakeState, b []byte) (int, e
 		hs.duplex.Absorb(bufCopy[:KemKeyLen])
 		bufCopy = bufCopy[KemKeyLen:]
 
+		if cert.KEMKeyPair == nil {
+			logrus.Debug("server: Hidden mode unable to find a kem key in the hop transport cert")
+			continue // Tag mismatch, move to the next certificate
+		}
+
 		k, err := cert.KEMKeyPair.Decapsulate(bufCopy[:KemCtLen]) // skem CipherText
 		if err != nil {
 			logrus.Debugf("server: unable to calculate skem: %s", err)

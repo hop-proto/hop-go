@@ -12,7 +12,7 @@ type Certificate struct {
 	RawIntermediate []byte
 
 	Exchanger  keys.Exchangable
-	KEMKeyPair keys.KEMKeyPair
+	KEMKeyPair *keys.KEMKeyPair
 	Leaf       *certs.Certificate // TODO(dadrian): Do we eve need this field?
 
 	HostNames []string
