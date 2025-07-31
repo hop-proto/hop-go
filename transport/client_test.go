@@ -62,7 +62,7 @@ func TestClientCertificates(t *testing.T) {
 			PublicKey: clientKey.Public[:],
 			Names:     names,
 		}
-		clientLeaf, err := certs.IssueLeaf(clientIntermediate, &clientLeafIdentity, certs.Leaf)
+		clientLeaf, err := certs.IssueLeaf(clientIntermediate, &clientLeafIdentity)
 		assert.NilError(t, err)
 
 		return ClientConfig{
@@ -78,7 +78,7 @@ func TestClientCertificates(t *testing.T) {
 			PublicKey: clientKey.Public[:],
 			Names:     names,
 		}
-		clientLeaf, err := certs.SelfSignLeaf(&clientLeafIdentity, certs.Leaf)
+		clientLeaf, err := certs.SelfSignLeaf(&clientLeafIdentity)
 		assert.NilError(t, err)
 
 		return ClientConfig{

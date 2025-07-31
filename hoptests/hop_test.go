@@ -98,7 +98,7 @@ func NewTestServer(t *testing.T) *TestServer {
 
 	s.ServerName = "example.local"
 
-	s.Leaf, err = certs.IssueLeaf(s.Intermediate, certs.LeafIdentity(s.LeafKeyPair, certs.DNSName(s.ServerName)), certs.Leaf)
+	s.Leaf, err = certs.IssueLeaf(s.Intermediate, certs.LeafIdentity(s.LeafKeyPair, certs.DNSName(s.ServerName)))
 	assert.NilError(t, err)
 
 	s.Store = certs.Store{}
@@ -116,7 +116,7 @@ func NewTestServer(t *testing.T) *TestServer {
 func (s *TestServer) ChainAuthenticator(t *testing.T, clientKey *keys.X25519KeyPair) core.Authenticator {
 	leaf, err := certs.SelfSignLeaf(&certs.Identity{
 		PublicKey: clientKey.Public[:],
-	}, certs.Leaf)
+	})
 	assert.NilError(t, err)
 	return core.InMemoryAuthenticator{
 		X25519KeyPair: clientKey,
@@ -493,7 +493,7 @@ func TestSelfAuthGrant(t *testing.T) {
 	clientCert, err := certs.SelfSignLeaf(&certs.Identity{
 		PublicKey: c.KeyPair.Public[:],
 		Names:     []certs.Name{certs.RawStringName("hop_user")},
-	}, certs.Leaf)
+	})
 	assert.NilError(t, err)
 	certBytes, err := clientCert.Marshal()
 	assert.NilError(t, err)
