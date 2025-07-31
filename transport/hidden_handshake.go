@@ -15,6 +15,7 @@ import (
 
 // TODO(hosono) In the paper, the hidden mode client hello is called "Client Request"
 // which seems like an ambiguous name. I've changed it to ClientRequestHidden
+// nolint
 func (hs *HandshakeState) writeClientRequestHidden(b []byte, serverPublicKey *keys.DHPublicKey) (int, error) {
 
 	logrus.Debug("client: sending client request (hidden mode)")
@@ -101,6 +102,7 @@ func (hs *HandshakeState) writeClientRequestHidden(b []byte, serverPublicKey *ke
 	return pos, err
 }
 
+// nolint
 func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, error) {
 
 	logrus.Debug("server: read client request hidden")
@@ -247,6 +249,7 @@ func (s *Server) readClientRequestHidden(hs *HandshakeState, b []byte) (int, err
 	return length, err
 }
 
+// nolint
 func (s *Server) writeServerResponseHidden(hs *HandshakeState, b []byte) (int, error) {
 
 	c, err := s.config.GetCertificate(ClientHandshakeInfo{
@@ -333,6 +336,7 @@ func (s *Server) writeServerResponseHidden(hs *HandshakeState, b []byte) (int, e
 	return pos, nil
 }
 
+// nolint
 func (hs *HandshakeState) readServerResponseHidden(b []byte) (int, error) {
 
 	minLength := HeaderLen + SessionIDLen + DHLen + 2*MacLen
