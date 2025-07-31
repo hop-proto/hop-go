@@ -60,7 +60,6 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 
 // CookieAD generates byte array that can be used as the associated data for the
 // AEAD encrypted data in the cookie.
-// TODO paul: ensure that this data copy is safe instead of the original pointer
 func CookieAD(ephemeral []byte, clientAddr *net.UDPAddr) []byte {
 	// TODO(dadrian): Remove the memory allocation
 	h := sha3.New256()

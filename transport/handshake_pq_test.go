@@ -15,7 +15,7 @@ import (
 )
 
 // +checklocksignore
-func TestNewPQNoiseXXHandshake(t *testing.T) {
+func TestPQNoiseXXHandshake(t *testing.T) {
 	var err error
 	logrus.SetLevel(logrus.DebugLevel)
 
@@ -40,7 +40,6 @@ func TestNewPQNoiseXXHandshake(t *testing.T) {
 
 	assert.Check(t, cmp.Equal(nil, err))
 
-	// TODO init a server instance and maybe a client one too
 	serverHs := new(HandshakeState)
 	serverHs.duplex.InitializeEmpty()
 	serverHs.duplex.Absorb([]byte(PostQuantumProtocolName))
@@ -52,7 +51,6 @@ func TestNewPQNoiseXXHandshake(t *testing.T) {
 	// init dh
 	serverHs.dh = new(dhState)
 	serverHs.dh.ephemeral.Generate()
-	// TODO do we need to load the statics in the hs?
 
 	serverHs.remoteAddr = raddr
 	serverHs.cookieKey = server.cookieKey
@@ -101,14 +99,6 @@ func TestNewPQNoiseXXHandshake(t *testing.T) {
 	clientBuf = make([]byte, 65535)
 	n, err1 = client.hs.writePQClientAuth(clientBuf)
 	_, serverHs, err2 = server.readPQClientAuth(clientBuf[:n], raddr)
-
-	assert.NilError(t, err1)
-	assert.NilError(t, err2)
-
-	// Server Conf // TODO (paul): shall we add a cookie here as long as there is a response here? might need it
-	serverBuf = make([]byte, 65535)
-	//n, err1 = server.writePQServerConf(serverBuf, serverHs)
-	//_, err2 = client.hs.readPQServerConf(serverBuf[:n])
 	assert.NilError(t, err1)
 	assert.NilError(t, err2)
 
@@ -125,7 +115,7 @@ func TestNewPQNoiseXXHandshake(t *testing.T) {
 }
 
 // +checklocksignore
-func TestNewPQNoiseIKHandshake(t *testing.T) {
+func TestPQNoiseIKHandshake(t *testing.T) {
 	var err error
 	logrus.SetLevel(logrus.DebugLevel)
 
@@ -256,7 +246,6 @@ func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDP
 	return c, s, raddr, clientStatic, serverPubStatic, kemServerPubStatic
 }
 
-// TODO this is not pq anymore as we dont need pq statics
 func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermediate *certs.Certificate) (*ServerConfig, *VerifyConfig, *keys.DHPublicKey, *keys.KEMPublicKey) {
 
 	keypair := keys.GenerateNewX25519KeyPair()

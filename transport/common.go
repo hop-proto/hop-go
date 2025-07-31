@@ -104,24 +104,15 @@ type MessageType byte
 
 // MessageType constants for each type of handshake and transport message.
 const (
-	MessageTypeClientHello            MessageType = 0x01
-	MessageTypeServerHello            MessageType = 0x02
-	MessageTypeClientAck              MessageType = 0x03
-	MessageTypeServerAuth             MessageType = 0x04
-	MessageTypeClientAuth             MessageType = 0x05
-	MessageTypeClientRequestHidden    MessageType = 0x08
-	MessageTypeServerResponseHidden   MessageType = 0x09
-	MessageTypePQClientHello          MessageType = 0x11 // PQ messages Handshake 0x1...
-	MessageTypePQServerHello          MessageType = 0x12
-	MessageTypePQClientAck            MessageType = 0x13
-	MessageTypePQServerAuth           MessageType = 0x14
-	MessageTypePQClientAuth           MessageType = 0x15
-	MessageTypePQServerConf           MessageType = 0x16
-	MessageTypePQClientRequestHidden  MessageType = 0x18
-	MessageTypePQServerResponseHidden MessageType = 0x19
-
-	MessageTypeTransport MessageType = 0x20
-	MessageTypeControl   MessageType = 0x80
+	MessageTypeClientHello          MessageType = 0x01
+	MessageTypeServerHello          MessageType = 0x02
+	MessageTypeClientAck            MessageType = 0x03
+	MessageTypeServerAuth           MessageType = 0x04
+	MessageTypeClientAuth           MessageType = 0x05
+	MessageTypeClientRequestHidden  MessageType = 0x08
+	MessageTypeServerResponseHidden MessageType = 0x09
+	MessageTypeTransport            MessageType = 0x10
+	MessageTypeControl              MessageType = 0x80
 )
 
 // ControlMessage specifies the bytes that indicate different control messages.

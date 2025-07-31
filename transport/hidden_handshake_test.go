@@ -162,8 +162,6 @@ func TestClientServerHiddenHSWithAgent(t *testing.T) {
 	assert.NilError(t, c.Close())
 }
 
-// TODO obsolete, has to be updated with PQ
-
 func TestClientHelloHiddenLength(t *testing.T) {
 	buf := make([]byte, 65535)
 	hs := new(HandshakeState)
