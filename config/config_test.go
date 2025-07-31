@@ -13,7 +13,7 @@ func TestLoadClientConfig(t *testing.T) {
 	cert := "/path/to/cert.pem"
 	hostname := "example.localhost"
 	autoSelfSign := false
-	ServerKEMKey := "/path/to/serverKey.pub"
+	ServerKEMKey := "/path/to/serverKEMKey.pub"
 	expected := &ClientConfig{
 		Global: HostConfigOptional{
 			CAFiles:     []string{"/path/to/ca.pem", "/path/to/other.pem"},
