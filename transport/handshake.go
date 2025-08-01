@@ -1,5 +1,7 @@
 package transport
 
+// All the handshake messages written in that file are meant to be kept up until we decide to validate the Hop noise PQ handshake pattern.
+
 import (
 	"bytes"
 	"errors"

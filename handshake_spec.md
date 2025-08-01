@@ -128,8 +128,8 @@ Server->Client: Server Hello [0x2]
 Client->Server: Client Ack [0x3]
 Server->Client: Server Auth [0x4]
 Client->Server: Client Auth [0x5]
-Client->Server: Transport Data [0x20]
-Server->Client: Transport Data [0x20]
+Client->Server: Transport Data [0x10]
+Server->Client: Transport Data [0x10]
 ```
 
 ### Message Structures
@@ -577,34 +577,34 @@ Thus, to a remote party, the client appears to have local key pair $\beta, \beta
 ---
 
 ```sequence
-Client->Server: Client Hello [0x11]
-Server->Client: Server Hello [0x12]
-Client->Server: Client Ack [0x13]
-Server->Client: Server Auth [0x14]
-Client->Server: Client Auth [0x15]
-Server->Client: Server Conf [0x16]
-Client->Server: Transport Data [0x20]
-Server->Client: Transport Data [0x20]
+Client->Server: Client Hello [0x01]
+Server->Client: Server Hello [0x02]
+Client->Server: Client Ack [0x03]
+Server->Client: Server Auth [0x04]
+Client->Server: Client Auth [0x05]
+Client->Server: Transport Data [0x10]
+Server->Client: Transport Data [0x10]
 ```
 
 #### Hop Noise PQ XX Pattern
 
 ```sequence
 -> e
-<- cookie
--> sni + cookie + e
-<- sessID + s (certs) + ekem
--> sessID + s (certs) + skem
-<- skem
+<- ekem, cookie
+-> e, cookie, Encaps(ekem), Encrypt(SNI)
+<- sessID, e, Encrypt(certs (s))  // compute DH(es)
+-> sessID, Encrypt(certs (s))     // compute DH(se)
 ```
+
+We will denote kem for ml-kem 512 keys, Encaps and Decaps are the function called with the keys. The other keys are DH keys as specified earlier in this document.
 
 #### Client Hello Message
 
 ---
 
-|        type $:=$ 0x11 (1 byte)        | Protocol Version (1 byte) | reserved $:= 0^2$ (2 bytes) |
-|:-------------------------------------:| :-----------------------: | --------------------------- |
-| Client ephemeral $:= e_c$ (800 bytes) |      mac (16 bytes)       |                             |
+|       type $:=$ 0x01 (1 byte)        | Protocol Version (1 byte) | reserved $:= 0^2$ (2 bytes) |
+|:------------------------------------:| :-----------------------: | --------------------------- |
+| Client ephemeral $:= e_c$ (32 bytes) |      mac (16 bytes)       |                             |
 
 ##### Client Hello Construction
 
@@ -640,9 +640,11 @@ mac = duplex.squeeze()
 
 ---
 
-|                                 type $:=$ 0x12 (1 byte)                                 |                 reserved $:= 0^3$ (3 bytes)                  |
-|:---------------------------------------------------------------------------------------:| :----------------------------------------------------------: |
-| cookie = AEAD($K_r$, $ML-KEM Key seed$, H($e_c$, clientIP, clientPort)) (32 + 64 bytes) |            mac (16 bytes)            |
+|                                  type $:=$ 0x02 (1 byte)                                  |                 reserved $:= 0^3$ (3 bytes)                  |
+|:-----------------------------------------------------------------------------------------:|:------------------------------------------------------------:|
+|                           ML-KEM 512 Ephemeral key (800 bytes)                            |                                                              |
+| :---------------------------------------------------------------------------------------: | :----------------------------------------------------------: |
+|  cookie = AEAD($K_r$, $ML-KEM Key seed$, H($e_c$, clientIP, clientPort)) (32 + 64 bytes)  |                        mac (16 bytes)                        |
 
 ##### Server Hello Construction
 
@@ -653,6 +655,8 @@ mac = duplex.squeeze()
 ```python
 # Continuing from duplex prior
 duplex.absorb(type + reserved)
+
+duplex.absorb(ekem_s)
 
 # AEAD Construction
 H = SHA3.256
@@ -669,6 +673,7 @@ mac = duplex.squeeze()
 ```python
 # Continuing from duplex prior
 duplex.absorb([type + reserved])
+duplex.absorb(KEMephemeral)
 duplex.absorb(cookie)
 mac = duplex.squeeze()
 ```
@@ -679,9 +684,10 @@ mac = duplex.squeeze()
 
 ---
 
-| type $:=$ 0x13 (1 byte) | reserved $:= 0^3$ (3 bytes) |
+| type $:=$ 0x03 (1 byte) | reserved $:= 0^3$ (3 bytes) |
 |:-----------------------:|:---------------------------:|
-|    $e_c$ (800 bytes)    |      cookie (96 bytes)      |
+|    $e_c$ (32 bytes)     |      cookie (96 bytes)      |
+|  ekem_s ct (768 bytes)  |                             |
 |     SNI (256 bytes)     |       mac (16 bytes)        |
 
 ##### Client Construction
@@ -696,6 +702,8 @@ mac = duplex.squeeze()
 duplex.absorb([type + reserved])
 duplex.absorb(e_c)
 duplex.absorb(cookie)
+ct, k = kem.Enc(ekem_s)
+duplex.absorb(k)
 sni = padTo(serverID, 256) # pad serverID to 256 bytes
 duplex.enc(sni)
 mac = duplex.squeeze()
@@ -713,6 +721,8 @@ e_s = kem.GenerateKeypairFromSeed(seed)
 duplex.absorb([type + reserved])
 duplex.absorb(e_c)
 duplex.absorb(cookie)
+k = kem.e_c.Dec(ct) #ekem
+duplex.absorb(k)
 sni = duplex.decrypt(encrypted_sni)
 name = unPad(sni)
 duplex.squeeze()
@@ -726,10 +736,10 @@ duplex.squeeze()
 
 ---
 
-| type $:=$ 0x14 (1 byte) |     Reserved := 0 (1 byte)     | Certs Len (2 bytes)                    |
+| type $:=$ 0x04 (1 byte) |     Reserved := 0 (1 byte)     | Certs Len (2 bytes)                    |
 |:-----------------------:|:------------------------------:|----------------------------------------|
 |   SessionID (4 bytes)   | Leaf Certificate (2 + n bytes) | Intermediate Certificate (2 + n bytes) |
-|     tag (16 bytes)      |      eKEM CT (768 bytes)       | mac (16 bytes)                         |
+|     tag (16 bytes)      |         e_s (32 bytes)         | mac (16 bytes)                         |
 |                         |                                |                                        |
 
 - Certs Len is the length of the encrypted section
@@ -745,11 +755,11 @@ duplex.squeeze()
 # Continuing from duplex prior
 duplex.absorb(type + reserved + certsLen)
 duplex.absorb(sessionID)
+duplex.absorb(e_s)
 certificates := [len(leaf), leaf, len(intermediate), intermediate]
 encCerts = duplex.encrypt(certificates)
 tag = duplex.squeeze()
-ct, k = kem.Enc(e_c) #ekem
-duplex.absorb(k)
+duplex.absorb(DH(es))
 mac = duplex.squeeze()
 ```
 
@@ -761,25 +771,25 @@ Client Logic
 # Continuing from duplex prior
 duplex.absorb(type + reserved + certsLen)
 duplex.absorb(SessionID)
+duplex.absorb(e_s)
 certificates = duplex.decrypt(encCerts)
 tag = duplex.squeeze()
 # verify tag
 # verify certs, extract server s
-k = kem.e_c.Dec(ct) #ekem
-duplex.absorb(k)
+duplex.absorb(DH(es))
 mac = duplex.squeeze()
 ```
 
 - Verify the tag before parsing the certs
 - Quit the handshake if the certs are invalid
-- Is the mac the same (after KEM)
+- Is the mac the same
 
 #### Client Auth
 
-| type $:=$ 0x15 (1 byte) |     Reserved := 0 (1 byte)     | Certs Len (2 bytes)                    |
-|:-----------------------:|:------------------------------:| -------------------------------------- |
+| type $:=$ 0x05 (1 byte) |     Reserved := 0 (1 byte)     | Certs Len (2 bytes)                    |
+|:-----------------------:|:------------------------------:|----------------------------------------|
 |   SessionID (4 bytes)   | Leaf Certificate (2 + n bytes) | Intermediate Certificate (2 + n bytes) |
-|     tag (16 bytes)      |      sKEM CT (768 bytes)       |                 mac (16 bytes)                        |
+|     tag (16 bytes)      |                                | mac (16 bytes)                         |
 |                         |                                |                                        |
 
 
@@ -793,8 +803,7 @@ duplex.absorb(sessionID)
 certificates := [len(leaf), leaf, len(intermediate), intermediate]
 encCerts = duplex.encrypt(certificates)
 tag = duplex.squeeze()
-ct, k = kem.Enc(s_s) #skem
-duplex.absorb(k)
+duplex.absorb(DH(se))
 mac = duplex.squeeze()
 ```
 
@@ -812,41 +821,11 @@ tag = duplex.squeeze()
 # verify tag
 # verify certs, extract server s
 k = kem.s_s.Dec(ct) #skem
-duplex.absorb(k)
+duplex.absorb(DH(se))
 mac = duplex.squeeze()
 ```
 - Verify the tag before parsing the certs
 - Quit the handshake if the certs are invalid
-- Is the mac the same (after KEM)
-
-
-#### Server Conf
-
-| type $:=$ 0x16 (1 byte) | reserved $:= 0^3$ (3 bytes) |
-|:-----------------------:|:---------------------------:|
-|   sKEM CT (768 bytes)   |       mac (16 bytes)       |
-
-
-##### Server Construction
-
-```python
-duplex.absorb([type + reserved])
-ct, k = kem.Enc(c_s) #skem
-duplex.absorb(k)
-mac = duplex.squeeze()
-```
-
-##### Client Logic
-
----
-
-```python
-duplex.absorb([type + reserved])
-k = kem.c_s.Dec(ct) #skem
-duplex.absorb(k)
-mac = duplex.squeeze()
-```
-
 - Is the mac the same (after KEM)
 - Derives the keys and use regular transport messages
 
@@ -857,18 +836,18 @@ mac = duplex.squeeze()
 
 
 ```sequence
-Client->Server: Client Auth [0x18]
-Server->Client: Server Auth [0x19]
-Client->Server: Transport Data [0x20]
-Server->Client: Transport Data [0x20]
+Client->Server: Client Auth [0x08]
+Server->Client: Server Auth [0x09]
+Client->Server: Transport Data [0x10]
+Server->Client: Transport Data [0x10]
 ```
 #### Hop Noise PQ IK Pattern
 
 ```sequence
-<- s
+<- skem
 ...
--> skem, e, s (certs)
-<- ekem, skem, s(certs)
+-> ekem, Encaps(skem), Encrypt(certs (s))
+<- Encaps(ekem), Encrypt(certs (s)) // DH (ss)
 ```
 
 
@@ -900,7 +879,7 @@ duplex = Cyclist()
 duplex.absorb(protocolID)
 duplex.absorb([type + protocol + reserved])
 duplex.absorb(e_c)
-ct, k = kem.Enc(s_s) #skem
+ct, k = kem.Encaps(skem_s) #skem
 duplex.absorb(k)
 ClientEncCerts = duplex.encrypt(certificates)
 tag = duplex.squeeze()
@@ -918,8 +897,8 @@ for vmCert in certList:
   duplex = Cyclist()
   duplex.absorb(protocolID)
   duplex.absorb([type + protocol + reserved])
-  duplex.absorb(e_c)
-  k = vmCert.s_s.Dec(ct) # skem
+  duplex.absorb(ekem_c)
+  k = vmCert.skem_s.Decaps(ct) # skem
   duplex.absorb(k)
   certificates = duplex.decrypt(ClientEncCerts)
   tag = duplex.squeeze()
@@ -941,7 +920,6 @@ mac = duplex.squeeze()
 |                                   |      Server eKEM CT (768 bytes)      |                                           |
 | Server Leaf Certificate (* bytes) |                                      | Server Intermediate Certificate (* bytes) |
 |                                   | Server Authentication Tag (16 bytes) |                                           |
-|                                   |      Server sKEM CT (768 bytes)      |                                           |
 |                                   |            MAC (16 bytes)            |                                           |
 
 
@@ -953,12 +931,11 @@ mac = duplex.squeeze()
 # Continuing from duplex prior
 duplex.absorb([type + reserved + Certs Len])
 duplex.absorb(SessionID)
-eCt, ek = kem.Enc(e_c) #ekem
+eCt, ek = kem.Encpaps(ekem_c) #ekem
 duplex.absorb(ek)
 ServerEncCerts = duplex.encrypt(certificates)
 tag = duplex.squeeze()
-sCt, sk = kem.Enc(e_s) #skem
-duplex.absorb(sk)
+duplex.absorb(DH(ss))
 mac = duplex.squeeze()
 ```
 
@@ -970,13 +947,12 @@ mac = duplex.squeeze()
 # Continuing from duplex prior
 duplex.absorb([type + reserved + Certs Len])
 duplex.absorb(SessionID)
-ek = kem.e_c.Dec(ct) # ekem
+ek = kem.ekem_c.Dec(ct) # ekem
 duplex.absorb(ek)
 certificates = duplex.decrypt(ServerEncCerts)
 tag = duplex.squeeze()
 # verify tag
 # verify certs, extract server static
-sk = kem.e_s.Dec(ct) # skem
-duplex.absorb(sk)
+duplex.absorb(DH(ss))
 mac = duplex.squeeze()
 ```
