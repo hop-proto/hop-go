@@ -420,8 +420,8 @@ counter +=1
 ```sequence
 Client->Server: Client Auth [0x8]
 Server->Client: Server Auth [0x9]
-Client->Server: Transport Data [0x20]
-Server->Client: Transport Data [0x20]
+Client->Server: Transport Data [0x10]
+Server->Client: Transport Data [0x10]
 ```
 
 ### Message Structures
