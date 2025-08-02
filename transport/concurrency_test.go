@@ -81,7 +81,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 					recvErr <- fmt.Errorf("message bad format: got %q", got)
 				}
 				if recvArr[d] {
-					recvErr <- fmt.Errorf("recieved %d twice", d)
+					recvErr <- fmt.Errorf("received %d twice", d)
 				}
 				recvArr[d] = true
 			}
