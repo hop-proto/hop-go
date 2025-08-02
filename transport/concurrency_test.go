@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"bytes"
 	"fmt"
 	"net"
 	"testing"
@@ -12,8 +11,9 @@ import (
 	"gotest.tools/assert"
 )
 
-// TestConcurrentReadWrite verifies that ReadMsg and WriteMsg can be
-// called concurrently on the same MsgConn without data races or deadlocks.
+// TestConcurrentReadWrite verifies that ReadMsg and WriteMsg can be called
+// concurrently on the same MsgConn without data races or deadlocks by sending a
+// lot of data on each side. This test is not deterministic.
 func TestConcurrentReadWrite(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	logrus.SetLevel(logrus.TraceLevel)
@@ -35,7 +35,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 	assert.NilError(t, cli.Handshake())
 
 	// Accept the connection on the server side.
-	srvConn, err := srv.AcceptTimeout(5 * time.Second)
+	srvConn, err := srv.AcceptTimeout(1 * time.Second)
 	assert.NilError(t, err)
 	defer func() { assert.NilError(t, srvConn.Close()) }()
 
@@ -63,8 +63,8 @@ func TestConcurrentReadWrite(t *testing.T) {
 		}
 	}()
 
-	// Reader: receive and verify echoed messages.
 	recvErr := make(chan error, 1)
+	recvArr := make([]bool, msgCount)
 	go func() {
 		buf := make([]byte, 2048)
 		for i := 0; i < msgCount; i++ {
@@ -74,10 +74,21 @@ func TestConcurrentReadWrite(t *testing.T) {
 				return
 			}
 			got := buf[:n]
-			want := []byte(fmt.Sprintf("message-%d", i))
-			if !bytes.Equal(got, want) {
-				recvErr <- fmt.Errorf("message mismatch: got %q, want %q", got, want)
-				return
+			{
+				var d int
+				n, err := fmt.Sscanf(string(got), "message-%d", &d)
+				if err != nil || n != 1 {
+					recvErr <- fmt.Errorf("message bad format: got %q", got)
+				}
+				if recvArr[d] {
+					recvErr <- fmt.Errorf("recieved %d twice", d)
+				}
+				recvArr[d] = true
+			}
+		}
+		for i, b := range recvArr {
+			if !b {
+				recvErr <- fmt.Errorf("did not receive %d", i)
 			}
 		}
 		recvErr <- nil

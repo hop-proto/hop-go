@@ -18,11 +18,6 @@
 - Calls to `SetDeadline` et. all should be allowed to be called from multiple
   threads, and should not affect pending calls.
 
-## Implementation Status
-
-Concurrent read and write are likely implemented. Close, nice error handling,
-and timeouts are not nicely implemented in all cases.
-
 In theory, we want this package to be able to pass the tests in
 [nettest](https://pkg.go.dev/golang.org/x/net/nettest#TestConn).
 
