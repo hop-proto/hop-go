@@ -38,6 +38,8 @@ const (
 
 	// MlKem512PrivateKeySize Size of a packed private key.
 	MlKem512PrivateKeySize = cpapke.PrivateKeySize + cpapke.PublicKeySize + 64
+
+	MlKem512SharedKeySize = 32
 )
 
 type KEMPublicKey struct {
