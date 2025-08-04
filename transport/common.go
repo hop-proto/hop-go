@@ -25,18 +25,19 @@ const (
 	HeaderLen = 4
 	MacLen    = 16
 	// TODO(dadrian): It's confusing to have MacLen and TagLen
-	TagLen       = 32
-	KeyLen       = 16
-	DHLen        = curve25519.PointSize
-	CookieLen    = DHLen + kravatte.TagSize // TODO (paul): why in the paper we describe it as being 48bytes?
-	SNILen       = 256
-	SessionIDLen = 4
-	CounterLen   = 8
-	TimestampLen = 8
-	KemCtLen     = keys.MlKem512CiphertextSize // KemCtLen
-	KemKeyLen    = keys.MlKem512PublicKeySize
-	PQCookieLen  = 32 + keys.MlKem512KeySeedSize // 32 comes for the CookieAD function but should not be that small
-	PQSeedLen    = keys.MlKem512KeySeedSize
+	TagLen            = 32
+	KeyLen            = 16
+	DHLen             = curve25519.PointSize
+	CookieLen         = DHLen + kravatte.TagSize // TODO (paul): why in the paper we describe it as being 48bytes?
+	SNILen            = 256
+	SessionIDLen      = 4
+	CounterLen        = 8
+	TimestampLen      = 8
+	KemCtLen          = keys.MlKem512CiphertextSize // KemCtLen
+	KemKeyLen         = keys.MlKem512PublicKeySize
+	PQCookieLen       = 32 + keys.MlKem512SharedKeySize // 32 comes for the CookieAD function but should not be that small
+	PQSeedLen         = keys.MlKem512KeySeedSize
+	PQSharedSecretLen = keys.MlKem512SharedKeySize
 
 	// HiddenModeTimestampExpiration TODO (paul) 5 sec is a way too long, evaluate the time need for a connection
 	// TODO (paul) what is considered a reasonable time range for a timestamp to prevent replay attack?

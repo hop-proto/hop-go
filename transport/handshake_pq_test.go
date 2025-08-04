@@ -64,7 +64,7 @@ func TestPQNoiseXXHandshake(t *testing.T) {
 	// Client Hello
 	clientBuf := make([]byte, 65535)
 	n, err1 := writePQClientHello(client.hs, clientBuf)
-	_, err2 := readPQClientHello(serverHs, clientBuf[:n]) // TODO here write the handle client hello which creates a hs state
+	_, err2 := readPQClientHello(serverHs, clientBuf[:n])
 	assert.NilError(t, err1)
 	assert.NilError(t, err2)
 

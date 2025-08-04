@@ -70,84 +70,48 @@ type kemState struct {
 	remoteEphemeral keys.KEMPublicKey
 }
 
-func (hs *HandshakeState) writeCookie(b []byte) (int, error) {
+func (hs *HandshakeState) writeCookie(b []byte, k []byte) (int, error) {
 	// TODO(dadrian): Avoid allocating memory.
 	aead, err := kravatte.NewSANSE(hs.cookieKey[:])
 	if err != nil {
 		return 0, err
 	}
 
-	var plaintextCookie []byte
-	var ad []byte
-	var cookieLen int
+	ad := CookieAD(hs.kem.remoteEphemeral.Bytes(), hs.remoteAddr)
 
-	if hs.kem != nil {
-		plaintextCookie = hs.kem.ephemeral.Seed[:]
-		ad = CookieAD(hs.dh.remoteEphemeral[:], hs.remoteAddr)
-		cookieLen = PQCookieLen
-
-	} else {
-		plaintextCookie = hs.dh.ephemeral.Private[:]
-		ad = CookieAD(hs.dh.remoteEphemeral[:], hs.remoteAddr)
-		cookieLen = CookieLen
-	}
-
-	enc := aead.Seal(b[:0], nil, plaintextCookie, ad)
-	if len(enc) != cookieLen {
-		logrus.Panicf("len(enc) != CookieLen: %d != %d. Not possible", len(enc), cookieLen)
+	enc := aead.Seal(b[:0], nil, k, ad)
+	if len(enc) != PQCookieLen {
+		logrus.Panicf("len(enc) != CookieLen: %d != %d. Not possible", len(enc), PQCookieLen)
 	}
 	return len(enc), nil // cookieLen
 }
 
-func (hs *HandshakeState) decryptCookie(b []byte) (int, error) {
-	var cookieLen int
+func (hs *HandshakeState) decryptCookie(b []byte) (int, *[]byte, error) {
 
-	if hs.kem != nil {
-		cookieLen = PQCookieLen
-
-	} else {
-		cookieLen = CookieLen
-	}
-
-	if len(b) < cookieLen {
-		return 0, ErrBufUnderflow
+	if len(b) < PQCookieLen {
+		return 0, nil, ErrBufUnderflow
 	}
 	aead, err := kravatte.NewSANSE(hs.cookieKey[:])
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	encryptedCookie := b[:cookieLen]
+	encryptedCookie := b[:PQCookieLen]
 
-	// TODO (paul): remove this condition
-	if hs.kem != nil {
-		ad := CookieAD(hs.dh.remoteEphemeral[:], hs.remoteAddr)
-		seed := make([]byte, PQSeedLen)
-		out, err := aead.Open(seed[:0], nil, encryptedCookie, ad)
-		if err != nil {
-			return 0, ErrInvalidMessage
-		}
-		if len(out) != PQSeedLen {
-			return 0, ErrInvalidMessage
-		}
-
-		hs.kem.ephemeral, err = keys.GenerateKEMKeyPairFromSeed(seed)
-		if err != nil {
-			return 0, ErrInvalidMessage
-		}
-
-	} else {
-		ad := CookieAD(hs.dh.remoteEphemeral[:], hs.remoteAddr)
-		out, err := aead.Open(hs.dh.ephemeral.Private[:0], nil, encryptedCookie, ad)
-		if err != nil {
-			return 0, ErrInvalidMessage
-		}
-		if len(out) != DHLen {
-			return 0, ErrInvalidMessage
-		}
-		hs.dh.ephemeral.PublicFromPrivate()
+	ad := CookieAD(hs.kem.remoteEphemeral.Bytes(), hs.remoteAddr)
+	k := make([]byte, PQSharedSecretLen)
+	out, err := aead.Open(k[:0], nil, encryptedCookie, ad)
+	if err != nil {
+		return 0, nil, ErrInvalidMessage
+	}
+	if len(out) != PQSharedSecretLen {
+		return 0, nil, ErrInvalidMessage
 	}
 
-	return cookieLen, nil
+	if err != nil {
+		return 0, nil, ErrInvalidMessage
+	}
+
+	return PQCookieLen, &k, nil
 }
 
 // nolint
@@ -231,7 +195,7 @@ func writeServerHello(hs *HandshakeState, b []byte) (int, error) {
 	hs.duplex.Absorb(secret)
 
 	// Cookie
-	n, err := hs.writeCookie(b)
+	n, err := hs.writeCookie(b, hs.dh.ephemeral.Private[:])
 	logrus.Debugf("server: generated cookie %x", b[:n])
 	if err != nil {
 		return 0, err

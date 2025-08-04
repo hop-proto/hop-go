@@ -25,7 +25,7 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	out.cookieKey = s.cookieKey
 
 	// Pull the private key out of the cookie
-	n, err := out.decryptCookie(cookie)
+	n, _, err := out.decryptCookie(cookie)
 	if err != nil {
 		logrus.Errorf("unable to decrypt cookie: %s", err)
 		return nil, err
