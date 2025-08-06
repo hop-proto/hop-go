@@ -385,16 +385,21 @@ func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fa
 		if err != nil {
 			return nil, err
 		}
-		rawIntermediate, err := c.Intermediate.Marshal()
-		if err != nil {
-			return nil, err
-		}
+
 		tc := &transport.Certificate{
-			RawLeaf:         rawLeaf,
-			RawIntermediate: rawIntermediate,
-			Exchanger:       c.Key,
-			Leaf:            c.Certificate,
+			RawLeaf:   rawLeaf,
+			Exchanger: c.Key,
+			Leaf:      c.Certificate,
 		}
+
+		if c.Intermediate != nil {
+			rawIntermediate, err := c.Intermediate.Marshal()
+			if err != nil {
+				return nil, err
+			}
+			tc.RawIntermediate = rawIntermediate
+		}
+
 		out = append(out, VirtualHost{
 			Pattern:     "*",
 			Certificate: *tc,

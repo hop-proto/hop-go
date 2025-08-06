@@ -284,6 +284,11 @@ func safeSend(ch chan *frame, value *frame) (closed bool) {
 	return false
 }
 
+func (r *Reliable) CanAcceptBytes() bool {
+	senderWindowSize := r.sender.getWindowSize()
+	return len(r.sender.frames) < int(senderWindowSize)
+}
+
 // receive is called by the muxer for each new packet
 func (r *Reliable) receive(pkt *frame) error {
 	r.l.Lock()

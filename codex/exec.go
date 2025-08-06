@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 	"github.com/muesli/cancelreader"
@@ -51,6 +52,11 @@ const (
 	execConf = byte(1)
 	execFail = byte(2)
 )
+
+// CanAcceptFunc is a callback that reports whether the sender window
+// is currently able to accept more data. It should return true if
+// s.frames has room for more entries.
+type CanAcceptFunc func() bool
 
 // SendFailure lets the client know that executing the command failed and the error
 func SendFailure(t *tubes.Reliable, err error) {
@@ -152,7 +158,7 @@ func NewExecTube(c Config) (*ExecTube, error) {
 	c.WaitGroup.Add(2)
 	go func(ex *ExecTube) {
 		defer c.WaitGroup.Done()
-		n, err := pausableCopy(c.OutPipe, c.StdoutTube, ex.lock)
+		n, err := pausableCopy(c.OutPipe, c.StdoutTube, ex.lock, nil)
 		if err != nil {
 			logrus.Errorf("codex: error copying from tube to stdout: %s", err)
 		}
@@ -168,7 +174,7 @@ func NewExecTube(c Config) (*ExecTube, error) {
 
 	go func(ex *ExecTube) {
 		defer c.WaitGroup.Done()
-		_, err := pausableCopy(c.StdinTube, inPipe, ex.lock)
+		_, err := pausableCopy(c.StdinTube, inPipe, ex.lock, c.StdinTube.CanAcceptBytes)
 		if err != nil {
 			logrus.Errorf("codex: error copying from stdin to tube: %s", err)
 		}
@@ -187,11 +193,15 @@ func NewExecTube(c Config) (*ExecTube, error) {
 // When lock.Lock() is called in another goroutine, pausableCopy temoporarily
 // stops copying data until lock.Unlock() is called.
 // This method is based on the code from io.Copy
-func pausableCopy(dst io.Writer, src io.Reader, lock *sync.RWMutex) (int64, error) {
-	buf := make([]byte, 32*1024)
+func pausableCopy(dst io.Writer, src io.Reader, lock *sync.RWMutex, canAccept CanAcceptFunc) (int64, error) {
+	buf := make([]byte, 32*1024) // 32KB buffer
 	var written int64 = 0
 	var err error
 	for {
+		if nil != canAccept && !canAccept() {
+			time.Sleep(10 * time.Millisecond) // avoid busy waiting
+			continue
+		}
 		lock.RLock()
 		nr, er := src.Read(buf)
 		if nr > 0 {

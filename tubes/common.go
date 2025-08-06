@@ -24,7 +24,7 @@ var errFrameOutOfBounds = errors.New("received data frame out of receive window 
 // Correctly implementing MTU discovery is complicated. Setting this to a
 // value that is always safe (~500), leads to unacceptable performance loss.
 // Setting this a large value may cause unreliable tubes to intermittently fail.
-const MaxFrameDataLength uint16 = 32768
+const MaxFrameDataLength uint16 = 1396 // total frame size tcpdump 1500q -> +104bytes
 
 // maximum number of packet an unreliable tube will buffer
 const maxBufferedPackets = 1000
@@ -37,7 +37,7 @@ const initialRTT = 333 * time.Millisecond
 // This number should be kept reasonably high to privilege RTR frames over RTT frames
 // If the measured RTT is ever lower than minRTT, it is clamped to minRTT
 // From RFC 9002 section 6.2.1 (kGranularity)
-const minRTT = 10 * time.Millisecond
+const minRTT = 5 * time.Millisecond
 
 const maxRTO = 10 * time.Second
 
@@ -45,7 +45,7 @@ const maxRTO = 10 * time.Second
 const maxFragTransPerRTO = 1
 
 // the number of packets in the window for reliable tubes
-const windowSize = 128
+const windowSize = 10
 
 // TODO(hosono) choose this time
 // amount of time to wait for all all tubes to close when muxer is stopping
