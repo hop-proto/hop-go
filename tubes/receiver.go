@@ -106,9 +106,9 @@ func (r *receiver) processIntoBuffer() bool {
 
 				r.missingFrame.Store(true)
 				// Add to RTR frame.datalength the cumulative missing frames
-				frameToSend := uint16(frag.priority - r.windowStart)
-				if frameToSend <= windowSize {
-					r.frameToSendCounter = frameToSend
+				frameToSendIndex := uint16(frag.priority - r.windowStart)
+				if frameToSendIndex <= windowSize { // we keep this number small for retransmission
+					r.frameToSendCounter = frameToSendIndex
 				}
 				if common.Debug {
 					log.WithFields(logrus.Fields{
@@ -243,7 +243,7 @@ func (r *receiver) receive(p *frame) (bool, error) {
 
 	// The flag ACK must be false to be processed in the heap memory.
 	// Prevent processing of RTR ACK with dataLength > 0
-	if ((p.dataLength > 0 && !p.flags.ACK) || p.flags.FIN) && frameInBounds(windowStart, windowEnd, frameNo) {
+	if ((p.dataLength > 0 && !p.flags.ACK) || p.flags.FIN) && windowStart <= frameNo {
 		heap.Push(&r.fragments, &pqItem{
 			value:    p.data,
 			priority: frameNo,

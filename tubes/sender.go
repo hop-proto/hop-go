@@ -60,6 +60,7 @@ type sender struct {
 	windowOpen chan struct{}
 
 	sendQueue chan *frame
+	probe     probe
 
 	m sync.Mutex
 
@@ -78,9 +79,15 @@ func newSender(log *logrus.Entry) *sender {
 		RTT:              initialRTT,
 		RTO:              initialRTT,
 		windowSize:       windowSize,
-		windowOpen:       make(chan struct{}, 1),
-		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
-		log:              log.WithField("sender", ""),
+		probe: probe{
+			state:                SlowStart,
+			cwndSize:             windowSize,
+			duplicatedAckCounter: 0,
+			ssThresh:             1000,
+		},
+		windowOpen: make(chan struct{}, 1),
+		sendQueue:  make(chan *frame, 1024), // TODO(hosono) make this size 0
+		log:        log.WithField("sender", ""),
 	}
 }
 
@@ -143,7 +150,7 @@ func (s *sender) write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (s *sender) recvAck(ackNo uint32) error {
+func (s *sender) recvAckOld(ackNo uint32) error {
 	s.m.Lock()
 	defer s.m.Unlock()
 

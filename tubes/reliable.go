@@ -220,9 +220,10 @@ func (r *Reliable) send() {
 
 			// Back off RTO if no ACKs were received
 			r.sender.RTO *= 2
+			r.sender.probe.state = SlowStart
 
 			if r.sender.RTO > maxRTO && len(r.sender.frames) > 0 {
-				logrus.Errorf("REL: RTO exeeded, dropping frame n°%v", r.sender.frames[0])
+				logrus.Errorf("REL: RTO exeeded, dropping frame n° %v", r.sender.frames[0].frameNo)
 				r.sender.frames = r.sender.frames[1:]
 				r.sender.RTO = r.sender.RTT
 			}
@@ -324,7 +325,10 @@ func (r *Reliable) receive(pkt *frame) error {
 
 	// Pass the frame to the sender
 	if pkt.flags.ACK {
-		r.sender.recvAck(pkt.ackNo)
+		missingFrameNo, _ := r.sender.recvAck(pkt.ackNo)
+		if missingFrameNo != 0 {
+			r.sendFrameByNumber(missingFrameNo)
+		}
 	}
 
 	// Handle ACK of FIN frame
@@ -730,9 +734,7 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 		rtrFullFrame.Time = time.Now()
 		rtrFullFrame.flags.REL = true
 
-		if common.Debug {
-			r.log.Debugf("Retransmitting frame %d", rtrFullFrame.frameNo)
-		}
+		r.log.Debugf("Retransmitting frame %d", rtrFullFrame.frameNo)
 		r.sender.log.WithFields(logrus.Fields{
 			"Frame N°": rtrFullFrame.frameNo,
 		}).Trace("Retransmission of RTR pkt")
@@ -742,5 +744,23 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 		r.lastRTRSent.Store(rtrFullFrame.frameNo)
 	}
 
+	r.sender.resetRetransmitTicker() // don't drop a frame before receiving the ack
+
 	r.pendingRTRTimers.Delete(rtrFrame.frameNo)
+}
+
+func (r *Reliable) sendFrameByNumber(frameNo uint32) {
+	logrus.Debugf("Searching for frame %v to priority send it", frameNo)
+	for i := 0; i < windowSize; i++ {
+		rtrFrame := &r.sender.frames[i]
+		if rtrFrame.frameNo == frameNo {
+			rtrFrame.ackNo = r.recvWindow.getAck()
+			rtrFrame.Time = time.Now()
+			rtrFrame.flags.REL = true
+			r.prioritySendQueue <- rtrFrame.toBytes()
+			logrus.Debugf("Frame %v found and prority sent", frameNo)
+			return
+		}
+	}
+	logrus.Debugf("Frame %v not found in the frame list", frameNo)
 }

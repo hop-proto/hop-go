@@ -423,12 +423,12 @@ func loadServerConfigFromFile(c *ServerConfig, path string) (*ServerConfig, erro
 
 	c.HiddenModeVHostNames = parsed.HiddenModeVHostNames
 
-	c.HandshakeTimeout = time.Second
+	c.HandshakeTimeout = 15 * time.Second
 	if parsed.HandshakeTimeout != 0 {
 		c.HandshakeTimeout = parsed.HandshakeTimeout
 	}
 
-	c.DataTimeout = time.Second
+	c.DataTimeout = 15 * time.Second
 	if parsed.DataTimeout != 0 {
 		c.DataTimeout = parsed.DataTimeout
 	}
