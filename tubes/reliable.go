@@ -760,6 +760,9 @@ func (r *Reliable) sendFrameByNumber(frameNo uint32) {
 			r.prioritySendQueue <- rtrFrame.toBytes()
 			logrus.Debugf("Frame %v found and prority sent", frameNo)
 			return
+		} else if rtrFrame.frameNo > frameNo {
+			logrus.Debugf("Frame %v not found, frame number in the list are greater than the frameNo", frameNo)
+			return
 		}
 	}
 	logrus.Debugf("Frame %v not found in the frame list", frameNo)

@@ -103,13 +103,18 @@ func (r *receiver) processIntoBuffer() bool {
 			}
 			if frag.priority > r.windowStart {
 				heap.Push(&r.fragments, frag)
+				/* // for some reason, this is creating a loop in retransmit and block everyone
+				// but looks it makes hop faster thus tbd
+				// only for the 100 MB files
 
-				r.missingFrame.Store(true)
-				// Add to RTR frame.datalength the cumulative missing frames
-				frameToSendIndex := uint16(frag.priority - r.windowStart)
-				if frameToSendIndex <= windowSize { // we keep this number small for retransmission
-					r.frameToSendCounter = frameToSendIndex
-				}
+					r.missingFrame.Store(true)
+					// Add to RTR frame.datalength the cumulative missing frames
+					frameToSendIndex := uint16(frag.priority - r.windowStart)
+					if frameToSendIndex <= windowSize { // we keep this number small for retransmission
+						r.frameToSendCounter = frameToSendIndex
+					}
+
+				*/
 				if common.Debug {
 					log.WithFields(logrus.Fields{
 						"frag.priority": frag.priority,
@@ -229,7 +234,7 @@ func (r *receiver) receive(p *frame) (bool, error) {
 	}
 
 	windowStart := r.windowStart
-	windowEnd := r.windowStart + uint64(uint32(r.windowSize))
+	windowEnd := r.windowStart + maxWindowSize
 	frameNo := r.unwrapFrameNo(p.frameNo)
 
 	var log *logrus.Entry
@@ -243,7 +248,7 @@ func (r *receiver) receive(p *frame) (bool, error) {
 
 	// The flag ACK must be false to be processed in the heap memory.
 	// Prevent processing of RTR ACK with dataLength > 0
-	if ((p.dataLength > 0 && !p.flags.ACK) || p.flags.FIN) && windowStart <= frameNo {
+	if ((p.dataLength > 0 && !p.flags.ACK) || p.flags.FIN) && frameInBounds(windowStart, windowEnd, frameNo) {
 		heap.Push(&r.fragments, &pqItem{
 			value:    p.data,
 			priority: frameNo,

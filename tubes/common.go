@@ -45,6 +45,8 @@ const maxRTO = 10 * time.Second
 // the maximum number of packets to retransmit per rto
 const maxFragTransPerRTO = 3
 
+const maxWindowSize = 1000
+
 // the number of packets in the window for reliable tubes
 const windowSize = 32
 
