@@ -423,12 +423,13 @@ func loadServerConfigFromFile(c *ServerConfig, path string) (*ServerConfig, erro
 
 	c.HiddenModeVHostNames = parsed.HiddenModeVHostNames
 
-	c.HandshakeTimeout = time.Second
+	// Default handshake timeout is 15 seconds
+	c.HandshakeTimeout = 15 * time.Second
 	if parsed.HandshakeTimeout != 0 {
 		c.HandshakeTimeout = parsed.HandshakeTimeout
 	}
 
-	c.DataTimeout = time.Second
+	// Default DataTimeout is 0, which means no timeout once a session is started.
 	if parsed.DataTimeout != 0 {
 		c.DataTimeout = parsed.DataTimeout
 	}
