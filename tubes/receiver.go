@@ -32,10 +32,7 @@ type receiver struct {
 
 	dataReady *common.DeadlineChan[struct{}]
 	// +checklocks:m
-	buffer       *bytes.Buffer
-	missingFrame atomic.Bool
-	// +checklocks:m
-	frameToSendCounter uint16
+	buffer *bytes.Buffer
 
 	log *logrus.Entry // +checklocksignore
 }
@@ -69,12 +66,6 @@ func (r *receiver) getWindowSize() uint16 {
 	return r.windowSize
 }
 
-func (r *receiver) getFrameToSendCounter() uint16 {
-	r.m.Lock()
-	defer r.m.Unlock()
-	return r.frameToSendCounter
-}
-
 /*
 Processes window into buffer stream if the ordered fragments are ready (in order).
 Precondition: r.m mutex is held.
@@ -103,18 +94,7 @@ func (r *receiver) processIntoBuffer() bool {
 			}
 			if frag.priority > r.windowStart {
 				heap.Push(&r.fragments, frag)
-				/* // for some reason, this is creating a loop in retransmit and block everyone
-				// but looks it makes hop faster thus tbd
-				// only for the 100 MB files
 
-					r.missingFrame.Store(true)
-					// Add to RTR frame.datalength the cumulative missing frames
-					frameToSendIndex := uint16(frag.priority - r.windowStart)
-					if frameToSendIndex <= windowSize { // we keep this number small for retransmission
-						r.frameToSendCounter = frameToSendIndex
-					}
-
-				*/
 				if common.Debug {
 					log.WithFields(logrus.Fields{
 						"frag.priority": frag.priority,
@@ -132,7 +112,6 @@ func (r *receiver) processIntoBuffer() bool {
 			r.buffer.Write(frag.value)
 			r.windowStart++
 			r.ackNo++
-			r.frameToSendCounter = 0
 			if common.Debug {
 				log.Trace("processing packet")
 			}

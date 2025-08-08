@@ -83,7 +83,9 @@ func newSender(log *logrus.Entry) *sender {
 			state:                SlowStart,
 			cwndSize:             windowSize,
 			duplicatedAckCounter: 0,
-			ssThresh:             1000,
+			ssThresh:             100,  // Limit the exponential increase after a window size of 100
+			lowerWindowSize:      10,   // window size min
+			upperWindowSize:      1000, // window size max
 		},
 		windowOpen: make(chan struct{}, 1),
 		sendQueue:  make(chan *frame, 1024), // TODO(hosono) make this size 0
