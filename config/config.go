@@ -428,7 +428,6 @@ func loadServerConfigFromFile(c *ServerConfig, path string) (*ServerConfig, erro
 		c.HandshakeTimeout = parsed.HandshakeTimeout
 	}
 
-	c.DataTimeout = 15 * time.Second
 	if parsed.DataTimeout != 0 {
 		c.DataTimeout = parsed.DataTimeout
 	}
