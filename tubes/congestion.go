@@ -1,9 +1,11 @@
 package tubes
 
 import (
-	"github.com/sirupsen/logrus"
-	"hop.computer/hop/common"
 	"time"
+
+	"hop.computer/hop/common"
+
+	"github.com/sirupsen/logrus"
 )
 
 type controlState int
