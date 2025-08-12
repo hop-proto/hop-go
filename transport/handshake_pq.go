@@ -20,7 +20,7 @@ import (
 // -> ekem
 // <- Encaps(ekem), cookie
 // -> e, ekem, cookie, Encrypt(SNI)
-// <- e, Encrypt(certs (s))  // compute DH(es)
+// <- e, Encrypt(certs (s))  // compute DH(ee), DH(es)
 // -> Encrypt(certs (s))     // compute DH(se)
 
 func writePQClientHello(hs *HandshakeState, b []byte) (int, error) {
@@ -325,6 +325,15 @@ func (s *Server) writePQServerAuth(b []byte, hs *HandshakeState) (int, error) {
 	x = x[DHLen:]
 	pos += DHLen
 
+	// DH (ee)
+	dhEE, err := hs.dh.ephemeral.Agree(hs.dh.remoteEphemeral[:])
+	if err != nil {
+		logrus.Debug("could not calculate DH(ee)")
+		return pos, err
+	}
+	logrus.Debugf("server ee: %x", dhEE)
+	hs.duplex.Absorb(dhEE)
+
 	// Certs
 	encCerts, err := EncryptCertificates(&hs.duplex, c.RawLeaf, c.RawIntermediate)
 	if err != nil {
@@ -392,6 +401,15 @@ func (hs *HandshakeState) readPQServerAuth(b []byte) (int, error) {
 	copy(hs.dh.remoteEphemeral[:], b[:DHLen])
 	hs.duplex.Absorb(b[:DHLen])
 	b = b[DHLen:]
+
+	// DH (ee)
+	dhEE, err := hs.dh.ephemeral.DH(hs.dh.remoteEphemeral[:])
+	if err != nil {
+		logrus.Debugf("client: could not calculate ee: %s", err)
+		return 0, err
+	}
+	logrus.Debugf("client: ee: %x", dhEE)
+	hs.duplex.Absorb(dhEE)
 
 	// Certs
 	encryptedCertificates := b[:encryptedCertLen]

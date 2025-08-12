@@ -342,6 +342,7 @@ duplex.squeeze()
 duplex.absorb(type + reserved + certsLen)
 duplex.absorb(sessionID)
 duplex.absorb(e_s)
+duplex.absorb(DH(ee))
 certificates := [len(leaf), leaf, len(intermediate), intermediate]
 encCerts = duplex.encrypt(certificates)
 tag = duplex.squeeze()
@@ -358,6 +359,7 @@ Client Logic
 duplex.absorb(type + reserved + certsLen)
 duplex.absorb(SessionID)
 duplex.absorb(e_s)
+duplex.absorb(DH(ee))
 certificates = duplex.decrypt(encCerts)
 tag = duplex.squeeze()
 # verify tag
