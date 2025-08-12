@@ -168,10 +168,11 @@ func (c *Client) clientHandshakeLocked() error {
 
 	// init KEM State
 	c.hs.kem = new(kemState)
-	c.hs.kem.ephemeral, err = keys.GenerateKEMKeyPair(rand.Reader)
+	ephemeral, err := keys.GenerateKEMKeyPair(rand.Reader)
 	if err != nil {
 		return err
 	}
+	c.hs.kem.ephemeral = *ephemeral
 
 	c.hs.leaf, c.hs.intermediate, err = c.prepareCertificates()
 	if err != nil {
