@@ -96,7 +96,7 @@ type Certificate struct {
 	IssuedAt  time.Time
 	ExpiresAt time.Time
 	IDChunk   IDChunk
-	PublicKey []byte
+	PublicKey keys.DHPublicKey
 	Parent    SHA3Fingerprint
 	Signature [SignatureLen]byte
 
@@ -285,7 +285,7 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 
 	buf := make([]byte, KeyLen)
 	n, err := io.ReadFull(r, buf)
-	c.PublicKey = buf
+	c.PublicKey = keys.DHPublicKey(buf)
 
 	bytesRead += int64(n)
 	if err != nil {

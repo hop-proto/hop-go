@@ -125,7 +125,7 @@ func TestClientServerHSWithAgent(t *testing.T) {
 	}
 
 	leaf, err := certs.SelfSignLeaf(&certs.Identity{
-		PublicKey: public[:],
+		PublicKey: public,
 	})
 
 	assert.NilError(t, err)

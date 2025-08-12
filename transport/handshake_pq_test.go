@@ -199,7 +199,7 @@ func newPQClientAuth(t assert.TestingT, certificate *certs.Certificate) (*keys.X
 	keypair := keys.GenerateNewX25519KeyPair()
 
 	c, err := certs.IssueLeaf(certificate, &certs.Identity{
-		PublicKey: keypair.Public[:],
+		PublicKey: keypair.Public,
 		Names:     []certs.Name{certs.RawStringName("testing")},
 	})
 	assert.NilError(t, err)
@@ -212,7 +212,7 @@ func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDP
 	intermediateKey := keys.GenerateNewSigningKeyPair()
 
 	rootIdentity := certs.Identity{
-		PublicKey: rootKey.Public[:],
+		PublicKey: rootKey.Public,
 		Names:     []certs.Name{certs.RawStringName("Root")},
 	}
 
@@ -221,7 +221,7 @@ func newPQClientAndServerForBench(t assert.TestingT) (*Client, *Server, *net.UDP
 	assert.NilError(t, err)
 
 	intermediateIdentity := certs.Identity{
-		PublicKey: intermediateKey.Public[:],
+		PublicKey: intermediateKey.Public,
 		Names:     []certs.Name{certs.RawStringName("Intermediate")},
 	}
 	intermediate, err := certs.IssueIntermediate(root, &intermediateIdentity)
@@ -262,7 +262,7 @@ func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermedi
 	kemPubKey := kemKp.Public
 
 	leafIdentity := certs.Identity{
-		PublicKey: keypair.Public[:],
+		PublicKey: keypair.Public,
 		Names:     []certs.Name{certs.RawStringName("testing")},
 	}
 

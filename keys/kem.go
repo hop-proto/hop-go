@@ -120,11 +120,16 @@ func ParseKEMPublicKeyFromBytes(data []byte) (*KEMPublicKey, error) {
 	return mustCirclToPublic(pub), nil
 }
 
+// mustCirclToPublic converts a circl KEM PublicKey into the wrapper type KEMPublicKey.
+// It marshals the inner public key into bytes and stores both the original key and its byte representation.
 func mustCirclToPublic(inner kem.PublicKey) *KEMPublicKey {
-	innerBytes, _ := inner.MarshalBinary()
+	innerBytes, err := inner.MarshalBinary()
+	if err != nil {
+		return nil
+	}
 	return &KEMPublicKey{
 		inner:      inner,
-		innerBytes: (innerBytes),
+		innerBytes: innerBytes,
 	}
 }
 
