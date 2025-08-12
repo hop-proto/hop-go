@@ -27,7 +27,7 @@ func TestClientCertificates(t *testing.T) {
 	clientKey := keys.GenerateNewX25519KeyPair()
 
 	clientRootIdentity := certs.Identity{
-		PublicKey: clientRootKey.Public[:],
+		PublicKey: clientRootKey.Public,
 		Names:     []certs.Name{certs.RawStringName("Client Root")},
 	}
 
@@ -36,7 +36,7 @@ func TestClientCertificates(t *testing.T) {
 	assert.NilError(t, err)
 
 	clientIntermediateIdentity := certs.Identity{
-		PublicKey: clientIntermediateKey.Public[:],
+		PublicKey: clientIntermediateKey.Public,
 		Names:     []certs.Name{certs.RawStringName("Client Intermediate")},
 	}
 	clientIntermediate, err := certs.IssueIntermediate(clientRoot, &clientIntermediateIdentity)
@@ -59,7 +59,7 @@ func TestClientCertificates(t *testing.T) {
 
 	issueClientLeaf := func(t *testing.T, names ...certs.Name) ClientConfig {
 		clientLeafIdentity := certs.Identity{
-			PublicKey: clientKey.Public[:],
+			PublicKey: clientKey.Public,
 			Names:     names,
 		}
 		clientLeaf, err := certs.IssueLeaf(clientIntermediate, &clientLeafIdentity)
@@ -75,7 +75,7 @@ func TestClientCertificates(t *testing.T) {
 
 	selfSignClientLeaf := func(t *testing.T, names ...certs.Name) ClientConfig {
 		clientLeafIdentity := certs.Identity{
-			PublicKey: clientKey.Public[:],
+			PublicKey: clientKey.Public,
 			Names:     names,
 		}
 		clientLeaf, err := certs.SelfSignLeaf(&clientLeafIdentity)
@@ -201,7 +201,7 @@ func TestClientCertificates(t *testing.T) {
 		var names []certs.Name
 		clientConfig := selfSignClientLeaf(t, names...)
 		set := authkeys.NewSyncAuthKeySet()
-		set.AddKey(keys.DHPublicKey(clientConfig.Leaf.PublicKey))
+		set.AddKey(clientConfig.Leaf.PublicKey)
 		verify := &VerifyConfig{
 			AuthKeys:           set,
 			AuthKeysAllowed:    true,

@@ -868,7 +868,7 @@ func (s *Server) readPQClientRequestHidden(hs *HandshakeState, b []byte) (int, e
 	}
 	hs.parsedLeaf = &leaf
 
-	hs.dh.remoteStatic = [32]byte(leaf.PublicKey)
+	hs.dh.remoteStatic = leaf.PublicKey
 	if err != nil {
 		return 0, err
 	}

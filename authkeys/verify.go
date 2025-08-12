@@ -47,7 +47,7 @@ func (s *SyncAuthKeySet) VerifyLeaf(leaf *certs.Certificate, opts certs.VerifyOp
 		return err
 	}
 
-	if _, isPresent := s.keySet[keys.DHPublicKey(leaf.PublicKey)]; !isPresent {
+	if _, isPresent := s.keySet[leaf.PublicKey]; !isPresent {
 		return errors.New("client static not found in authorized key set")
 	}
 	return nil

@@ -115,7 +115,7 @@ func NewTestServer(t *testing.T) *TestServer {
 
 func (s *TestServer) ChainAuthenticator(t *testing.T, clientKey *keys.X25519KeyPair) core.Authenticator {
 	leaf, err := certs.SelfSignLeaf(&certs.Identity{
-		PublicKey: clientKey.Public[:],
+		PublicKey: clientKey.Public,
 	})
 	assert.NilError(t, err)
 	return core.InMemoryAuthenticator{
@@ -491,7 +491,7 @@ func TestSelfAuthGrant(t *testing.T) {
 	c := NewTestClient(t, s, "hop_user")
 
 	clientCert, err := certs.SelfSignLeaf(&certs.Identity{
-		PublicKey: c.KeyPair.Public[:],
+		PublicKey: c.KeyPair.Public,
 		Names:     []certs.Name{certs.RawStringName("hop_user")},
 	})
 	assert.NilError(t, err)

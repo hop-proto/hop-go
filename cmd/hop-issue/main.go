@@ -69,7 +69,7 @@ func main() {
 			logrus.Fatalf("unable to parse DH public key: %s", err)
 		}
 		identity := certs.Identity{
-			PublicKey: pubKey[:],
+			PublicKey: *pubKey,
 		}
 		if dnsName != "" {
 			identity.Names = append(identity.Names, certs.DNSName(dnsName))
@@ -125,7 +125,7 @@ func main() {
 			logrus.Fatalf("unable to parse signing public key: %s", err)
 		}
 		identity := certs.Identity{
-			PublicKey: pubKey[:],
+			PublicKey: *pubKey,
 			Names:     []certs.Name{certs.DNSName(dnsName)},
 		}
 		intermediate, err := certs.IssueIntermediate(parent, &identity)
@@ -139,7 +139,7 @@ func main() {
 		output.Write(pemBytes)
 	case certs.Root:
 		identity := certs.Identity{
-			PublicKey: signingKeyPair.Public[:],
+			PublicKey: signingKeyPair.Public,
 			Names:     []certs.Name{certs.DNSName(dnsName)},
 		}
 		root, err := certs.SelfSignRoot(&identity, signingKeyPair)

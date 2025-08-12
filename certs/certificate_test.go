@@ -43,11 +43,11 @@ func TestWriteTo(t *testing.T) {
 				},
 			},
 		},
-		PublicKey: testKeyPair.public[:],
+		PublicKey: testKeyPair.public,
 		Parent:    SHA3Fingerprint{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32},
 		Signature: fakeSignature(),
 	}
-	assert.Check(t, keys.DHPublicKey(c.PublicKey) != zero)
+	assert.Check(t, c.PublicKey != zero)
 	assert.Check(t, c.Parent != zero)
 
 	b := &bytes.Buffer{}
@@ -103,7 +103,7 @@ func TestWriteTo(t *testing.T) {
 	assert.Equal(t, c.ExpiresAt, d.ExpiresAt)
 	assert.DeepEqual(t, c.IDChunk, d.IDChunk)
 	assert.DeepEqual(t, c.PublicKey, d.PublicKey)
-	assert.Equal(t, keys.DHPublicKey(c.PublicKey), keys.DHPublicKey(testKeyPair.public))
+	assert.Equal(t, c.PublicKey, keys.DHPublicKey(testKeyPair.public))
 	assert.Equal(t, c.Parent, d.Parent)
 	assert.Equal(t, c.Signature, d.Signature)
 	// TODO(dadrian): Fingerprint handling

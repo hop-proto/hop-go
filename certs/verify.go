@@ -11,14 +11,14 @@ import (
 
 // Identity is a set of names associated with a public key.
 type Identity struct {
-	PublicKey []byte
+	PublicKey [KeyLen]byte
 	Names     []Name
 }
 
 // SigningIdentity returns an Identity pointing to a public key with no name.
 func SigningIdentity(key *keys.SigningKeyPair) *Identity {
 	return &Identity{
-		PublicKey: key.Public[:],
+		PublicKey: key.Public,
 	}
 }
 
@@ -26,7 +26,7 @@ func SigningIdentity(key *keys.SigningKeyPair) *Identity {
 // names.
 func LeafIdentity(key *keys.X25519KeyPair, names ...Name) *Identity {
 	return &Identity{
-		PublicKey: key.Public[:],
+		PublicKey: key.Public,
 		Names:     names,
 	}
 }

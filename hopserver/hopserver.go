@@ -333,7 +333,7 @@ func (s *HopServer) AddAuthGrant(intent *authgrants.Intent) error {
 	s.agMap.AddAuthGrant(intent, authgrants.PrincipalID(NoSession))
 
 	// add delegate key from cert to transport server authorized key pool
-	s.keyStore.AddKey(keys.DHPublicKey(intent.DelegateCert.PublicKey))
+	s.keyStore.AddKey(intent.DelegateCert.PublicKey)
 
 	return nil
 }
