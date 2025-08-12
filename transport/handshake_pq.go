@@ -69,10 +69,11 @@ func readPQClientHello(hs *HandshakeState, b []byte) (int, error) {
 	b = b[HeaderLen:]
 
 	// Remote PQ Ephemeral
-	hs.kem.remoteEphemeral, err = keys.ParseKEMPublicKeyFromBytes(b[:KemKeyLen])
+	remoteEphemeral, err := keys.ParseKEMPublicKeyFromBytes(b[:KemKeyLen])
 	if err != nil {
 		return 0, err
 	}
+	hs.kem.remoteEphemeral = *remoteEphemeral
 	hs.duplex.Absorb(b[:KemKeyLen])
 	b = b[KemKeyLen:]
 
@@ -99,7 +100,7 @@ func writePQServerHello(hs *HandshakeState, b []byte) (int, error) {
 	b = b[HeaderLen:]
 
 	// KEM Ephemeral CipherText
-	ct, k, err := keys.Encapsulate(rand.Reader, hs.kem.remoteEphemeral)
+	ct, k, err := keys.Encapsulate(rand.Reader, &hs.kem.remoteEphemeral)
 	if err != nil {
 		return 0, err
 	}
@@ -251,7 +252,7 @@ func (s *Server) readPQClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 	cookie := b[:PQCookieLen]
 	b = b[PQCookieLen:]
 
-	hs, err := s.ReplayPQDuplexFromCookie(cookie, kemRemoteEphemeral, addr)
+	hs, err := s.ReplayPQDuplexFromCookie(cookie, *kemRemoteEphemeral, addr)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -699,7 +700,7 @@ func (hs *HandshakeState) writePQClientRequestHidden(b []byte, serverKEMPublicKe
 	pos += KemKeyLen
 
 	// skem CipherText
-	ct, k, err := keys.Encapsulate(rand.Reader, *serverKEMPublicKey)
+	ct, k, err := keys.Encapsulate(rand.Reader, serverKEMPublicKey)
 	if err != nil {
 		return pos, err
 	}
@@ -853,10 +854,11 @@ func (s *Server) readPQClientRequestHidden(hs *HandshakeState, b []byte) (int, e
 	copy(b, bufCopy)
 
 	// save remote in the hs object
-	hs.kem.remoteEphemeral, err = keys.ParseKEMPublicKeyFromBytes(remoteEphemeralBytes)
+	remoteEphemeral, err := keys.ParseKEMPublicKeyFromBytes(remoteEphemeralBytes)
 	if err != nil {
 		return 0, err
 	}
+	hs.kem.remoteEphemeral = *remoteEphemeral
 
 	// Parse certificates
 	leaf, _, err := hs.certificateParserAndVerifier(rawLeaf, rawIntermediate)
@@ -938,7 +940,7 @@ func (s *Server) writePQServerResponseHidden(hs *HandshakeState, b []byte) (int,
 	pos += SessionIDLen
 
 	// KEM CipherText -> ekem
-	eCt, ek, err := keys.Encapsulate(rand.Reader, hs.kem.remoteEphemeral)
+	eCt, ek, err := keys.Encapsulate(rand.Reader, &hs.kem.remoteEphemeral)
 	if err != nil {
 		return 0, err
 	}

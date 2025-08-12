@@ -29,8 +29,9 @@ func TestPQNoiseXXHandshake(t *testing.T) {
 
 	// init kem
 	client.hs.kem = new(kemState)
-	client.hs.kem.ephemeral, err = keys.GenerateKEMKeyPair(rand.Reader)
+	clientEphemeral, err := keys.GenerateKEMKeyPair(rand.Reader)
 	assert.Check(t, cmp.Equal(nil, err))
+	client.hs.kem.ephemeral = *clientEphemeral
 	client.hs.leaf, client.hs.intermediate, err = client.prepareCertificates()
 
 	// init dh
@@ -46,7 +47,9 @@ func TestPQNoiseXXHandshake(t *testing.T) {
 
 	// init kem
 	serverHs.kem = new(kemState)
-	serverHs.kem.ephemeral, err = keys.GenerateKEMKeyPair(rand.Reader)
+	serverEphemeral, err := keys.GenerateKEMKeyPair(rand.Reader)
+	assert.Check(t, cmp.Equal(nil, err))
+	serverHs.kem.ephemeral = *serverEphemeral
 
 	// init dh
 	serverHs.dh = new(dhState)
@@ -130,8 +133,9 @@ func TestPQNoiseIKHandshake(t *testing.T) {
 
 	// init kem
 	client.hs.kem = new(kemState)
-	client.hs.kem.ephemeral, err = keys.GenerateKEMKeyPair(rand.Reader)
+	clientEphemeral, err := keys.GenerateKEMKeyPair(rand.Reader)
 	assert.NilError(t, err)
+	client.hs.kem.ephemeral = *clientEphemeral
 	client.hs.leaf, client.hs.intermediate, err = client.prepareCertificates()
 	assert.NilError(t, err)
 
@@ -145,7 +149,10 @@ func TestPQNoiseIKHandshake(t *testing.T) {
 
 	// init kem
 	serverHs.kem = new(kemState)
-	serverHs.kem.ephemeral, err = keys.GenerateKEMKeyPair(rand.Reader)
+	assert.NilError(t, err)
+	serverEphemeral, err := keys.GenerateKEMKeyPair(rand.Reader)
+	assert.NilError(t, err)
+	serverHs.kem.ephemeral = *serverEphemeral
 
 	// init dh
 	serverHs.dh = new(dhState)
@@ -262,7 +269,7 @@ func newPQTestServerConfig(t assert.TestingT, root *certs.Certificate, intermedi
 	c, err := certs.IssueLeaf(intermediate, &leafIdentity)
 
 	server := ServerConfig{
-		KEMKeyPair:       &kemKp,
+		KEMKeyPair:       kemKp,
 		KeyPair:          keypair,
 		Certificate:      c,
 		Intermediate:     intermediate,

@@ -55,32 +55,32 @@ type KEMKeyPair struct {
 	Seed    KEMSeed
 }
 
-func GenerateKEMKeyPair(rng io.Reader) (KEMKeyPair, error) {
+func GenerateKEMKeyPair(rng io.Reader) (*KEMKeyPair, error) {
 	seed := make([]byte, 64)
 	if _, err := io.ReadFull(rng, seed); err != nil {
-		return KEMKeyPair{}, err
+		return nil, err
 	}
 
 	pub, priv := MlKem512.DeriveKeyPair(seed)
 
-	return KEMKeyPair{
+	return &KEMKeyPair{
 		Private: priv,
-		Public:  mustCirclToPublic(pub),
+		Public:  *mustCirclToPublic(pub),
 		Seed:    KEMSeed(seed),
 	}, nil
 }
 
-func GenerateKEMKeyPairFromSeed(seed []byte) (KEMKeyPair, error) {
+func GenerateKEMKeyPairFromSeed(seed []byte) (*KEMKeyPair, error) {
 	pub, priv := MlKem512.DeriveKeyPair(seed)
 
-	return KEMKeyPair{
+	return &KEMKeyPair{
 		Private: priv,
-		Public:  mustCirclToPublic(pub),
+		Public:  *mustCirclToPublic(pub),
 		Seed:    KEMSeed(seed),
 	}, nil
 }
 
-func Encapsulate(rng io.Reader, dest KEMPublicKey) ([]byte, []byte, error) {
+func Encapsulate(rng io.Reader, dest *KEMPublicKey) ([]byte, []byte, error) {
 	pubTo := dest.inner
 
 	seed := make([]byte, MlKem512.EncapsulationSeedSize())
@@ -105,24 +105,24 @@ func ParseKEMPrivateKeyFromBytes(data []byte) (*KEMKeyPair, error) {
 
 	kp := &KEMKeyPair{
 		Private: priv,
-		Public:  mustCirclToPublic(priv.Public()),
+		Public:  *mustCirclToPublic(priv.Public()),
 	}
 
 	return kp, nil
 }
 
-func ParseKEMPublicKeyFromBytes(data []byte) (KEMPublicKey, error) {
+func ParseKEMPublicKeyFromBytes(data []byte) (*KEMPublicKey, error) {
 	pub, err := MlKem512.UnmarshalBinaryPublicKey(data)
 	if err != nil {
-		return KEMPublicKey{}, errors.New("KEM: public key cannot be parsed from the buffer")
+		return nil, errors.New("KEM: public key cannot be parsed from the buffer")
 	}
 
 	return mustCirclToPublic(pub), nil
 }
 
-func mustCirclToPublic(inner kem.PublicKey) KEMPublicKey {
+func mustCirclToPublic(inner kem.PublicKey) *KEMPublicKey {
 	innerBytes, _ := inner.MarshalBinary()
-	return KEMPublicKey{
+	return &KEMPublicKey{
 		inner:      inner,
 		innerBytes: (innerBytes),
 	}
@@ -192,7 +192,7 @@ func KEMKeyFromPEM(p *pem.Block) (*KEMKeyPair, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out, nil
 }
 
 // ReadKEMKeyFromPEMFile reads the first PEM-encoded Hop KEM key at the provided
@@ -265,5 +265,5 @@ func ParseKEMPublicKey(encoded string) (*KEMPublicKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out, nil
 }

@@ -82,7 +82,7 @@ func main() {
 		if err != nil {
 			logrus.Fatalf("unable to genrate ml-kem keypair: %s", err)
 		}
-		if err = keys.EncodeKEMKeyToPEM(fd, kp); err != nil {
+		if err = keys.EncodeKEMKeyToPEM(fd, *kp); err != nil {
 			logrus.Fatalf("unable to write private key: %s", err)
 		}
 		pfd.WriteString(kp.Public.String())

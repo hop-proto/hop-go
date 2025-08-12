@@ -584,11 +584,13 @@ func (s *Server) handlePQClientHello(b []byte) (*HandshakeState, error) {
 		return nil, ErrInvalidMessage
 	}
 
-	scratchHS.kem.ephemeral, err = keys.GenerateKEMKeyPair(rand.Reader)
+	ephemeral, err := keys.GenerateKEMKeyPair(rand.Reader)
 
 	if err != nil {
 		return nil, err
 	}
+
+	scratchHS.kem.ephemeral = *ephemeral
 
 	return scratchHS, nil
 }
