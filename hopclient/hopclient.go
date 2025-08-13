@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -148,12 +149,20 @@ func (c *HopClient) authenticatorSetupLocked() error {
 	if hc.ServerKEMKey != "" {
 		logrus.Infof("client: server Key loaded to complete Hidden Mode handshake")
 
-		serverKeyPath := combinators.StringOr(hc.ServerKEMKey, config.DefaultKeyPath())
-		ServerKEMKey, err = loadServerPublicKEMKey(serverKeyPath)
+		// In the ACME context, the requester sends the key over a Hop session.
+		// The CA will keep the key in memory without creating a file
+		if strings.HasPrefix(hc.ServerKEMKey, keys.KEMPublicKeyPrefix) {
+			ServerKEMKey, err = keys.ParseKEMPublicKey(hc.ServerKEMKey)
+			if err != nil {
+				logrus.Errorf("client: unable to read the server public key file: %v", err)
+			}
+		} else {
+			serverKeyPath := combinators.StringOr(hc.ServerKEMKey, config.DefaultKeyPath())
+			ServerKEMKey, err = loadServerPublicKEMKey(serverKeyPath)
 
-		if err != nil {
-			logrus.Errorf("client: unable to load the server public key file: %v", err)
-			ServerKEMKey = nil
+			if err != nil {
+				logrus.Errorf("client: unable to load the server public key file: %v", err)
+			}
 		}
 	}
 
