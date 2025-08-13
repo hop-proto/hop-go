@@ -333,7 +333,7 @@ func (s *HopServer) AddAuthGrant(intent *authgrants.Intent) error {
 
 // AuthorizeKey returns nil if the publicKey is in the authorized_keys file for
 // the user.
-func (s *HopServer) AuthorizeKey(user string, publicKey keys.PublicKey) error {
+func (s *HopServer) AuthorizeKey(user string, publicKey keys.DHPublicKey) error {
 	d, err := config.UserDirectoryFor(user)
 	if err != nil {
 		return err
@@ -372,7 +372,7 @@ func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fa
 		// TODO(dadrian)[2022-12-26]: If certs are shared, we'll re-parse all
 		// these. We could use some kind of content-addressable store to cache
 		// these after a single load pass across the whole config.
-		tc, err := transport.MakeCert(block.Key, block.Certificate, block.Intermediate)
+		tc, err := transport.MakeCert(block.Key, block.Certificate, block.Intermediate, block.KEMKey)
 		if err != nil {
 			return nil, err
 		}

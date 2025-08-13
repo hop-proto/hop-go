@@ -18,7 +18,7 @@ type Certificate struct {
 	HostNames []string
 }
 
-func MakeCert(keyPair *keys.X25519KeyPair, leaf, intermdiate *certs.Certificate) (*Certificate, error) {
+func MakeCert(keyPair *keys.X25519KeyPair, leaf, intermdiate *certs.Certificate, kemKeyPair *keys.KEMKeyPair) (*Certificate, error) {
 	leafBytes, err := leaf.Marshal()
 	if err != nil {
 		return nil, err
@@ -32,7 +32,7 @@ func MakeCert(keyPair *keys.X25519KeyPair, leaf, intermdiate *certs.Certificate)
 		RawLeaf:         leafBytes,
 		RawIntermediate: intermediateBytes,
 		Exchanger:       keyPair,
+		KEMKeyPair:      kemKeyPair,
 		Leaf:            leaf,
-		HostName:        "",
 	}, nil
 }

@@ -37,7 +37,11 @@ func writePQClientHello(hs *HandshakeState, b []byte) (int, error) {
 	x = x[HeaderLen:]
 
 	// PQ Ephemeral
-	ephemeralBytes := hs.kem.ephemeral.Public.Bytes()
+	ephemeralBytes, err := hs.kem.ephemeral.Public.MarshalBinary()
+	if err != nil {
+		return HeaderLen, err
+	}
+
 	copy(x, ephemeralBytes[:])
 	hs.duplex.Absorb(x[:KemKeyLen])
 	x = x[KemKeyLen:]
@@ -191,7 +195,10 @@ func (hs *HandshakeState) writePQClientAck(b []byte) (int, error) {
 	b = b[DHLen:]
 
 	// PQ Ephemeral
-	ephemeralBytes := hs.kem.ephemeral.Public.Bytes()
+	ephemeralBytes, err := hs.kem.ephemeral.Public.MarshalBinary()
+	if err != nil {
+		return HeaderLen + DHLen, err
+	}
 	copy(b, ephemeralBytes[:])
 	hs.duplex.Absorb(b[:KemKeyLen])
 	b = b[KemKeyLen:]
@@ -206,7 +213,7 @@ func (hs *HandshakeState) writePQClientAck(b []byte) (int, error) {
 	b = b[PQCookieLen:]
 
 	// Encrypted SNI
-	err := hs.EncryptSNI(b, hs.certVerify.Name)
+	err = hs.EncryptSNI(b, hs.certVerify.Name)
 	if err != nil {
 		return HeaderLen + DHLen + KemKeyLen + PQCookieLen, ErrInvalidMessage
 	}
@@ -257,9 +264,14 @@ func (s *Server) readPQClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 		return 0, nil, err
 	}
 
+	kemRemoteEphemeralBytes, err := (*kemRemoteEphemeral).MarshalBinary()
+	if err != nil {
+		return 0, nil, err
+	}
+
 	hs.duplex.Absorb(header)
 	hs.duplex.Absorb(ephemeral)
-	hs.duplex.Absorb(kemRemoteEphemeral.Bytes())
+	hs.duplex.Absorb(kemRemoteEphemeralBytes)
 	hs.duplex.Absorb(cookie)
 
 	// TODO (paul) this notation with DHLen hard coded sounds weird, we might have a better way to do it
@@ -646,7 +658,11 @@ func (s *Server) ReplayPQDuplexFromCookie(cookie []byte, clientKemEphemeral keys
 	// Replay Client Hello
 	out.duplex.Absorb([]byte(PostQuantumProtocolName))
 	out.duplex.Absorb([]byte{byte(MessageTypeClientHello), Version, 0, 0})
-	out.duplex.Absorb(clientKemEphemeral.Bytes())
+	clientKemEphemeralBytes, err := clientKemEphemeral.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	out.duplex.Absorb(clientKemEphemeralBytes)
 	out.duplex.Squeeze(out.macBuf[:])
 	logrus.Debugf("server: regen ch mac: %x", out.macBuf[:])
 
@@ -693,7 +709,10 @@ func (hs *HandshakeState) writePQClientRequestHidden(b []byte, serverKEMPublicKe
 	pos += HeaderLen
 
 	// PQ Ephemeral -> ekem
-	ephemeralBytes := hs.kem.ephemeral.Public.Bytes()
+	ephemeralBytes, err := hs.kem.ephemeral.Public.MarshalBinary()
+	if err != nil {
+		return pos, err
+	}
 	copy(b, ephemeralBytes[:])
 	hs.duplex.Absorb(b[:KemKeyLen])
 	b = b[KemKeyLen:]

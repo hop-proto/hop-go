@@ -42,10 +42,7 @@ const (
 	MlKem512SharedKeySize = 32
 )
 
-type KEMPublicKey struct {
-	inner      kem.PublicKey
-	innerBytes []byte
-}
+type KEMPublicKey kem.PublicKey
 type KEMPrivateKey kem.PrivateKey
 type KEMSeed []byte
 
@@ -65,7 +62,7 @@ func GenerateKEMKeyPair(rng io.Reader) (*KEMKeyPair, error) {
 
 	return &KEMKeyPair{
 		Private: priv,
-		Public:  *mustCirclToPublic(pub),
+		Public:  pub,
 		Seed:    KEMSeed(seed),
 	}, nil
 }
@@ -75,20 +72,18 @@ func GenerateKEMKeyPairFromSeed(seed []byte) (*KEMKeyPair, error) {
 
 	return &KEMKeyPair{
 		Private: priv,
-		Public:  *mustCirclToPublic(pub),
+		Public:  pub,
 		Seed:    KEMSeed(seed),
 	}, nil
 }
 
 func Encapsulate(rng io.Reader, dest *KEMPublicKey) ([]byte, []byte, error) {
-	pubTo := dest.inner
-
 	seed := make([]byte, MlKem512.EncapsulationSeedSize())
 	if _, err := io.ReadFull(rng, seed); err != nil {
 		return nil, nil, err
 	}
 
-	ct, ss, err := MlKem512.EncapsulateDeterministically(pubTo, seed)
+	ct, ss, err := MlKem512.EncapsulateDeterministically(*dest, seed)
 	if err != nil {
 		// This should NEVER happen.
 		panic("KEM: failed to encapsulate: " + err.Error())
@@ -105,7 +100,7 @@ func ParseKEMPrivateKeyFromBytes(data []byte) (*KEMKeyPair, error) {
 
 	kp := &KEMKeyPair{
 		Private: priv,
-		Public:  *mustCirclToPublic(priv.Public()),
+		Public:  priv.Public(),
 	}
 
 	return kp, nil
@@ -116,21 +111,10 @@ func ParseKEMPublicKeyFromBytes(data []byte) (*KEMPublicKey, error) {
 	if err != nil {
 		return nil, errors.New("KEM: public key cannot be parsed from the buffer")
 	}
+	// Convert to the Hop interface
+	pubkey := KEMPublicKey(pub)
 
-	return mustCirclToPublic(pub), nil
-}
-
-// mustCirclToPublic converts a circl KEM PublicKey into the wrapper type KEMPublicKey.
-// It marshals the inner public key into bytes and stores both the original key and its byte representation.
-func mustCirclToPublic(inner kem.PublicKey) *KEMPublicKey {
-	innerBytes, err := inner.MarshalBinary()
-	if err != nil {
-		return nil
-	}
-	return &KEMPublicKey{
-		inner:      inner,
-		innerBytes: innerBytes,
-	}
+	return &pubkey, nil
 }
 
 func (kp *KEMKeyPair) MarshalBinary() ([]byte, error) {
@@ -155,20 +139,16 @@ func (kp *KEMKeyPair) Decapsulate(ct []byte) ([]byte, error) {
 	return ss, nil
 }
 
-func (pubKey KEMPublicKey) MarshalBinary() ([]byte, error) {
-	return pubKey.inner.MarshalBinary()
-}
-
-func (pubKey KEMPublicKey) Bytes() []byte {
-	return pubKey.innerBytes
-}
-
 // KEMPublicKeyPrefix is the prefix used in public key files for Hop KEM keys.
 const KEMPublicKeyPrefix = "hop-kem-v1-"
 
-// String encodes a KEMPublicKey to a custom format.
-func (pubKey KEMPublicKey) String() string {
-	b64 := base64.StdEncoding.EncodeToString(pubKey.Bytes())
+// KEMPublicKeyToString String encodes a KEMPublicKey to a custom format.
+func KEMPublicKeyToString(pubKey *KEMPublicKey) string {
+	pubKeyBytes, err := (*pubKey).MarshalBinary()
+	if err != nil {
+		return ""
+	}
+	b64 := base64.StdEncoding.EncodeToString(pubKeyBytes)
 	return fmt.Sprintf("%s%s", KEMPublicKeyPrefix, b64)
 }
 

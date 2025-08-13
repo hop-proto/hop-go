@@ -85,7 +85,8 @@ func main() {
 		if err = keys.EncodeKEMKeyToPEM(fd, *kp); err != nil {
 			logrus.Fatalf("unable to write private key: %s", err)
 		}
-		pfd.WriteString(kp.Public.String())
+		pfd.WriteString(keys.KEMPublicKeyToString(&kp.Public))
+
 	} else {
 		kp := keys.GenerateNewX25519KeyPair()
 		if err := keys.EncodeDHKeyToPEM(fd, kp); err != nil {

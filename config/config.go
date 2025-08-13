@@ -32,6 +32,7 @@ type ClientConfig struct {
 // ServerConfig represents a parsed server configuration.
 type ServerConfig struct {
 	Key          *keys.X25519KeyPair
+	KEMKey       *keys.KEMKeyPair
 	Certificate  *certs.Certificate
 	Intermediate *certs.Certificate
 
@@ -60,6 +61,7 @@ type ServerConfig struct {
 type NameConfig struct {
 	Pattern      string
 	Key          *keys.X25519KeyPair
+	KEMKey       *keys.KEMKeyPair
 	Certificate  *certs.Certificate
 	Intermediate *certs.Certificate
 	AutoSelfSign bool
@@ -69,6 +71,7 @@ type NameConfig struct {
 // serverConfigSchema represents a server config file in a way that TOML can parse
 type serverConfigSchema struct {
 	Key          string // the path the the key file
+	KEMKey       string
 	Certificate  string // path to the certificate
 	Intermediate string // path to the intermediate cert
 
@@ -97,6 +100,7 @@ type serverConfigSchema struct {
 type nameConfigSchema struct {
 	Pattern      string
 	Key          string
+	KEMKey       string
 	Certificate  string
 	Intermediate string
 	AutoSelfSign *bool
@@ -111,7 +115,7 @@ type HostConfigOptional struct {
 	AutoSelfSign         *bool
 	CAFiles              []string
 	ServerName           *string
-	ServerKey            *string
+	ServerKEMKey         *string
 	ServerIPv4           *string
 	ServerIPv6           *string
 	Certificate          *string
@@ -121,6 +125,7 @@ type HostConfigOptional struct {
 	Hostname             *string
 	Intermediate         *string
 	Key                  *string
+	KEMKey               *string
 	Patterns             []string
 	Port                 int
 	RemoteFwds           *portforwarding.Forward
@@ -143,7 +148,7 @@ type HostConfig struct {
 	AutoSelfSign         bool
 	CAFiles              []string
 	ServerName           string // expected name on server cert
-	ServerKey            string // Server Public key to enable Hidden mode
+	ServerKEMKey         string // Server Public key to enable Hidden mode
 	ServerIPv4           string
 	ServerIPv6           string
 	Certificate          string
@@ -153,6 +158,7 @@ type HostConfig struct {
 	Hostname             string
 	Intermediate         string
 	Key                  string
+	KEMKey               string
 	Port                 int
 	RemoteFwds           *portforwarding.Forward
 	LocalFwds            *portforwarding.Forward
@@ -184,8 +190,8 @@ func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
 	if other.ServerName != nil {
 		hc.ServerName = other.ServerName
 	}
-	if other.ServerKey != nil {
-		hc.ServerKey = other.ServerKey
+	if other.ServerKEMKey != nil {
+		hc.ServerKEMKey = other.ServerKEMKey
 	}
 	if other.ServerIPv4 != nil {
 		hc.ServerIPv4 = other.ServerIPv4
@@ -213,6 +219,9 @@ func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
 	}
 	if other.Key != nil {
 		hc.Key = other.Key
+	}
+	if other.KEMKey != nil {
+		hc.KEMKey = other.KEMKey
 	}
 	// don't need to merge Patterns
 	if other.Port != 0 {
@@ -257,8 +266,8 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	if hc.ServerName != nil {
 		newHC.ServerName = *hc.ServerName
 	}
-	if hc.ServerKey != nil {
-		newHC.ServerKey = *hc.ServerKey
+	if hc.ServerKEMKey != nil {
+		newHC.ServerKEMKey = *hc.ServerKEMKey
 	}
 	if hc.Certificate != nil {
 		newHC.Certificate = *hc.Certificate
@@ -280,6 +289,9 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	}
 	if hc.Key != nil {
 		newHC.Key = *hc.Key
+	}
+	if hc.KEMKey != nil {
+		newHC.KEMKey = *hc.KEMKey
 	}
 	if hc.LocalFwds != nil {
 		newHC.LocalFwds = hc.LocalFwds
@@ -384,6 +396,15 @@ func loadServerConfigFromFile(c *ServerConfig, path string) (*ServerConfig, erro
 			return nil, err
 		}
 		c.Intermediate = intermediate
+	}
+
+	if parsed.KEMKey != "" {
+		kemKeyPair, err := keys.ReadKEMKeyFromPEMFile(parsed.KEMKey)
+		if err != nil {
+			return nil, err
+		}
+		c.KEMKey = kemKeyPair
+		logrus.Debug("Read kem key from PEM file Hidden Mode activated")
 	}
 
 	c.AutoSelfSign = false

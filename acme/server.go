@@ -20,7 +20,6 @@ import (
 	"hop.computer/hop/config"
 	"hop.computer/hop/hopclient"
 	"hop.computer/hop/hopserver"
-	"hop.computer/hop/keys"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
 	"hop.computer/hop/userauth"
@@ -131,7 +130,7 @@ func (s *AcmeSession) StartChallenge() error {
 
 	username := userauth.GetInitMsg(uaTube) // client sends desired username
 	leaf := s.transportConn.FetchClientLeaf()
-	k := keys.PublicKey(leaf.PublicKey)
+	k := leaf.PublicKey
 	s.log.Info("got userauth init message: ", k.String())
 
 	ags, err := s.server.AuthorizeKeyAuthGrant(username, k)

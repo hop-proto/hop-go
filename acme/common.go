@@ -131,7 +131,7 @@ func (cr *CertAndChallenge) ReadFrom(r io.Reader) (int64, error) {
 type CertificateRequest struct {
 	// TODO additional certificate request info
 	Name   certs.Name
-	PubKey keys.PublicKey
+	PubKey keys.DHPublicKey
 }
 
 func (req *CertificateRequest) WriteTo(w io.Writer) (int64, error) {

@@ -77,7 +77,12 @@ func (hs *HandshakeState) writeCookie(b []byte, k []byte) (int, error) {
 		return 0, err
 	}
 
-	ad := CookieAD(hs.kem.remoteEphemeral.Bytes(), hs.remoteAddr)
+	remoteEphemeralBytes, err := hs.kem.remoteEphemeral.MarshalBinary()
+	if err != nil {
+		return 0, err
+	}
+
+	ad := CookieAD(remoteEphemeralBytes, hs.remoteAddr)
 
 	enc := aead.Seal(b[:0], nil, k, ad)
 	if len(enc) != PQCookieLen {
@@ -97,7 +102,12 @@ func (hs *HandshakeState) decryptCookie(b []byte) (int, *[]byte, error) {
 	}
 	encryptedCookie := b[:PQCookieLen]
 
-	ad := CookieAD(hs.kem.remoteEphemeral.Bytes(), hs.remoteAddr)
+	remoteEphemeralBytes, err := hs.kem.remoteEphemeral.MarshalBinary()
+	if err != nil {
+		return 0, nil, err
+	}
+
+	ad := CookieAD(remoteEphemeralBytes, hs.remoteAddr)
 	k := make([]byte, PQSharedSecretLen)
 	out, err := aead.Open(k[:0], nil, encryptedCookie, ad)
 	if err != nil {
