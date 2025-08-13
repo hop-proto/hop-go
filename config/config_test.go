@@ -110,8 +110,8 @@ func TestLoadServerConfig(t *testing.T) {
 		Users:                []string{"user"},
 		HiddenModeVHostNames: []string{"example.com"},
 		Names:                []NameConfig{},
-		HandshakeTimeout:     time.Second,
-		DataTimeout:          time.Second,
+		HandshakeTimeout:     15 * time.Second,
+		DataTimeout:          0 * time.Second,
 	}
 	// TODO(hosono) there is currently no good way to compare certificates as equal
 	assert.DeepEqual(t, c, expected, cmpopts.IgnoreFields(ServerConfig{}, "Certificate", "Intermediate", "CACerts"))
