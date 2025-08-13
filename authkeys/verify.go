@@ -10,10 +10,10 @@ import (
 
 // SyncAuthKeySet is a set of trusted keys
 type SyncAuthKeySet struct {
+	// keySet must only be accessed while holding lock
 	// +checklocks:lock
 	keySet map[keys.DHPublicKey]bool
-	// +checklocks:lock
-	lock sync.Mutex
+	lock   sync.Mutex
 }
 
 // NewSyncAuthKeySet returns a new store
