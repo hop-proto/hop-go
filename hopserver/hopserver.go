@@ -388,11 +388,11 @@ func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fa
 		}
 		var rawIntermediate []byte
 		if c.Intermediate != nil {
-			intermdiateBytes, err := c.Intermediate.Marshal()
+			intermediateBytes, err := c.Intermediate.Marshal()
 			if err != nil {
 				return nil, err
 			}
-			rawIntermediate = intermdiateBytes
+			rawIntermediate = intermediateBytes
 		}
 		tc := &transport.Certificate{
 			RawLeaf:         rawLeaf,
