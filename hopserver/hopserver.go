@@ -398,6 +398,7 @@ func NewVirtualHosts(c *config.ServerConfig, fallbackKey *keys.X25519KeyPair, fa
 			RawLeaf:         rawLeaf,
 			RawIntermediate: rawIntermediate,
 			Exchanger:       c.Key,
+			KEMKeyPair:      c.KEMKey,
 			Leaf:            c.Certificate,
 		}
 		out = append(out, VirtualHost{

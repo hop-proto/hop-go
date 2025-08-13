@@ -439,17 +439,27 @@ func loadServerConfigFromFile(c *ServerConfig, path string) (*ServerConfig, erro
 			Intermediate: intermediate,
 			AutoSelfSign: autoSelfSign,
 		}
+
+		if nameConf.KEMKey != "" {
+			kemKeyPair, err := keys.ReadKEMKeyFromPEMFile(nameConf.KEMKey)
+			if err != nil {
+				return nil, err
+			}
+			name.KEMKey = kemKeyPair
+		}
+
 		c.Names = append(c.Names, name)
 	}
 
 	c.HiddenModeVHostNames = parsed.HiddenModeVHostNames
 
-	c.HandshakeTimeout = time.Second
+	// Default handshake timeout is 15 seconds
+	c.HandshakeTimeout = 15 * time.Second
 	if parsed.HandshakeTimeout != 0 {
 		c.HandshakeTimeout = parsed.HandshakeTimeout
 	}
 
-	c.DataTimeout = time.Second
+	// Default DataTimeout is 0, which means no timeout once a session is started.
 	if parsed.DataTimeout != 0 {
 		c.DataTimeout = parsed.DataTimeout
 	}
