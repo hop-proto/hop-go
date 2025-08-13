@@ -5,13 +5,15 @@ import (
 	"encoding/binary"
 	"io"
 
+	"github.com/sirupsen/logrus"
+
 	"hop.computer/hop/tubes"
 )
 
 const (
 	headerLen         = 4
 	usernameLenOffset = 0
-	usernameOffset    = 4
+	usernameOffset    = 2
 )
 
 type userAuthInitMsg struct {
@@ -40,7 +42,11 @@ func (msg *userAuthInitMsg) toBytes() []byte {
 
 // RequestAuthorization used by client to send username and get server confirmation or denial
 func RequestAuthorization(ch *tubes.Reliable, username string) bool {
-	ch.Write(newUserAuthInitMsg(username).toBytes())
+	mess := newUserAuthInitMsg(username).toBytes()
+	if len(mess) == 0 {
+		logrus.Errorf("C: client username empty userauth")
+	}
+	ch.Write(mess)
 	//add timeout
 	b := make([]byte, 1)
 	io.ReadFull(ch, b)
@@ -49,10 +55,16 @@ func RequestAuthorization(ch *tubes.Reliable, username string) bool {
 
 // GetInitMsg lets the hop server read a user auth request
 func GetInitMsg(ch *tubes.Reliable) string {
-	lbuf := make([]byte, 4)
+	lbuf := make([]byte, 2)
 	io.ReadFull(ch, lbuf)
 	length := binary.BigEndian.Uint16(lbuf[:])
+	if length == 0 {
+		logrus.Errorf("S: get init message user auth has a length of 0")
+	}
 	buf := make([]byte, length)
 	io.ReadFull(ch, buf)
+	if string(buf) == "" {
+		logrus.Errorf("S: get init message user auth has a empty string username")
+	}
 	return string(buf)
 }

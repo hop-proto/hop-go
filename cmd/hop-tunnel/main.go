@@ -46,7 +46,7 @@ func issueCerts() (leaf, intermediate *certs.Certificate, keyPair *keys.X25519Ke
 	rootKeyPair := keys.GenerateNewSigningKeyPair()
 	rootIdentity := certs.Identity{
 		Names:     []certs.Name{},
-		PublicKey: rootKeyPair.Public,
+		PublicKey: keys.DHPublicKey(rootKeyPair.Public),
 	}
 	root, err := certs.SelfSignRoot(&rootIdentity, rootKeyPair)
 	if err != nil {

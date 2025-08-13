@@ -19,12 +19,13 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	defer s.cookieLock.Unlock()
 
 	out := new(HandshakeState)
-	copy(out.remoteEphemeral[:], clientEphemeral)
+	out.dh = new(dhState)
+	copy(out.dh.remoteEphemeral[:], clientEphemeral)
 	out.remoteAddr = clientAddr
 	out.cookieKey = s.cookieKey
 
 	// Pull the private key out of the cookie
-	n, err := out.decryptCookie(cookie)
+	n, _, err := out.decryptCookie(cookie)
 	if err != nil {
 		logrus.Errorf("unable to decrypt cookie: %s", err)
 		return nil, err
@@ -43,13 +44,13 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 	out.duplex.Squeeze(out.macBuf[:])
 	logrus.Debugf("server: regen ch mac: %x", out.macBuf[:])
 	out.duplex.Absorb([]byte{byte(MessageTypeServerHello), 0, 0, 0})
-	out.duplex.Absorb(out.ephemeral.Public[:])
-	out.ee, err = out.ephemeral.DH(out.remoteEphemeral[:])
-	logrus.Debugf("replay server ee: %x", out.ee)
+	out.duplex.Absorb(out.dh.ephemeral.Public[:])
+	dhEe, err := out.dh.ephemeral.DH(out.dh.remoteEphemeral[:])
+	logrus.Debugf("replay server ee: %x", dhEe)
 	if err != nil {
 		return nil, err
 	}
-	out.duplex.Absorb(out.ee)
+	out.duplex.Absorb(dhEe)
 	out.duplex.Absorb(cookie)
 	out.duplex.Squeeze(out.macBuf[:])
 	logrus.Debugf("server: regen sh mac: %x", out.macBuf[:])
@@ -59,7 +60,7 @@ func (s *Server) ReplayDuplexFromCookie(cookie, clientEphemeral []byte, clientAd
 
 // CookieAD generates byte array that can be used as the associated data for the
 // AEAD encrypted data in the cookie.
-func CookieAD(ephemeral *[DHLen]byte, clientAddr *net.UDPAddr) []byte {
+func CookieAD(ephemeral []byte, clientAddr *net.UDPAddr) []byte {
 	// TODO(dadrian): Remove the memory allocation
 	h := sha3.New256()
 	h.Write(ephemeral[:])

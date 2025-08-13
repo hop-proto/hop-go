@@ -102,8 +102,8 @@ func TestWriteTo(t *testing.T) {
 	assert.Equal(t, c.IssuedAt, d.IssuedAt)
 	assert.Equal(t, c.ExpiresAt, d.ExpiresAt)
 	assert.DeepEqual(t, c.IDChunk, d.IDChunk)
-	assert.Equal(t, c.PublicKey, d.PublicKey)
-	assert.Equal(t, c.PublicKey, testKeyPair.public)
+	assert.DeepEqual(t, c.PublicKey, d.PublicKey)
+	assert.Equal(t, c.PublicKey, keys.DHPublicKey(testKeyPair.public))
 	assert.Equal(t, c.Parent, d.Parent)
 	assert.Equal(t, c.Signature, d.Signature)
 	// TODO(dadrian): Fingerprint handling

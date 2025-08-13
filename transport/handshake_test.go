@@ -111,7 +111,7 @@ func TestClientServerHSWithAgent(t *testing.T) {
 
 	keydescr, err := ac.Get(context.Background(), keypath)
 	assert.NilError(t, err)
-	var public keys.PublicKey
+	var public keys.DHPublicKey
 	assert.Check(t, len(keydescr.Public[:]) == 32)
 	copy(public[:], keydescr.Public[0:32])
 
@@ -154,8 +154,9 @@ func TestClientServerHSWithAgent(t *testing.T) {
 func TestBufferSizes(t *testing.T) {
 	short := make([]byte, HeaderLen+4)
 	hs := new(HandshakeState)
+	hs.dh = new(dhState)
 	hs.duplex.InitializeEmpty()
-	hs.ephemeral.Generate()
+	hs.dh.ephemeral.Generate()
 	n, err := writeClientHello(hs, short)
 	assert.Check(t, cmp.Equal(ErrBufOverflow, err))
 	assert.Check(t, cmp.Equal(0, n))
@@ -163,29 +164,32 @@ func TestBufferSizes(t *testing.T) {
 
 func TestCookie(t *testing.T) {
 	var cookieKey [KeyLen]byte
+	sharedSecret := make([]byte, PQSharedSecretLen)
 	_, err := rand.Read(cookieKey[:])
 	assert.NilError(t, err)
 	hs := HandshakeState{}
+	hs.kem = new(kemState)
 	hs.duplex.InitializeEmpty()
 	hs.duplex.Absorb([]byte("some data that is longish"))
-	hs.ephemeral.Generate()
-	_, err = rand.Read(hs.remoteEphemeral[:])
+	kp, err := keys.GenerateKEMKeyPair(rand.Reader)
 	assert.NilError(t, err)
+	hs.kem.remoteEphemeral = kp.Public
 
-	oldPrivate := hs.ephemeral.Private
+	_, err = rand.Read(sharedSecret[:])
+	assert.NilError(t, err)
 
 	hs.remoteAddr = &net.UDPAddr{
 		IP:   net.ParseIP("192.168.1.1"),
 		Port: 8675,
 	}
 	hs.cookieKey = cookieKey
-	cookie := make([]byte, 2*CookieLen)
-	n, err := hs.writeCookie(cookie)
-	assert.Check(t, cmp.Equal(CookieLen, n))
+	cookie := make([]byte, 2*PQCookieLen)
+	n, err := hs.writeCookie(cookie, sharedSecret[:])
+	assert.Check(t, cmp.Equal(PQCookieLen, n))
 	assert.NilError(t, err)
 
-	bytesRead, err := hs.decryptCookie(cookie)
-	assert.Check(t, cmp.Equal(CookieLen, bytesRead))
+	bytesRead, k, err := hs.decryptCookie(cookie)
+	assert.Check(t, cmp.Equal(PQCookieLen, bytesRead))
 	assert.NilError(t, err)
-	assert.Check(t, cmp.Equal(oldPrivate, hs.ephemeral.Private))
+	assert.Check(t, cmp.DeepEqual(sharedSecret, *k))
 }

@@ -11,4 +11,4 @@ AutoSelfSign = false
 Address = "127.0.0.1" # TODO(drebelsky) Address
 Hostname = "example.localhost"
 Port = 1234
-ServerKey = "/path/to/serverKey.pub"
+ServerKEMKey = "/path/to/serverKEMKey.pub"

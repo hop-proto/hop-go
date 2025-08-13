@@ -68,7 +68,7 @@ func VerifyParent(child *Certificate, parent *Certificate) error {
 
 	tbsLen := child.raw.Len() - 64
 	tbs := child.raw.Bytes()[:tbsLen]
-	ok := keys.VerifySignature((*keys.SigningPublicKey)(&parent.PublicKey), tbs, &child.Signature)
+	ok := keys.VerifySignature((*keys.SigningPublicKey)(parent.PublicKey[:]), tbs, &child.Signature)
 	if !ok {
 		return errors.New("invalid signature")
 	}

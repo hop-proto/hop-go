@@ -100,7 +100,7 @@ func selfSign(self *Identity, certificateType CertificateType, keyPair *keys.Sig
 		IDChunk: IDChunk{
 			Blocks: self.Names,
 		},
-		PublicKey:   self.PublicKey,
+		PublicKey:   keys.DHPublicKey(self.PublicKey),
 		Fingerprint: zero,
 	}
 	buf := bytes.Buffer{}

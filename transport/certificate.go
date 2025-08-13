@@ -11,13 +11,14 @@ type Certificate struct {
 	RawLeaf         []byte
 	RawIntermediate []byte
 
-	Exchanger keys.Exchangable
-	Leaf      *certs.Certificate // TODO(dadrian): Do we eve need this field?
+	Exchanger  keys.Exchangable
+	KEMKeyPair *keys.KEMKeyPair
+	Leaf       *certs.Certificate // TODO(dadrian): Do we eve need this field?
 
-	HostName string
+	HostNames []string
 }
 
-func MakeCert(keyPair *keys.X25519KeyPair, leaf, intermdiate *certs.Certificate) (*Certificate, error) {
+func MakeCert(keyPair *keys.X25519KeyPair, leaf, intermdiate *certs.Certificate, kemKeyPair *keys.KEMKeyPair) (*Certificate, error) {
 	leafBytes, err := leaf.Marshal()
 	if err != nil {
 		return nil, err
@@ -31,7 +32,7 @@ func MakeCert(keyPair *keys.X25519KeyPair, leaf, intermdiate *certs.Certificate)
 		RawLeaf:         leafBytes,
 		RawIntermediate: intermediateBytes,
 		Exchanger:       keyPair,
+		KEMKeyPair:      kemKeyPair,
 		Leaf:            leaf,
-		HostName:        "",
 	}, nil
 }

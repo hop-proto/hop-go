@@ -52,8 +52,8 @@ type ClientConfig struct {
 	HSDeadline         time.Time
 	KeepAlive          time.Duration
 
-	// ServerKey indicates the key used by the client to complete the hidden mode handshake
-	ServerKey *keys.PublicKey
+	// ServerKEMKey is the ML-KEM public static key used in the hidden mode handshake
+	ServerKEMKey *keys.KEMPublicKey
 }
 
 func (c *ClientConfig) maxBufferedPackets() int {
@@ -98,6 +98,7 @@ type ServerConfig struct {
 	HandshakeTimeout time.Duration
 
 	KeyPair      *keys.X25519KeyPair
+	KEMKeyPair   *keys.KEMKeyPair
 	Certificate  *certs.Certificate
 	Intermediate *certs.Certificate
 
@@ -105,6 +106,8 @@ type ServerConfig struct {
 
 	GetCertificate func(ClientHandshakeInfo) (*Certificate, error)
 	GetCertList    func() ([]*Certificate, error)
+
+	HiddenModeVHostNames []string
 }
 
 func (c *ServerConfig) maxPendingConnections() int {

@@ -14,6 +14,7 @@ import (
 
 	"hop.computer/hop/certs"
 	"hop.computer/hop/common"
+	"hop.computer/hop/keys"
 )
 
 type serverState uint32
@@ -157,14 +158,14 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 	case MessageTypeClientHello:
 		s.cookieLock.Lock()
 		defer s.cookieLock.Unlock()
-		scratchHS, err := s.handleClientHello(rawRead[:msgLen])
+		scratchHS, err := s.handlePQClientHello(rawRead[:msgLen])
 		if err != nil {
 			return err
 		}
-		logrus.Debugf("server: client ephemeral: %x", scratchHS.remoteEphemeral)
+		logrus.Debugf("server: client ephemeral: %x", scratchHS.dh.remoteEphemeral)
 		scratchHS.cookieKey = s.cookieKey
 		scratchHS.remoteAddr = addr
-		n, err := writeServerHello(scratchHS, handshakeWriteBuf)
+		n, err := writePQServerHello(scratchHS, handshakeWriteBuf)
 		if err != nil {
 			return err
 		}
@@ -174,7 +175,7 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 		}
 	case MessageTypeClientAck:
 		logrus.Debug("server: about to handle client ack")
-		n, hs, err := s.handleClientAck(rawRead[:msgLen], addr)
+		n, hs, err := s.readPQClientAck(rawRead[:msgLen], addr)
 		if err != nil {
 			logrus.Debugf("server: unable to handle client ack: %s", err)
 			return err
@@ -185,7 +186,7 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 		}
 		hs.certVerify = s.config.ClientVerify
 		s.setHandshakeState(addr, hs)
-		n, err = s.writeServerAuth(handshakeWriteBuf, hs)
+		n, err = s.writePQServerAuth(handshakeWriteBuf, hs)
 		if err != nil {
 			return err
 		}
@@ -199,7 +200,7 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 			logrus.Tracef("server: raw read: %x", rawRead[:msgLen])
 		}
 
-		_, hs, err := s.handleClientAuth(rawRead[:msgLen], addr)
+		_, hs, err := s.readPQClientAuth(rawRead[:msgLen], addr)
 		if err != nil {
 			return err
 		}
@@ -223,7 +224,8 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 
 	case MessageTypeClientRequestHidden:
 		logrus.Debug("server: receiving a hidden client request to handle")
-		n, hs, err := s.handleClientRequestHidden(rawRead[:msgLen])
+
+		n, hs, err := s.handlePQClientRequestHidden(rawRead[:msgLen])
 		if err != nil {
 			logrus.Debugf("server: unable to handle client hidden request: %s", err)
 			return err
@@ -234,7 +236,7 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 		}
 
 		s.setHandshakeState(addr, hs)
-		n, err = s.writeServerResponseHidden(hs, handshakeWriteBuf)
+		n, err = s.writePQServerResponseHidden(hs, handshakeWriteBuf)
 		logrus.Debugf("server: sh %x", handshakeWriteBuf[:n])
 		if err := s.writePacket(handshakeWriteBuf[:n], addr); err != nil {
 			return err
@@ -257,6 +259,7 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 	return nil
 }
 
+// nolint
 func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeState, error) {
 	var buf [SNILen]byte
 	length := HeaderLen + DHLen + CookieLen + SNILen + MacLen
@@ -308,6 +311,7 @@ func (s *Server) handleClientAck(b []byte, addr *net.UDPAddr) (int, *HandshakeSt
 	return length, hs, err
 }
 
+// nolint
 func (s *Server) writeServerAuth(b []byte, hs *HandshakeState) (int, error) {
 	c, err := s.config.GetCertificate(ClientHandshakeInfo{
 		ServerName: hs.sni,
@@ -350,13 +354,13 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState) (int, error) {
 	logrus.Debugf("server: sa tag %x", x[:MacLen])
 	x = x[MacLen:]
 	pos += MacLen
-	hs.es, err = c.Exchanger.Agree(hs.remoteEphemeral[:])
+	dhEs, err := c.Exchanger.Agree(hs.dh.remoteEphemeral[:])
 	if err != nil {
 		logrus.Debug("could not calculate DH(es)")
 		return pos, err
 	}
-	logrus.Debugf("server es: %x", hs.es)
-	hs.duplex.Absorb(hs.es)
+	logrus.Debugf("server es: %x", dhEs)
+	hs.duplex.Absorb(dhEs)
 	hs.duplex.Squeeze(x[:MacLen])
 	logrus.Debugf("server serverauth mac: %x", x[:MacLen])
 	// x = x[MacLen:]
@@ -364,6 +368,7 @@ func (s *Server) writeServerAuth(b []byte, hs *HandshakeState) (int, error) {
 	return pos, nil
 }
 
+// nolint
 func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeState, error) {
 	x := b
 	pos := 0
@@ -423,13 +428,13 @@ func (s *Server) handleClientAuth(b []byte, addr *net.UDPAddr) (int, *HandshakeS
 	}
 	hs.parsedLeaf = &leaf
 
-	hs.se, err = hs.ephemeral.DH(leaf.PublicKey[:])
+	dhSe, err := hs.dh.ephemeral.DH(leaf.PublicKey[:])
 	if err != nil {
 		logrus.Debugf("server: unable to calculated se: %s", err)
 		return pos, nil, err
 	}
-	logrus.Debugf("server: se %x", hs.se)
-	hs.duplex.Absorb(hs.se)
+	logrus.Debugf("server: se %x", dhSe)
+	hs.duplex.Absorb(dhSe)
 	hs.duplex.Squeeze(hs.macBuf[:]) // mac
 	clientMac := x[:MacLen]
 	if !bytes.Equal(hs.macBuf[:], clientMac) {
@@ -545,10 +550,13 @@ func (s *Server) Serve() error {
 	return nil
 }
 
+// nolint
 func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
 	scratchHS := &HandshakeState{}
 	scratchHS.duplex.InitializeEmpty()
 	scratchHS.duplex.Absorb([]byte(ProtocolName))
+	scratchHS.dh = new(dhState)
+
 	n, err := readClientHello(scratchHS, b)
 	if err != nil {
 		return nil, err
@@ -556,7 +564,34 @@ func (s *Server) handleClientHello(b []byte) (*HandshakeState, error) {
 	if n != len(b) {
 		return nil, ErrInvalidMessage
 	}
-	scratchHS.ephemeral.Generate()
+	scratchHS.dh.ephemeral.Generate()
+	return scratchHS, nil
+}
+
+func (s *Server) handlePQClientHello(b []byte) (*HandshakeState, error) {
+	scratchHS := &HandshakeState{}
+	scratchHS.duplex.InitializeEmpty()
+	scratchHS.duplex.Absorb([]byte(PostQuantumProtocolName))
+	scratchHS.dh = new(dhState)
+
+	scratchHS.kem = new(kemState)
+
+	n, err := readPQClientHello(scratchHS, b)
+	if err != nil {
+		return nil, err
+	}
+	if n != len(b) {
+		return nil, ErrInvalidMessage
+	}
+
+	ephemeral, err := keys.GenerateKEMKeyPair(rand.Reader)
+
+	if err != nil {
+		return nil, err
+	}
+
+	scratchHS.kem.ephemeral = *ephemeral
+
 	return scratchHS, nil
 }
 
@@ -602,15 +637,32 @@ func (s *Server) finishHandshake(hs *HandshakeState, isHidden bool) error {
 	return nil
 }
 
+// nolint
 func (s *Server) handleClientRequestHidden(b []byte) (int, *HandshakeState, error) {
 	hs := &HandshakeState{}
-	hs.duplex.InitializeEmpty()
-	hs.ephemeral.Generate()
-
-	hs.duplex.Absorb([]byte(HiddenProtocolName))
-	hs.RekeyFromSqueeze(HiddenProtocolName)
+	hs.dh = new(dhState)
+	hs.dh.ephemeral.Generate()
 
 	n, err := s.readClientRequestHidden(hs, b)
+
+	if err != nil {
+		return n, nil, err
+	}
+	if n != len(b) {
+		return n, nil, ErrInvalidMessage
+	}
+	return n, hs, nil
+}
+
+func (s *Server) handlePQClientRequestHidden(b []byte) (int, *HandshakeState, error) {
+	hs := &HandshakeState{}
+	hs.dh = new(dhState)
+	hs.dh.ephemeral.Generate()
+
+	// init kem
+	hs.kem = new(kemState)
+
+	n, err := s.readPQClientRequestHidden(hs, b)
 
 	if err != nil {
 		return n, nil, err
@@ -736,8 +788,8 @@ func (s *Server) init() error {
 	s.m.Lock()
 	defer s.m.Unlock()
 
-	if s.config.KeyPair == nil && s.config.GetCertificate == nil {
-		return errors.New("config.KeyPair or config.GetCertificate must be set")
+	if s.config.KeyPair == nil && s.config.KEMKeyPair == nil && s.config.GetCertificate == nil {
+		return errors.New("config.KeyPair, or s.config.KEMKeyPair, or config.GetCertificate must be set")
 	}
 	if s.config.Certificate == nil && s.config.GetCertificate == nil {
 		return errors.New("Certificate must be set when GetCertificate is Nil")
@@ -753,11 +805,21 @@ func (s *Server) init() error {
 				return err
 			}
 		}
+
+		var nameList []string
+
+		for _, b := range s.config.Certificate.IDChunk.Blocks {
+			nameList = append(nameList, b.String())
+		}
+
 		c := &Certificate{
 			RawLeaf:         cert.Bytes(),
 			RawIntermediate: intermediate.Bytes(),
 			Exchanger:       s.config.KeyPair,
+			KEMKeyPair:      s.config.KEMKeyPair,
+			HostNames:       nameList,
 		}
+
 		s.config.GetCertificate = func(ClientHandshakeInfo) (*Certificate, error) {
 			return c, nil
 		}

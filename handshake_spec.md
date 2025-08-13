@@ -44,7 +44,7 @@ The duplex object can be used to implement PRFs, hash functions, eXentable outpu
 
 We will use the [Cyclist](https://eprint.iacr.org/2018/767.pdf) implementation of a duplex object instantiated with the **keccak** permutation.
 
-The following primitive is not necessary to understand deeply.  For completion, we will include it because it provide us a a robust CTR mode AEAD over data of arbitrary size.
+The following primitive is not necessary to understand deeply.  For completion, we will include it because it provides us a robust CTR mode AEAD over data of arbitrary size.
 
 A [**deck function**](https://archive.fosdem.org/2020/schedule/event/security_incrementality_and_deck_functions/attachments/slides/3725/export/events/attachments/security_incrementality_and_deck_functions/slides/3725/InDF_FOSDEM2020.pdf) $F_K: \mathbb{(Z_2^*)^*\rightarrow (Z_2^n)^*}$ is a doubly extendable cryptographic keyed function.
 $$
@@ -104,6 +104,14 @@ $\rightarrow s, se$
 
 > After each DH operation, everything is encrypted with an AEAD cipher keyed with keys derived from the chain of DH output values. For example, in the **IK** handshake pattern, $s$ is encrypted as $\text{AEAD}(\text{KDF}(\text{DH}(e,s))), s)$, while the encryption of the server ephemeral key is under a key derived from $es$ and $ss$.
 
+### Post Quantum Noise
+
+The Noise Framework originally uses Diffie-Hellman key-exchanges as the only asymmetric primitive. However, to ensure confidentiality over time, Key Encapsulation Mechanisms (KEM) would be a strong candidate to replace DH shared secret. Hop is using shared secret to encrypt its handshake and deriving the final keys, with the Cyclist duplex object. While PQNoise would also ensure authenticity, we customized the pattern for only meet the confidentiality and privacy challenges as known as "harvest now, decrypt later". Nonetheless, we kept Diffie-Hellman key-exchanges to proof the parties identity and authenticate. This hybride version, keeps lightweight certificates and handshake messages. More details about the handshake messages are provided in the handshake description.
+
+> [PQNoise](https://eprint.iacr.org/2022/539) (CCS '22)
+
+
+
 ### Noise + Duplex Objects
 
 ---
@@ -116,7 +124,474 @@ A duplex object allows us to reduce the state machine to a single chain and auth
 
 Our protocol will incorporate the [Cyclist](https://eprint.iacr.org/2018/767.pdf) duplex object with Noise.
 
-## Handshake Description
+
+
+
+#### Transport Message
+
+---
+
+|  type $:=$ 0x6 (1 byte)  | reserved $:= 0^3$ (3 bytes) |
+| :----------------------: | :-------------------------: |
+|   SessionID (4 bytes)    |      Counter (8 bytes)      |
+| Encrypted Data (* bytes) |       Mac (16 bytes)        |
+
+- Logic same as discoverable flow, but continuing from duplex above
+
+## Local Trust Splitting
+
+The noise protocol authenticates the client using a static DH key pair. However, we would like to locally split trust across multiple feeds. For example, we may want authentication to require both a yubikey and a key pair stored on the client device. Yubikey keys have a [restricted API](https://support.yubico.com/support/solutions/articles/15000027139-yubikey-5-2-3-enhancements-to-openpgp-3-4-support) of operations that provide both signing and DH oracles. Therefore, our local trust splitting can only depend on this restricted API; in our trust splitting protocol, we will model local key pairs as DH oracles that support the following operation:
+
+- For key pair $(\alpha, \alpha G)$, where $G$ is the generator of a prime order group,  $\mathcal{O}_{\alpha}(X)=\alpha X$.
+
+We require that loss of a single DH oracle prevents us from calculating a shared secret with a remote party.
+
+> Note: the use of ephemeral keys in the key agreement preserves forward secrecy.
+
+To split trust, we simply just create a DH oracle $\mathcal{O}_\beta$, where $\beta = \alpha_1\alpha_2...\alpha_n$ for private keys $\alpha_1, ..., \alpha_n$. To do this, we simply compose the DH oracles as follows:
+$$
+\mathcal{O}_\beta (X) = \mathcal{O}_{\alpha_1}\mathcal{O}_{\alpha_2}...\mathcal{O}_{\alpha_n}(X)
+$$
+Thus, to a remote party, the client appears to have local key pair $\beta, \beta G$.
+
+
+
+## Post Quantum Handshake Description
+
+### Discoverable Server Flow
+
+---
+
+```sequence
+Client->Server: Client Hello [0x01]
+Server->Client: Server Hello [0x02]
+Client->Server: Client Ack [0x03]
+Server->Client: Server Auth [0x04]
+Client->Server: Client Auth [0x05]
+Client->Server: Transport Data [0x10]
+Server->Client: Transport Data [0x10]
+```
+
+#### Hop Noise PQ XX Pattern
+
+We will denote e/skem for ML-KEM 512 keys, Encaps and Decaps are the function called with the keys, e/s are ephemeral and static keys used for the DH permutations.
+
+```sequence
+-> ekem
+<- Encaps(ekem), cookie
+-> e, ekem, cookie , Encrypt(SNI)
+<- sessID, e, Encrypt(certs (s))  // compute DH(es)
+-> sessID, Encrypt(certs (s))     // compute DH(se)
+```
+
+
+#### Client Hello Message
+
+---
+
+|             type $:=$ 0x01 (1 byte)             | Protocol Version (1 byte) | reserved $:= 0^2$ (2 bytes) |
+|:-----------------------------------------------:| :-----------------------: | --------------------------- |
+| Client ML-KEM Ephemeral $:= ekem_c$ (800 bytes) |      mac (16 bytes)       |                             |
+
+##### Client Hello Construction
+
+---
+
+```python
+protocolName = “hop_pqNN_XX_cyclist_keccak_p1600_12” # 1-1 protocol version
+duplex = Cyclist()
+duplex.absorb(protocolName)
+
+duplex.absorb([type + version + reserved])
+duplex.absorb(ekem_c)
+mac = duplex.squeeze()
+```
+
+##### Server Logic
+
+---
+
+```python
+duplex = Cyclist()
+duplex.absorb(protocolName)
+duplex.absorb([type + version +reserved])
+duplex.absorb(ekem_c)
+mac = duplex.squeeze()
+```
+
+- Calculated mac ?= client mac
+  - If so, send Server Hello
+  - Else: do not respond
+
+#### Server Hello Message
+
+---
+
+|                                     type $:=$ 0x02 (1 byte)                                     |                 reserved $:= 0^3$ (3 bytes)                  |
+|:-----------------------------------------------------------------------------------------------:|:------------------------------------------------------------:|
+|                           ML-KEM 512 Ephemeral Ciphertext (768 bytes)                           |                                                              |
+|    :---------------------------------------------------------------------------------------:    | :----------------------------------------------------------: |
+| cookie = AEAD($K_r$, $ML-KEM shared secret$, H($ekem_c$, clientIP, clientPort)) (32 + 32 bytes) |                        mac (16 bytes)                        |
+
+##### Server Hello Construction
+
+---
+
+- $K_r$ is a key that is rotated every N minutes or M connections
+
+```python
+# Continuing from duplex prior
+duplex.absorb(type + reserved)
+ct, k = kem.Encaps(ekem_c)
+duplex.absorb(k)
+
+
+# AEAD Construction
+H = SHA3.256
+aead = SANE_init(K_r)
+cookie = aead.seal(plaintext=k, ad=H(ekem_c, clientIP, clientPort)) // k -> ML-KEM shared secret
+duplex.absorb(cookie)
+mac = duplex.squeeze()
+```
+
+##### Client Logic
+
+---
+
+```python
+# Continuing from duplex prior
+duplex.absorb([type + reserved])
+k = ekem_c.Decaps(ct)
+duplex.absorb(k)
+duplex.absorb(cookie)
+mac = duplex.squeeze()
+```
+
+- Is the mac the same?
+
+#### Client Ack
+
+---
+
+| type $:=$ 0x03 (1 byte) | reserved $:= 0^3$ (3 bytes) |
+|:-----------------------:|:---------------------------:|
+|    $e_c$ (32 bytes)     |     ekem_c (800 bytes)      |
+|    cookie (64 bytes)    |                             |
+|     SNI (256 bytes)     |       mac (16 bytes)        |
+
+##### Client Construction
+
+---
+
+- SNI is an IDBlock from the certificate spec
+  - Server ID is the expected ID of the server
+
+```python
+# Continuing from duplex prior
+duplex.absorb([type + reserved])
+duplex.absorb(e_c)
+duplex.absorb(ekem_c)
+duplex.absorb(cookie)
+sni = padTo(serverID, 256) # pad serverID to 256 bytes
+duplex.enc(sni)
+mac = duplex.squeeze()
+```
+
+##### Server Logic
+
+---
+
+```python
+# Use cookie AEAD construction
+k = aead_open(ciphertext=cookie, ad=H(ekem_c, clientIP, clientPort))
+# ... Resimulate duplex up until this point with k the previously shared secret...
+duplex.absorb([type + reserved])
+duplex.absorb(e_c)
+duplex.absorb(ekem_c)
+duplex.absorb(cookie)
+sni = duplex.decrypt(encrypted_sni)
+name = unPad(sni)
+duplex.squeeze()
+```
+
+- Use SNI to located certificate to serve, verify all macs
+- Limit max number of handshakes with a given IP
+- Only read the SNI if the Mac matches
+
+#### Server Auth
+
+---
+
+|        type $:=$ 0x04 (1 byte)         |     Reserved := 0 (1 byte)      | Certs Len (2 bytes)            |
+|:--------------------------------------:|:-------------------------------:|--------------------------------|
+|          SessionID (4 bytes)           |         e_s (32 bytes)          | Leaf Certificate (2 + n bytes) |
+| Intermediate Certificate (2 + n bytes) |          tag(16 bytes)          | mac (16 bytes)                 |
+|                                        |                                 |                                |
+
+- Certs Len is the length of the encrypted section
+- Each certificate is encoded as a vector with a 2-byte length prepended
+  - Total `certsLen := 4 + len(leaf) + len(intermediate)`
+- SessionID is a random unique 4 byte opaque string, generated by the server
+
+##### Server Auth Construction
+
+---
+
+```python
+# Continuing from duplex prior
+duplex.absorb(type + reserved + certsLen)
+duplex.absorb(sessionID)
+duplex.absorb(e_s)
+duplex.absorb(DH(ee))
+certificates := [len(leaf), leaf, len(intermediate), intermediate]
+encCerts = duplex.encrypt(certificates)
+tag = duplex.squeeze()
+duplex.absorb(DH(es))
+mac = duplex.squeeze()
+```
+
+Client Logic
+
+---
+
+```python
+# Continuing from duplex prior
+duplex.absorb(type + reserved + certsLen)
+duplex.absorb(SessionID)
+duplex.absorb(e_s)
+duplex.absorb(DH(ee))
+certificates = duplex.decrypt(encCerts)
+tag = duplex.squeeze()
+# verify tag
+# verify certs, extract server s
+duplex.absorb(DH(es))
+mac = duplex.squeeze()
+```
+
+- Verify the tag before parsing the certs
+- Quit the handshake if the certs are invalid
+- Is the mac the same
+
+#### Client Auth
+
+| type $:=$ 0x05 (1 byte) |     Reserved := 0 (1 byte)     | Certs Len (2 bytes)                    |
+|:-----------------------:|:------------------------------:|----------------------------------------|
+|   SessionID (4 bytes)   | Leaf Certificate (2 + n bytes) | Intermediate Certificate (2 + n bytes) |
+|     tag (16 bytes)      |                                | mac (16 bytes)                         |
+|                         |                                |                                        |
+
+
+##### Client Auth Construction
+
+
+```python
+# Continuing from duplex prior
+duplex.absorb(type + reserved + certsLen)
+duplex.absorb(sessionID)
+certificates := [len(leaf), leaf, len(intermediate), intermediate]
+encCerts = duplex.encrypt(certificates)
+tag = duplex.squeeze()
+duplex.absorb(DH(se))
+mac = duplex.squeeze()
+```
+
+
+##### Server Logic
+
+---
+
+```python
+# Continuing from duplex prior
+duplex.absorb(type +  reserved + certsLen)
+duplex.absorb(SessionID)
+certificates = duplex.decrypt(encCerts)
+tag = duplex.squeeze()
+# verify tag
+# verify certs, extract server s
+duplex.absorb(DH(se))
+mac = duplex.squeeze()
+```
+- Verify the tag before parsing the certs
+- Quit the handshake if the certs are invalid
+- Derives the keys and use regular transport messages
+
+
+#### Transport Message
+
+---
+
+##### Client & Server Key Derivation
+
+---
+
+```python
+duplex.ratchet()
+duplex.absorb("client_to_server_key")
+client_to_server_key = duplex.squeeze_key() # squeeze 16
+duplex.ratchet()
+duplex.absorb("server_to_client_key")
+server_to_client_key = duplex.squeeze_key() # squeeze 16
+# Every 2^64 payloads these keys will rotate
+# TODO(dadrian): Define how
+```
+
+##### Message
+
+|  type $:=$ 0x6 (1 byte)  | reserved $:= 0^3$ (3 bytes) |
+| :----------------------: | :-------------------------: |
+|   SessionID (4 bytes)    |      Counter (8 bytes)      |
+| Encrypted Data (* bytes) |                             |
+
+Counter is a literal counter. Is not a nonce.
+
+Encrypted data will contain a nonce at the front, if necessary, and a Mac. The AEAD implementation should verify the mac as part of the open/seal.
+
+##### Transport Construction
+
+---
+
+```python
+# Eventually
+# aead = SANE_init(server_to_client_key, counter)
+# Now
+aead = aes_gcm(key, nonce_size=12)
+nonce = getrandombytes(12)
+enc_data = aead(plaintext=plaintext, nonce=nonce, ad=pkt[0:headerLen + SessionIDLen + CounterLen])
+enc_data = ''.join([nonce, enc_data])
+counter +=1
+```
+
+
+### Hidden Server Flow
+
+---
+
+
+```sequence
+Client->Server: Client Auth [0x08]
+Server->Client: Server Auth [0x09]
+Client->Server: Transport Data [0x10]
+Server->Client: Transport Data [0x10]
+```
+#### Hop Noise PQ IK Pattern
+
+```sequence
+<- skem
+...
+-> ekem, Encaps(skem), Encrypt(certs (s))
+<- Encaps(ekem), Encrypt(certs (s)) // DH (ss)
+```
+
+
+### Message Structures
+
+---
+
+##### Client Request Message
+
+---
+
+|      type $:=$ 0x18 (1 byte)      |          Protocol Version (1 byte)          |       Certs Len $:= 0^2$ (2 bytes)        |
+|:---------------------------------:|:-------------------------------------------:|:-----------------------------------------:|
+|                                   |    Client  Ephemeral ML-KEM (800 bytes)     |                                           |
+|                                   |         Client sKEM CT (768 bytes)          |                                           |
+| Client Leaf Certificate (* bytes) |                                             | Client Intermediate Certificate (* bytes) |
+|                                   | Client Static Authentication Tag (16 bytes) |                                           |
+|                                   |             Timestamp (8 bytes)             |                                           |
+|                                   |               MAC (16 bytes)                |                                           |
+
+##### Client Request Construction
+
+---
+
+```python
+# server’s static key is cached from a previous discoverable mode handshake, or distributed out-of-band
+protocolID = “hop_pqIK_cyclist_keccak_C512”
+duplex = Cyclist()
+duplex.absorb(protocolID)
+duplex.absorb([type + protocol + reserved])
+duplex.absorb(ekem_c)
+ct, k = kem.Encaps(skem_s) #skem
+duplex.absorb(k)
+ClientEncCerts = duplex.encrypt(certificates)
+tag = duplex.squeeze()
+timestamp = duplex.encrypt(time.Now().Unix())
+mac = duplex.squeeze()
+```
+
+##### Server Logic
+
+---
+
+```python
+protocolID = “hop_pqIK_cyclist_keccak_C512”
+for vmCert in certList:
+  duplex = Cyclist()
+  duplex.absorb(protocolID)
+  duplex.absorb([type + protocol + reserved])
+  duplex.absorb(ekem_c)
+  k = vmCert.skem_s.Decaps(ct) # skem
+  duplex.absorb(k)
+  certificates = duplex.decrypt(ClientEncCerts)
+  tag = duplex.squeeze()
+  # verify tag if equal break
+
+# verify certs, extract client static
+timestamp = duplex.decrypt(time.Now().Unix())
+mac = duplex.squeeze()
+```
+
+#### Server Auth Message
+
+---
+
+
+|      type $:=$ 0x8 (1 byte)       |       Reserved $:= 0$ (1 byte)       |       Certs Len $:= 0^2$ (2 bytes)        |
+|:---------------------------------:|:------------------------------------:|:-----------------------------------------:|
+|                                   |         SessionID (4 bytes)          |                                           |
+|                                   |      Server eKEM CT (768 bytes)      |                                           |
+| Server Leaf Certificate (* bytes) |                                      | Server Intermediate Certificate (* bytes) |
+|                                   | Server Authentication Tag (16 bytes) |                                           |
+|                                   |            MAC (16 bytes)            |                                           |
+
+
+##### Server Auth Construction
+
+---
+
+```python
+# Continuing from duplex prior
+duplex.absorb([type + reserved + Certs Len])
+duplex.absorb(SessionID)
+ct, k = kem.Encpaps(ekem_c) #ekem
+duplex.absorb(k)
+ServerEncCerts = duplex.encrypt(certificates)
+tag = duplex.squeeze()
+duplex.absorb(DH(ss))
+mac = duplex.squeeze()
+```
+
+##### Client Logic
+
+---
+
+```python
+# Continuing from duplex prior
+duplex.absorb([type + reserved + Certs Len])
+duplex.absorb(SessionID)
+e = ekem_c.Dec(ct) # ekem
+duplex.absorb(k)
+certificates = duplex.decrypt(ServerEncCerts)
+tag = duplex.squeeze()
+# verify tag
+# verify certs, extract server static
+duplex.absorb(DH(ss))
+mac = duplex.squeeze()
+```
+
+
+
+## Handshake Description (Old version using Noise DH only)
 
 ### Discoverable Server Flow
 
@@ -128,8 +603,8 @@ Server->Client: Server Hello [0x2]
 Client->Server: Client Ack [0x3]
 Server->Client: Server Auth [0x4]
 Client->Server: Client Auth [0x5]
-Client->Server: Transport Data [0x6]
-Server->Client: Transport Data [0x6]
+Client->Server: Transport Data [0x10]
+Server->Client: Transport Data [0x10]
 ```
 
 ### Message Structures
@@ -367,50 +842,6 @@ mac = duplex.squeeze()
 - Quit the handshake if the certs are invalid
 - Is the mac the same (after DH)
 
-#### Transport Message
-
----
-
-##### Client & Server Key Derivation
-
----
-
-```python
-duplex.ratchet()
-duplex.absorb("client_to_server_key")
-client_to_server_key = duplex.squeeze_key() # squeeze 16
-duplex.ratchet()
-duplex.absorb("server_to_client_key")
-server_to_client_key = duplex.squeeze_key() # squeeze 16
-# Every 2^64 payloads these keys will rotate
-# TODO(dadrian): Define how
-```
-
-##### Message
-
-|  type $:=$ 0x6 (1 byte)  | reserved $:= 0^3$ (3 bytes) |
-| :----------------------: | :-------------------------: |
-|   SessionID (4 bytes)    |      Counter (8 bytes)      |
-| Encrypted Data (* bytes) |                             |
-
-Counter is a literal counter. Is not a nonce.
-
-Encrypted data will contain a nonce at the front, if necessary, and a Mac. The AEAD implementation should verify the mac as part of the open/seal.
-
-##### Transport Construction
-
----
-
-```python
-# Eventually
-# aead = SANE_init(server_to_client_key, counter)
-# Now
-aead = aes_gcm(key, nonce_size=12)
-nonce = getrandombytes(12)
-enc_data = aead(plaintext=plaintext, nonce=nonce, ad=pkt[0:headerLen + SessionIDLen + CounterLen])
-enc_data = ''.join([nonce, enc_data])
-counter +=1
-```
 
 ### Hidden Server Flow
 
@@ -420,15 +851,15 @@ counter +=1
 ```sequence
 Client->Server: Client Auth [0x8]
 Server->Client: Server Auth [0x9]
-Client->Server: Transport Data [0x6]
-Server->Client: Transport Data [0x6]
+Client->Server: Transport Data [0x10]
+Server->Client: Transport Data [0x10]
 ```
 
 ### Message Structures
 
 ---
 
-##### Client Auth Message
+##### Client Request Message
 
 ---
 
@@ -440,15 +871,14 @@ Server->Client: Transport Data [0x6]
 |                                   |             Timestamp (8 bytes)             |                                           |
 |                                   |               MAC (16 bytes)                |                                           |
 
-##### Client Auth Construction
+##### Client Request Construction
 
 ---
 
-TODO check the protocol ID in the code and here
 
 ```python
 # server’s static key is cached from a previous discoverable mode handshake, or distributed out-of-band
-protocolID = “noise_IK_cyclist_keccak_C512”
+protocolID = “hop_IK_cyclist_keccak_C512”
 duplex = Cyclist()
 duplex.absorb(protocolID)
 duplex.absorb([type + protocol + reserved])
@@ -466,26 +896,30 @@ mac = duplex.squeeze()
 ---
 
 ```python
-protocolID = “noise_IK_cyclist_keccak_C512”
-duplex = Cyclist()
-duplex.absorb(protocolID)
-duplex.absorb([type + protocol + reserved])
-duplex.absorb(ClientEphemeral)
-duplex.absorb(DH(es))
-certificates = duplex.decrypt(ClientEncCerts)
-tag = duplex.squeeze()
-# verify tag
+protocolID = “hop_IK_cyclist_keccak_C512”
+for vmCert in certList:
+    duplex = Cyclist()
+    duplex.absorb(protocolID)
+    duplex.absorb([type + protocol + reserved])
+    duplex.absorb(ClientEphemeral)
+    duplex.absorb(DH(es)) # with vmCert.Static
+    certificates = duplex.decrypt(ClientEncCerts)
+    tag = duplex.squeeze()
+    # verify tag if equal break
+    
 # verify certs, extract client static
 duplex.absorb(ss)
 timestamp = duplex.decrypt(time.Now().Unix())
 mac = duplex.squeeze()
 ```
 
-- Is the static a static of a valid client? (what do we consider as a valid client?)
+- Is the static a public key of a valid client and server VM?
 - Is the timestamp greater than the last timestamp seen from the last valid handshake from the client?
-- Search up certificate related to serverID for that serverID type (not implemented yet -> server will loop in the SNI to find the corresponding key)
+- Verify the tag before parsing the certs
+- Quit the handshake if the certs are invalid
+- Is the mac the same (after DH)
 
-#### Server Auth Message
+#### Server Response Message
 
 ---
 
@@ -499,7 +933,7 @@ mac = duplex.squeeze()
 |                                   |            MAC (16 bytes)            |                                           |
 
 
-##### Server Auth Construction
+##### Server Response Construction
 
 ---
 
@@ -533,31 +967,6 @@ duplex.absorb(DH(se))
 mac = duplex.squeeze()
 ```
 
-- Are the certificates valid? (TODO paul)
-
-#### Transport Message
-
----
-
-|  type $:=$ 0x6 (1 byte)  | reserved $:= 0^3$ (3 bytes) |
-| :----------------------: | :-------------------------: |
-|   SessionID (4 bytes)    |      Counter (8 bytes)      |
-| Encrypted Data (* bytes) |       Mac (16 bytes)        |
-
-- Logic same as discoverable flow, but continuing from duplex above
-
-## Local Trust Splitting
-
-The noise protocol authenticates the client using a static DH key pair. However, we would like to locally split trust across multiple feeds. For example, we may want authentication to require both a yubikey and a key pair stored on the client device. Yubikey keys have a [restricted API](https://support.yubico.com/support/solutions/articles/15000027139-yubikey-5-2-3-enhancements-to-openpgp-3-4-support) of operations that provide both signing and DH oracles. Therefore, our local trust splitting can only depend on this restricted API; in our trust splitting protocol, we will model local key pairs as DH oracles that support the following operation:
-
-- For key pair $(\alpha, \alpha G)$, where $G$ is the generator of a prime order group,  $\mathcal{O}_{\alpha}(X)=\alpha X$.
-
-We require that loss of a single DH oracle prevents us from calculating a shared secret with a remote party.
-
-> Note: the use of ephemeral keys in the key agreement preserves forward secrecy.
-
-To split trust, we simply just create a DH oracle $\mathcal{O}_\beta$, where $\beta = \alpha_1\alpha_2...\alpha_n$ for private keys $\alpha_1, ..., \alpha_n$. To do this, we simply compose the DH oracles as follows:
-$$
-\mathcal{O}_\beta (X) = \mathcal{O}_{\alpha_1}\mathcal{O}_{\alpha_2}...\mathcal{O}_{\alpha_n}(X)
-$$
-Thus, to a remote party, the client appears to have local key pair $\beta, \beta G$.
+- Verify the tag before parsing the certs
+- Quit the handshake if the certs are invalid
+- Is the mac the same (after DH)

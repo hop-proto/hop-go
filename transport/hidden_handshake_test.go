@@ -31,15 +31,15 @@ func TestClientServerCompatibilityHiddenHandshake(t *testing.T) {
 	assert.NilError(t, err)
 	go s.Serve()
 
-	serverPublicKey, err := keys.ReadDHKeyFromPubFile("testdata/leaf.pub")
+	serverPublicKey, err := keys.ReadKEMKeyFromPubFile("testdata/kem_hop.pub")
 	assert.NilError(t, err)
 
 	ckp, leaf := newClientAuth(t)
 	clientConfig := ClientConfig{
-		Verify:    *vc,
-		Exchanger: ckp,
-		Leaf:      leaf,
-		ServerKey: serverPublicKey,
+		Verify:       *vc,
+		Exchanger:    ckp,
+		Leaf:         leaf,
+		ServerKEMKey: serverPublicKey,
 	}
 	c, err := Dial("udp", s.Addr().String(), clientConfig)
 	assert.NilError(t, err)
@@ -110,7 +110,7 @@ func TestClientServerHiddenHSWithAgent(t *testing.T) {
 
 	keydescr, err := ac.Get(context.Background(), keypath)
 	assert.NilError(t, err)
-	var public keys.PublicKey
+	var public keys.DHPublicKey
 	assert.Check(t, len(keydescr.Public[:]) == 32)
 	copy(public[:], keydescr.Public[0:32])
 
@@ -130,15 +130,15 @@ func TestClientServerHiddenHSWithAgent(t *testing.T) {
 	assert.NilError(t, err)
 
 	// Hidden mode serverPublic key reading
-	serverKey, err := keys.ReadDHKeyFromPubFile("testdata/leaf.pub")
+	serverKey, err := keys.ReadKEMKeyFromPubFile("testdata/kem_hop.pub")
 	assert.NilError(t, err)
 
 	// adding the serverPublicKey to the client config enabling the hiddenHS
 	c, err := Dial("udp", pc.LocalAddr().String(), ClientConfig{
-		Verify:    *verifyConfig,
-		Exchanger: bc,
-		Leaf:      leaf,
-		ServerKey: serverKey,
+		Verify:       *verifyConfig,
+		Exchanger:    bc,
+		Leaf:         leaf,
+		ServerKEMKey: serverKey,
 	})
 	defer func() {
 		err := c.Close()
@@ -165,13 +165,14 @@ func TestClientServerHiddenHSWithAgent(t *testing.T) {
 func TestClientHelloHiddenLength(t *testing.T) {
 	buf := make([]byte, 65535)
 	hs := new(HandshakeState)
+	hs.dh = new(dhState)
 	hs.duplex.InitializeEmpty()
-	hs.ephemeral.Generate()
+	hs.dh.ephemeral.Generate()
 	hs.RekeyFromSqueeze(HiddenProtocolName)
 
 	keyPair := keys.X25519KeyPair{}
 	keyPair.Generate()
-	hs.static = &keyPair
+	hs.dh.static = &keyPair
 
 	leaf, err := certs.ReadCertificatePEMFile("testdata/leaf.pem")
 	assert.NilError(t, err)

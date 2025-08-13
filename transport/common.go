@@ -7,12 +7,15 @@ import (
 
 	"golang.org/x/crypto/curve25519"
 
+	"hop.computer/hop/keys"
 	"hop.computer/hop/kravatte"
 )
 
 // ProtocolName is the string representation of the parameters used in this version
 const ProtocolName = "hop_NN_XX_cyclist_keccak_p1600_12"
 const HiddenProtocolName = "hop_IK_cyclist_keccak_C512"
+const PostQuantumProtocolName = "hop_pqNN_XX_cyclist_keccak_p1600_12"
+const PostQuantumHiddenProtocolName = "hop_pqIK_cyclist_keccak_C512"
 
 // Version is the protocol version being used. Only one version is supported.
 const Version byte = 0x01
@@ -22,14 +25,23 @@ const (
 	HeaderLen = 4
 	MacLen    = 16
 	// TODO(dadrian): It's confusing to have MacLen and TagLen
-	TagLen       = 32
-	KeyLen       = 16
-	DHLen        = curve25519.PointSize
-	CookieLen    = DHLen + kravatte.TagSize
-	SNILen       = 256
-	SessionIDLen = 4
-	CounterLen   = 8
-	TimestampLen = 8
+	TagLen            = 32
+	KeyLen            = 16
+	DHLen             = curve25519.PointSize
+	CookieLen         = DHLen + kravatte.TagSize // TODO (paul): why in the paper we describe it as being 48bytes?
+	SNILen            = 256
+	SessionIDLen      = 4
+	CounterLen        = 8
+	TimestampLen      = 8
+	KemCtLen          = keys.MlKem512CiphertextSize // KemCtLen
+	KemKeyLen         = keys.MlKem512PublicKeySize
+	PQCookieLen       = 32 + keys.MlKem512SharedKeySize // 32 comes for the CookieAD function but should not be that small
+	PQSeedLen         = keys.MlKem512KeySeedSize
+	PQSharedSecretLen = keys.MlKem512SharedKeySize
+
+	// HiddenModeTimestampExpiration TODO (paul) 5 sec is a way too long, evaluate the time need for a connection
+	// TODO (paul) what is considered a reasonable time range for a timestamp to prevent replay attack?
+	HiddenModeTimestampExpiration = 5
 )
 
 // MaxTotalPacketSize is MaxUDPPacketSize minus bytes used by Ethernet frames and Wifi frames.
@@ -44,6 +56,8 @@ const MaxPlaintextSize = MaxTotalPacketSize - HeaderLen - SessionIDLen - Counter
 const (
 	HelloLen          = HeaderLen + DHLen + MacLen
 	AssociatedDataLen = HeaderLen + SessionIDLen + CounterLen
+
+	PQHelloLen = HeaderLen + KemKeyLen + MacLen
 )
 
 // errTransportOnly is an error that should not leave the transport layer.

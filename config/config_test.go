@@ -50,7 +50,7 @@ func TestLoadClientConfig(t *testing.T) {
 	cert := "/path/to/cert.pem"
 	hostname := "example.localhost"
 	autoSelfSign := false
-	serverKey := "/path/to/serverKey.pub"
+	ServerKEMKey := "/path/to/serverKEMKey.pub"
 	expected := &ClientConfig{
 		Global: HostConfigOptional{
 			CAFiles:     []string{"/path/to/ca.pem", "/path/to/other.pem"},
@@ -62,7 +62,7 @@ func TestLoadClientConfig(t *testing.T) {
 			AutoSelfSign: &autoSelfSign,
 			Hostname:     &hostname,
 			Port:         1234,
-			ServerKey:    &serverKey,
+			ServerKEMKey: &ServerKEMKey,
 		}},
 	}
 	assert.DeepEqual(t, c, expected)
@@ -110,8 +110,8 @@ func TestLoadServerConfig(t *testing.T) {
 		Users:                []string{"user"},
 		HiddenModeVHostNames: []string{"example.com"},
 		Names:                []NameConfig{},
-		HandshakeTimeout:     time.Second,
-		DataTimeout:          time.Second,
+		HandshakeTimeout:     15 * time.Second,
+		DataTimeout:          0 * time.Second,
 	}
 	// TODO(hosono) there is currently no good way to compare certificates as equal
 	assert.DeepEqual(t, c, expected, cmpopts.IgnoreFields(ServerConfig{}, "Certificate", "Intermediate", "CACerts"))

@@ -41,7 +41,6 @@ const (
 	Leaf         CertificateType = 1
 	Intermediate CertificateType = 2
 	Root         CertificateType = 3
-	Ephemeral    CertificateType = 4 // ?????
 )
 
 // String implements Stringer for CertificateType.
@@ -97,7 +96,7 @@ type Certificate struct {
 	IssuedAt  time.Time
 	ExpiresAt time.Time
 	IDChunk   IDChunk
-	PublicKey [KeyLen]byte
+	PublicKey keys.DHPublicKey
 	Parent    SHA3Fingerprint
 	Signature [SignatureLen]byte
 
@@ -284,11 +283,15 @@ func (c *Certificate) ReadFrom(r io.Reader) (int64, error) {
 	bytesRead += 8
 	c.ExpiresAt = time.Unix(int64(t), 0)
 
-	n, err := io.ReadFull(r, c.PublicKey[:])
+	buf := make([]byte, KeyLen)
+	n, err := io.ReadFull(r, buf)
+	c.PublicKey = keys.DHPublicKey(buf)
+
 	bytesRead += int64(n)
 	if err != nil {
 		return bytesRead, err
 	}
+
 	if n != KeyLen {
 		return bytesRead, io.EOF
 	}

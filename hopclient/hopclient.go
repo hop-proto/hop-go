@@ -142,18 +142,18 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		return c.getAuthorization(verifyConfig)
 	}
 
-	var serverKey *keys.PublicKey
+	var ServerKEMKey *keys.KEMPublicKey
 	var err error
 
-	if hc.ServerKey != "" {
+	if hc.ServerKEMKey != "" {
 		logrus.Infof("client: server Key loaded to complete Hidden Mode handshake")
 
-		serverKeyPath := combinators.StringOr(hc.ServerKey, config.DefaultKeyPath())
-		serverKey, err = loadServerPublicKey(serverKeyPath)
+		serverKeyPath := combinators.StringOr(hc.ServerKEMKey, config.DefaultKeyPath())
+		ServerKEMKey, err = loadServerPublicKEMKey(serverKeyPath)
 
 		if err != nil {
 			logrus.Errorf("client: unable to load the server public key file: %v", err)
-			serverKey = nil
+			ServerKEMKey = nil
 		}
 	}
 
@@ -184,7 +184,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 
 		logrus.Infof("Created exchanger for agent with keyID: %s ", keyPath)
 
-		var public keys.PublicKey
+		var public keys.DHPublicKey
 		copy(public[:], bc.Public[:]) // TODO(baumanl): resolve public key type awkwardness
 
 		if c.hostconfig.AutoSelfSign {
@@ -196,7 +196,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 			BoundClient:  bc,
 			VerifyConfig: verifyConfig,
 			Leaf:         leaf,
-			ServerKey:    serverKey,
+			ServerKEMKey: ServerKEMKey,
 		}
 		logrus.Info("leaf: ", leaf)
 	} else {
@@ -219,7 +219,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 			X25519KeyPair: keypair,
 			VerifyConfig:  verifyConfig,
 			Leaf:          leaf,
-			ServerKey:     serverKey,
+			ServerKEMKey:  ServerKEMKey,
 		}
 	}
 	c.authenticator = authenticator
@@ -228,10 +228,10 @@ func (c *HopClient) authenticatorSetupLocked() error {
 
 // TODO(baumanl): Put this in a different package/file
 
-func selfSignLeaf(public *keys.PublicKey, address core.URL) *certs.Certificate {
+func selfSignLeaf(public *keys.DHPublicKey, address core.URL) *certs.Certificate {
 	logrus.Infof("auto self-signing leaf for user %q", address.User)
 	leaf, err := certs.SelfSignLeaf(&certs.Identity{
-		PublicKey: *public,
+		PublicKey: [certs.KeyLen]byte(public[:]),
 		Names: []certs.Name{
 			certs.RawStringName(address.User),
 		},
@@ -314,10 +314,10 @@ func (c *HopClient) Close() error {
 func (c *HopClient) startUnderlying(address string, authenticator core.Authenticator) error {
 	// TODO(dadrian): Update this once the authenticator interface is set.
 	transportConfig := transport.ClientConfig{
-		Exchanger: authenticator,
-		Verify:    authenticator.GetVerifyConfig(),
-		Leaf:      authenticator.GetLeaf(),
-		ServerKey: authenticator.GetServerKey(),
+		Exchanger:    authenticator,
+		Verify:       authenticator.GetVerifyConfig(),
+		Leaf:         authenticator.GetLeaf(),
+		ServerKEMKey: authenticator.GetServerKEMKey(),
 	}
 	var err error
 	var dialer net.Dialer
@@ -433,14 +433,14 @@ func (c *HopClient) HandleTubes() {
 	}
 }
 
-func loadServerPublicKey(serverKeyPath string) (*keys.PublicKey, error) {
+func loadServerPublicKEMKey(serverKeyPath string) (*keys.KEMPublicKey, error) {
 
 	keyBytes, err := os.ReadFile(serverKeyPath)
 	if err != nil {
 		logrus.Errorf("client: could not read server key file: %s", err)
 		return nil, err
 	}
-	pubKey, err := keys.ParseDHPublicKey(string(keyBytes))
+	pubKey, err := keys.ParseKEMPublicKey(string(keyBytes))
 	if err != nil {
 		logrus.Errorf("client: unable to parse the server key file: %s", err)
 		return nil, err
