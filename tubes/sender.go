@@ -1,7 +1,6 @@
 package tubes
 
 import (
-	"hop.computer/hop/common"
 	"io"
 	"os"
 	"sync"
@@ -9,6 +8,8 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+
+	"hop.computer/hop/common"
 )
 
 type sender struct {

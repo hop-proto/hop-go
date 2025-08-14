@@ -745,6 +745,8 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 }
 
 func (r *Reliable) sendFrameByNumber(frameNo uint32) {
+	r.l.Lock()
+	defer r.l.Unlock()
 	if common.Debug {
 		logrus.Debugf("Searching for frame %v to priority send it", frameNo)
 	}
@@ -780,6 +782,8 @@ func (r *Reliable) sendFrameByNumber(frameNo uint32) {
 }
 
 func (r *Reliable) CanAcceptBytes() bool {
+	r.l.Lock()
+	defer r.l.Unlock()
 	senderWindowSize := r.sender.getWindowSize()
 	return len(r.sender.frames) < int(senderWindowSize)
 }
