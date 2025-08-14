@@ -404,3 +404,9 @@ func (s *sender) sendFin() error {
 
 	return nil
 }
+
+func (s *sender) getWindowSize() uint16 {
+	s.m.Lock()
+	defer s.m.Unlock()
+	return s.senderWindow.windowSize
+}

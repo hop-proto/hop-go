@@ -778,3 +778,8 @@ func (r *Reliable) sendFrameByNumber(frameNo uint32) {
 		logrus.Debugf("Frame %v not found in the frame list", frameNo)
 	}
 }
+
+func (r *Reliable) CanAcceptBytes() bool {
+	senderWindowSize := r.sender.getWindowSize()
+	return len(r.sender.frames) < int(senderWindowSize)
+}
