@@ -744,9 +744,8 @@ func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, old
 	r.pendingRTRTimers.Delete(rtrFrame.frameNo)
 }
 
+// +checklocks:r.l
 func (r *Reliable) sendFrameByNumber(frameNo uint32) {
-	r.l.Lock()
-	defer r.l.Unlock()
 	if common.Debug {
 		logrus.Debugf("Searching for frame %v to priority send it", frameNo)
 	}
