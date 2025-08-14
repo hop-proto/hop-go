@@ -7,8 +7,6 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
-	"os"
-	"strings"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -143,26 +141,25 @@ func (c *HopClient) authenticatorSetupLocked() error {
 		return c.getAuthorization(verifyConfig)
 	}
 
-	var ServerKEMKey *keys.KEMPublicKey
+	var serverKEMKey *keys.KEMPublicKey
 	var err error
 
-	if hc.ServerKEMKey != "" {
+	if hc.ServerKEMKeyPath != "" {
 		logrus.Infof("client: server Key loaded to complete Hidden Mode handshake")
 
-		// In the ACME context, the requester sends the key over a Hop session.
-		// The CA will keep the key in memory without creating a file
-		if strings.HasPrefix(hc.ServerKEMKey, keys.KEMPublicKeyPrefix) {
-			ServerKEMKey, err = keys.ParseKEMPublicKey(hc.ServerKEMKey)
-			if err != nil {
-				logrus.Errorf("client: unable to read the server public key file: %v", err)
-			}
-		} else {
-			serverKeyPath := combinators.StringOr(hc.ServerKEMKey, config.DefaultKeyPath())
-			ServerKEMKey, err = loadServerPublicKEMKey(serverKeyPath)
+		serverKeyPath := combinators.StringOr(hc.ServerKEMKeyPath, config.DefaultKeyPath())
+		serverKEMKey, err = keys.ReadKEMKeyFromPubFile(serverKeyPath)
 
-			if err != nil {
-				logrus.Errorf("client: unable to load the server public key file: %v", err)
-			}
+		if err != nil {
+			logrus.Errorf("client: unable to load the server public key file: %v", err)
+		}
+	}
+
+	// If a serverKey and a serverKeyPath are loaded in the configuration, Hop prioritize the serverKey over the serverKeyPath
+	if hc.ServerKEMKey != "" {
+		serverKEMKey, err = keys.ParseKEMPublicKey(hc.ServerKEMKey)
+		if err != nil {
+			logrus.Errorf("client: unable to read the server public key file: %v", err)
 		}
 	}
 
@@ -205,7 +202,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 			BoundClient:  bc,
 			VerifyConfig: verifyConfig,
 			Leaf:         leaf,
-			ServerKEMKey: ServerKEMKey,
+			ServerKEMKey: serverKEMKey,
 		}
 		logrus.Info("leaf: ", leaf)
 	} else {
@@ -228,7 +225,7 @@ func (c *HopClient) authenticatorSetupLocked() error {
 			X25519KeyPair: keypair,
 			VerifyConfig:  verifyConfig,
 			Leaf:          leaf,
-			ServerKEMKey:  ServerKEMKey,
+			ServerKEMKey:  serverKEMKey,
 		}
 	}
 	c.authenticator = authenticator
@@ -440,19 +437,4 @@ func (c *HopClient) HandleTubes() {
 			}
 		}
 	}
-}
-
-func loadServerPublicKEMKey(serverKeyPath string) (*keys.KEMPublicKey, error) {
-
-	keyBytes, err := os.ReadFile(serverKeyPath)
-	if err != nil {
-		logrus.Errorf("client: could not read server key file: %s", err)
-		return nil, err
-	}
-	pubKey, err := keys.ParseKEMPublicKey(string(keyBytes))
-	if err != nil {
-		logrus.Errorf("client: unable to parse the server key file: %s", err)
-		return nil, err
-	}
-	return pubKey, nil
 }
