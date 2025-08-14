@@ -231,7 +231,7 @@ func (r *Reliable) send() {
 
 			r.l.Unlock()
 
-		case <-r.sender.windowOpen: // +checklocksignore accessing channels is safe
+		case <-r.sender.senderWindow.windowOpen: // +checklocksignore accessing channels is safe
 			r.l.Lock()
 			numFrames := r.sender.framesToSend(false, 0)
 			r.log.WithField("numFrames", numFrames).Trace("window open")
@@ -626,7 +626,7 @@ func (r *Reliable) receiveRTRFrame(frame *frame) {
 		// with the current processing index
 
 		// To limit the search in a reasonable range
-		numFrames := min(windowSize, len(r.sender.frames))
+		numFrames := min(defaultwindowSize, len(r.sender.frames))
 
 		for i := 0; i < numFrames; i++ {
 			rtrFrame := &r.sender.frames[i]

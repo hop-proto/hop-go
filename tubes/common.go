@@ -41,11 +41,15 @@ const minRTT = 10 * time.Millisecond
 
 const maxRTO = 10 * time.Second
 
-// the maximum number of packets to retransmit per rto
-const maxFragTransPerRTO = 1
+// The maximum number of packets to retransmit per rto
+const maxFragTransPerRTO = 3
 
-// the number of packets in the window for reliable tubes
-const windowSize = 128
+// The number of packets in the window for reliable tubes
+const defaultwindowSize = 32 // 32 lets Hop adapt on the network type
+
+// The upper and lower bounds for an optimal use of the window without congestion
+const maxWindowSize = 1000
+const minWindowSize = 10
 
 // TODO(hosono) choose this time
 // amount of time to wait for all all tubes to close when muxer is stopping

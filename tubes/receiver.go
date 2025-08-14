@@ -45,7 +45,7 @@ func newReceiver(log *logrus.Entry) *receiver {
 		dataReady:   common.NewDeadlineChan[struct{}](1),
 		buffer:      new(bytes.Buffer),
 		fragments:   make(PriorityQueue, 0),
-		windowSize:  windowSize,
+		windowSize:  defaultwindowSize,
 		windowStart: 1,
 		log:         log.WithField("receiver", ""),
 	}
@@ -107,7 +107,7 @@ func (r *receiver) processIntoBuffer() bool {
 				r.missingFrame.Store(true)
 				// Add to RTR frame.datalength the cumulative missing frames
 				frameToSend := uint16(frag.priority - r.windowStart)
-				if frameToSend <= windowSize {
+				if frameToSend <= defaultwindowSize {
 					r.frameToSendCounter = frameToSend
 				}
 				if common.Debug {
