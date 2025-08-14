@@ -37,7 +37,7 @@ const initialRTT = 333 * time.Millisecond
 // This number should be kept reasonably high to privilege RTR frames over RTT frames
 // If the measured RTT is ever lower than minRTT, it is clamped to minRTT
 // From RFC 9002 section 6.2.1 (kGranularity)
-const minRTT = 10 * time.Millisecond
+const minRTT = 5 * time.Millisecond
 
 const maxRTO = 10 * time.Second
 
