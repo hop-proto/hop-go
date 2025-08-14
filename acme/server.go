@@ -20,6 +20,7 @@ import (
 	"hop.computer/hop/config"
 	"hop.computer/hop/hopclient"
 	"hop.computer/hop/hopserver"
+	"hop.computer/hop/keys"
 	"hop.computer/hop/transport"
 	"hop.computer/hop/tubes"
 	"hop.computer/hop/userauth"
@@ -205,6 +206,7 @@ func (s *AcmeSession) Start() error {
 	t := true
 	username := AcmeUser
 	keyPath := "id_hop.pem"
+	KEMPublicKeyString := keys.KEMPublicKeyToString(&domainAndKey.KEMPublicKey)
 	hc := &config.HostConfigOptional{
 		AutoSelfSign:         &t,
 		ServerName:           &domain,
@@ -213,6 +215,7 @@ func (s *AcmeSession) Start() error {
 		User:                 &username,
 		InsecureSkipVerify:   &t,
 		RequestAuthorization: &t,
+		ServerKEMKey:         &KEMPublicKeyString,
 	}
 	clientConfig := hc.Unwrap()
 	client, err := hopclient.NewHopClient(clientConfig)

@@ -18,17 +18,25 @@ const AcmeUser = "reserved_hop_certificate_request_username"
 // DomainNameAndKey is a message requesting a certificate for a given domain name and public key
 // TODO(hosono) maybe this should be signed?
 type DomainNameAndKey struct {
-	DomainName string
-	Port       uint16
-	PublicKey  [certs.KeyLen]byte
+	DomainName   string
+	Port         uint16
+	KEMPublicKey keys.KEMPublicKey
 }
 
 func (d *DomainNameAndKey) WriteTo(w io.Writer) (int64, error) {
-	buf := make([]byte, len(d.DomainName)+len(d.PublicKey)+4)
+	kemBytes, err := d.KEMPublicKey.MarshalBinary()
+	if err != nil {
+		return 0, err
+	}
+
+	buf := make([]byte, 2+len(d.DomainName)+2+2+len(kemBytes))
 	binary.BigEndian.PutUint16(buf, uint16(len(d.DomainName)))
 	copy(buf[2:], []byte(d.DomainName))
 	binary.BigEndian.PutUint16(buf[2+len(d.DomainName):], d.Port)
-	copy(buf[4+len(d.DomainName):], d.PublicKey[:])
+
+	kemLenPos := 4 + len(d.DomainName)
+	binary.BigEndian.PutUint16(buf[kemLenPos:], uint16(len(kemBytes)))
+	copy(buf[kemLenPos+2:], kemBytes)
 
 	n, err := w.Write(buf)
 	return int64(n), err
@@ -49,9 +57,26 @@ func (d *DomainNameAndKey) Read(r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	_, err = io.ReadFull(r, d.PublicKey[:])
 
-	return err
+	var kemLen uint16
+	err = binary.Read(r, binary.BigEndian, &kemLen)
+	if err != nil {
+		return err
+	}
+
+	kemBuf := make([]byte, int(kemLen))
+	_, err = io.ReadFull(r, kemBuf)
+	if err != nil {
+		return err
+	}
+
+	KEMPublicKey, err := keys.ParseKEMPublicKeyFromBytes(kemBuf)
+	if err != nil {
+		return err
+	}
+	d.KEMPublicKey = *KEMPublicKey
+
+	return nil
 }
 
 type CertAndChallenge struct {

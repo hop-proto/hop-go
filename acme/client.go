@@ -1,6 +1,7 @@
 package acme
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"strconv"
@@ -46,7 +47,7 @@ func (c *AcmeClient) Dial() error {
 	return c.HopClient.Dial()
 }
 
-func (c *AcmeClient) startChallengeServer(listenAddr string, challenge []byte, ourKeys *keys.X25519KeyPair, caCert *certs.Certificate) (*AcmeServer, error) {
+func (c *AcmeClient) startChallengeServer(listenAddr string, challenge []byte, ourKeys *keys.X25519KeyPair, ourKEMKeys *keys.KEMKeyPair, caCert *certs.Certificate) (*AcmeServer, error) {
 	root, intermediate, leaf, err := createCertChain(c.Config.DomainName, ourKeys)
 	if err != nil {
 		return nil, err
@@ -54,14 +55,16 @@ func (c *AcmeClient) startChallengeServer(listenAddr string, challenge []byte, o
 
 	config := &AcmeServerConfig{
 		ServerConfig: &config.ServerConfig{
-			Key:              ourKeys,
-			Certificate:      leaf,
-			Intermediate:     intermediate,
-			ListenAddress:    listenAddr,
-			HandshakeTimeout: 5 * time.Minute,
-			DataTimeout:      5 * time.Minute,
-			CACerts:          []*certs.Certificate{root, intermediate},
-			EnableAuthgrants: true,
+			Key:                  ourKeys,
+			KEMKey:               ourKEMKeys,
+			Certificate:          leaf,
+			Intermediate:         intermediate,
+			ListenAddress:        listenAddr,
+			HandshakeTimeout:     5 * time.Minute,
+			DataTimeout:          5 * time.Minute,
+			CACerts:              []*certs.Certificate{root, intermediate},
+			EnableAuthgrants:     true,
+			HiddenModeVHostNames: []string{c.Config.DomainName},
 		},
 		SigningCertificate: nil,
 		IsChallengeServer:  true,
@@ -94,13 +97,17 @@ func (c *AcmeClient) Run() (*certs.Certificate, error) {
 	}
 
 	reqKeyPair := keys.GenerateNewX25519KeyPair()
+	reqKEMKeyPair, err := keys.GenerateKEMKeyPair(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
 
 	// Step 1: Send domain name and public key to CA
 	c.log.Info("Step 1: Send domain name and public key to CA")
 	domainAndKey := DomainNameAndKey{
-		DomainName: c.Config.DomainName,
-		Port:       c.Config.ChallengePort,
-		PublicKey:  reqKeyPair.Public,
+		DomainName:   c.Config.DomainName,
+		Port:         c.Config.ChallengePort,
+		KEMPublicKey: reqKEMKeyPair.Public,
 	}
 	_, err = domainAndKey.WriteTo(tube)
 	if err != nil {
@@ -120,7 +127,7 @@ func (c *AcmeClient) Run() (*certs.Certificate, error) {
 	// Step 3: Requester informs CA that challenge is complete
 	c.log.Info("Step 3: Requester informs CA that challenge is complete")
 	localAddr := "localhost:" + strconv.Itoa(int(c.Config.ChallengePort))
-	server, err := c.startChallengeServer(localAddr, challenge.Challenge, reqKeyPair, challenge.Cert)
+	server, err := c.startChallengeServer(localAddr, challenge.Challenge, reqKeyPair, reqKEMKeyPair, challenge.Cert)
 	if err != nil {
 		return nil, err
 	}

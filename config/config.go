@@ -116,6 +116,7 @@ type HostConfigOptional struct {
 	CAFiles              []string
 	ServerName           *string
 	ServerKEMKey         *string
+	ServerKEMKeyPath     *string
 	ServerIPv4           *string
 	ServerIPv6           *string
 	Certificate          *string
@@ -125,7 +126,6 @@ type HostConfigOptional struct {
 	Hostname             *string
 	Intermediate         *string
 	Key                  *string
-	KEMKey               *string
 	Patterns             []string
 	Port                 int
 	RemoteFwds           *portforwarding.Forward
@@ -148,7 +148,8 @@ type HostConfig struct {
 	AutoSelfSign         bool
 	CAFiles              []string
 	ServerName           string // expected name on server cert
-	ServerKEMKey         string // Server Public key to enable Hidden mode
+	ServerKEMKey         string // Server Public key path to enable Hidden mode
+	ServerKEMKeyPath     string // Server Public key to enable Hidden mode
 	ServerIPv4           string
 	ServerIPv6           string
 	Certificate          string
@@ -158,7 +159,6 @@ type HostConfig struct {
 	Hostname             string
 	Intermediate         string
 	Key                  string
-	KEMKey               string
 	Port                 int
 	RemoteFwds           *portforwarding.Forward
 	LocalFwds            *portforwarding.Forward
@@ -190,6 +190,9 @@ func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
 	if other.ServerName != nil {
 		hc.ServerName = other.ServerName
 	}
+	if other.ServerKEMKeyPath != nil {
+		hc.ServerKEMKeyPath = other.ServerKEMKeyPath
+	}
 	if other.ServerKEMKey != nil {
 		hc.ServerKEMKey = other.ServerKEMKey
 	}
@@ -219,9 +222,6 @@ func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
 	}
 	if other.Key != nil {
 		hc.Key = other.Key
-	}
-	if other.KEMKey != nil {
-		hc.KEMKey = other.KEMKey
 	}
 	// don't need to merge Patterns
 	if other.Port != 0 {
@@ -266,6 +266,9 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	if hc.ServerName != nil {
 		newHC.ServerName = *hc.ServerName
 	}
+	if hc.ServerKEMKeyPath != nil {
+		newHC.ServerKEMKeyPath = *hc.ServerKEMKeyPath
+	}
 	if hc.ServerKEMKey != nil {
 		newHC.ServerKEMKey = *hc.ServerKEMKey
 	}
@@ -289,9 +292,6 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	}
 	if hc.Key != nil {
 		newHC.Key = *hc.Key
-	}
-	if hc.KEMKey != nil {
-		newHC.KEMKey = *hc.KEMKey
 	}
 	if hc.LocalFwds != nil {
 		newHC.LocalFwds = hc.LocalFwds
