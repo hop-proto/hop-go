@@ -145,8 +145,6 @@ func (c *HopClient) authenticatorSetupLocked() error {
 	var err error
 
 	if hc.ServerKEMKeyPath != "" {
-		logrus.Infof("client: server Key loaded to complete Hidden Mode handshake")
-
 		serverKeyPath := combinators.StringOr(hc.ServerKEMKeyPath, config.DefaultKeyPath())
 		serverKEMKey, err = keys.ReadKEMKeyFromPubFile(serverKeyPath)
 

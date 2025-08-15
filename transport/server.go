@@ -155,7 +155,6 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 	}
 	mt := MessageType(rawRead[0])
 
-	// TODO verify if there is any answere from any type of messages while in hidden mode
 	switch mt {
 	case MessageTypeClientHello:
 		if !s.config.IsHidden {
