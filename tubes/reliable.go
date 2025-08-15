@@ -780,6 +780,8 @@ func (r *Reliable) sendFrameByNumber(frameNo uint32) {
 	}
 }
 
+// CanAcceptBytes is currently called every 10ms to copy data in the frames list
+// It can slow down the sender if called more often as locking and unlocking are slow.
 func (r *Reliable) CanAcceptBytes() bool {
 	r.l.Lock()
 	defer r.l.Unlock()
