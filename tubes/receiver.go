@@ -22,8 +22,6 @@ type receiver struct {
 	ackNo uint64
 	// +checklocks:m
 	windowStart uint64
-	// +checklocks:m
-	windowSize uint16
 
 	closed atomic.Bool
 	m      sync.Mutex
@@ -42,7 +40,6 @@ func newReceiver(log *logrus.Entry) *receiver {
 		dataReady:   common.NewDeadlineChan[struct{}](1),
 		buffer:      new(bytes.Buffer),
 		fragments:   make(PriorityQueue, 0),
-		windowSize:  defaultwindowSize,
 		windowStart: 1,
 		log:         log.WithField("receiver", ""),
 	}
@@ -58,12 +55,6 @@ func (r *receiver) getAck() uint32 {
 	r.m.Lock()
 	defer r.m.Unlock()
 	return uint32(r.ackNo)
-}
-
-func (r *receiver) getWindowSize() uint16 {
-	r.m.Lock()
-	defer r.m.Unlock()
-	return r.windowSize
 }
 
 /*
