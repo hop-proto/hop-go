@@ -69,7 +69,6 @@ func (u *Unreliable) makeInitFrame(req bool) initiateFrame {
 		data:       []byte{},
 		dataLength: 0,
 		frameNo:    0,
-		windowSize: 0,
 		flags: frameFlags{
 			ACK:  false,
 			FIN:  false,
