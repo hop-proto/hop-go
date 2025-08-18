@@ -78,7 +78,6 @@ func (r *Reliable) initiate(req bool) {
 			data:       []byte{},
 			dataLength: 0,
 			frameNo:    0,
-			windowSize: r.recvWindow.getWindowSize(),
 			flags: frameFlags{
 				REQ:  req,
 				RESP: !req,
@@ -429,7 +428,6 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 			data:       []byte{},
 			dataLength: 0,
 			frameNo:    0,
-			windowSize: r.recvWindow.getWindowSize(),
 			flags: frameFlags{
 				REQ:  false,
 				RESP: true,
