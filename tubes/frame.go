@@ -21,7 +21,6 @@ type initiateFrame struct {
 	data       []byte
 	dataLength uint16
 	flags      frameFlags
-	windowSize uint16
 }
 
 type frameFlags struct {
@@ -89,13 +88,10 @@ func (p *initiateFrame) toBytes() []byte {
 	binary.BigEndian.PutUint32(frameNumBytes, p.frameNo)
 	dataLength := []byte{0, 0}
 	binary.BigEndian.PutUint16(dataLength, p.dataLength)
-	windowSize := []byte{0, 0}
-	binary.BigEndian.PutUint16(windowSize, p.windowSize)
 	return append(
 		[]byte{
 			p.tubeID, flagsToMetaByte(&p.flags),
 			dataLength[0], dataLength[1],
-			windowSize[0], windowSize[1],
 			byte(p.tubeType), byte(0),
 			frameNumBytes[0], frameNumBytes[1], frameNumBytes[2], frameNumBytes[3],
 		},
@@ -138,9 +134,8 @@ func fromInitiateBytes(b []byte) *initiateFrame {
 		tubeID:     b[0],
 		flags:      metaToFlags(b[1]),
 		dataLength: dataLength,
-		windowSize: binary.BigEndian.Uint16(b[4:6]),
-		tubeType:   TubeType(b[6]),
-		frameNo:    binary.BigEndian.Uint32(b[8:12]),
-		data:       b[12 : 12+dataLength],
+		tubeType:   TubeType(b[4]),
+		frameNo:    binary.BigEndian.Uint32(b[6:10]),
+		data:       b[10 : 10+dataLength],
 	}
 }
