@@ -640,9 +640,9 @@ func (r *Reliable) sendFrameByNumberLocked(frameNo uint32) {
 		return
 	}
 	for i := 0; i < defaultWindowSize; i++ {
-		rtrFrame := r.sender.frames[i]
+		rtrFrame := *r.sender.frames[i].frame
 		if rtrFrame.frameNo == frameNo && rtrFrame.queued {
-			rtrFrame.Time = time.Now()
+			r.sender.frames[i].Time = time.Now()
 			r.prioritySendQueue <- rtrFrame.toBytes()
 			if common.Debug {
 				logrus.Debugf("Frame %v found and prority sent", frameNo)
