@@ -133,7 +133,11 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 		(pkt.dataLength == 0 && (ackNo != lastAckNo || pkt.frameNo != lastFrameNo ||
 			retransmission || pkt.flags.FIN || pkt.flags.RESP))) || r.unsend == 10 { // based on best practices for TCP loss detection RFC5681 and RFC6675. Should be 3 but 10 has a better mitigation for spurious loss detection
 
-		r.sendQueue <- pkt.toBytes()
+		if retransmission {
+			r.prioritySendQueue <- pkt.toBytes() // send in the reliable priority queue
+		} else {
+			r.sendQueue <- pkt.toBytes()
+		}
 		r.lastAckSent.Store(ackNo)
 		r.lastFrameSent.Store(pkt.frameNo)
 
@@ -283,6 +287,13 @@ func (r *Reliable) send() {
 
 			// Do not block ACKs - Blocks frame transmission out of window open
 			r.sendOneFrame(pkt, false)
+
+		case pkt, ok = <-r.sender.prioritySendQueue: // +checklocksignore accessing channels is safe
+			if !ok {
+				break
+			}
+
+			r.sendOneFrame(pkt, true)
 		}
 	}
 	r.log.Debug("send ended")
@@ -640,15 +651,15 @@ func (r *Reliable) sendFrameByNumberLocked(frameNo uint32) {
 		return
 	}
 	for i := 0; i < defaultWindowSize; i++ {
-		rtrFrame := *r.sender.frames[i].frame
-		if rtrFrame.frameNo == frameNo && rtrFrame.queued {
-			r.sender.frames[i].Time = time.Now()
-			r.prioritySendQueue <- rtrFrame.toBytes()
+		rtrFrameStruct := r.sender.frames[i]
+		if rtrFrameStruct.frameNo == frameNo && rtrFrameStruct.queued {
+			rtrFrameStruct.Time = time.Now()
+			r.sender.prioritySendQueue <- rtrFrameStruct.frame
 			if common.Debug {
 				logrus.Debugf("Frame %v found and prority sent", frameNo)
 			}
 			return
-		} else if rtrFrame.frameNo > frameNo {
+		} else if rtrFrameStruct.frameNo > frameNo {
 			if common.Debug {
 				logrus.Debugf("Frame %v not found, frame number in the list are greater than the frameNo", frameNo)
 			}

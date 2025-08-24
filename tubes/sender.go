@@ -58,7 +58,8 @@ type sender struct {
 	// the time after which writes will expire
 	deadline time.Time
 
-	sendQueue chan *frame
+	sendQueue         chan *frame
+	prioritySendQueue chan *frame
 
 	m sync.Mutex
 
@@ -103,8 +104,9 @@ func newSender(log *logrus.Entry) *sender {
 			windowSize:           defaultWindowSize,
 			windowOpen:           make(chan struct{}, 1),
 		},
-		sendQueue: make(chan *frame, 1024), // TODO(hosono) make this size 0
-		log:       log.WithField("sender", ""),
+		sendQueue:         make(chan *frame, 1024), // TODO(hosono) make this size 0
+		prioritySendQueue: make(chan *frame, 1024),
+		log:               log.WithField("sender", ""),
 	}
 }
 
@@ -377,6 +379,7 @@ func (s *sender) framesToSend(rto bool, startIndex int) int {
 func (s *sender) Close() error {
 	if s.closed.CompareAndSwap(false, true) {
 		close(s.sendQueue)
+		close(s.prioritySendQueue)
 
 		return nil
 	}
