@@ -155,12 +155,12 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 
 // Retransmission ACKs are extra packets to update the sender/receiver
 // on the last ackNo update. It uses the prioritySendQueue.
-func (r *Reliable) sendRetransmissionAck(lastFrameNo, ackNo uint32) {
+func (r *Reliable) sendRetransmissionAck(lastFrameNo, ackNo uint32, tubeId byte) {
 	rtrPkt := &frame{
 		frameNo: lastFrameNo,
 		data:    []byte{},
 		flags:   frameFlags{RTR: true, ACK: true, REL: true},
-		tubeID:  r.id,
+		tubeID:  tubeId,
 		ackNo:   ackNo,
 	}
 
@@ -168,9 +168,6 @@ func (r *Reliable) sendRetransmissionAck(lastFrameNo, ackNo uint32) {
 		"Frame N°": rtrPkt.frameNo,
 		"Ack N°":   ackNo,
 	}).Trace("Retransmission of RTR ack")
-
-	// reset transmission of duplicated acks as experiencing major congestion event
-	r.unsend = 0
 
 	// Uses the priority queue to retransmit faster
 	r.prioritySendQueue <- rtrPkt.toBytes()
@@ -331,8 +328,10 @@ func (r *Reliable) receive(pkt *frame) error {
 		return ErrBadTubeState
 	}
 
-	if pkt.flags.RTR {
-		r.receiveRTRFrame(pkt)
+	if pkt.flags.RTR && !pkt.flags.ACK && pkt.dataLength > 0 {
+		newAck := r.recvWindow.getAck()
+		r.sendRetransmissionAck(pkt.ackNo, newAck, r.id)
+		//r.unsend = 0
 	}
 
 	finProcessed, err := r.recvWindow.receive(pkt)
@@ -341,7 +340,9 @@ func (r *Reliable) receive(pkt *frame) error {
 	if pkt.flags.ACK {
 		missingFrameNo, _ := r.sender.recvAck(pkt.ackNo)
 		if missingFrameNo != 0 {
-			r.sendFrameByNumber(missingFrameNo)
+			r.sender.m.Lock()
+			r.sendFrameByNumberLocked(missingFrameNo)
+			r.sender.m.Unlock()
 		}
 	}
 
@@ -627,21 +628,8 @@ func (r *Reliable) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
-// An RTR frame is a frame has been sent in large congestion event (RTO)
-// The receiver of this frame should transmit the last ACK to update the
-// sender.
 // +checklocks:r.l
-func (r *Reliable) receiveRTRFrame(frame *frame) {
-	// If a packet does have the RTR flag, the receiver will update the sender with the last frame received embedded in an ACK
-	if !frame.flags.ACK && frame.dataLength > 0 {
-		newAck := r.recvWindow.getAck()
-		r.sendRetransmissionAck(frame.ackNo, newAck)
-
-	}
-}
-
-// +checklocks:r.l
-func (r *Reliable) sendFrameByNumber(frameNo uint32) {
+func (r *Reliable) sendFrameByNumberLocked(frameNo uint32) {
 	if common.Debug {
 		logrus.Debugf("Searching for frame %v to priority send it", frameNo)
 	}
@@ -652,12 +640,9 @@ func (r *Reliable) sendFrameByNumber(frameNo uint32) {
 		return
 	}
 	for i := 0; i < defaultWindowSize; i++ {
-		rtrFrame := &r.sender.frames[i]
-		if rtrFrame.frameNo == frameNo {
-			rtrFrame.tubeID = r.id
-			rtrFrame.ackNo = r.recvWindow.getAck()
+		rtrFrame := r.sender.frames[i]
+		if rtrFrame.frameNo == frameNo && rtrFrame.queued {
 			rtrFrame.Time = time.Now()
-			rtrFrame.flags.REL = true
 			r.prioritySendQueue <- rtrFrame.toBytes()
 			if common.Debug {
 				logrus.Debugf("Frame %v found and prority sent", frameNo)

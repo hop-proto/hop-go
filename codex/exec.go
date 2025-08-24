@@ -199,7 +199,7 @@ func pausableCopy(dst io.Writer, src io.Reader, lock *sync.RWMutex, canAccept Ca
 	var err error
 	for {
 		if nil != canAccept && !canAccept() {
-			time.Sleep(10 * time.Millisecond) // avoid busy waiting 2*tubes.minRTT
+			time.Sleep(10 * time.Millisecond) // avoid busy waiting = tubes.minRTT
 			continue
 		}
 		lock.RLock()
