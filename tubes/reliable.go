@@ -342,7 +342,6 @@ func (r *Reliable) receive(pkt *frame) error {
 	if pkt.flags.RTR && !pkt.flags.ACK && pkt.dataLength > 0 {
 		newAck := r.recvWindow.getAck()
 		r.sendRetransmissionAck(pkt.ackNo, newAck, r.id)
-		//r.unsend = 0
 	}
 
 	finProcessed, err := r.recvWindow.receive(pkt)
