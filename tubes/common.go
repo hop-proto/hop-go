@@ -41,11 +41,8 @@ const minRTT = 5 * time.Millisecond
 
 const maxRTO = 10 * time.Second
 
-// The maximum number of packets to retransmit per rto
-const maxFragTransPerRTO = 3
-
 // The number of packets in the window for reliable tubes
-const defaultwindowSize = 32 // 32 lets Hop adapt on the network type
+const defaultWindowSize = 10 // 10 lets Hop adapt on the network type
 
 // The upper and lower bounds for an optimal use of the window without congestion
 const maxWindowSize = 1000

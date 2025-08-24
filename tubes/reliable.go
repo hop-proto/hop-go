@@ -47,17 +47,17 @@ type Reliable struct {
 	// +checklocks:l
 	tubeState state
 	// +checklocks:l
-	lastAckTimer     *time.Timer
-	lastAckSent      atomic.Uint32
-	lastFrameSent    atomic.Uint32
-	lastRTRSent      atomic.Uint32 // +checklocksignore
-	pendingRTRTimers sync.Map
-	closed           chan struct{}
-	initRecv         chan struct{}
-	initDone         chan struct{}
-	sendDone         chan struct{}
-	l                sync.Mutex
-	log              *logrus.Entry
+	lastAckTimer  *time.Timer
+	lastAckSent   atomic.Uint32
+	lastFrameSent atomic.Uint32
+	unsend        uint16
+
+	closed   chan struct{}
+	initRecv chan struct{}
+	initDone chan struct{}
+	sendDone chan struct{}
+	l        sync.Mutex
+	log      *logrus.Entry
 }
 
 // Reliable implements net.Conn
@@ -129,13 +129,17 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 	}
 
 	// Limit the retransmission of ACKs to the last value loaded through r.recvWindow.getAck()
-	if pkt.dataLength > 0 ||
+	if (pkt.dataLength > 0 ||
 		(pkt.dataLength == 0 && (ackNo != lastAckNo || pkt.frameNo != lastFrameNo ||
-			retransmission || pkt.flags.FIN || pkt.flags.RESP)) {
+			retransmission || pkt.flags.FIN || pkt.flags.RESP))) || r.unsend == 10 { // based on best practices for TCP loss detection RFC5681 and RFC6675. Should be 3 but 10 has a better mitigation for spurious loss detection
 
 		r.sendQueue <- pkt.toBytes()
 		r.lastAckSent.Store(ackNo)
 		r.lastFrameSent.Store(pkt.frameNo)
+
+		r.unsend = 0
+	} else {
+		r.unsend++
 	}
 
 	if common.Debug {
@@ -165,7 +169,10 @@ func (r *Reliable) sendRetransmissionAck(lastFrameNo, ackNo uint32) {
 		"Ack N°":   ackNo,
 	}).Trace("Retransmission of RTR ack")
 
-	// To send before ACKs
+	// reset transmission of duplicated acks as experiencing major congestion event
+	r.unsend = 0
+
+	// Uses the priority queue to retransmit faster
 	r.prioritySendQueue <- rtrPkt.toBytes()
 }
 
@@ -175,12 +182,14 @@ func (r *Reliable) send() {
 	ok := true
 	for ok {
 		select {
-		// find a way of having a logic retransmit ticker time and logic
+		// onTimeout sender
 		case <-r.sender.RetransmitTicker.C: // +checklocksignore accessing channels is safe
 
 			r.l.Lock()
 
 			numFrames := r.sender.framesToSend(true, 0)
+
+			rtoSent := false
 
 			for i := 0; i < numFrames; i++ {
 				rtoFrame := &r.sender.frames[i]
@@ -204,20 +213,33 @@ func (r *Reliable) send() {
 					rtoFrame.queued = true
 				}
 
-				r.lastRTRSent.Store(rtoFrame.frameNo)
-
 				r.sendOneFrame(rtoFrame.frame, true)
+
+				rtoSent = true
 			}
 
 			// Back off RTO if no ACKs were received
 			r.sender.RTO *= 2
 
-			// backup the congestion window
-			r.sender.senderWindow.state = SlowStart
-			r.sender.senderWindow.lowerWindowSize = uint16(3 * r.sender.senderWindow.cwndSize / 4) // converge faster to the max speed
-			r.sender.senderWindow.upperWindowSize = uint16(r.sender.senderWindow.cwndSize)         // converge faster to the max speed
-			newcwndSize := 3 * r.sender.senderWindow.cwndSize / 4
-			r.sender.senderWindow.cwndSize = newcwndSize
+			// Reduce the window size if rto frame sent and no recent congestion event
+			if rtoSent && r.sender.senderWindow.state == AIMD {
+				r.sender.senderWindow.state = FastRecovery
+				newcwndSize := 3 * r.sender.senderWindow.cwndSize / 4 // the traditional 1/2 is too aggressive when considering frame bursts
+				r.sender.senderWindow.cwndSize = newcwndSize
+				r.sender.senderWindow.windowSize = uint16(newcwndSize)
+				r.sender.rtoCounter = 0
+			}
+
+			if r.sender.senderWindow.state == FastRecovery {
+				r.sender.rtoCounter++
+			}
+
+			if rtoSent && r.sender.senderWindow.state == SlowStart {
+				newcwndSize := r.sender.senderWindow.cwndSize / 2
+				r.sender.senderWindow.ssThresh = uint16(newcwndSize)
+				r.sender.senderWindow.cwndSize = newcwndSize
+				r.sender.senderWindow.state = FastRecovery // will switch to AIMD on the next successful ack
+			}
 
 			if r.sender.RTO > maxRTO && len(r.sender.frames) > 0 {
 				logrus.Errorf("REL: RTO exeeded, dropping frame n° %v", r.sender.frames[0].frameNo)
@@ -605,141 +627,17 @@ func (r *Reliable) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
-// An RTR frame is a frame that need to be processed in priority.
-// The flag RTR mention to the receiver that a frame is lost due to congestion
-// Or packet loss.
+// An RTR frame is a frame has been sent in large congestion event (RTO)
+// The receiver of this frame should transmit the last ACK to update the
+// sender.
 // +checklocks:r.l
 func (r *Reliable) receiveRTRFrame(frame *frame) {
-	lastSentRTRNo := r.lastRTRSent.Load()
-	ackNo := frame.ackNo
-
 	// If a packet does have the RTR flag, the receiver will update the sender with the last frame received embedded in an ACK
 	if !frame.flags.ACK && frame.dataLength > 0 {
 		newAck := r.recvWindow.getAck()
 		r.sendRetransmissionAck(frame.ackNo, newAck)
 
 	}
-
-	if ackNo > lastSentRTRNo {
-
-		// Frames sent via RTO ask the receiver to send a RTR frame
-		// with the current processing index
-
-		// To limit the search in a reasonable range
-		numFrames := min(defaultwindowSize, len(r.sender.frames))
-
-		for i := 0; i < numFrames; i++ {
-			rtrFrame := &r.sender.frames[i]
-
-			if rtrFrame.frameNo > ackNo {
-				if common.Debug {
-					r.log.Debugf("receiver: RTR frame not found in valid range, i=%v", i)
-				}
-				break
-			}
-
-			if rtrFrame.frameNo == ackNo {
-				timeSinceQueued := time.Since(rtrFrame.Time)
-				r.scheduleRetransmission(rtrFrame.frame, frame.dataLength, timeSinceQueued, i)
-				break
-			}
-		}
-	}
-}
-
-// scheduleRetransmission manages retransmission with a delay based on RTT
-// +checklocks:r.l
-func (r *Reliable) scheduleRetransmission(rtrFrame *frame, dataLength uint16, timeSinceQueued time.Duration, oldFrameIndex int) {
-
-	waitTime := r.sender.RTT - timeSinceQueued
-
-	// Defining an upper bound to be more compliant with retransmission
-	if waitTime > r.sender.RTT/2 {
-		waitTime = r.sender.RTT / 2
-	}
-
-	r.pendingRTRTimers.Range(func(key, value interface{}) bool {
-		if timer, valid := value.(*time.Timer); valid {
-			timer.Stop()
-			if common.Debug {
-				r.log.Debugf("Canceled previous retransmission for frame %v", key)
-			}
-		}
-		r.pendingRTRTimers.Delete(key)
-		return true
-	})
-
-	if waitTime > 0 {
-		if common.Debug {
-			r.log.Debugf("Scheduling retransmission for frame %d in %v", rtrFrame.frameNo, waitTime)
-		}
-
-		// To send an RTO only after the RTR
-		r.sender.resetRetransmitTicker()
-
-		timer := time.AfterFunc(waitTime, func() {
-			r.l.Lock()
-			r.executeRetransmission(rtrFrame, dataLength, oldFrameIndex)
-			r.l.Unlock()
-		})
-
-		r.pendingRTRTimers.Store(rtrFrame.frameNo, timer)
-	} else {
-		// If RTT has passed, retransmit immediately
-		r.executeRetransmission(rtrFrame, dataLength, oldFrameIndex)
-	}
-}
-
-// executeRetransmission actually sends the retransmission if no newer frame has arrived.
-// +checklocks:r.l
-func (r *Reliable) executeRetransmission(rtrFrame *frame, dataLength uint16, oldFrameIndex int) {
-	if r.lastRTRSent.Load() >= rtrFrame.frameNo {
-		if common.Debug {
-			r.log.Debugf("Skipping retransmission for frame %d, newer frame received", rtrFrame.frameNo)
-		}
-		r.pendingRTRTimers.Delete(rtrFrame.frameNo)
-		return
-	}
-
-	if common.Debug {
-		r.log.Debugf("Executing retransmission for frame %d", rtrFrame.frameNo)
-	}
-
-	frameListLen := r.sender.unAckedFramesRemaining()
-
-	if frameListLen == 0 {
-		r.log.Errorf("Sender frames are empty, aborting retransmission for frame %d", rtrFrame.frameNo)
-		return
-	}
-
-	if oldFrameIndex < 0 || oldFrameIndex+int(dataLength) > frameListLen {
-		r.log.Errorf("Invalid retransmission range for frame %d, aborting", rtrFrame.frameNo)
-		return
-	}
-	for j := 0; j < int(dataLength); j++ {
-		frameIndex := oldFrameIndex + j
-
-		rtrFullFrame := &r.sender.frames[frameIndex]
-
-		rtrFullFrame.ackNo = r.recvWindow.getAck()
-		rtrFullFrame.Time = time.Now()
-		rtrFullFrame.flags.REL = true
-
-		if common.Debug {
-			r.log.Debugf("Retransmitting frame %d", rtrFullFrame.frameNo)
-		}
-		r.sender.log.WithFields(logrus.Fields{
-			"Frame N°": rtrFullFrame.frameNo,
-		}).Trace("Retransmission of RTR pkt")
-
-		r.prioritySendQueue <- rtrFullFrame.toBytes()
-
-		r.lastRTRSent.Store(rtrFullFrame.frameNo)
-	}
-
-	r.sender.resetRetransmitTicker() // don't drop a frame before receiving the ack
-
-	r.pendingRTRTimers.Delete(rtrFrame.frameNo)
 }
 
 // +checklocks:r.l
@@ -747,20 +645,19 @@ func (r *Reliable) sendFrameByNumber(frameNo uint32) {
 	if common.Debug {
 		logrus.Debugf("Searching for frame %v to priority send it", frameNo)
 	}
-	if len(r.sender.frames) < defaultwindowSize {
+	if len(r.sender.frames) < defaultWindowSize {
 		if common.Debug {
-			logrus.Debugf("Frame list has less than %v frames", defaultwindowSize)
+			logrus.Debugf("Frame list has less than %v frames", defaultWindowSize)
 		}
 		return
 	}
-	for i := 0; i < defaultwindowSize; i++ {
+	for i := 0; i < defaultWindowSize; i++ {
 		rtrFrame := &r.sender.frames[i]
 		if rtrFrame.frameNo == frameNo {
 			rtrFrame.tubeID = r.id
 			rtrFrame.ackNo = r.recvWindow.getAck()
 			rtrFrame.Time = time.Now()
 			rtrFrame.flags.REL = true
-			rtrFrame.flags.RTR = true
 			r.prioritySendQueue <- rtrFrame.toBytes()
 			if common.Debug {
 				logrus.Debugf("Frame %v found and prority sent", frameNo)
