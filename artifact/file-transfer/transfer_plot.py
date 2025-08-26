@@ -30,7 +30,6 @@ hex_colors = {
     "SSH CUBIC": "#21918c"
 }
 
-# Faceted lineplot by Host
 g = sns.catplot(
     data=df,
     x="File Size",

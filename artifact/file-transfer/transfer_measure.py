@@ -41,7 +41,7 @@ def get_config_path(host):
         "XXX-3": "fk"
     }
 
-    return f"/Users/paul/IdeaProjects/hop-go/containers/ocean/{config_map.get(host, 'sf')}/config_hidden.toml"
+    return f"./{config_map.get(host, 'sf')}/config_hidden.toml"
 
 
 def log_result_entry(host, file_size, proto, speed, filename="transfer_data.csv"):
@@ -52,11 +52,9 @@ def log_result_entry(host, file_size, proto, speed, filename="transfer_data.csv"
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Write header if file is newly created
         if not file_exists:
             writer.writerow(["Time", "Host", "File Size", "Protocol", "Speed (MB/s)"])
 
-        # Write the new entry
         writer.writerow([timestamp, host, file_size, proto, speed])
 
     print(f"Logged: {host}, {file_size}, {proto}: {speed} MB/s")
