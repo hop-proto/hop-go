@@ -41,7 +41,7 @@ def get_config_path(host):
         "XXX-3": "fk"
     }
 
-    return f"./{config_map.get(host, 'sf')}/config_hidden.toml"
+    return f"./{config_map.get(host, 'sg')}/config_hidden.toml"
 
 
 def log_result_entry(host, file_size, proto, speed, filename="transfer_data.csv"):
