@@ -154,61 +154,69 @@ func (s *Server) readPacket(rawRead []byte, handshakeWriteBuf []byte) error {
 		return ErrInvalidMessage
 	}
 	mt := MessageType(rawRead[0])
+
 	switch mt {
 	case MessageTypeClientHello:
-		s.cookieLock.Lock()
-		defer s.cookieLock.Unlock()
-		scratchHS, err := s.handlePQClientHello(rawRead[:msgLen])
-		if err != nil {
-			return err
-		}
-		logrus.Debugf("server: client ephemeral: %x", scratchHS.dh.remoteEphemeral)
-		scratchHS.cookieKey = s.cookieKey
-		scratchHS.remoteAddr = addr
-		n, err := writePQServerHello(scratchHS, handshakeWriteBuf)
-		if err != nil {
-			return err
-		}
-		logrus.Debugf("server: sh %x", handshakeWriteBuf[:n])
-		if err := s.writePacket(handshakeWriteBuf[:n], addr); err != nil {
-			return err
-		}
-	case MessageTypeClientAck:
-		logrus.Debug("server: about to handle client ack")
-		n, hs, err := s.readPQClientAck(rawRead[:msgLen], addr)
-		if err != nil {
-			logrus.Debugf("server: unable to handle client ack: %s", err)
-			return err
-		}
-		if n != msgLen {
-			logrus.Debug("client ack had extra data")
-			return ErrInvalidMessage
-		}
-		hs.certVerify = s.config.ClientVerify
-		s.setHandshakeState(addr, hs)
-		n, err = s.writePQServerAuth(handshakeWriteBuf, hs)
-		if err != nil {
-			return err
-		}
-		err = s.writePacket(handshakeWriteBuf[:n], addr)
-		if err != nil {
-			return err
-		}
-	case MessageTypeClientAuth:
-		if common.Debug {
-			logrus.Debug("server: received client auth with length ", msgLen)
-			logrus.Tracef("server: raw read: %x", rawRead[:msgLen])
+		if !s.config.IsHidden {
+			s.cookieLock.Lock()
+			defer s.cookieLock.Unlock()
+			scratchHS, err := s.handlePQClientHello(rawRead[:msgLen])
+			if err != nil {
+				return err
+			}
+			logrus.Debugf("server: client ephemeral: %x", scratchHS.dh.remoteEphemeral)
+			scratchHS.cookieKey = s.cookieKey
+			scratchHS.remoteAddr = addr
+			n, err := writePQServerHello(scratchHS, handshakeWriteBuf)
+			if err != nil {
+				return err
+			}
+			logrus.Debugf("server: sh %x", handshakeWriteBuf[:n])
+			if err := s.writePacket(handshakeWriteBuf[:n], addr); err != nil {
+				return err
+			}
 		}
 
-		_, hs, err := s.readPQClientAuth(rawRead[:msgLen], addr)
-		if err != nil {
-			return err
+	case MessageTypeClientAck:
+		if !s.config.IsHidden {
+			logrus.Debug("server: about to handle client ack")
+			n, hs, err := s.readPQClientAck(rawRead[:msgLen], addr)
+			if err != nil {
+				logrus.Debugf("server: unable to handle client ack: %s", err)
+				return err
+			}
+			if n != msgLen {
+				logrus.Debug("client ack had extra data")
+				return ErrInvalidMessage
+			}
+			hs.certVerify = s.config.ClientVerify
+			s.setHandshakeState(addr, hs)
+			n, err = s.writePQServerAuth(handshakeWriteBuf, hs)
+			if err != nil {
+				return err
+			}
+			err = s.writePacket(handshakeWriteBuf[:n], addr)
+			if err != nil {
+				return err
+			}
 		}
-		logrus.Debug("server: finishHandshake")
-		if err := s.finishHandshake(hs, false); err != nil {
-			return err
+	case MessageTypeClientAuth:
+		if !s.config.IsHidden {
+			if common.Debug {
+				logrus.Debug("server: received client auth with length ", msgLen)
+				logrus.Tracef("server: raw read: %x", rawRead[:msgLen])
+			}
+
+			_, hs, err := s.readPQClientAuth(rawRead[:msgLen], addr)
+			if err != nil {
+				return err
+			}
+			logrus.Debug("server: finishHandshake")
+			if err := s.finishHandshake(hs, false); err != nil {
+				return err
+			}
+			logrus.Debug("server: finished handshake!")
 		}
-		logrus.Debug("server: finished handshake!")
 	case MessageTypeServerHello, MessageTypeServerAuth:
 		// Server-side should not receive messages only sent by the server
 		return ErrUnexpectedMessage

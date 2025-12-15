@@ -17,11 +17,13 @@ type sender struct {
 	// +checklocks:m
 	ackNo uint64
 
-	frameNo    uint32
-	windowSize uint16
+	frameNo uint32
 
 	// The number of packets sent but not acked
-	unacked uint16
+	unacked    uint16
+	rtoCounter int
+
+	senderWindow senderWindow
 
 	finSent    bool
 	finFrameNo uint32 // +checklocksignore
@@ -56,31 +58,55 @@ type sender struct {
 	// the time after which writes will expire
 	deadline time.Time
 
-	// signals that more data be sent
-	windowOpen chan struct{}
-
-	sendQueue chan *frame
+	sendQueue         chan *frame
+	prioritySendQueue chan *frame
 
 	m sync.Mutex
 
 	// logging context
 	log *logrus.Entry
 }
+type controlState int
+
+const (
+	SlowStart controlState = iota
+	AIMD
+	FastRecovery
+)
+
+type senderWindow struct {
+	state                controlState
+	cwndSize             float64
+	duplicatedAckCounter int
+	ssThresh             uint16 // SSTHRESH helps the congestion control algorithm remember the latest safe rate.
+	windowSize           uint16
+
+	// signals that more data be sent
+	windowOpen chan struct{}
+}
 
 func newSender(log *logrus.Entry) *sender {
 	return &sender{
-		ackNo:   1,
-		frameNo: 1,
-		unacked: 0,
-		buffer:  make([]byte, 0),
+		ackNo:      1,
+		frameNo:    1,
+		unacked:    0,
+		rtoCounter: 0,
+		buffer:     make([]byte, 0),
 		// finSent defaults to false
 		RetransmitTicker: time.NewTicker(initialRTT),
 		RTT:              initialRTT,
 		RTO:              initialRTT,
-		windowSize:       windowSize,
-		windowOpen:       make(chan struct{}, 1),
-		sendQueue:        make(chan *frame, 1024), // TODO(hosono) make this size 0
-		log:              log.WithField("sender", ""),
+		senderWindow: senderWindow{
+			state:                SlowStart,
+			cwndSize:             defaultWindowSize,
+			duplicatedAckCounter: 0,
+			ssThresh:             512,
+			windowSize:           defaultWindowSize,
+			windowOpen:           make(chan struct{}, 1),
+		},
+		sendQueue:         make(chan *frame, 1024), // TODO(hosono) make this size 0
+		prioritySendQueue: make(chan *frame, 1024),
+		log:               log.WithField("sender", ""),
 	}
 }
 
@@ -133,7 +159,7 @@ func (s *sender) write(b []byte) (int, error) {
 
 	if numFrames > 0 {
 		select {
-		case s.windowOpen <- struct{}{}:
+		case s.senderWindow.windowOpen <- struct{}{}:
 			break
 		default:
 			break
@@ -143,57 +169,44 @@ func (s *sender) write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (s *sender) recvAck(ackNo uint32) error {
+func (s *sender) recvAck(ackNo uint32) (uint32, error) {
 	s.m.Lock()
 	defer s.m.Unlock()
 
 	// Stop the ticker since we're about to do a new RTT measurement.
 	s.RetransmitTicker.Stop()
 
+	missingFrameNo := uint32(0)
 	oldAckNo := s.ackNo
 	newAckNo := uint64(ackNo)
-	if newAckNo < s.ackNo && (newAckNo+(1<<32)-s.ackNo <= uint64(s.windowSize)) { // wrap around
+	if newAckNo < s.ackNo && (newAckNo+(1<<32)-s.ackNo <= uint64(s.senderWindow.windowSize)) { // wrap around
 		newAckNo = newAckNo + (1 << 32)
+	}
+
+	if s.senderWindow.duplicatedAckCounter > 100 {
+		// TODO (paul): make sure that this is the right way to terminate a connection
+		// Should not happen
+		s.Close()
+	}
+
+	// to not apply on the first 20 ACKs as the network probing is inaccurate
+	if oldAckNo == newAckNo && newAckNo > 20 {
+		missingFrameNo = s.onLoss(ackNo)
 	}
 
 	windowOpen := s.ackNo < newAckNo
 
+	if s.senderWindow.state == FastRecovery && oldAckNo == newAckNo {
+		windowOpen = true
+	}
+
 	for s.ackNo < newAckNo {
-		if !s.frames[0].Time.Equal(time.Time{}) && ackNo == s.frames[0].frame.frameNo+1 && !s.frames[0].flags.RTR {
-			oldRTT := s.RTT
-			measuredRTT := time.Since(s.frames[0].Time)
-
-			// RTT Upper bound
-			measuredRTT = min(measuredRTT, s.RTT*2)
-
-			// This formula comes from RFC 9002 section 5.3
-			s.RTT = (s.RTT/8)*7 + measuredRTT/8
-
-			if s.RTT < minRTT {
-				s.RTT = minRTT
-			}
-			if common.Debug {
-				s.log.WithFields(logrus.Fields{
-					"oldRTT":      oldRTT,
-					"measuredRTT": measuredRTT,
-					"newRTT":      s.RTT,
-				}).Trace("updated rtt")
-			}
-		}
+		s.onSuccess(ackNo)
 		s.ackNo++
 		s.frames = s.frames[1:]
 		if s.unacked > 0 {
 			s.unacked--
 		}
-
-		// Adjust the RTO on the RTT when receive an ACK
-		s.RTO = (s.RTT / 8) * 9
-
-		s.log.WithFields(logrus.Fields{
-			"ack frame No": newAckNo,
-			"unacked":      s.unacked,
-			"new ack now":  s.ackNo,
-		}).Trace("I am acknowledging")
 	}
 
 	if common.Debug {
@@ -203,10 +216,22 @@ func (s *sender) recvAck(ackNo uint32) error {
 		}).Trace("updated ackNo")
 	}
 
+	// Limite window size lower value
+	if s.senderWindow.cwndSize < 10 {
+		s.senderWindow.cwndSize = 10
+	}
+
+	// update the windowsize from the cwndSize
+	s.senderWindow.windowSize = uint16(s.senderWindow.cwndSize)
+
+	if common.Debug {
+		logrus.Debugf("windowsSize %v", s.senderWindow.windowSize)
+	}
+
 	// Only fill the window if new space has really opened up
 	if windowOpen {
 		select {
-		case s.windowOpen <- struct{}{}:
+		case s.senderWindow.windowOpen <- struct{}{}:
 			break
 		default:
 			break
@@ -215,7 +240,104 @@ func (s *sender) recvAck(ackNo uint32) error {
 
 	s.resetRetransmitTicker()
 
-	return nil
+	return missingFrameNo, nil
+}
+
+func (s *sender) onSuccess(ackNo uint32) {
+
+	if !s.frames[0].Time.Equal(time.Time{}) && ackNo == s.frames[0].frame.frameNo+1 && !s.frames[0].flags.RTR {
+		oldRTT := s.RTT
+		measuredRTT := time.Since(s.frames[0].Time)
+
+		// RTT Upper bound
+		measuredRTT = min(measuredRTT, s.RTT*2)
+
+		// This formula comes from RFC 9002 section 5.3
+		s.RTT = (s.RTT/8)*7 + measuredRTT/8
+
+		if s.RTT < minRTT {
+			s.RTT = minRTT
+		}
+
+		if common.Debug {
+			s.log.WithFields(logrus.Fields{
+				"oldRTT":      oldRTT,
+				"measuredRTT": measuredRTT,
+				"newRTT":      s.RTT,
+			}).Trace("updated rtt")
+		}
+	}
+
+	if s.frames[0].dataLength > 1000 {
+
+		// Each time we receive an acknowledgement, we will take the current window size CWND and reassign it to CWND + (1/CWND)
+		if s.senderWindow.state == AIMD {
+			s.senderWindow.cwndSize = s.senderWindow.cwndSize + (1 / s.senderWindow.cwndSize) // +=CWND + (1/CWND)
+
+		} else { // Slow start or recovery
+			s.senderWindow.cwndSize++
+
+			// Slow start is used when congestion window is no greater than the slow start
+			// threshold
+			if uint16(s.senderWindow.cwndSize) > s.senderWindow.ssThresh {
+				s.senderWindow.state = AIMD
+			}
+		}
+
+	}
+
+	s.senderWindow.duplicatedAckCounter = 0
+
+	// Adjust the RTO on the RTT when receive an ACK
+	s.RTO = (s.RTT / 8) * 9
+}
+
+func (s *sender) onLoss(ackNo uint32) uint32 {
+
+	missingFrameNo := uint32(0)
+
+	s.senderWindow.duplicatedAckCounter++
+
+	// Missing frames on second duplicate ACK
+	// Proactively retransmits subsequent frames on > 1 duplicate ACKs
+
+	if s.senderWindow.duplicatedAckCounter < 5 {
+		missingFrameNo = ackNo + uint32(s.senderWindow.duplicatedAckCounter) - 1 // congestion on the path -> retransmit before cutting the window
+		if s.senderWindow.state == FastRecovery {
+			if s.senderWindow.duplicatedAckCounter == 1 {
+				missingFrameNo = 0 // don't send on first frame
+			} else {
+				missingFrameNo -= 1 // increment the index from dup ack = 2
+			}
+		}
+	} else {
+		missingFrameNo = ackNo
+	}
+
+	if common.Debug {
+		logrus.Debugf("I received the ack %v, n %v times, windowS %v, ssThresh %v", ackNo, s.senderWindow.duplicatedAckCounter, s.senderWindow.windowSize, s.senderWindow.ssThresh)
+	}
+
+	if s.senderWindow.state == AIMD && s.senderWindow.duplicatedAckCounter == 2 {
+		// clamp the lower value of the ssThresh
+		newAIMDcwndSize := (3 * s.senderWindow.cwndSize) / 4
+
+		s.senderWindow.ssThresh = uint16(newAIMDcwndSize)
+		s.senderWindow.cwndSize = newAIMDcwndSize
+
+	} else if s.senderWindow.state == SlowStart {
+		newcwndSize := s.senderWindow.cwndSize / 2
+		s.senderWindow.ssThresh = uint16(newcwndSize)
+		s.senderWindow.cwndSize = newcwndSize
+		s.senderWindow.state = FastRecovery // will switch to AIMD on the next successful ack
+	}
+
+	// clamp the lower value of the minimum value 10
+	if s.senderWindow.cwndSize < minWindowSize {
+		s.senderWindow.cwndSize = minWindowSize
+	}
+
+	return missingFrameNo
 }
 
 func (s *sender) sendEmptyPacket() {
@@ -234,9 +356,13 @@ func (s *sender) framesToSend(rto bool, startIndex int) int {
 	// TODO(hosono) this is a mess because there's no builtin min or clamp functions
 	var numFrames int
 	if rto {
-		numFrames = maxFragTransPerRTO
+		if s.rtoCounter < int(s.senderWindow.windowSize) {
+			numFrames = s.rtoCounter + 1
+		} else {
+			numFrames = int(s.senderWindow.windowSize)
+		}
 	} else {
-		numFrames = int(s.windowSize) - int(s.unacked) - startIndex
+		numFrames = int(s.senderWindow.windowSize) - int(s.unacked) - startIndex
 	}
 
 	// Clamp value to avoid going out of bounds
@@ -253,6 +379,7 @@ func (s *sender) framesToSend(rto bool, startIndex int) int {
 func (s *sender) Close() error {
 	if s.closed.CompareAndSwap(false, true) {
 		close(s.sendQueue)
+		close(s.prioritySendQueue)
 
 		return nil
 	}
@@ -304,4 +431,10 @@ func (s *sender) sendFin() error {
 	}
 
 	return nil
+}
+
+func (s *sender) getWindowSize() uint16 {
+	s.m.Lock()
+	defer s.m.Unlock()
+	return s.senderWindow.windowSize
 }

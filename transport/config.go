@@ -108,6 +108,7 @@ type ServerConfig struct {
 	GetCertList    func() ([]*Certificate, error)
 
 	HiddenModeVHostNames []string
+	IsHidden             bool // if HiddenModeVHostNames length > 0, server discards discoverable mode HS
 }
 
 func (c *ServerConfig) maxPendingConnections() int {

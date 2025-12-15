@@ -22,8 +22,6 @@ type receiver struct {
 	ackNo uint64
 	// +checklocks:m
 	windowStart uint64
-	// +checklocks:m
-	windowSize uint16
 
 	closed atomic.Bool
 	m      sync.Mutex
@@ -32,10 +30,7 @@ type receiver struct {
 
 	dataReady *common.DeadlineChan[struct{}]
 	// +checklocks:m
-	buffer       *bytes.Buffer
-	missingFrame atomic.Bool
-	// +checklocks:m
-	frameToSendCounter uint16
+	buffer *bytes.Buffer
 
 	log *logrus.Entry // +checklocksignore
 }
@@ -45,7 +40,6 @@ func newReceiver(log *logrus.Entry) *receiver {
 		dataReady:   common.NewDeadlineChan[struct{}](1),
 		buffer:      new(bytes.Buffer),
 		fragments:   make(PriorityQueue, 0),
-		windowSize:  windowSize,
 		windowStart: 1,
 		log:         log.WithField("receiver", ""),
 	}
@@ -61,18 +55,6 @@ func (r *receiver) getAck() uint32 {
 	r.m.Lock()
 	defer r.m.Unlock()
 	return uint32(r.ackNo)
-}
-
-func (r *receiver) getWindowSize() uint16 {
-	r.m.Lock()
-	defer r.m.Unlock()
-	return r.windowSize
-}
-
-func (r *receiver) getFrameToSendCounter() uint16 {
-	r.m.Lock()
-	defer r.m.Unlock()
-	return r.frameToSendCounter
 }
 
 /*
@@ -104,12 +86,6 @@ func (r *receiver) processIntoBuffer() bool {
 			if frag.priority > r.windowStart {
 				heap.Push(&r.fragments, frag)
 
-				r.missingFrame.Store(true)
-				// Add to RTR frame.datalength the cumulative missing frames
-				frameToSend := uint16(frag.priority - r.windowStart)
-				if frameToSend <= windowSize {
-					r.frameToSendCounter = frameToSend
-				}
 				if common.Debug {
 					log.WithFields(logrus.Fields{
 						"frag.priority": frag.priority,
@@ -127,7 +103,6 @@ func (r *receiver) processIntoBuffer() bool {
 			r.buffer.Write(frag.value)
 			r.windowStart++
 			r.ackNo++
-			r.frameToSendCounter = 0
 			if common.Debug {
 				log.Trace("processing packet")
 			}
@@ -229,7 +204,7 @@ func (r *receiver) receive(p *frame) (bool, error) {
 	}
 
 	windowStart := r.windowStart
-	windowEnd := r.windowStart + uint64(uint32(r.windowSize))
+	windowEnd := r.windowStart + maxWindowSize
 	frameNo := r.unwrapFrameNo(p.frameNo)
 
 	var log *logrus.Entry

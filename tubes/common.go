@@ -37,15 +37,16 @@ const initialRTT = 333 * time.Millisecond
 // This number should be kept reasonably high to privilege RTR frames over RTT frames
 // If the measured RTT is ever lower than minRTT, it is clamped to minRTT
 // From RFC 9002 section 6.2.1 (kGranularity)
-const minRTT = 10 * time.Millisecond
+const minRTT = 5 * time.Millisecond
 
 const maxRTO = 10 * time.Second
 
-// the maximum number of packets to retransmit per rto
-const maxFragTransPerRTO = 1
+// The number of packets in the window for reliable tubes
+const defaultWindowSize = 10 // 10 lets Hop adapt on the network type
 
-// the number of packets in the window for reliable tubes
-const windowSize = 128
+// The upper and lower bounds for an optimal use of the window without congestion
+const maxWindowSize = 1000
+const minWindowSize = 10
 
 // TODO(hosono) choose this time
 // amount of time to wait for all all tubes to close when muxer is stopping

@@ -1,0 +1,9 @@
+ListenAddress = ":77"
+
+Key = "/etc/hopd/id_hop.pem"
+KEMKey = "/etc/hopd/kem_hop.pem"
+Certificate = "/etc/hopd/id_hop.cert"
+CAFiles = ["/etc/hopd/CAFiles/intermediate.cert", "/etc/hopd/CAFiles/root.cert"]
+
+Users = ["root"]
+HiddenModeVHostNames = ["127.0.0.1"]

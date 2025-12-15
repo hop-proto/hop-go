@@ -142,12 +142,15 @@ func NewHopServer(sc *config.ServerConfig) (*HopServer, error) {
 		return certificates, nil
 	}
 
+	isHiddenActivated := len(sc.HiddenModeVHostNames) > 0
+
 	tconf := transport.ServerConfig{
 		GetCertificate:       getCert,
 		HandshakeTimeout:     sc.HandshakeTimeout,
 		ClientVerify:         &transport.VerifyConfig{},
 		GetCertList:          getAllowedCerts,
 		HiddenModeVHostNames: sc.HiddenModeVHostNames,
+		IsHidden:             isHiddenActivated,
 	}
 
 	// serverConfig options inform verify config settings
