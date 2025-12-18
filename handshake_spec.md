@@ -1,10 +1,6 @@
 # Hop Protocol
 
-
-
-[TOC]
-
-Draft Authors: Wilson Nguyen, Gerry Wan, David Adrian, Zakir Durumeric
+Authors: Paul Flammarion, George Ari Hosono, Wilson Nguyen, Laura Bauman, Daniel Rebelsky, Gerry Wan, David Adrian, Zakir Durumeric
 
 ## Prerequisite Knowledge
 
