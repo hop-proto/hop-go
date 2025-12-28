@@ -16,7 +16,7 @@ require (
 	github.com/muesli/cancelreader v0.2.2
 	github.com/pkg/errors v0.9.1
 	github.com/sbinet/pstree v0.3.0
-	github.com/sirupsen/logrus v1.8.1
+	github.com/sirupsen/logrus v1.8.3
 	goji.io v2.0.2+incompatible
 	golang.org/x/crypto v0.11.1-0.20230711161743-2e82bdd1719d
 	golang.org/x/exp v0.0.0-20221215174704-0915cd710c24
