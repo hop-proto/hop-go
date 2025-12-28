@@ -1,6 +1,6 @@
 module hop.computer/hop
 
-go 1.23
+go 1.24
 
 replace github.com/BurntSushi/toml => github.com/drebelsky/toml v0.0.2
 
