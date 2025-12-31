@@ -9,7 +9,7 @@ Hop seeks to provide native support for secure identity forwarding that abides b
 3. **To Whom** (the target)
 4. **When** (deadline/expiration date)
 
-On inception a hop client process determines whether it is acting as a Principal or Delegate. The default behavior is for the hop client to be a Delegate (TODO(baumanl): confirm this is desired default), but this can be overriden via the client config file or command line arguments.
+On inception a hop client process determines whether it is acting as a Principal or Delegate. The default behavior is for the hop client to be a Delegate, but this can be overriden via the client config file or command line arguments.
 
 **Principal** Client:
 - must have proof of identity (e.g. cert + static private key)
@@ -48,35 +48,46 @@ I made a rudimentary animation of this process in google slides (present and cli
 
 ### Intent Request Fields
 
-| Field           | Size        |
-| -----------     | ----------- |
-| Grant Type | 1 byte |
-| Reps(?) | 1 byte|
-| Target Port Number | 2 bytes |
-| Start Time | 8 bytes |
-| Expiration Time | 8 bytes |
-| Target Username | 32 bytes    |
-| Target SNI      |  <=256 bytes       |
-| Delegate Client Certificate | <= 660 bytes (?)|
-| Associated Data | * bytes |
+| Field           | Size         |
+| -----------     |--------------|
+| Grant Type | 1 byte       |
+| Target Port Number | 2 bytes      |
+| Start Time | 8 bytes      |
+| Expiration Time | 8 bytes      |
+| Target Username | 32 bytes     |
+| Target SNI      | <=256 bytes  |
+| Delegate Client Certificate | <= 660 bytes |
+| Associated Data | * bytes      |
 
-- **Target Username** (32 bytes): the user on the target server that the Delegate wants to perform the action as (the *to whom* or *as whom* I guess). Populated by DClient from default (local username) or CLI flags/config.
-- **Target SNI** (<=256 bytes): the identifier of the server that the Delegate wants to connect to (the other part of the *to/as whom*). In the format of a cert ID Block. Populated by DClient from CLI flags/config.
+- **Target Username** (32 bytes): the user on the target server that the Delegate wants to perform the action as (*as whom*). Populated by DClient from default (local username) or CLI flags/config.
+- **Target SNI** (<=256 bytes): the identifier of the server that the Delegate wants to connect to (*to whom*). In the format of a cert ID Block. Populated by DClient from CLI flags/config.
 - **Target Port Number** (2 bytes): what port to connect to on the target. Populated by DClient from default or CLI flags/config.
-- **Grant Type** (1 byte): indicates how to interpret the "Associated Data" section. Can be one of "shell", "cmd", "local PF", "remote PF", etc. Populated by DClient. TODO(baumanl): is this actually necessary/how was I using it exactly before...?
-- **Reps** (1 byte): How many times this authorization grant can be used (single use or multi-use). Don't know if we care about this or if we should allocate more than one byte.
+- **Grant Type** (1 byte): indicates how to interpret the "Associated Data" section. Can be one of "shell", "cmd", "local PF", "remote PF", etc. Populated by DClient. 
 - **Start Time** (8 bytes): timestamp of when the authorization grant becomes effective.
 - **Expiration Time** (8 bytes): timestamp of when the authorization grant expires.
 - **Delegate Client Certificate** (<= 660 bytes): "self-signed" or otherwise; contains Delegate's static public key.
 - **Associated Data** (* bytes): More information about specific action (e.g. command to run, ports to forward, etc.)
 
 
-**TODO**(baumanl): Previously the Intent Request was missing some concept of the "when" (start time, duration, repeatability of the grant). What exactly do we want to support/what should the defaults be? I added the Reps, Start Time, and Duration fields to account for this, but they were not mentioned in the original outline of the auth grant protocol and I did not implement them previously.
-
 ### Authorize Intent
 
-- upon receiving the IR from ServerA, PClient needs to either approve or deny the request. This could be accomplished in many ways (e.g. prompting user for approval, reading a "policy" file, etc.)
-- If the IR is denied, then PClient sends an Intent Denied message with an optional reason for the denial. It keeps the AGT open in case the Delegate would like to send more IRs.
+Upon receiving the IR from ServerA, PClient needs to either approve or deny the request presented by the intent dialogue.
+
+```
+Would you like to
+  allow delegate.server.com
+  to run the command 'sudo reboot'
+  as user
+  on target.server.com
+  from <date>
+  until <date>
+  
+    Yes
+  > No
+```
+
+
+If the IR is denied, then PClient sends an Intent Denied message with an optional reason for the denial. It keeps the AGT open in case the Delegate would like to send more IRs.
 
 ### Intent Communication
 
@@ -110,10 +121,4 @@ I made a rudimentary animation of this process in google slides (present and cli
 ###
 
 Other Discussion Points:
-- TODO(baumanl): are all of the fields in the Intent Request necessary/are any missing? Specifically, it used to also include the Delegate SNI, but I think the Principal should actually just keep track of it since it will have received the Delegate's certificate when connecting to it.
 - TODO(baumanl): any use case for attempting to *dynamically* determine whether a client should act as a P/D? (e.g. by determining if it was spawned by a hopd process?)
-- TODO(baumanl): specify threat model better (how much do we trust the Delegate/authorization grant requests that the Principal receives?
-
-Questions about Client Certs:
-- Minimum number of bytes?
-- Use cases for multiple ID blocks?
