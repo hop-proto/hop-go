@@ -92,7 +92,10 @@ func (c *HopClient) newPrincipalInstanceSetup(delTube *tubes.Reliable, pq *ptPro
 	// check (and keep checking on signal) for the unreliable tube with the id
 	pq.lock.Lock()
 	logrus.Info("principal: acquired pq.lock for the first time")
-	for _, ok := pq.tubes[tubeID]; ok; {
+	for {
+		if _, ok := pq.tubes[tubeID]; ok {
+			break
+		}
 		logrus.Info("tube not here yet. waiting...")
 		pq.cv.Wait()
 	}
