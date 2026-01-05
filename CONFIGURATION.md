@@ -121,11 +121,13 @@ Certificate = "./leaf.cert"
 CAFiles = ["./intermediate.cert", "./root.cert"]
 
 KEMKey = "kem-hop.pem"
+Users = ["root"]
 HiddenModeVHostNames = ["127.0.0.1"]
 ```
 
 - `Key` and `Certificate` reference the server leaf certificate
 - `CAFiles` must include both the intermediate and root certificates
+- `Users` is the set of user allowed on the server
 - Hidden mode is enabled only when both `KEMKey` and `HiddenModeVHostNames` are set.
 
 
