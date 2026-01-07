@@ -9,7 +9,7 @@ Hop seeks to provide native support for secure identity forwarding that abides b
 3. **To Whom** (the target)
 4. **When** (deadline/expiration date)
 
-On inception a hop client process determines whether it is acting as a Principal or Delegate. The default behavior is for the hop client to be a Delegate, but this can be overriden via the client config file or command line arguments.
+On inception a Hop client process determines whether it is acting as a Principal or Delegate. The default behavior is for the hop client to be a Principal, but this can be overridden via the client config file or command line arguments.
 
 **Principal** Client:
 - must have proof of identity (e.g. cert + static private key)
@@ -17,15 +17,14 @@ On inception a hop client process determines whether it is acting as a Principal
 
 **Delegate** Client:
 - must request an authorization grant from a Principal Client
-- must be a descendant process of hopd to request an auth grant (not necessarily to use one though; as long as it has access to the static key used to get the authgrant)
 - must have proof of identity (e.g. \[self-signed\]cert + static private key)
-- to request an auth grant: hopd must still have an active hop session with a P hop client (once an auth grant has been issued the hop session with the Principal can terminate, but no further auth grants can be granted and further identity chaining will not be possible.)
+- to request an auth grant: hopd must still have an active hop session with a Principal hop client (once an auth grant has been issued the hop session with the Principal can terminate, but no further auth grants can be granted and further identity chaining will not be possible.)
 
 ## Authgrant Flow
 
 ```sequence
 PClient-->ServerA: Principal connects to ServerA
-...
+PClient-->ServerA: Principal spawns delegate client (DClient) on ServerA
 DClient--ServerA-->PClient: Intent Request
 Authorize Intent
 PClient--ServerA-->ServerB: Intent Communication
@@ -36,14 +35,14 @@ I made a rudimentary animation of this process in google slides (present and cli
 
 ### Principal Client Connects to ServerA
 - Principal client performs a standard hop handshake with ServerA and starts a hop session
-- within this hop session the user starts a Delegate Hop Client on Server A. (e.g. hopd--bash(PID)--hop or just hopd--hop(PID) if executing a single command)
+- Within this hop session the user starts a Delegate Hop Client on Server A.
 - hopd adds an entry to a map of PID --> hop session with Principal
-- hopd listens on an abstract unix domain socket for requests from descendent processes to contact their respective Principal
+- hopd listens on an abstract unix domain socket for requests from descendant processes to contact their respective Principal.
 
 ### Intent Request
 
-- The Delegate client (DClient) uses IPC to contact the hopd server (ServerA) and request to send an Intent Request to its Principal (PClient)
-- ServerA verifies that DClient is a descendent process and uses it's PID to locate the hop session it has with its Principal. TODO(baumanl): this portion of code is very unix specific --> either generalize or weaken this guarantee.
+- The Delegate client (DClient) uses IPC to contact the hopd server (ServerA) and request to send an Intent Request to its Principal (PClient).
+- ServerA verifies that DClient is a descendant process and uses its PID to locate the hop session it has with its Principal. This is simply the most convenient way for ServerA to know which Principal to send the request to. The security of authgrants does *not* depend on DClient being a descendant of ServerA.
 - ServerA opens an authorization grant tube (AGT) with PClient and sends the Intent Request message (outlined below).
 
 ### Intent Request Fields
@@ -71,7 +70,7 @@ I made a rudimentary animation of this process in google slides (present and cli
 
 ### Authorize Intent
 
-Upon receiving the IR from ServerA, PClient needs to either approve or deny the request presented by the intent dialogue.
+Upon receiving the Intent Request from ServerA, PClient needs to either approve or deny the request presented by the intent dialogue.
 
 ```
 Would you like to
@@ -87,13 +86,13 @@ Would you like to
 ```
 
 
-If the IR is denied, then PClient sends an Intent Denied message with an optional reason for the denial. It keeps the AGT open in case the Delegate would like to send more IRs.
+If the Intent Request is denied, then PClient sends an Intent Denied message with an optional reason for the denial. It keeps the AGT open in case the Delegate would like to send more Intent Requests.
 
 ### Intent Communication
 
-- Assuming the Principal approves the IR, then it needs to communicate the IR to the target server (ServerB).
+- Assuming the Principal approves the Intent Request, then it needs to communicate the Intent Request to the target server (ServerB).
 - It does this by establishing a hop session with the target proxied through the Delegate (it is not required that the Principal be able to directly connect to the target server).
-- The Principal verifies that the target server's certificate matches the Target SNI field in the IR, and then sends the IR over.
+- The Principal verifies that the target server's certificate matches the Target SNI field in the Intent Request, and then sends the Intent Request over.
 
 ### Intent Confirmation or Denial
 
@@ -104,21 +103,3 @@ If the IR is denied, then PClient sends an Intent Denied message with an optiona
 ### DClient connects to ServerB (target)
 
 - Now, upon completing the transport layer handshake with ServerB (using the keypair/cert corresponding to the client identifier for the authgrants), DClient can use any of the authgrants to perform authorized actions on the client. As authgrants are used/expire, ServerB (Target) removes them from the authgrant map.
-
-- TODO(baumanl): currently authgrants are stored in process memory; if the hopd process terminates then they are lost and Delegates would need to rerequest authorization grants. If we are looking to support long-term authgrants then it may be beneficial to store them in the file system.
-
-- TODO(baumanl): In order for an authgrant to be used, the Delegate must be able to complete a hop handshake with the server. This brings up the concern of client authentication. If the Delegate is using a self-signed certificate (basically a wrapper around a temporary "static" key) then the server must be willing to complete the handshake even though there is no real client certificate involved. This has a few implications that I see:
-  1. If the hop server does not want to trust self-signed certificates, then the Delegate client must have access to a static key and certificate that the transport layer will accept. Then, after the handshake, it can have an authorization grant giving it temporary access from another user. This seems borderline redundant and like it could potentially cause issues if a Delegate cert is given too much baseline power. However, currently I think this is the correct approach for cases where the hop server is configured to not allow self-signed connections.
-  2. On the otherhand, if the server always completes handshakes with all self-signed certificates then it seems like client certs are somewhat pointless to begin with.
-  3. Or, and this would probably involve breaking layering, we could attempt to allow the hop transport layer can trust self-signed certs only in the case that they have a corresponding outstanding authgrant.
-
-- Update on above TODO: David "When the delegate is connecting to "Server B", it needs to authenticate to Server B however Server B expects to authenticate, which will either be a fixed set of self-signed keys (authorized_keys), or via a client certificate hierarchy. This should be the same whether or not the connection is coming from a delegate, or from a principal directly."
-  - Are you implying that depending on the server configuration the transport layer will be aware of some set of authorized keys that the application layer could add keys to dynamically? If so, then I easily see how authgrants can fit in with that configuration.
-
-  -  On the other hand, if the server is configured to use purely a client certificate hierarchy, then the authgrant protocol could still be used, but the delegate would still need some certificate that fits into that hierarchy (and then the authgrant can actually give access to the correct user account). Did I understand that correctly?
-
-
-###
-
-Other Discussion Points:
-- TODO(baumanl): any use case for attempting to *dynamically* determine whether a client should act as a P/D? (e.g. by determining if it was spawned by a hopd process?)
