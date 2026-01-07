@@ -61,6 +61,11 @@ serve-dev: ## launch a container running the server with code mounted in
 	docker compose -f ./containers/docker-compose.yml build hopd-dev
 	docker compose -f ./containers/docker-compose.yml up --detach hop-server
 
+.PHONY: serve-dev-hidden
+serve-dev-hidden: ## launch a container running the server with code mounted in
+	docker compose -f ./containers/docker-compose.yml build hopd-dev
+	docker compose -f ./containers/docker-compose.yml up --detach hop-server-hidden
+
 .PHONY: port-forwarding-dev
 port-forwarding-dev: ## launch a container running the server with code mounted in
 	docker compose -f ./containers/docker-compose.yml build hopd-dev

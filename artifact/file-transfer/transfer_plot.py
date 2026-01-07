@@ -4,7 +4,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 
-df = pd.read_csv("transfer_data.csv")
+df = pd.read_csv("transfer_data_local.csv")
 
 df["File Size"] = df["File Size"].replace({
     "10MB_file": "10MB",
