@@ -1,29 +1,25 @@
-# Artifacts Functional
+# Artifact Functionality
 
----
+Hop supports multiple deployment configurations: a standalone server, multiple independent servers, or chained servers, with or without hidden mode enabled. Further descriptions of supported configurations and deployment options are provided in [CONTAINERS](../containers/README.md).
 
-Hop can be used in different configurations: as a standalone server, with multiple servers, or as a chain of servers, with or without hidden mode. To explore the different arrangements and configurations, please refer to [CONTAINERS](../containers/README.md).
+To mirror the setup described in the containers documentation, a single Hop server can be run locally using Docker as follows.
 
-As a mirror of the containers README, you can locally run a single Hop server in Docker as follows:
-
-From the `hop-go` directory, run the following commands:
-- `make serve-dev` to launch the docker image
+From the `hop-go` directory, execute:
+- `make serve-dev` to launch the Hop Docker container
 - `go run hop.computer/hop/cmd/hop -C containers/client_config.toml user@127.0.0.1:7777`
   to connect to the server
 
-# Results Reproduced
+---
+
+# Reproducing Results
 
 ## Session Establishment
 
----
+This experiment measures the time required to establish a non-interactive shell session and execute an initial command.
 
-This experiment measures the time required to establish a non-interactive shell and execute an initial command.
+All data reported in the paper are available in `tts_data.csv`. The corresponding plot can be reproduced using `tts_plot.py`.
 
-All collected data reported in the paper can be found in `tts_data.csv`, and you can reproduce the plot using `tts_plot.py`.
-
-The experiment script can be found in `tts_measure.py`.
-
-See and update the experiment configuration at the top of the file
+The measurement script is located in `tts_measure.py`. The experiment configuration is defined at the top of the file:
 
 ```python
 CONFIG_MAP = {
@@ -46,54 +42,73 @@ RESULTS_FILE = "tts_data_local.csv"
 HOSTS = CONFIG_MAP.keys()
 HOP_PATH = "go run hop.computer/hop/cmd/hop"
 ```
-This configuration specify that the script must be run from the root directory of `hop-go` and requires three running servers: SSH, Hop, and Hop with hidden mode enabled.
 
-To run it locally you can use `make cred-gen` from the project root, as described in [CONTAINERS](../containers/README.md), and then run:
-- `make serve-dev` to launch the Hop server Docker container
-- `make serve-dev-hidden` to launch the hidden-mode Hop server Docker container
+This configuration assumes execution from the root directory of `hop-go` and requires three running services: an SSH server, a Hop server, and a Hop server with hidden mode enabled.
 
-To run it on separate machine, you must install Hop and SSH on it and  follow the instructions to configure Hop in [CONFIGURATION](../CONFIGURATION.md).
+To reproduce the experiment locally:
+1. Generate credentials using `make cred-gen` from the project root (see [CONTAINERS](../containers/README.md)).
+2. Launch the Hop server container using `make serve-dev`.
+3. Launch the hidden-mode Hop server container using `make serve-dev-hidden`.
 
-> Note
-> Remember to update the measurement Python script accordingly to point to the correct IP, protocol, and configuration file paths for both hidden and discoverable modes.
+To run the experiment on a remote machine, install both Hop and SSH and configure Hop as described in [CONFIGURATION](../CONFIGURATION.md).
 
-`tts_plot.py` can be used to generate the bar plot showing your results similarly to the figure in the paper.
-Make sure to update `RESULTS_FILE = "tts_data.csv"` to match your dataset file.
+> [!NOTE] 
+> The measurement script must be updated to reflect the correct IP addresses, protocols, and configuration file paths for both hidden and discoverable modes.
 
-
-## File Transfer Speed
-### In Simulation
+Use `tts_plot.py` to generate the bar plot corresponding to the figure reported in the paper. Ensure that `RESULTS_FILE` matches the dataset being plotted.
 
 ---
 
-This experiment runs in Mininet TODO add a link as a controlled simulation environment to isolate the effects of network variation.
+## File Transfer Speed
 
-You need to have a working loopback ssh authentication.
-For Hop, you need to generate a client_config.toml and a server_config.toml to enable the connection to `root@10.0.3.10`
+We evaluate file transfer performance using three file sizes: 10 MB, 100 MB, and 1 GB. Files are named following the convention `{size}_file` (e.g., `10MB_file`).
 
-Find help in [CONFIGURATION](../CONFIGURATION.md).
-
-TODO maybe i can easily make certificate for this sim 
-
-### Real World
-
-This experiment measures the time required for a file to be transferred to a remote host tunneled by different protocol.
-
-All collected data can be found in `transfer.csv`, and you can plot it using `transfer_plot.py`. This script reproduces the results reported in the paper.
-
-You can also measure your own transfers.
-
-To do so you first must have running and accessible ssh or/and Hop servers. If you decide to setup environments on remote servers we suggest you to follow the instructions in [CONFIGURATION](../CONFIGURATION.md). You can also run it locally by setting up a docker environment as described in [CONTAINERS](../containers/README.md).
-
-You then need to generate files of random data with different sizes. You can do it with the following command
-```sh
-dd if=/dev/urandom of=1GB_file bs=1M count=1024
-dd if=/dev/urandom of=100MB_file bs=1M count=100
-dd if=/dev/urandom of=10MB_file bs=1M count=10 
+To avoid unintended compression or caching effects, all files are populated with random data:
+```shell
+dd if=/dev/urandom of=1GB_file bs=1M count=1024  
+dd if=/dev/urandom of=100MB_file bs=1M count=100  
+dd if=/dev/urandom of=10MB_file bs=1M count=10
 ```
 
-At the top of the transfer_measure.py file, edit the parameters with the according ones:
+Repeated transfers of large files may consume significant time and system resources. Users should take appropriate precautions before running these experiments.
 
+### Simulation Environment
+
+This experiment is conducted using [Mininet](https://mininet.org/) to provide a controlled environment and isolate the effects of network conditions along the `h1--r--h3` path.
+
+Pre-generated credentials and Hop configuration files are available in `artifact/simulation/config`.
+
+Key simulation parameters can be adjusted at the top of the experiment script:
+
+```python
+QUEUE = 200  
+DELAYH1 = '10ms'      # h1--r link  
+BWH1 = 100            # h1--r link
+
+RESULTS_FILE = "results_hop_local.csv"  
+FILE_SIZES = ["100MB"]
+
+NETWORKS = [
+{"name": "baseline", "bw": 100, "delay": "10ms", "jitter": "0ms", "loss": 0}
+# Additional network configurations...
+]
+```
+
+Run the Mininet simulation from the `hop-go` root directory with elevated privileges (`sudo`).
+
+The script produces a dataset that can be visualized using `simulation_plot.py`. The datasets used to generate the figures in the paper are provided and can be plotted directly using the same script.
+
+---
+
+### Real-World Deployment
+
+This experiment measures end-to-end file transfer time to a remote host tunneled over different protocols.
+
+All data reported in the paper are available in `transfer.csv`. The corresponding plot can be reproduced using `transfer_plot.py`.
+
+Users may also collect new measurements. This requires running and accessible SSH and/or Hop servers. For remote deployments, follow the setup instructions in [CONFIGURATION](../CONFIGURATION.md). Alternatively, a local Docker-based setup can be used as described in [CONTAINERS](../containers/README.md).
+
+Experiment parameters are defined at the top of `transfer_measure.py`:
 ```python
 HOST_MAP = {
     "127.0.0.1": {
@@ -112,24 +127,25 @@ FILE_NAMES = ["100MB_file", "10MB_file", "1GB_file"]
 HOP_PATH = "go run hop.computer/hop/cmd/hop"
 ```
 
-If you want to change your congestion control to NewReno instead of cubic
+To switch the TCP congestion control algorithm from Cubic to NewReno, execute:
 
 `sysctl net.ipv4.tcp_congestion_control=reno`
 
-This would reflect in your measurement key as `rsync_ssh_reno`
+Measurements collected under this configuration will be labeled using the key `rsync_ssh_reno`.
 
-You can then run the measurement script and plot the results. 
+After running the measurement script, results can be visualized using `transfer_plot.py`.
 
-Repetitive transfer of large files might take time and ressources. Please take the necessary precaution before running this experiment.
+---
 
 ## Keystroke Latency
 
-This experiment requires to establish a Hop or SSH session and run the typometer software. The software will record all your data and you can save if in the csv file format. Then you can print your result using our `keystrokes_plot.py` to have the visualisation of your data.
+This experiment measures interactive latency during terminal usage. A Hop or SSH session must be established with an interactive terminal, after which the Typometer software will require to select the active terminal window and record keystroke latency data. Results can be exported in CSV format.
 
-We provide a copy of the software and its licence in the keystroke-latency folder. Please refer to its readme to run the software.
+A copy of the [Typometer](https://github.com/pavelfatin/typometer) software and its license is provided in the `keystroke-latency` directory. Refer to the included README for usage instructions.
 
-All our data used in the paper can be found in `keystrockes_data.csv` and you can replicate our figure using the script `keystrokes_plot.py`.
+All data used in the paper are available in `keystrokes_data.csv`. The corresponding figure can be reproduced using `keystrokes_plot.py`.
 
-Update the source file and the styles to have an output.
+Users may update the input dataset and plotting parameters to customize the visualization.
 
-
+> [!NOTE]
+> This experiment does not have a script to run the experiments as it is entirely handled by the Typometer software.
