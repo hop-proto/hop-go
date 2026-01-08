@@ -1,4 +1,20 @@
-# Artifact Functionality
+# Artifacts Available
+
+In accordance with the USENIX Security Open Science Policy, we have made Hop permanently and publicly available via Zenodo at [10.5281/zenodo.17953396](https://doi.org/10.5281/zenodo.17953397).
+
+```
+hop-go
+├── artifact
+│   ├── file-transfer
+│   ├── keystroke-latency
+│   ├── simulation
+│   ├── time-to-shell
+│   └── README.md
+└── ... hop-go source code
+```
+
+
+# Artifacts Functional
 
 Hop supports multiple deployment configurations: a standalone server, multiple independent servers, or chained servers, with or without hidden mode enabled. Further descriptions of supported configurations and deployment options are provided in [CONTAINERS](../containers/README.md).
 
@@ -11,7 +27,7 @@ From the `hop-go` directory, execute:
 
 ---
 
-# Reproducing Results
+# Results Reproduced
 
 ## Session Establishment
 
