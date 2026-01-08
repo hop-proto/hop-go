@@ -1,0 +1,10 @@
+[Global]
+Key = "artifact/simulation/config/id_client.pem"
+Certificate = "artifact/simulation/config/id_client.cert"
+CAFiles = ["artifact/simulation/config/CAFiles/intermediate.cert", "artifact/simulation/config/CAFiles/root.cert"]
+
+
+[[Hosts]]
+Patterns = ["10.0.3.10"]
+ServerName = "10.0.3.10"
+Port = 7777

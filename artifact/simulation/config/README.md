@@ -1,0 +1,1 @@
+These identities and configurations are generated specifically for the Mininet experiment. You may regenerate your own by following the guidelines provided in [CONFIGURATION](../../../CONFIGURATION.md).
