@@ -2,9 +2,12 @@ import pandas as pd
 from datetime import datetime
 import seaborn as sns
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
 
 
-df = pd.read_csv("transfer_data_local.csv")
+df = pd.read_csv("transfer_data.csv")
 
 df["File Size"] = df["File Size"].replace({
     "10MB_file": "10MB",

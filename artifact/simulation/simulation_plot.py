@@ -2,6 +2,9 @@ import matplotlib.pyplot as plt
 import csv
 from collections import defaultdict
 from datetime import datetime
+import matplotlib
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
 
 ssh_file = "./results_ssh.csv"
 hop_file = "./results_hop.csv"
@@ -98,8 +101,8 @@ for group in line_groups:
     x_hop, y_hop = zip(*hop_points)
 
     ax = axs[plotted]
-    ax.plot(x_ssh, y_ssh, '-o', label='SSH', color='#5ec962')
-    ax.plot(x_hop, y_hop, '-x', label='Hop', color='#3b528b')
+    ax.plot(x_ssh, y_ssh, '--s', label='SSH', color='#5ec962')
+    ax.plot(x_hop, y_hop, '-o', label='Hop', color='#3b528b')
     ax.set_xlabel(varying, fontsize=15)
     ax.set_ylabel("Throughput (MB/s)", fontsize=13)
     ax.set_ylim(0, 13)

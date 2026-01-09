@@ -5,8 +5,11 @@ import numpy as np
 import matplotlib.cm as cm
 from datetime import datetime
 import matplotlib.colors as mcolors
+import matplotlib
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
 
-RESULTS_FILE = "./tts_data_local.csv"
+RESULTS_FILE = "./tts_data.csv"
 
 def load_data():
     # Read CSV, specifying column names explicitly
@@ -21,7 +24,7 @@ def load_data():
 
     df = df[df['Latency'] != 0]
 
-    df = df.sort_values(by=["Host", "Type"], ascending=[True, True])
+    df = df.sort_values(by=["Host", "Type"], ascending=[False, True])
 
     return df
 
@@ -44,7 +47,7 @@ def plot_results(df):
         "Hop-D": "#3b528b",
     }
 
-    plt.figure(figsize=(7.5, 3.75))
+    plt.figure(figsize=(5, 2.5)) # 15 7.5 7.5 3.75 5 2.5
     ax = sns.barplot(data=df,
                      x="Host",
                      y="Latency",
