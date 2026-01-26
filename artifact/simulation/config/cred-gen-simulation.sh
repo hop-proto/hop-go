@@ -1,8 +1,8 @@
 HOP_DIR="../../../"
 
 cd "$HOP_DIR" || exit 1
-
 mkdir "./artifact/simulation/config/CAFiles" || exit 1
+
 
 # Root
 
@@ -11,11 +11,11 @@ go run ./cmd/hop-keygen \
   -name root \
   -directory ./artifact/simulation/config/CAFiles
 
-
 go run ./cmd/hop-issue \
   -type root \
   -key-file ./artifact/simulation/config/CAFiles/root.pem \
   > ./artifact/simulation/config/CAFiles/root.cert
+
 
 # Intermediate
 
@@ -23,7 +23,6 @@ go run ./cmd/hop-keygen \
   -signing \
   -name intermediate \
   -directory ./artifact/simulation/config/CAFiles/
-
 
 go run ./cmd/hop-issue \
   -type intermediate \
@@ -33,13 +32,12 @@ go run ./cmd/hop-issue \
   -dns-name simulation.com \
   > ./artifact/simulation/config/CAFiles/intermediate.cert
 
+
 # Client
 
 go run ./cmd/hop-keygen \
   -name id_client \
   -directory ./artifact/simulation/config/
-
-
 
 go run ./cmd/hop-issue \
   -type leaf \
@@ -55,8 +53,6 @@ go run ./cmd/hop-issue \
 go run ./cmd/hop-keygen \
   -name id_server \
   -directory ./artifact/simulation/config/
-
-
 
 go run ./cmd/hop-issue \
   -type leaf \
