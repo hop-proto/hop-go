@@ -1,1 +1,1 @@
-These identities and configurations are generated specifically for the Mininet experiment. You may regenerate your own by following the guidelines provided in [CONFIGURATION](../../../CONFIGURATION.md).
+You can automatically generate identities fitting the configurations specifically for the Mininet experiment by running `cred-gen-simulation.sh` script. You may regenerate your own by following the guidelines provided in [CONFIGURATION](../../../CONFIGURATION.md).
