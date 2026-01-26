@@ -92,7 +92,7 @@ Repeated transfers of large files may consume significant time and system resour
 
 This experiment is conducted using [Mininet](https://mininet.org/) to provide a controlled environment and isolate the effects of network conditions along the `h1--r--h3` path.
 
-Pre-generated credentials and Hop configuration files are available in `artifact/simulation/config`.
+Script to generate credentials and Hop configuration files are available in `artifact/simulation/config`.
 
 Key simulation parameters can be adjusted at the top of the experiment script:
 
