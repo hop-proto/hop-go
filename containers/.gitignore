@@ -5,3 +5,4 @@ target_server/id_server.*
 third_server/id_server.*
 id_client.*
 id_server.*
+kem_hop.*

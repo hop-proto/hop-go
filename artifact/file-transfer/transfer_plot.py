@@ -2,6 +2,9 @@ import pandas as pd
 from datetime import datetime
 import seaborn as sns
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
 
 
 df = pd.read_csv("transfer_data.csv")

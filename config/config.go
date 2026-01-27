@@ -251,7 +251,7 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	//TODO(drebelsky): consider using reflection
 	newHC := HostConfig{
 		HandshakeTimeout:     15 * time.Second,
-		DataTimeout:          15 * time.Second,
+		DataTimeout:          15 * time.Minute,
 		Input:                os.Stdin,
 		Output:               os.Stdout,
 		RequestAuthorization: true,

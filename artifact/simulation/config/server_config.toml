@@ -1,0 +1,7 @@
+ListenAddress = ":77"
+
+Key = "artifact/simulation/config/id_server.pem"
+Certificate = "artifact/simulation/config/id_server.cert"
+CAFiles = [ "artifact/simulation/config/CAFiles/intermediate.cert" , "artifact/simulation/config/CAFiles/root.cert"]
+
+Users = ["root"]

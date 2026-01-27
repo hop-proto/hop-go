@@ -4,7 +4,13 @@ for Hop, including test keys, Docker files, entrypoints, etc.
 # Running one server
 Run the following commands from the `hop-go` directory
   - `make serve-dev` to launch the docker image
-  - `go run hop.computer/hop/cmd/hop -C containers/client_config.toml user@127.0.0.1`
+  - `go run hop.computer/hop/cmd/hop -C containers/client_config.toml user@127.0.0.1:7777`
+  to connect to the server
+
+# Running one server with Hidden Handshake
+Run the following commands from the `hop-go` directory
+- `make serve-dev-hidden` to launch the docker image
+- `go run hop.computer/hop/cmd/hop -C containers/hidden_server/client_config_hidden.toml user@127.0.0.1:5555`
   to connect to the server
 
 # Running two servers

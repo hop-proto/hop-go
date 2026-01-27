@@ -6,50 +6,47 @@ import os
 import csv
 import glob
 
+HOST_MAP = {
+    "127.0.0.1": {
+        # "rsync_ssh_reno": {  # This key can also be "rsync_ssh_cubic"
+        #     "user": "root",
+        # },
+        "rsync_hop": {
+            "user": "user",
+            "config": "containers/client_config.toml"
+        }
+    },
+}
+
+RESULTS_FILE = "transfer_data_local.csv"
+FILE_NAMES = ["100MB_file", "10MB_file", "1GB_file"]
+HOP_PATH = "go run hop.computer/hop/cmd/hop"
+
 
 def extract_speed(rsync_output):
     if "closed" in rsync_output.lower() or "error" in rsync_output.lower():
         print(rsync_output)
         return 0.0001
 
-    # Match both MB/s and kB/s
-    match = re.findall(r'(\d+\.\d+)([kM])B/s', rsync_output)
+    # Match kB/s or MB/s
+    matches = re.findall(r'(\d+\.\d+)\s*([kM])B/s', rsync_output)
+    if not matches:
+        return 0.0
 
-    if match:
-        value, unit = match[-1]
-        value = float(value)
+    value, unit = matches[-1]
+    value = float(value)
 
-        if unit == 'k':
-            value = value / 1000  # convert kB/s to MB/s
+    if unit == "k":
+        value /= 1000.0  # kB/s → MB/s
 
-        if value <= 300:
-            return value
-
-
-def run_cmd(cmd):
-    try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-        return result.stdout.strip()
-    except Exception as e:
-        return str(e)
+    return value
 
 
-def get_config_path(host):
-    config_map = {
-        "XXX-1": "ny2",
-        "XXX-2": "sg",
-        "XXX-3": "fk"
-    }
-
-    return f"./{config_map.get(host, 'sg')}/config_hidden.toml"
-
-
-def log_result_entry(host, file_size, proto, speed, filename="transfer_data.csv"):
+def log_result_entry(host, file_size, proto, speed, filename=RESULTS_FILE):
     file_exists = os.path.isfile(filename)
 
-    with open(filename, mode="a", newline="") as file:
-        writer = csv.writer(file)
-
+    with open(filename, "a", newline="") as f:
+        writer = csv.writer(f)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         if not file_exists:
@@ -57,49 +54,77 @@ def log_result_entry(host, file_size, proto, speed, filename="transfer_data.csv"
 
         writer.writerow([timestamp, host, file_size, proto, speed])
 
-    print(f"Logged: {host}, {file_size}, {proto}: {speed} MB/s")
+    print(f"Logged: {host}, {file_size}, {proto}: {speed:.2f} MB/s")
 
 
-def test_transfer(host, file_size):
-    print(f"Testing on {host} with {file_size}...")
+def test_transfer(host, file_size, protocol):
+    print(f"Testing {protocol} on {host} with {file_size}...")
 
-    run_cmd(f"ssh root@{host} 'rm {file_size}'")
-    config_path = get_config_path(host)
+    user = HOST_MAP[host][protocol]["user"]
 
-    protocols = {
-        "rsync_hop": f"rsync --no-compress --info=progress2 --rsh='./hop -C {config_path} root@{host}' {file_size} :",
-        "rsync_ssh": f"rsync --no-compress --info=progress2 -e 'ssh -c chacha20-poly1305@openssh.com' {file_size} root@{host}:",
-    }
+    if protocol == "hop":
+        config_path = HOST_MAP[host][protocol]["config"]
+        command = (
+            "rsync --no-compress --info=progress2 "
+            f"--rsh=\"{HOP_PATH} -C {config_path}\" "
+            f"{file_size} {user}@{host}:"
+        )
 
-    for proto, cmd in protocols.items():
-        try:
-            output = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=1000)
-            output_text = output.stdout + output.stderr
-        except subprocess.TimeoutExpired:
-            print(f"Timeout: {proto} took longer than 2.5 minutes. Skipping to next protocol.")
-            continue
+    elif protocol == "ssh":
+        command = (
+            "rsync --no-compress --info=progress2 "
+            "-e \"ssh -c chacha20-poly1305@openssh.com\" "
+            f"{file_size} {user}@{host}:"
+        )
 
-        print(output_text)
-        speed = extract_speed(output_text)
-        log_result_entry(host, file_size, proto, speed)
+    else:
+        print(f"Unknown protocol: {protocol}")
+        return
 
-        try:
-            subprocess.run(f"ssh root@{host} 'rm {file_size}'", shell=True, timeout=60)
-        except subprocess.TimeoutExpired:
-            print(f"Warning: Cleanup command timed out for {proto}")
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=1000,
+        )
+        output_text = result.stdout + result.stderr
+    except subprocess.TimeoutExpired:
+        print(f"Timeout: {protocol} exceeded time limit")
+        return
 
-        time.sleep(1)
+    print(output_text)
+
+    speed = extract_speed(output_text)
+    log_result_entry(host, file_size, protocol, speed)
+
+    # Cleanup remote file
+    try:
+        if protocol == "hop":
+            config_path = HOST_MAP[host][protocol]["config"]
+            cleanup_cmd = (
+                f"{HOP_PATH} -C {config_path} "
+                f"-c 'rm {file_size} && exit' {user}@{host}"
+            )
+        else:
+            cleanup_cmd = f"ssh {user}@{host} 'rm {file_size}'"
+
+        subprocess.run(cleanup_cmd, shell=True, timeout=60)
+
+    except subprocess.TimeoutExpired:
+        print(f"Warning: cleanup timed out for {protocol}")
+
+    time.sleep(1)
 
 
-for file in glob.glob("/tmp/hop*"):
-    os.remove(file)
+if __name__ == "__main__":
+    for file in glob.glob("/tmp/hop*"):
+        os.remove(file)
 
-hosts = ["XXX-1", "XXX-2", "XXX-3"]  # IP adresses
-file_sizes = ["100MB_file", "10MB_file", "1GB_file"]  # Files
-
-i = 0
-for i in range(0, 100):
-    i += 1
-    for host in hosts:
-        for file in file_sizes:
-            test_transfer(host, file)
+    for i in range(10):  # Will perform 10 times the experiment
+        print("Run test #", i)
+        for host, protocols in HOST_MAP.items():
+            for file_size in FILE_NAMES:
+                for protocol in protocols:
+                    test_transfer(host, file_size, protocol)

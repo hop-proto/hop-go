@@ -40,10 +40,12 @@ EX_CLIENT_CERT_OUTPUT_DIR=${HOP_DIR}/${EX_CLIENT_CERT_OUTPUT_DIR:='./containers'
 ## private keys
 ${HOP_GEN} | tee $EXAMPLE_CERT_OUTPUT_DIR/id_server.pem
 ${HOP_GEN} | tee $EX_CLIENT_CERT_OUTPUT_DIR/id_client.pem
+${HOP_GEN} -kem | tee $EXAMPLE_CERT_OUTPUT_DIR/kem_hop.pem
 
 ## public keys
 ${HOP_GEN} -private $EXAMPLE_CERT_OUTPUT_DIR/id_server.pem | tee $EXAMPLE_CERT_OUTPUT_DIR/id_server.pub
 ${HOP_GEN} -private $EX_CLIENT_CERT_OUTPUT_DIR/id_client.pem | tee $EX_CLIENT_CERT_OUTPUT_DIR/id_client.pub
+${HOP_GEN} -kem -private $EXAMPLE_CERT_OUTPUT_DIR/kem_hop.pem | tee $EXAMPLE_CERT_OUTPUT_DIR/kem_hop.pub
 
 ## certs
 ${HOP_ISSUE} -type leaf -key-file $CAFILES_OUTPUT_DIR/intermediate-key.pem -cert-file $CAFILES_OUTPUT_DIR/intermediate.cert -public-key $EXAMPLE_CERT_OUTPUT_DIR/id_server.pub -dns-name $EXAMPLE_CERT_DNS_NAME | tee $EXAMPLE_CERT_OUTPUT_DIR/id_server.cert
@@ -69,12 +71,20 @@ ${HOP_GEN} | tee $TARGET_CERT_OUTPUT_DIR/id_server.pem
 ${HOP_GEN} | tee $DELEGATE_CERT_OUTPUT_DIR/id_server.pem
 ${HOP_GEN} | tee $THIRD_CERT_OUTPUT_DIR/id_server.pem
 
+${HOP_GEN} -kem | tee $TARGET_CERT_OUTPUT_DIR/kem_hop.pem
+${HOP_GEN} -kem | tee $DELEGATE_CERT_OUTPUT_DIR/kem_hop.pem
+${HOP_GEN} -kem | tee $THIRD_CERT_OUTPUT_DIR/kem_hop.pem
+
 ${HOP_GEN} | tee $PRINCIPAL_CERT_OUTPUT_DIR/id_client.pem
 
 ## Public Keys
 ${HOP_GEN} -private $TARGET_CERT_OUTPUT_DIR/id_server.pem | tee $TARGET_CERT_OUTPUT_DIR/id_server.pub
 ${HOP_GEN} -private $DELEGATE_CERT_OUTPUT_DIR/id_server.pem | tee $DELEGATE_CERT_OUTPUT_DIR/id_server.pub
 ${HOP_GEN} -private $THIRD_CERT_OUTPUT_DIR/id_server.pem | tee $THIRD_CERT_OUTPUT_DIR/id_server.pub
+
+${HOP_GEN} -kem -private $TARGET_CERT_OUTPUT_DIR/kem_hop.pem | tee $TARGET_CERT_OUTPUT_DIR/kem_hop.pub
+${HOP_GEN} -kem -private $DELEGATE_CERT_OUTPUT_DIR/kem_hop.pem | tee $DELEGATE_CERT_OUTPUT_DIR/kem_hop.pub
+${HOP_GEN} -kem -private $THIRD_CERT_OUTPUT_DIR/kem_hop.pem | tee $THIRD_CERT_OUTPUT_DIR/kem_hop.pub
 
 ${HOP_GEN} -private $PRINCIPAL_CERT_OUTPUT_DIR/id_client.pem | tee $PRINCIPAL_CERT_OUTPUT_DIR/id_client.pub
 
@@ -84,3 +94,29 @@ ${HOP_ISSUE} -type leaf -key-file $CAFILES_OUTPUT_DIR/intermediate-key.pem -cert
 ${HOP_ISSUE} -type leaf -key-file $CAFILES_OUTPUT_DIR/intermediate-key.pem -cert-file $CAFILES_OUTPUT_DIR/intermediate.cert -public-key $THIRD_CERT_OUTPUT_DIR/id_server.pub -dns-name $THIRD_CERT_DNS_NAME | tee $THIRD_CERT_OUTPUT_DIR/id_server.cert
 
 ${HOP_ISSUE} -type leaf -key-file $CAFILES_OUTPUT_DIR/intermediate-key.pem -cert-file $CAFILES_OUTPUT_DIR/intermediate.cert -public-key $PRINCIPAL_CERT_OUTPUT_DIR/id_client.pub -dns-name $PRINCIPAL_CERT_DNS_NAME | tee $PRINCIPAL_CERT_OUTPUT_DIR/id_client.cert
+
+# Generate files for make serve-dev-hidden (hidden hop connection)
+## server
+HIDDEN_CERT_DNS_NAME=${HIDDEN_CERT_DNS_NAME:='hidden.com'}
+HIDDEN_CERT_OUTPUT_DIR=${HOP_DIR}/${HIDDEN_CERT_OUTPUT_DIR:='./containers/hidden_server'}
+
+## client
+HIDDEN_CLIENT_CERT_DNS_NAME=${HIDDEN_CLIENT_CERT_DNS_NAME:='user'}
+HIDDEN_CLIENT_CERT_OUTPUT_DIR=${HOP_DIR}/${HIDDEN_CLIENT_CERT_OUTPUT_DIR:='./containers/hidden_server'}
+
+## private keys
+${HOP_GEN} | tee $HIDDEN_CERT_OUTPUT_DIR/id_server.pem
+${HOP_GEN} | tee $HIDDEN_CLIENT_CERT_OUTPUT_DIR/id_client.pem
+${HOP_GEN} -kem | tee $HIDDEN_CERT_OUTPUT_DIR/kem_hop.pem
+
+## public keys
+${HOP_GEN} -private $HIDDEN_CERT_OUTPUT_DIR/id_server.pem | tee $HIDDEN_CERT_OUTPUT_DIR/id_server.pub
+${HOP_GEN} -private $HIDDEN_CLIENT_CERT_OUTPUT_DIR/id_client.pem | tee $HIDDEN_CLIENT_CERT_OUTPUT_DIR/id_client.pub
+${HOP_GEN} -kem -private $HIDDEN_CERT_OUTPUT_DIR/kem_hop.pem | tee $HIDDEN_CERT_OUTPUT_DIR/kem_hop.pub
+
+## certs
+${HOP_ISSUE} -type leaf -key-file $CAFILES_OUTPUT_DIR/intermediate-key.pem -cert-file $CAFILES_OUTPUT_DIR/intermediate.cert -public-key $HIDDEN_CERT_OUTPUT_DIR/id_server.pub -dns-name $HIDDEN_CERT_DNS_NAME | tee $HIDDEN_CERT_OUTPUT_DIR/id_server.cert
+${HOP_ISSUE} -type leaf -key-file $CAFILES_OUTPUT_DIR/intermediate-key.pem -cert-file $CAFILES_OUTPUT_DIR/intermediate.cert -public-key $HIDDEN_CLIENT_CERT_OUTPUT_DIR/id_client.pub -dns-name $HIDDEN_CLIENT_CERT_DNS_NAME | tee $HIDDEN_CLIENT_CERT_OUTPUT_DIR/id_client.cert
+
+
+
