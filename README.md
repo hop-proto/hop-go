@@ -45,10 +45,14 @@ $ go run cmd/hop -C ./hop_config user@host:port  # runs Hop client
 
 This will build the server in a Docker container and run it.
 ```cmd
+$ make cred-gen # To generate the default credentials
 $ make serve-dev  # Build and launch a server container
 $ docker ps  # Look for the container name, in case you need to stop it later.
-$ go run cmd/hop -C ./containers/client_config
+$ go run ./cmd/hop -C ./containers/client_config.toml user@127.0.0.1
 ```
+
+>[!NOTE]
+> If you have `io.Copy(tube, f) stopped with error: read /dev/ptmx: input/output error` Restarting the container fixes this issue.
 
 # License and Copyright
 
