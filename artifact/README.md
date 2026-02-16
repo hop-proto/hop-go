@@ -21,9 +21,13 @@ Hop supports multiple deployment configurations: a standalone server, multiple i
 To mirror the setup described in the containers documentation, a single Hop server can be run locally using Docker as follows.
 
 From the `hop-go` directory, execute:
+- `make cred-gen` to generate the default credentials for the containers
 - `make serve-dev` to launch the Hop Docker container
 - `go run hop.computer/hop/cmd/hop -C containers/client_config.toml user@127.0.0.1:7777`
   to connect to the server
+
+>[!NOTE]
+> If you have `io.Copy(tube, f) stopped with error: read /dev/ptmx: input/output error` Restarting the container fixes this issue.
 
 ---
 
@@ -57,6 +61,7 @@ CONFIG_MAP = {
 RESULTS_FILE = "tts_data_local.csv"
 HOSTS = CONFIG_MAP.keys()
 HOP_PATH = "go run hop.computer/hop/cmd/hop"
+EXPERIMENT = 10  # Will perform 10 times the experiment
 ```
 
 This configuration assumes execution from the root directory of `hop-go` and requires three running services: an SSH server, a Hop server, and a Hop server with hidden mode enabled.
@@ -70,6 +75,8 @@ To run the experiment on a remote machine, install both Hop and SSH and configur
 
 > [!NOTE] 
 > The measurement script must be updated to reflect the correct IP addresses, protocols, and configuration file paths for both hidden and discoverable modes.
+
+By default, the `tts_measure.py` is configured to run 10 measures for each of the configured protocols. Our collected dataset outlines 100 measurements for each configuration.
 
 Use `tts_plot.py` to generate the bar plot corresponding to the figure reported in the paper. Ensure that `RESULTS_FILE` matches the dataset being plotted.
 
@@ -128,12 +135,14 @@ Experiment parameters are defined at the top of `transfer_measure.py`:
 ```python
 HOST_MAP = {
     "127.0.0.1": {
-        "rsync_ssh_cubic": {
-            "user": "root",
-        },
+        # "rsync_ssh_reno": {  # This key can also be "rsync_ssh_cubic"
+        #     "user": "root",
+        #     "protocol": "ssh"
+        # },
         "rsync_hop": {
             "user": "user",
-            "config": "containers/client_config.toml"
+            "config": "containers/client_config.toml",
+            "protocol": "hop"  # either "hop" or "ssh" in lowercase
         }
     },
 }
@@ -141,6 +150,7 @@ HOST_MAP = {
 RESULTS_FILE = "transfer_data_local.csv"
 FILE_NAMES = ["100MB_file", "10MB_file", "1GB_file"]
 HOP_PATH = "go run hop.computer/hop/cmd/hop"
+EXPERIMENT = 10  # Will perform 10 times the experiment
 ```
 
 To switch the TCP congestion control algorithm from Cubic to NewReno, execute:
@@ -151,6 +161,10 @@ Measurements collected under this configuration will be labeled using the key `r
 
 After running the measurement script, results can be visualized using `transfer_plot.py`.
 
+> [!NOTE]
+> If your tubes do not close properly after a file transfer, you might need to enforce a data timeout. We suggest setting it to 15 seconds for this experiment instead of the default 15 minutes. To do so, edit `hop-go/config/config.go` in the function `func (hc *HostConfigOptional) Unwrap() *HostConfig` and set:
+>
+>     DataTimeout: 15 * time.Second,
 ---
 
 ## Keystroke Latency

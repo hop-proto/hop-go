@@ -25,6 +25,7 @@ CONFIG_MAP = {
 RESULTS_FILE = "tts_data_local.csv"
 HOSTS = CONFIG_MAP.keys()
 HOP_PATH = "go run hop.computer/hop/cmd/hop"  # Update this with the actual path to the hop binary
+EXPERIMENT = 10  # Will perform 10 times the experiment
 
 
 def run_command(cmd):
@@ -111,6 +112,6 @@ if __name__ == "__main__":
 
     log_number = sys.argv[1] if len(sys.argv) > 1 else "default"
 
-    for i in range(10):  # Will perform 10 times the experiment
+    for i in range(EXPERIMENT):
         print("Run test #", i)
         run_tests(log_number)

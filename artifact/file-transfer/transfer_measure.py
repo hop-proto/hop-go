@@ -10,10 +10,12 @@ HOST_MAP = {
     "127.0.0.1": {
         # "rsync_ssh_reno": {  # This key can also be "rsync_ssh_cubic"
         #     "user": "root",
+        #     "protocol": "ssh"
         # },
         "rsync_hop": {
             "user": "user",
-            "config": "containers/client_config.toml"
+            "config": "containers/client_config.toml",
+            "protocol": "hop"  # either hop or ssh in lowercase
         }
     },
 }
@@ -21,6 +23,7 @@ HOST_MAP = {
 RESULTS_FILE = "transfer_data_local.csv"
 FILE_NAMES = ["100MB_file", "10MB_file", "1GB_file"]
 HOP_PATH = "go run hop.computer/hop/cmd/hop"
+EXPERIMENT = 10  # Will perform 10 times the experiment
 
 
 def extract_speed(rsync_output):
@@ -57,13 +60,14 @@ def log_result_entry(host, file_size, proto, speed, filename=RESULTS_FILE):
     print(f"Logged: {host}, {file_size}, {proto}: {speed:.2f} MB/s")
 
 
-def test_transfer(host, file_size, protocol):
-    print(f"Testing {protocol} on {host} with {file_size}...")
+def test_transfer(host, file_size, protocol_key):
+    print(f"Testing {protocol_key} on {host} with {file_size}...")
 
-    user = HOST_MAP[host][protocol]["user"]
+    user = HOST_MAP[host][protocol_key]["user"]
+    protocol = HOST_MAP[host][protocol_key]["protocol"]
 
     if protocol == "hop":
-        config_path = HOST_MAP[host][protocol]["config"]
+        config_path = HOST_MAP[host][protocol_key]["config"]
         command = (
             "rsync --no-compress --info=progress2 "
             f"--rsh=\"{HOP_PATH} -C {config_path}\" "
@@ -78,7 +82,7 @@ def test_transfer(host, file_size, protocol):
         )
 
     else:
-        print(f"Unknown protocol: {protocol}")
+        print(f"Unknown protocol: {protocol}. You can only specify hop or ssh in lowercase")
         return
 
     try:
@@ -91,18 +95,18 @@ def test_transfer(host, file_size, protocol):
         )
         output_text = result.stdout + result.stderr
     except subprocess.TimeoutExpired:
-        print(f"Timeout: {protocol} exceeded time limit")
+        print(f"Timeout: {protocol_key} exceeded time limit")
         return
 
     print(output_text)
 
     speed = extract_speed(output_text)
-    log_result_entry(host, file_size, protocol, speed)
+    log_result_entry(host, file_size, protocol_key, speed)
 
     # Cleanup remote file
     try:
         if protocol == "hop":
-            config_path = HOST_MAP[host][protocol]["config"]
+            config_path = HOST_MAP[host][protocol_key]["config"]
             cleanup_cmd = (
                 f"{HOP_PATH} -C {config_path} "
                 f"-c 'rm {file_size} && exit' {user}@{host}"
@@ -122,9 +126,9 @@ if __name__ == "__main__":
     for file in glob.glob("/tmp/hop*"):
         os.remove(file)
 
-    for i in range(10):  # Will perform 10 times the experiment
+    for i in range(EXPERIMENT):
         print("Run test #", i)
-        for host, protocols in HOST_MAP.items():
+        for host, protocol_keys in HOST_MAP.items():
             for file_size in FILE_NAMES:
-                for protocol in protocols:
-                    test_transfer(host, file_size, protocol)
+                for protocol_key in protocol_keys:
+                    test_transfer(host, file_size, protocol_key)
