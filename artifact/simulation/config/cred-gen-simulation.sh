@@ -1,4 +1,5 @@
 HOP_DIR="../../../"
+ROOT_HOP_DIR="/root/.hop/authorized_keys" # MUST be in root home dir
 
 cd "$HOP_DIR" || exit 1
 mkdir "./artifact/simulation/config/CAFiles" || exit 1
@@ -61,3 +62,6 @@ go run ./cmd/hop-issue \
   -public-key ./artifact/simulation/config/id_server.pub \
   -dns-name 10.0.3.10 \
   > ./artifact/simulation/config/id_server.cert
+
+mkdir -p .hop
+cat ./artifact/simulation/config/id_client.pub > "$ROOT_HOP_DIR"

@@ -157,7 +157,7 @@ def run_tests():
     with open(output_file, 'a') as file:
         for config in network_configs:
             topo = RTopo(config)
-            net = Mininet(topo=topo, link=TCLink, autoSetMacs=True)
+            net = Mininet(topo=topo, controller=None, link=TCLink, autoSetMacs=True)
             net.start()
 
             r = net['r']

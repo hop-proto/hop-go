@@ -13,12 +13,16 @@ See [ARCHITECTURE](./ARCHITECTURE.md) for details on how this project is structu
 
 # Quick Start
 
-Set up `$GOPATH` (see https://golang.org/doc/code.html).
+Set up `$GOPATH` (see https://go.dev/wiki/SettingGOPATH).
 
 ```
-$ go get github.com/hop-proto/hop-go
-$ cd $GOPATH/src/github.com/hop-proto/hop-go
+$ git clone https://github.com/hop-proto/hop-go.git
+$ cd hop-go
+$ go get ./...; go get -t ./...
 ```
+
+> [!NOTE]
+> The error message `download go1.24 for linux/amd64: toolchain not available` can be fixed by updating `go.mod` from `go 1.24` to `go 1.24.0`
 
 #### Generating Keys
 

@@ -7,4 +7,4 @@ CAFiles = ["artifact/simulation/config/CAFiles/intermediate.cert", "artifact/sim
 [[Hosts]]
 Patterns = ["10.0.3.10"]
 ServerName = "10.0.3.10"
-Port = 7777
+Port = 77
