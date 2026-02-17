@@ -65,3 +65,4 @@ go run ./cmd/hop-issue \
 
 mkdir -p .hop
 cat ./artifact/simulation/config/id_client.pub > "$ROOT_HOP_DIR"
+echo "Be sure that you have the id_client.pub key in $ROOT_HOP_DIR or user's Hop authorized keys home directory.)"

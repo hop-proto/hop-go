@@ -95,6 +95,11 @@ dd if=/dev/urandom of=10MB_file bs=1M count=10
 
 Repeated transfers of large files may consume significant time and system resources. Users should take appropriate precautions before running these experiments.
 
+> [!NOTE]
+> If your tubes do not close properly after a file transfer, you might need to enforce a data timeout. We suggest setting it to 15 seconds for this experiment instead of the default 15 minutes. To do so, edit `hop-go/config/config.go` in the function `func (hc *HostConfigOptional) Unwrap() *HostConfig` and set:
+>
+>     DataTimeout: 15 * time.Second,
+
 ### Simulation Environment
 
 This experiment is conducted using [Mininet](https://mininet.org/) to provide a controlled environment and isolate the effects of network conditions along the `h1--r--h3` path.
@@ -118,6 +123,9 @@ NETWORKS = [
 ```
 
 Run the Mininet simulation from the `hop-go` root directory with elevated privileges (`sudo`).
+
+> [!WARNING]
+> Be sure you have the mininet client public key in the mininet server `$(HOME_DIR)/.hop/authorized_keys`. It is usually in `/root/.hop/authorized_keys` on Linux machine.
 
 The script produces a dataset that can be visualized using `simulation_plot.py`. The datasets used to generate the figures in the paper are provided and can be plotted directly using the same script.
 
@@ -161,10 +169,6 @@ Measurements collected under this configuration will be labeled using the key `r
 
 After running the measurement script, results can be visualized using `transfer_plot.py`.
 
-> [!NOTE]
-> If your tubes do not close properly after a file transfer, you might need to enforce a data timeout. We suggest setting it to 15 seconds for this experiment instead of the default 15 minutes. To do so, edit `hop-go/config/config.go` in the function `func (hc *HostConfigOptional) Unwrap() *HostConfig` and set:
->
->     DataTimeout: 15 * time.Second,
 ---
 
 ## Keystroke Latency
