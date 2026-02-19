@@ -1,6 +1,6 @@
 module hop.computer/hop
 
-go 1.24
+go 1.26
 
 replace github.com/BurntSushi/toml => github.com/drebelsky/toml v0.0.2
 
@@ -11,7 +11,6 @@ require (
 	github.com/charmbracelet/lipgloss v1.0.0
 	github.com/cloudflare/circl v1.6.1
 	github.com/creack/pty v1.1.18
-	github.com/gosuri/uilive v0.0.4
 	github.com/mattn/go-isatty v0.0.20
 	github.com/muesli/cancelreader v0.2.2
 	github.com/pkg/errors v0.9.1
