@@ -1,0 +1,12 @@
+.git
+.gitignore
+.github
+.idea
+.DS_Store
+.vscode
+.cache
+
+1GB_file
+100MB_file
+10MB_file
+*.csv
