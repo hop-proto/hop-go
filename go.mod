@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.4
 	github.com/charmbracelet/lipgloss v1.0.0
 	github.com/cloudflare/circl v1.6.1
-	github.com/creack/pty v1.1.18
+	github.com/creack/pty v1.1.24
 	github.com/mattn/go-isatty v0.0.20
 	github.com/muesli/cancelreader v0.2.2
 	github.com/pkg/errors v0.9.1
