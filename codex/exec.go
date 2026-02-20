@@ -363,6 +363,11 @@ func Server(stdinTube, stdoutTube *tubes.Reliable, f *os.File) {
 		logrus.Info("io.Copy(f, tube) stopped with error: ", e)
 		wg.Done()
 	}()
+
+	// TODO(hosono) This solves a race condition that intermittently causes login shells to fail.
+	// We should find a real solution
+	time.Sleep(5 * time.Millisecond)
+
 	_, e := io.Copy(stdoutTube, f)
 	logrus.Info("io.Copy(tube, f) stopped with error: ", e)
 	wg.Wait()
