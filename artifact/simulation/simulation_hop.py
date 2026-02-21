@@ -136,7 +136,7 @@ def extract_speed(rsync_output, bw):
     return 0
 
 def run_hop_rsync(h1, file_size, bw):
-    cmd = f'rsync --no-compress --info=progress2 --rsh="go run hop.computer/hop/cmd/hop -C ./artifact/simulation/config/client_config.toml root@10.0.3.10" ./{file_size}_file :/tmp/file/'
+    cmd = f'rsync --no-compress --info=progress2 --rsh="go run hop.computer/hop/cmd/hop -C ./artifact/simulation/config/client_config.toml --datatimeout 10s root@10.0.3.10" ./{file_size}_file :/tmp/file/'
     return run_cmd(h1, file_size, cmd, bw)
 
 

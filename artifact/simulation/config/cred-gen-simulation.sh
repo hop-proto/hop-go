@@ -1,5 +1,5 @@
 HOP_DIR="../../../"
-ROOT_HOP_DIR="/root/.hop/authorized_keys" # MUST be in root home dir
+ROOT_HOP_DIR="/root/.hop/" # MUST be in root home dir
 
 cd "$HOP_DIR" || exit 1
 mkdir "./artifact/simulation/config/CAFiles" || exit 1
@@ -63,6 +63,6 @@ go run ./cmd/hop-issue \
   -dns-name 10.0.3.10 \
   > ./artifact/simulation/config/id_server.cert
 
-mkdir -p .hop
-cat ./artifact/simulation/config/id_client.pub > "$ROOT_HOP_DIR"
+mkdir -p "$ROOT_HOP_DIR"
+cat "$HOP_DIR"/artifact/simulation/config/id_client.pub > "$ROOT_HOP_DIR"/authorized_keys
 echo "Be sure that you have the id_client.pub key in $ROOT_HOP_DIR or user's Hop authorized keys home directory.)"
