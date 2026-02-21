@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"strconv"
 	"strings"
+	"time"
 
 	istty "github.com/mattn/go-isatty"
 	"github.com/sirupsen/logrus"
@@ -27,6 +28,8 @@ type ClientFlags struct {
 
 	Cmd     string
 	Address *core.URL
+
+	DataTimeout string
 
 	// TODO(dadrian): What are these args?
 	RemoteFwds *portforwarding.Forward // CLI arguments related to remote port forwarding
@@ -76,8 +79,26 @@ func mergeClientFlagsAndConfig(f *ClientFlags, cc *config.ClientConfig, dc *conf
 	hc.LocalFwds = f.LocalFwds
 	hc.RemoteFwds = f.RemoteFwds
 
+	clientConfig := hc.Unwrap()
+
+	if f.DataTimeout != "" {
+		duration, err := time.ParseDuration(f.DataTimeout)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"invalid --datatimeout value %q (examples: 1h, 10m, 15s)",
+				f.DataTimeout,
+			)
+		}
+
+		if duration <= 0 {
+			return nil, fmt.Errorf("--datatimeout must be greater than 0")
+		}
+
+		clientConfig.DataTimeout = duration
+	}
+
 	// TODO(baumanl): add merge support for all other flags/config options
-	return hc.Unwrap(), nil
+	return clientConfig, nil
 }
 
 // LoadClientConfigFromFlags follows the configpath provided in flags (or default)
@@ -143,6 +164,8 @@ func defineClientFlags(fs *flag.FlagSet, f *ClientFlags) {
 	fs.StringVar(&f.Cmd, "c", "", "specific command to execute on remote server")
 	fs.BoolVar(&f.Headless, "N", false, "don't execute a remote command. Useful for just port forwarding.")
 	fs.BoolVar(&f.Verbose, "V", false, "display verbose error messages")
+
+	fs.StringVar(&f.DataTimeout, "datatimeout", "", "Set the client data timeout before closing the session (uses 15 minutes when unspecified). Examples: --datatimeout 10s")
 
 	// TODO(baumanl): Right now all explicit commands are run within the context
 	// of a shell using "$SHELL -c <cmd>" (this allows for expanding env

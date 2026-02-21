@@ -52,6 +52,7 @@ func createTestClient(t *testing.T, server *AcmeServer, serverName string, rootC
 	keyPath := "home/user/.hop/id_hop.pem"
 	rootCertPath := "home/user/.hop/root.cert"
 	interCertPath := "home/user/.hop/intermediate.cert"
+	dataTimeout := "1s"
 	hc := &config.HostConfigOptional{
 		Hostname:             &serverListenDomain,
 		Port:                 port,
@@ -60,7 +61,7 @@ func createTestClient(t *testing.T, server *AcmeServer, serverName string, rootC
 		Key:                  &keyPath,
 		ServerName:           &serverName,
 		CAFiles:              []string{rootCertPath, interCertPath},
-		DataTimeout:          int(time.Second),
+		DataTimeout:          &dataTimeout,
 		RequestAuthorization: &falsey,
 	}
 	hostConf := hc.Unwrap()

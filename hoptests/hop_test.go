@@ -198,6 +198,8 @@ func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
 	// TODO(baumanl): what should actual default values be here.
 	keyPath := path.Join("home", username, "/.hop/id_hop.pem")
 	truth := true
+	dataTimeout := "1s"
+
 	hc := config.HostConfigOptional{
 		Hostname:     &h,
 		Port:         port,
@@ -206,7 +208,7 @@ func NewTestClient(t *testing.T, s *TestServer, username string) *TestClient {
 		Key:          &keyPath,
 		ServerName:   &s.ServerName,
 		CAFiles:      []string{"home/" + username + "/.hop/root.cert", "home/" + username + "/.hop/intermediate.cert"},
-		DataTimeout:  int(time.Second),
+		DataTimeout:  &dataTimeout,
 		Input:        os.Stdin,
 	}
 	c.Config = hc.Unwrap()

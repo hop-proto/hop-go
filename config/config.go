@@ -134,8 +134,8 @@ type HostConfigOptional struct {
 	IsDelegate           *bool // If set then client will initiate authgrant protocol
 	IsPrincipal          *bool // If set then client will respond to authgrant requests
 	UsePty               *bool
-	HandshakeTimeout     int
-	DataTimeout          int
+	HandshakeTimeout     *string
+	DataTimeout          *string
 	InsecureSkipVerify   *bool // If set, the client will not verify the server's certificate
 	RequestAuthorization *bool
 	Input                io.Reader
@@ -239,10 +239,10 @@ func (hc *HostConfigOptional) MergeWith(other *HostConfigOptional) {
 	if other.UsePty != nil {
 		hc.UsePty = other.UsePty
 	}
-	if other.HandshakeTimeout != 0 {
+	if other.HandshakeTimeout != nil {
 		hc.HandshakeTimeout = other.HandshakeTimeout
 	}
-	if other.DataTimeout != 0 {
+	if other.DataTimeout != nil {
 		hc.DataTimeout = other.DataTimeout
 	}
 }
@@ -315,11 +315,11 @@ func (hc *HostConfigOptional) Unwrap() *HostConfig {
 	if hc.UsePty != nil {
 		newHC.UsePty = *hc.UsePty
 	}
-	if hc.HandshakeTimeout != 0 {
-		newHC.HandshakeTimeout = time.Duration(hc.HandshakeTimeout) * time.Second
+	if hc.HandshakeTimeout != nil {
+		newHC.HandshakeTimeout, _ = time.ParseDuration(*hc.HandshakeTimeout) // format 1h, 20m, 15sec...
 	}
-	if hc.DataTimeout != 0 {
-		newHC.DataTimeout = time.Duration(hc.DataTimeout) * time.Second
+	if hc.DataTimeout != nil {
+		newHC.DataTimeout, _ = time.ParseDuration(*hc.DataTimeout) // format 1h, 20m, 15sec...
 	}
 	if hc.InsecureSkipVerify != nil {
 		newHC.InsecureSkipVerify = *hc.InsecureSkipVerify
