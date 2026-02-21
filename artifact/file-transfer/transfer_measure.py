@@ -70,7 +70,7 @@ def test_transfer(host, file_size, protocol_key):
         config_path = HOST_MAP[host][protocol_key]["config"]
         command = (
             "rsync --no-compress --info=progress2 "
-            f"--rsh=\"{HOP_PATH} -C {config_path}\" "
+            f"--rsh=\"{HOP_PATH} -C {config_path} --datatimeout 10s\" "
             f"{file_size} {user}@{host}:"
         )
 
