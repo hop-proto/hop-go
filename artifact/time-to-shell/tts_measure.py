@@ -5,6 +5,7 @@ from datetime import datetime
 import glob
 import os
 
+# The keys must be either "ssh", "hop", or "hop-hidden" for this script.
 CONFIG_MAP = {
     "127.0.0.1": {
         # Uncomment to enable the measure of SSH on the specified IP
@@ -39,6 +40,7 @@ def run_command(cmd):
             text=True
         )
 
+        # Times out after 20 seconds
         while time.time() - start_time < 20:
             output = process.stdout.readline()
             if "Connected" in output:
@@ -55,6 +57,7 @@ def run_command(cmd):
     return 0  # unsuccessful
 
 
+# Test connection starts a non-interactive shell and exits.
 def test_connection(protocol, host):
     if protocol != "ssh":
         config_path = CONFIG_MAP[host][protocol]["config"]
@@ -72,6 +75,7 @@ def test_connection(protocol, host):
     return run_command(commands[protocol])
 
 
+# Write the results of the experiment in the CSV file
 def log_results(protocol, duration, host, log_number):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     log_entry = f"{timestamp};{protocol};{duration};{host};{log_number}\n"
@@ -81,10 +85,9 @@ def log_results(protocol, duration, host, log_number):
 
 
 def run_tests(log_number):
+    # Run experiment for each host and protocol
     for host, protocols in CONFIG_MAP.items():
-
         for key in protocols.keys():
-
             if key == "ssh":
                 print("Run SSH")
                 duration = test_connection("ssh", host)
@@ -107,11 +110,13 @@ def run_tests(log_number):
 
 
 if __name__ == "__main__":
+    # Cleaning logs file before experiment
     for file in glob.glob("/tmp/hop*"):
         os.remove(file)
 
     log_number = sys.argv[1] if len(sys.argv) > 1 else "default"
 
+    # Run experiment n times
     for i in range(EXPERIMENT):
         print("Run test #", i)
         run_tests(log_number)

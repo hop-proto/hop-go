@@ -6,20 +6,24 @@ from mininet.link import TCLink
 from mininet.topo import Topo
 from mininet.log import setLogLevel, info
 
+# Topology: (hop client) h1 ------ r ------ h3 (hop server)
+
 QUEUE = 200
-DELAYH1 = '10ms'      # h1--r link
-BWH1 = 100            # h1--r link
+DELAYH1 = '10ms'  # h1--r link
+BWH1 = 100  # h1--r link
 
 RESULTS_FILE = "results_hop_local.csv"
 FILE_SIZES = ["100MB"]
+HOP_PATH = "go run hop.computer/hop/cmd/hop"  # client
+HOPD_PATH = "go run hop.computer/hop/cmd/hopd"  # server
 
 NETWORKS = [
     # === BASELINE ===
     {"name": "baseline", "bw": 100, "delay": "10ms", "jitter": "0ms", "loss": 0},
 
     # === BANDWIDTH SCALING ===
-    #{"name": "bw_1Mbps", "bw": 1, "delay": "10ms", "jitter": "0ms", "loss": 0},
-    #{"name": "bw_5Mbps", "bw": 5, "delay": "10ms", "jitter": "0ms", "loss": 0},
+    # {"name": "bw_1Mbps", "bw": 1, "delay": "10ms", "jitter": "0ms", "loss": 0},
+    # {"name": "bw_5Mbps", "bw": 5, "delay": "10ms", "jitter": "0ms", "loss": 0},
     {"name": "bw_10Mbps", "bw": 10, "delay": "10ms", "jitter": "0ms", "loss": 0},
     {"name": "bw_20Mbps", "bw": 20, "delay": "10ms", "jitter": "0ms", "loss": 0},
     {"name": "bw_30Mbps", "bw": 30, "delay": "10ms", "jitter": "0ms", "loss": 0},
@@ -41,8 +45,8 @@ NETWORKS = [
     {"name": "delay_200ms", "bw": 100, "delay": "200ms", "jitter": "0ms", "loss": 0},
     {"name": "delay_300ms", "bw": 100, "delay": "300ms", "jitter": "0ms", "loss": 0},
     {"name": "delay_500ms", "bw": 100, "delay": "500ms", "jitter": "0ms", "loss": 0},
-    #{"name": "delay_750ms", "bw": 100, "delay": "750ms", "jitter": "0ms", "loss": 0},
-    #{"name": "delay_1000ms", "bw": 100, "delay": "1000ms", "jitter": "0ms", "loss": 0},
+    # {"name": "delay_750ms", "bw": 100, "delay": "750ms", "jitter": "0ms", "loss": 0},
+    # {"name": "delay_1000ms", "bw": 100, "delay": "1000ms", "jitter": "0ms", "loss": 0},
 
     # === JITTER SCALING ===
     {"name": "jitter_0ms", "bw": 100, "delay": "10ms", "jitter": "0ms", "loss": 0},
@@ -70,17 +74,18 @@ NETWORKS = [
     {"name": "loss_10", "bw": 100, "delay": "10ms", "jitter": "0ms", "loss": 10},
 
     # === REALISTIC COMPOSITE SCENARIOS ===
-    #{"name": "4G_urban", "bw": 20, "delay": "30ms", "jitter": "5ms", "loss": 0.2},
-    #{"name": "4G_rural", "bw": 5, "delay": "100ms", "jitter": "20ms", "loss": 0.5},
-    #{"name": "5G_ideal", "bw": 200, "delay": "5ms", "jitter": "1ms", "loss": 0.05},
-    #{"name": "wifi_highload", "bw": 10, "delay": "80ms", "jitter": "40ms", "loss": 2},
-    #{"name": "satellite_L1", "bw": 10, "delay": "300ms", "jitter": "30ms", "loss": 0.2},
-    #{"name": "satellite_L2", "bw": 10, "delay": "600ms", "jitter": "50ms", "loss": 0.5},
-    #{"name": "mobile_edge", "bw": 5, "delay": "250ms", "jitter": "20ms", "loss": 1},
-    #{"name": "congested_net", "bw": 1, "delay": "300ms", "jitter": "100ms", "loss": 5},
-    #{"name": "unstable_wifi", "bw": 5, "delay": "100ms", "jitter": "80ms", "loss": 3},
-    #{"name": "starlink_like", "bw": 100, "delay": "50ms", "jitter": "10ms", "loss": 0.1},
+    # {"name": "4G_urban", "bw": 20, "delay": "30ms", "jitter": "5ms", "loss": 0.2},
+    # {"name": "4G_rural", "bw": 5, "delay": "100ms", "jitter": "20ms", "loss": 0.5},
+    # {"name": "5G_ideal", "bw": 200, "delay": "5ms", "jitter": "1ms", "loss": 0.05},
+    # {"name": "wifi_highload", "bw": 10, "delay": "80ms", "jitter": "40ms", "loss": 2},
+    # {"name": "satellite_L1", "bw": 10, "delay": "300ms", "jitter": "30ms", "loss": 0.2},
+    # {"name": "satellite_L2", "bw": 10, "delay": "600ms", "jitter": "50ms", "loss": 0.5},
+    # {"name": "mobile_edge", "bw": 5, "delay": "250ms", "jitter": "20ms", "loss": 1},
+    # {"name": "congested_net", "bw": 1, "delay": "300ms", "jitter": "100ms", "loss": 5},
+    # {"name": "unstable_wifi", "bw": 5, "delay": "100ms", "jitter": "80ms", "loss": 3},
+    # {"name": "starlink_like", "bw": 100, "delay": "50ms", "jitter": "10ms", "loss": 0.1},
 ]
+
 
 class LinuxRouter(Node):
     "A Node with IP forwarding enabled."
@@ -116,6 +121,7 @@ class RTopo(Topo):
                      jitter=config["jitter"])
 
 
+# Extract the speed of the file transfer from the Rsync output
 def extract_speed(rsync_output, bw):
     if "closed" in rsync_output.lower() or "error" in rsync_output.lower():
         print(rsync_output)
@@ -135,12 +141,13 @@ def extract_speed(rsync_output, bw):
 
     return 0
 
+
+# Create Hop command
 def run_hop_rsync(h1, file_size, bw):
-    cmd = f'rsync --no-compress --info=progress2 --rsh="go run hop.computer/hop/cmd/hop -C ./artifact/simulation/config/client_config.toml --datatimeout 10s root@10.0.3.10" ./{file_size}_file :/tmp/file/'
+    cmd = f'rsync --no-compress --info=progress2 --rsh="{HOP_PATH} -C ./artifact/simulation/config/client_config.toml --datatimeout 10s root@10.0.3.10" ./{file_size}_file :/tmp/file/'
     return run_cmd(h1, file_size, cmd, bw)
 
-
-
+# Run command on h1
 def run_cmd(h1, file_size, cmd, bw):
     output = h1.cmd(cmd)
     return extract_speed(output, bw)
@@ -153,11 +160,13 @@ def log_and_print(file, text):
 
 def run_tests():
     with open(RESULTS_FILE, 'a') as file:
+        # Set up a new network for each network configuration
         for config in NETWORKS:
             topo = RTopo(config)
             net = Mininet(topo=topo, controller=None, link=TCLink, autoSetMacs=True)
             net.start()
 
+            # Creates the mininet network config
             r = net['r']
             r.cmd('ip route list')
             r.cmd('ifconfig r-eth1 10.0.1.1/24')
@@ -178,10 +187,12 @@ def run_tests():
             for h in [r, h1, h2, h3]:
                 h.cmd('/usr/sbin/sshd')
 
+            # clean files
             h3.cmd("rm -f /tmp/hop*")
             h3.cmd("rm -f /tmp/file/*")
 
-            h3.cmd("go run hop.computer/hop/cmd/hopd -C ./artifact/simulation/config/server_config.toml &")
+            # Starts Hop server
+            h3.cmd(f"{HOPD_PATH} -C ./artifact/simulation/config/server_config.toml &")
 
             for size in FILE_SIZES:
                 print("-------------------------------------------------------------------")
@@ -191,9 +202,14 @@ def run_tests():
                 elif "MB" in size:
                     file_size_mb = int(size.replace("MB", ""))
 
+                # Run Hop client file transfer
                 speed = run_hop_rsync(h1, size, config["bw"])
-                log_and_print(file, f"{datetime.now()};{file_size_mb};Hop;{config['bw']};{config['delay']};{config['jitter']};{config['loss']};{speed};")
 
+                # Log results
+                log_and_print(file,
+                              f"{datetime.now()};{file_size_mb};Hop;{config['bw']};{config['delay']};{config['jitter']};{config['loss']};{speed};")
+
+            # Delete files
             h3.cmd("rm -f /tmp/file/*")
 
             net.stop()
@@ -203,5 +219,3 @@ def run_tests():
 
 # Start test
 run_tests()
-
-
