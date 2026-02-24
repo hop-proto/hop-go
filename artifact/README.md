@@ -55,7 +55,7 @@ apt install openjdk-11-jre
 Note that Docker is not installed with this command set.
 
 > [!NOTE]
-> To ensure proper execution of Hop, we recommend using `Go 1.23` for the project, as an issue with Hop's use of `creack/pty` may prevent a shell from opening when running on newer versions of Go. Go version might be updated in `go.mod` and `hop-dev-dockerfile`.
+> To ensure proper execution of Hop, we recommend using `Go 1.23` for the project, as an issue with Hop's use of `creack/pty` may prevent a shell from opening when running on newer versions of Go. Go version might be updated in `go.mod` and `hop-dev-dockerfile`. See Issue #193.
 
 
 # Artifacts Functional
@@ -71,7 +71,7 @@ From the `hop-go` directory, execute:
   to connect to the server
 
 >[!NOTE]
-> If you have `io.Copy(tube, f) stopped with error: read /dev/ptmx: input/output error` Restarting the container fixes this issue.
+> If you have `io.Copy(tube, f) stopped with error: read /dev/ptmx: input/output error` restarting the container or downgrading Go to 1.23 fixes this issue. See Issue #193.
 
 ---
 
