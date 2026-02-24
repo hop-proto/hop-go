@@ -54,6 +54,9 @@ $ go run ./cmd/hop -C ./containers/client_config.toml user@127.0.0.1
 
 Success is having a shell as `user` in the Docker container `example.com`
 
+>[!NOTE]
+> If you have `io.Copy(tube, f) stopped with error: read /dev/ptmx: input/output error` restarting the container or downgrading Go to 1.23 fixes this issue.
+
 # License and Copyright
 
 Copyright 2025 The Board of Trustees of The Leland Stanford Junior University

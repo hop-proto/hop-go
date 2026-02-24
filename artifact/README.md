@@ -55,7 +55,7 @@ apt install openjdk-11-jre
 Note that Docker is not installed with this command set.
 
 > [!NOTE]
-> To ensure proper execution of Hop, we recommend using `Go 1.23` for the project, as an issue with Hop's use of `creack/pty` may prevent a shell from opening when running on newer versions of Go.
+> To ensure proper execution of Hop, we recommend using `Go 1.23` for the project, as an issue with Hop's use of `creack/pty` may prevent a shell from opening when running on newer versions of Go. Go version might be updated in `go.mod` and `hop-dev-dockerfile`.
 
 
 # Artifacts Functional
