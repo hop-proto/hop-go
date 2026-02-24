@@ -26,7 +26,9 @@ HOP_PATH = "go run hop.computer/hop/cmd/hop"
 EXPERIMENT = 10  # Will perform 10 times the experiment
 
 
+# Extract the speed of the file transfer from the Rsync output
 def extract_speed(rsync_output):
+    # Log 0.0001 if the file if the transfer failed
     if "closed" in rsync_output.lower() or "error" in rsync_output.lower():
         print(rsync_output)
         return 0.0001
@@ -40,11 +42,12 @@ def extract_speed(rsync_output):
     value = float(value)
 
     if unit == "k":
-        value /= 1000.0  # kB/s → MB/s
+        value /= 1000.0  # kB/s -> MB/s
 
     return value
 
 
+# Log the results to the CSV file
 def log_result_entry(host, file_size, proto, speed, filename=RESULTS_FILE):
     file_exists = os.path.isfile(filename)
 
@@ -60,6 +63,7 @@ def log_result_entry(host, file_size, proto, speed, filename=RESULTS_FILE):
     print(f"Logged: {host}, {file_size}, {proto}: {speed:.2f} MB/s")
 
 
+# Running a file transfer for the specified protocol and file
 def test_transfer(host, file_size, protocol_key):
     print(f"Testing {protocol_key} on {host} with {file_size}...")
 
@@ -70,7 +74,7 @@ def test_transfer(host, file_size, protocol_key):
         config_path = HOST_MAP[host][protocol_key]["config"]
         command = (
             "rsync --no-compress --info=progress2 "
-            f"--rsh=\"{HOP_PATH} -C {config_path}\" "
+            f"--rsh=\"{HOP_PATH} -C {config_path} --datatimeout 10s\" "
             f"{file_size} {user}@{host}:"
         )
 
@@ -85,6 +89,7 @@ def test_transfer(host, file_size, protocol_key):
         print(f"Unknown protocol: {protocol}. You can only specify hop or ssh in lowercase")
         return
 
+    # Run the transfer
     try:
         result = subprocess.run(
             command,
@@ -98,12 +103,14 @@ def test_transfer(host, file_size, protocol_key):
         print(f"Timeout: {protocol_key} exceeded time limit")
         return
 
+    # Log the output in the terminal
     print(output_text)
 
+    # Log the output in CSV file
     speed = extract_speed(output_text)
     log_result_entry(host, file_size, protocol_key, speed)
 
-    # Cleanup remote file
+    # Cleanup remote file since rysnc would not transfer it again if already exists
     try:
         if protocol == "hop":
             config_path = HOST_MAP[host][protocol_key]["config"]
@@ -123,11 +130,13 @@ def test_transfer(host, file_size, protocol_key):
 
 
 if __name__ == "__main__":
+    # Cleaning logs file before experiment
     for file in glob.glob("/tmp/hop*"):
         os.remove(file)
 
     for i in range(EXPERIMENT):
         print("Run test #", i)
+        # Test for all protocols and file size of each host
         for host, protocol_keys in HOST_MAP.items():
             for file_size in FILE_NAMES:
                 for protocol_key in protocol_keys:

@@ -21,9 +21,6 @@ $ cd hop-go
 $ go get ./...; go get -t ./...
 ```
 
-> [!NOTE]
-> The error message `download go1.24 for linux/amd64: toolchain not available` can be fixed by updating `go.mod` from `go 1.24` to `go 1.24.0`
-
 #### Generating Keys
 
 There are two different keygen tools at the moment. We know
@@ -41,8 +38,8 @@ More about certificate generation and Hop configuration can be found in [CONFIGU
 
 #### Running Hop
 ```cmd
-$ go run cmd/hopd -C ./hopd_config # runs Hop server
-$ go run cmd/hop -C ./hop_config user@host:port  # runs Hop client
+$ go run cmd/hopd -C ./hopd_config.toml # runs Hop server
+$ go run cmd/hop -C ./hop_config.toml user@host:port  # runs Hop client
 ```
 
 #### Local testing with Docker
@@ -55,8 +52,10 @@ $ docker ps  # Look for the container name, in case you need to stop it later.
 $ go run ./cmd/hop -C ./containers/client_config.toml user@127.0.0.1
 ```
 
+Success is having a shell as `user` in the Docker container `example.com`
+
 >[!NOTE]
-> If you have `io.Copy(tube, f) stopped with error: read /dev/ptmx: input/output error` Restarting the container fixes this issue.
+> If you have `io.Copy(tube, f) stopped with error: read /dev/ptmx: input/output error` restarting the container or downgrading Go to 1.23 fixes this issue. See Issue [#193](https://github.com/hop-proto/hop-go/issues/193).
 
 # License and Copyright
 
