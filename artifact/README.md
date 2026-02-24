@@ -37,10 +37,10 @@ To run all the experiments, you will need a Linux-based machine. We suggest usin
 
 - `Mininet v2.3.0`, for the evaluation in simulation. Installation available at https://mininet.org.  
 
-- `Java 11`, to run Typometer software only used for keystroke timing evaluation.  
+- `Java 11`, to run Typometer software, only used for keystroke timing evaluation.  
   Installation available at https://www.oracle.com/java/technologies/javase/jdk11-archive-downloads.html.  
 
-If you're using the apt package manager you can install most of the dependencies required for Hop artifact by executing:
+If you're using the apt package manager, you can install most of the dependencies required for the Hop artifact by executing:
 
 ```bash
 apt install golang
@@ -52,7 +52,7 @@ apt install mininet
 apt install openjdk-11-jre
 ```
 
-Note that Docker is not installed with this commande set.
+Note that Docker is not installed with this command set.
 
 > [!NOTE]
 > To ensure proper execution of Hop, we recommend using `Go 1.23` for the project, as an issue with Hop's use of `creack/pty` may prevent a shell from opening when running on newer versions of Go.
@@ -142,12 +142,12 @@ dd if=/dev/urandom of=100MB_file bs=1M count=100
 dd if=/dev/urandom of=10MB_file bs=1M count=10
 ```
 
-Ensure that the files are not existing on the remote host before starting the file transfer, otherwise rsync will not perform it again.
+Ensure that the files do not exist on the remote host before starting the file transfer; rsync will not perform it again.
 
 Repeated transfers of large files may consume significant time and system resources. Users should take appropriate precautions before running these experiments.
 
 > [!NOTE]
-> Since Hop tubes tend to do not close properly after a file transfer, we enforce their closure by forcing a `data timeout`on the client side. This can be updated in the script by finding the `--datatimeout` flag and can be configured in the `config.toml` files `DataTimeout = "3m"` for 3 minutes (as an example).
+> Since Hop tubes tend not to close properly after a file transfer, we enforce their closure by forcing a `data timeout`on the client side. This can be updated in the script by finding the `--datatimeout` flag and can be configured in the `config.toml` files `DataTimeout = "3m"` for 3 minutes (as an example).
 
 
 ### Simulation Environment
@@ -175,10 +175,10 @@ NETWORKS = [
 ]
 ```
 
-Run the Mininet simulation from the `hop-go` root directory with elevated privileges (`sudo`). Be sure that Hop can also run with these privileges. You can either add go to the sudoers file, or build Hop and update the script paths.
+Run the Mininet simulation from the `hop-go` root directory with elevated privileges (`sudo`). Be sure that Hop can also run with these privileges. You can either add go to the sudoers file or build Hop and update the script paths.
 
 > [!WARNING]
-> Be sure you have the mininet client public key in the mininet server `$(HOME_DIR)/.hop/authorized_keys`. It is usually in `/root/.hop/authorized_keys` on Linux machine.
+> Be sure you have the mininet client public key in the mininet server `$(HOME_DIR)/.hop/authorized_keys`. It is usually in `/root/.hop/authorized_keys` on a Linux machine.
 
 The script produces a dataset that can be visualized using `simulation_plot.py`. The datasets used to generate the figures in the paper are provided and can be plotted directly using the same script.
 
@@ -239,4 +239,4 @@ All data used in the paper are available in `keystrokes_data.csv`. The correspon
 Users may update the input dataset and plotting parameters to customize the visualization.
 
 > [!NOTE]
-> This experiment does not have a script to run the experiments as it is entirely handled by the Typometer software. The `typometer/` folder and all its files is a copy of the original source code accessed in August 2025.
+> This experiment does not have a script to run the experiments, as it is entirely handled by the Typometer software. The `typometer/` folder and all its files are a copy of the original source code accessed in August 2025.
