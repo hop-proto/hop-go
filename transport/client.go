@@ -56,7 +56,16 @@ type Client struct {
 
 	config ClientConfig
 
-	closeWg sync.WaitGroup
+	// closeDone is closed exactly once (guarded by closeOnce) when the
+	// connection has been fully torn down. Concurrent callers of Close that lose
+	// the race to perform the teardown block on it so that Close never returns
+	// before the connection is safely closed.
+	closeOnce sync.Once
+	closeDone chan struct{}
+}
+
+func (c *Client) signalClosed() {
+	c.closeOnce.Do(func() { close(c.closeDone) })
 }
 
 // IsClosed returns true if Close() has finished.
@@ -603,40 +612,44 @@ func (c *Client) SetWriteDeadline(t time.Time) error {
 // Close immediately tears down the connection.
 // Future operations on non-buffered data will return io.EOF
 func (c *Client) Close() error {
-	c.closeWg.Add(1)
-	for !c.state.CompareAndSwap(clientStateOpen, clientStateClosing) {
-		cur := c.state.Load()
-		switch cur {
+	for {
+		switch c.state.Load() {
 		case clientStateCreated:
+			// Never opened; nothing to tear down.
 			if c.state.CompareAndSwap(clientStateCreated, clientStateClosed) {
-				c.closeWg.Done()
+				c.signalClosed()
 				return nil
 			}
+			// Lost the race; re-evaluate the state.
 		case clientStateHandshaking:
+			// Wait for the in-progress handshake to resolve, then re-evaluate.
 			c.handshakeWg.Wait()
+		case clientStateOpen:
+			if !c.state.CompareAndSwap(clientStateOpen, clientStateClosing) {
+				// Lost the race; re-evaluate the state.
+				continue
+			}
+			// We won the race to tear down the connection.
+			// TODO(dadrian)[2024-04-07]: Document why this is correct, or fix it.
+			c.underlyingConn.SetReadDeadline(time.Now())
+			c.wg.Wait()
+			c.state.Store(clientStateClosed)
+			c.ss.handle.Close()
+			c.underlyingConn.Close()
+			c.signalClosed()
+			return nil
 		case clientStateClosing:
-			c.closeWg.Done()
-			c.closeWg.Wait()
+			// Another goroutine is tearing down the connection. Block until it
+			// finishes so that Close does not return before the connection is
+			// safely closed.
+			<-c.closeDone
 			return nil
 		case clientStateClosed:
-			c.closeWg.Done()
 			return nil
 		case clientStateError:
-			c.closeWg.Done()
 			return c.err
 		}
 	}
-	defer c.closeWg.Done()
-	// TODO(dadrian)[2024-04-07]: Document why this is correct, or fix it.
-	c.underlyingConn.SetReadDeadline(time.Now())
-
-	c.wg.Wait()
-
-	c.state.Store(clientStateClosed)
-	c.ss.handle.Close()
-	c.underlyingConn.Close()
-
-	return nil
 }
 
 // NewClient returns a Client configured as specified, using the underlying UDP
@@ -646,6 +659,7 @@ func NewClient(conn UDPLike, server *net.UDPAddr, config ClientConfig) *Client {
 		underlyingConn: conn,
 		dialAddr:       server,
 		config:         config,
+		closeDone:      make(chan struct{}),
 	}
 	return c
 }

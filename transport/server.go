@@ -50,8 +50,18 @@ type Server struct {
 	cookieLock       sync.Mutex
 	stopCookieRotate chan struct{}
 
-	wg        sync.WaitGroup
-	closeWait sync.WaitGroup
+	wg sync.WaitGroup
+
+	// closeDone is closed exactly once (guarded by closeOnce) when the server
+	// has been fully shut down. Concurrent callers of Close that lose the race
+	// to perform the shutdown block on it so that Close never returns before the
+	// server is safely closed.
+	closeOnce sync.Once
+	closeDone chan struct{}
+}
+
+func (s *Server) signalClosed() {
+	s.closeOnce.Do(func() { close(s.closeDone) })
 }
 
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
@@ -734,62 +744,69 @@ func (s *Server) Addr() net.Addr {
 
 // Close stops the server, causing Serve() to return.
 func (s *Server) Close() (err error) {
-	s.closeWait.Add(1)
-	for !s.state.CompareAndSwap(uint32(serverStateServing), uint32(serverStateClosing)) {
-		cur := serverState(s.state.Load())
-		switch cur {
+	for {
+		switch serverState(s.state.Load()) {
 		case serverStateReady:
+			// Never started serving; nothing to tear down.
 			if s.state.CompareAndSwap(uint32(serverStateReady), uint32(serverStateClosed)) {
-				s.closeWait.Done()
+				s.signalClosed()
 				return nil
 			}
+			// Lost the race; re-evaluate the state.
+		case serverStateServing:
+			if !s.state.CompareAndSwap(uint32(serverStateServing), uint32(serverStateClosing)) {
+				// Lost the race; re-evaluate the state.
+				continue
+			}
+			// We won the race to shut the server down.
+
+			// Stop reading packets
+			s.udpConn.SetReadDeadline(time.Now())
+			// Stop rotating cookies inside readPacket
+			close(s.stopCookieRotate)
+			// Wait for read packet to finish
+			s.wg.Wait()
+
+			// Close the channels
+			close(s.pendingConnections)
+
+			// Drain everything and close the connections
+			wg := sync.WaitGroup{}
+			func() {
+				s.m.Lock()
+				defer s.m.Unlock()
+				for h := range s.pendingConnections {
+					wg.Add(1)
+					go func(h *Handle) {
+						defer wg.Done()
+						h.Close()
+					}(h)
+				}
+				for _, ss := range s.sessions {
+					wg.Add(1)
+					go func(ss *SessionState) {
+						defer wg.Done()
+						if ss.handle != nil {
+							ss.handle.Close()
+						}
+						s.stopTrackingSession(ss.sessionID)
+					}(ss)
+				}
+			}()
+			wg.Wait()
+			s.udpConn.Close()
+			s.signalClosed()
+			return nil
 		case serverStateClosing:
-			s.closeWait.Done()
-			s.closeWait.Wait()
+			// Another goroutine is shutting the server down. Block until it
+			// finishes so that Close does not return before the server is safely
+			// closed.
+			<-s.closeDone
 			return nil
 		case serverStateClosed:
-			s.closeWait.Done()
 			return nil
 		}
 	}
-	defer s.closeWait.Done()
-
-	// Stop reading packets
-	s.udpConn.SetReadDeadline(time.Now())
-	// Stop rotating cookies inside readPacket
-	close(s.stopCookieRotate)
-	// Wait for read packet to finish
-	s.wg.Wait()
-
-	// Close the channels
-	close(s.pendingConnections)
-
-	// Drain everything and close the connections
-	wg := sync.WaitGroup{}
-	func() {
-		s.m.Lock()
-		defer s.m.Unlock()
-		for h := range s.pendingConnections {
-			wg.Add(1)
-			go func(h *Handle) {
-				defer wg.Done()
-				h.Close()
-			}(h)
-		}
-		for _, ss := range s.sessions {
-			wg.Add(1)
-			go func(ss *SessionState) {
-				defer wg.Done()
-				if ss.handle != nil {
-					ss.handle.Close()
-				}
-				s.stopTrackingSession(ss.sessionID)
-			}(ss)
-		}
-	}()
-	wg.Wait()
-	s.udpConn.Close()
-	return nil
 }
 
 func (s *Server) init() error {
@@ -860,6 +877,7 @@ func NewServer(conn UDPLike, config ServerConfig) (*Server, error) {
 		udpConn:          conn,
 		config:           config,
 		stopCookieRotate: make(chan struct{}),
+		closeDone:        make(chan struct{}),
 	}
 	err := s.init()
 	return &s, err

@@ -243,7 +243,13 @@ func (ss *SessionState) closeLocked() (err error) {
 	if ss.handleState == closed {
 		return nil
 	}
-	// TODO(dadrian)[2023-09-09]: Actually close. This is hard because sometimes
+	// Transition into the closed state. Once closed, writes via Handle.send
+	// return io.EOF and Handle.IsClosed reports true. The receive queue is
+	// drained separately (see Handle.Close) so that buffered data can still be
+	// read after a close.
+	//
+	// TODO(dadrian)[2023-09-09]: Notify the peer. This is hard because sometimes
 	// the Server knows we're closing, and sometimes only the Handle knows.
+	ss.handleState = closed
 	return nil
 }
