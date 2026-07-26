@@ -13,7 +13,8 @@ import (
 
 // Handle implements net.Conn and MsgConn for connections accepted by a Server.
 type Handle struct {
-	readLock sync.Mutex
+	readLock  sync.Mutex
+	writeLock sync.Mutex
 
 	underlying UDPLike                      // outgoing socket-like
 	recv       *common.DeadlineChan[[]byte] // incoming transport messages
@@ -153,35 +154,44 @@ func (c *Handle) Write(buf []byte) (int, error) {
 	return total, nil
 }
 
-// writeControl writes a control message to the remote host
-// TODO(hosono) fix lint error
-// nolint
-func (c *Handle) writeControlLocked(msg ControlMessage) error {
-	return c.ss.writePacketLocked(c.underlying, MessageTypeControl, []byte{byte(msg)}, c.ss.writeKey)
-}
-
 func (c *Handle) send(msgType MessageType, b []byte) error {
+	// Preserve packet write order without holding the session lock during
+	// socket I/O. Close only needs the session lock, so a blocked write cannot
+	// prevent it from completing.
+	c.writeLock.Lock()
+	defer c.writeLock.Unlock()
+
 	c.ss.m.Lock()
-	defer c.ss.m.Unlock()
 	if c.ss.handleState == closed {
+		c.ss.m.Unlock()
 		return io.EOF
 	}
-	err := c.ss.writePacketLocked(c.underlying, msgType, b, c.ss.writeKey)
+	pkt, err := c.ss.sealPacketLocked(msgType, b, c.ss.writeKey)
+	remoteAddr := c.ss.remoteAddr
+	c.ss.m.Unlock()
 	if err != nil {
-		// TODO(dadrian)[2023-09-08]: Is this necessary or correct?
 		go c.Close()
+		return err
 	}
-	return err
+
+	written, _, err := c.underlying.WriteMsgUDP(pkt, nil, remoteAddr)
+	if err != nil {
+		go c.Close()
+		return err
+	}
+	if written != len(pkt) {
+		// Should never happen for a datagram-oriented connection.
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 // Close closes the connection. Future operations on non-buffered data will return io.EOF.
 func (c *Handle) Close() error {
 	c.ss.m.Lock()
 	defer c.ss.m.Unlock()
-
-	c.recv.Close()
-
-	return c.ss.closeLocked()
+	err := c.ss.closeLocked()
+	return err
 }
 
 // FetchClientLeaf returns the certificate the client presented when setting up the connection

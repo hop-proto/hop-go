@@ -33,6 +33,8 @@ const (
 type Server struct {
 	m sync.RWMutex
 
+	lifecycleMu sync.Mutex
+
 	udpConn UDPLike
 	config  ServerConfig
 
@@ -51,7 +53,8 @@ type Server struct {
 	stopCookieRotate chan struct{}
 
 	wg        sync.WaitGroup
-	closeWait sync.WaitGroup
+	closeDone chan struct{}
+	closeErr  error
 }
 
 func (s *Server) setHandshakeState(remoteAddr *net.UDPAddr, hs *HandshakeState) bool {
@@ -124,12 +127,6 @@ func (s *Server) fetchSession(sessionID SessionID) *SessionState {
 // +checklocksread:s.m
 func (s *Server) fetchSessionLocked(sessionID SessionID) *SessionState {
 	return s.sessions[sessionID]
-}
-
-func (s *Server) stopTrackingSession(sessionID SessionID) {
-	s.m.Lock()
-	defer s.m.Unlock()
-	s.stopTrackingSessionLocked(sessionID)
 }
 
 // +checklocks:s.m
@@ -468,6 +465,9 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte) error {
 	}
 	ss.m.Lock()
 	defer ss.m.Unlock()
+	if ss.handleState == closed {
+		return nil
+	}
 
 	// TODO(dadrian): Can we avoid this allocation?
 	plaintext := make([]byte, PlaintextLen(len(msg)))
@@ -505,12 +505,13 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte) error {
 
 // Serve blocks until the server is closed.
 func (s *Server) Serve() error {
-	// TODO(dadrian)[2023-09-09]: Handle the case where this function is
-	// erroneously called twice.
+	s.lifecycleMu.Lock()
 	if !s.state.CompareAndSwap(uint32(serverStateReady), uint32(serverStateServing)) {
+		s.lifecycleMu.Unlock()
 		return errors.New("Serve called on non-ready Server")
 	}
-	s.wg.Add(3)
+	s.wg.Add(2)
+	s.lifecycleMu.Unlock()
 
 	go func() {
 		defer s.wg.Done()
@@ -553,8 +554,8 @@ func (s *Server) Serve() error {
 		}
 	}()
 
-	s.wg.Done()
 	s.wg.Wait()
+	<-s.closeDone
 	return nil
 }
 
@@ -715,6 +716,7 @@ func (s *Server) Accept() (*Handle, error) {
 func (s *Server) AcceptTimeout(duration time.Duration) (*Handle, error) {
 	logrus.Debug("accept timeout started")
 	timer := time.NewTimer(duration)
+	defer timer.Stop()
 	select {
 	case handle, ok := <-s.pendingConnections:
 		if ok {
@@ -734,62 +736,48 @@ func (s *Server) Addr() net.Addr {
 
 // Close stops the server, causing Serve() to return.
 func (s *Server) Close() (err error) {
-	s.closeWait.Add(1)
-	for !s.state.CompareAndSwap(uint32(serverStateServing), uint32(serverStateClosing)) {
+	s.lifecycleMu.Lock()
+	for {
 		cur := serverState(s.state.Load())
 		switch cur {
-		case serverStateReady:
-			if s.state.CompareAndSwap(uint32(serverStateReady), uint32(serverStateClosed)) {
-				s.closeWait.Done()
-				return nil
+		case serverStateClosing, serverStateClosed:
+			s.lifecycleMu.Unlock()
+			<-s.closeDone
+			return s.closeErr
+		default:
+			if s.state.CompareAndSwap(uint32(cur), uint32(serverStateClosing)) {
+				s.lifecycleMu.Unlock()
+				goto closing
 			}
-		case serverStateClosing:
-			s.closeWait.Done()
-			s.closeWait.Wait()
-			return nil
-		case serverStateClosed:
-			s.closeWait.Done()
-			return nil
 		}
 	}
-	defer s.closeWait.Done()
 
-	// Stop reading packets
-	s.udpConn.SetReadDeadline(time.Now())
-	// Stop rotating cookies inside readPacket
+closing:
+	// Closing the socket unblocks both the Serve read loop and any in-flight
+	// writes before we wait for workers or acquire per-session locks.
+	s.closeErr = s.udpConn.Close()
 	close(s.stopCookieRotate)
-	// Wait for read packet to finish
 	s.wg.Wait()
 
-	// Close the channels
+	s.m.Lock()
 	close(s.pendingConnections)
+	sessions := make([]*SessionState, 0, len(s.sessions))
+	for _, ss := range s.sessions {
+		sessions = append(sessions, ss)
+	}
+	clear(s.handshakes)
+	clear(s.sessions)
+	s.m.Unlock()
 
-	// Drain everything and close the connections
-	wg := sync.WaitGroup{}
-	func() {
-		s.m.Lock()
-		defer s.m.Unlock()
-		for h := range s.pendingConnections {
-			wg.Add(1)
-			go func(h *Handle) {
-				defer wg.Done()
-				h.Close()
-			}(h)
+	for _, ss := range sessions {
+		if ss.handle != nil {
+			_ = ss.handle.Close()
 		}
-		for _, ss := range s.sessions {
-			wg.Add(1)
-			go func(ss *SessionState) {
-				defer wg.Done()
-				if ss.handle != nil {
-					ss.handle.Close()
-				}
-				s.stopTrackingSession(ss.sessionID)
-			}(ss)
-		}
-	}()
-	wg.Wait()
-	s.udpConn.Close()
-	return nil
+	}
+
+	s.state.Store(uint32(serverStateClosed))
+	close(s.closeDone)
+	return s.closeErr
 }
 
 func (s *Server) init() error {
@@ -860,6 +848,7 @@ func NewServer(conn UDPLike, config ServerConfig) (*Server, error) {
 		udpConn:          conn,
 		config:           config,
 		stopCookieRotate: make(chan struct{}),
+		closeDone:        make(chan struct{}),
 	}
 	err := s.init()
 	return &s, err
