@@ -26,12 +26,22 @@ func issue(parent *Certificate, child *Identity, certType CertificateType, durat
 	if parent.privateKey == nil {
 		return nil, errors.New("issue requires a private key")
 	}
+	if duration <= 0 {
+		return nil, errors.New("issue requires a positive duration")
+	}
 	now := time.Now()
+	if now.Before(parent.IssuedAt) || !now.Before(parent.ExpiresAt) {
+		return nil, errors.New("issue requires a currently valid parent")
+	}
+	expiresAt := now.Add(duration)
+	if expiresAt.After(parent.ExpiresAt) {
+		expiresAt = parent.ExpiresAt
+	}
 	out := &Certificate{
 		Version:   Version,
 		Type:      certType,
-		IssuedAt:  time.Now(),
-		ExpiresAt: now.Add(week),
+		IssuedAt:  now,
+		ExpiresAt: expiresAt,
 		IDChunk: IDChunk{
 			Blocks: child.Names,
 		},
@@ -80,10 +90,16 @@ func issue(parent *Certificate, child *Identity, certType CertificateType, durat
 // TODO(dadrian): Should we just use XEdDSA so that we don't need to have two
 // different key types, in exchange for having to implement more cryptography?
 func IssueLeaf(parent *Certificate, child *Identity) (*Certificate, error) {
+	return IssueLeafWithValidity(parent, child, week)
+}
+
+// IssueLeafWithValidity issues a leaf Certificate for the requested validity
+// period. The certificate will never outlive its intermediate parent.
+func IssueLeafWithValidity(parent *Certificate, child *Identity, validity time.Duration) (*Certificate, error) {
 	if parent.Type != Intermediate {
 		return nil, errors.New("IssueLeaf requires the parent to be an intermediate")
 	}
-	return issue(parent, child, Leaf, week)
+	return issue(parent, child, Leaf, validity)
 }
 
 func selfSign(self *Identity, certificateType CertificateType, keyPair *keys.SigningKeyPair) (*Certificate, error) {

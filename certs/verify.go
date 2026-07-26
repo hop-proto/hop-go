@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"hop.computer/hop/keys"
 )
@@ -126,6 +127,7 @@ const (
 	ReasonUnverifiedParent    VerificationFailureReason = iota
 	ReasonUnexpectedType      VerificationFailureReason = iota
 	ReasonInvalidCertificate  VerificationFailureReason = iota
+	ReasonTimeInvalid         VerificationFailureReason = iota
 	ReasonInternalError       VerificationFailureReason = iota
 )
 
@@ -144,6 +146,8 @@ func (r VerificationFailureReason) String() string {
 		return "unexpected certificate type"
 	case ReasonInvalidCertificate:
 		return "invalid certificate"
+	case ReasonTimeInvalid:
+		return "certificate is not currently valid"
 	case ReasonInternalError:
 		return "internal error"
 	default:
@@ -208,6 +212,20 @@ func mismatchedName(c *Certificate, target Name) error {
 	}
 }
 
+func timeInvalid(c *Certificate, now time.Time) error {
+	return &verifyError{
+		reason: ReasonTimeInvalid,
+		error: fmt.Errorf(
+			"%s: certificate %x is valid from %s until %s, current time is %s",
+			ReasonTimeInvalid,
+			c.Fingerprint,
+			c.IssuedAt,
+			c.ExpiresAt,
+			now,
+		),
+	}
+}
+
 // VerifyOptions holds parameters to VerifyLeaf.
 type VerifyOptions struct {
 	// PresentedIntermediate will be used to build a verified chain if it is
@@ -217,6 +235,10 @@ type VerifyOptions struct {
 
 	// Name is compared to the name on the leaf certificate if it is non-zero.
 	Name Name
+
+	// CurrentTime is used for validity checks. The current time is used when
+	// this field is zero.
+	CurrentTime time.Time
 }
 
 // VerifyLeaf verifies that the leaf chains up to a root in the store. It takes
@@ -231,6 +253,13 @@ func (s Store) VerifyLeaf(leaf *Certificate, opts VerifyOptions) error {
 	if !opts.Name.IsZero() && !leaf.MatchesName(opts.Name) {
 		return mismatchedName(leaf, opts.Name)
 	}
+	now := opts.CurrentTime
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if now.Before(leaf.IssuedAt) || !now.Before(leaf.ExpiresAt) {
+		return timeInvalid(leaf, now)
+	}
 	var intermediate *Certificate
 	if opts.PresentedIntermediate != nil && leaf.Parent == opts.PresentedIntermediate.Fingerprint {
 		intermediate = opts.PresentedIntermediate
@@ -242,6 +271,9 @@ func (s Store) VerifyLeaf(leaf *Certificate, opts VerifyOptions) error {
 
 	if intermediate.Type != Intermediate {
 		return unexpectedTypeError(intermediate, Intermediate)
+	}
+	if now.Before(intermediate.IssuedAt) || !now.Before(intermediate.ExpiresAt) {
+		return timeInvalid(intermediate, now)
 	}
 	if intermediate.Fingerprint != leaf.Parent {
 		// Should not happen with a well-formed Store
@@ -257,6 +289,9 @@ func (s Store) VerifyLeaf(leaf *Certificate, opts VerifyOptions) error {
 	}
 	if root.Type != Root {
 		return unexpectedTypeError(root, Root)
+	}
+	if now.Before(root.IssuedAt) || !now.Before(root.ExpiresAt) {
+		return timeInvalid(root, now)
 	}
 	if root.Fingerprint != intermediate.Parent {
 		// Should not happen with a well-formed Store

@@ -512,6 +512,7 @@ func (hs *HandshakeState) certificateParserAndVerifier(rawLeaf []byte, rawInterm
 	opts := certs.VerifyOptions{}
 	if hs.certVerify != nil {
 		opts.Name = hs.certVerify.Name
+		opts.CurrentTime = hs.certVerify.CurrentTime
 	}
 	leaf := certs.Certificate{}
 	intermediate := certs.Certificate{}
