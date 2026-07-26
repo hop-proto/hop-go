@@ -180,8 +180,9 @@ func (r *Reliable) sendRetransmissionAck(lastFrameNo, ackNo uint32, tubeId byte)
 // send continuously reads packet from the sends and hands them to the muxer
 func (r *Reliable) send() {
 	var pkt *frame
-	ok := true
-	for ok {
+	sendQueue := r.sender.sendQueue                 // +checklocksignore accessing channels is safe
+	prioritySendQueue := r.sender.prioritySendQueue // +checklocksignore accessing channels is safe
+	for sendQueue != nil || prioritySendQueue != nil {
 		select {
 		// onTimeout sender
 		case <-r.sender.RetransmitTicker.C: // +checklocksignore accessing channels is safe
@@ -280,19 +281,23 @@ func (r *Reliable) send() {
 			}
 			r.l.Unlock()
 
-		case pkt, ok = <-r.sender.sendQueue: // +checklocksignore accessing channels is safe
+		case queuedPkt, ok := <-sendQueue: // +checklocksignore accessing channels is safe
 			if !ok {
-				break
+				sendQueue = nil
+				continue
 			}
 
 			// Do not block ACKs - Blocks frame transmission out of window open
+			pkt = queuedPkt
 			r.sendOneFrame(pkt, false)
 
-		case pkt, ok = <-r.sender.prioritySendQueue: // +checklocksignore accessing channels is safe
+		case queuedPkt, ok := <-prioritySendQueue: // +checklocksignore accessing channels is safe
 			if !ok {
-				break
+				prioritySendQueue = nil
+				continue
 			}
 
+			pkt = queuedPkt
 			r.sendOneFrame(pkt, true)
 		}
 	}

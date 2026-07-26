@@ -378,6 +378,7 @@ func (s *sender) framesToSend(rto bool, startIndex int) int {
 // Close stops the sender and causes future writes to return io.EOF
 func (s *sender) Close() error {
 	if s.closed.CompareAndSwap(false, true) {
+		s.RetransmitTicker.Stop()
 		close(s.sendQueue)
 		close(s.prioritySendQueue)
 
