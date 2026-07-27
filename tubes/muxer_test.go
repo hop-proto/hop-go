@@ -2,6 +2,7 @@ package tubes
 
 import (
 	"net"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,221 @@ import (
 	"hop.computer/hop/pkg/must"
 	"hop.computer/hop/transport"
 )
+
+type blockingWriteMsgConn struct {
+	writeStarted   chan struct{}
+	releaseWrite   chan struct{}
+	writeCompleted chan struct{}
+	closed         chan struct{}
+
+	startOnce    sync.Once
+	completeOnce sync.Once
+	closeOnce    sync.Once
+}
+
+type stopResult struct {
+	sendErr error
+	recvErr error
+}
+
+func newBlockingWriteMsgConn() *blockingWriteMsgConn {
+	return &blockingWriteMsgConn{
+		writeStarted:   make(chan struct{}),
+		releaseWrite:   make(chan struct{}),
+		writeCompleted: make(chan struct{}),
+		closed:         make(chan struct{}),
+	}
+}
+
+func (c *blockingWriteMsgConn) Read(p []byte) (int, error) {
+	return c.ReadMsg(p)
+}
+
+func (c *blockingWriteMsgConn) Write(p []byte) (int, error) {
+	if err := c.WriteMsg(p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (c *blockingWriteMsgConn) Close() error {
+	c.closeOnce.Do(func() {
+		close(c.closed)
+	})
+	return nil
+}
+
+func (c *blockingWriteMsgConn) LocalAddr() net.Addr {
+	return &net.IPAddr{}
+}
+
+func (c *blockingWriteMsgConn) RemoteAddr() net.Addr {
+	return &net.IPAddr{}
+}
+
+func (c *blockingWriteMsgConn) SetDeadline(time.Time) error {
+	return nil
+}
+
+func (c *blockingWriteMsgConn) SetReadDeadline(time.Time) error {
+	return nil
+}
+
+func (c *blockingWriteMsgConn) SetWriteDeadline(time.Time) error {
+	return nil
+}
+
+func (c *blockingWriteMsgConn) ReadMsg([]byte) (int, error) {
+	<-c.closed
+	return 0, net.ErrClosed
+}
+
+func (c *blockingWriteMsgConn) WriteMsg([]byte) error {
+	c.startOnce.Do(func() {
+		close(c.writeStarted)
+	})
+
+	select {
+	case <-c.releaseWrite:
+		c.completeOnce.Do(func() {
+			close(c.writeCompleted)
+		})
+		return nil
+	case <-c.closed:
+		return net.ErrClosed
+	}
+}
+
+// TestMuxerStopDrainsSenderBeforeClosingUnderlying verifies that shutdown
+// writes every frame accepted from a tube before closing the transport.
+func TestMuxerStopDrainsSenderBeforeClosingUnderlying(t *testing.T) {
+	conn := newBlockingWriteMsgConn()
+	muxer := newMuxer(conn, time.Second, false, logrus.WithField("test", t.Name()))
+
+	muxer.sendQueue <- []byte("final reliable acknowledgement")
+	<-conn.writeStarted
+
+	stopDone := make(chan stopResult, 1)
+	go func() {
+		sendErr, recvErr := muxer.Stop()
+		stopDone <- stopResult{sendErr: sendErr, recvErr: recvErr}
+	}()
+
+	select {
+	case <-conn.closed:
+		close(conn.releaseWrite)
+		<-stopDone
+		t.Fatal("underlying connection closed while the muxer sender was writing")
+	case <-stopDone:
+		close(conn.releaseWrite)
+		t.Fatal("Muxer.Stop returned while the muxer sender was writing")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(conn.releaseWrite)
+	select {
+	case result := <-stopDone:
+		assert.NilError(t, result.sendErr)
+		assert.NilError(t, result.recvErr)
+	case <-time.After(time.Second):
+		t.Fatal("Muxer.Stop did not finish after the pending write completed")
+	}
+
+	select {
+	case <-conn.writeCompleted:
+	default:
+		t.Fatal("pending write did not complete")
+	}
+	select {
+	case <-conn.closed:
+	default:
+		t.Fatal("underlying connection was not closed")
+	}
+}
+
+// TestMuxerStopInterruptsBlockedSender verifies that a stuck transport write
+// cannot deadlock shutdown after the graceful drain period expires.
+func TestMuxerStopInterruptsBlockedSender(t *testing.T) {
+	conn := newBlockingWriteMsgConn()
+	muxer := newMuxer(conn, time.Second, false, logrus.WithField("test", t.Name()))
+
+	muxer.sendQueue <- []byte("blocked write")
+	<-conn.writeStarted
+
+	stopDone := make(chan stopResult, 1)
+	go func() {
+		sendErr, recvErr := muxer.Stop()
+		stopDone <- stopResult{sendErr: sendErr, recvErr: recvErr}
+	}()
+
+	select {
+	case result := <-stopDone:
+		assert.NilError(t, result.sendErr)
+		assert.NilError(t, result.recvErr)
+	case <-time.After(2 * muxerTimeout):
+		t.Fatal("Muxer.Stop deadlocked on a blocked transport write")
+	}
+
+	select {
+	case <-conn.closed:
+	default:
+		t.Fatal("blocked transport was not closed")
+	}
+	select {
+	case <-conn.writeCompleted:
+		t.Fatal("blocked write unexpectedly completed")
+	default:
+	}
+}
+
+// TestMuxerStopUnblocksTubeProducerOnBlockedWrite verifies that the forced
+// shutdown bound reaches upstream tube producers, not only the Muxer sender.
+func TestMuxerStopUnblocksTubeProducerOnBlockedWrite(t *testing.T) {
+	conn := newBlockingWriteMsgConn()
+	muxer := newMuxer(conn, time.Second, false, logrus.WithField("test", t.Name()))
+
+	tube, err := muxer.CreateUnreliableTube(common.ExecTube)
+	assert.NilError(t, err)
+	<-conn.writeStarted
+
+	err = tube.receiveInitiatePkt(&initiateFrame{
+		flags: frameFlags{RESP: true},
+	})
+	assert.NilError(t, err)
+	<-tube.initiateDone
+
+	err = tube.WriteMsg([]byte("queued behind blocked muxer write"))
+	assert.NilError(t, err)
+	deadline := time.Now().Add(time.Second)
+	for len(tube.send.C) != 0 && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+	assert.Equal(t, len(tube.send.C), 0, "tube sender did not consume queued message")
+
+	stopDone := make(chan stopResult, 1)
+	go func() {
+		sendErr, recvErr := muxer.Stop()
+		stopDone <- stopResult{sendErr: sendErr, recvErr: recvErr}
+	}()
+
+	select {
+	case result := <-stopDone:
+		assert.NilError(t, result.sendErr)
+		assert.NilError(t, result.recvErr)
+	case <-time.After(2 * muxerTimeout):
+		// Release the fake write so a broken Stop can clean up before the test
+		// fails rather than leaking its shutdown goroutines.
+		close(conn.releaseWrite)
+		<-stopDone
+		t.Fatal("Muxer.Stop deadlocked behind an unreliable tube producer")
+	}
+
+	select {
+	case <-conn.closed:
+	default:
+		t.Fatal("blocked transport was not closed")
+	}
+}
 
 // makeMuxers creates two connected muxers running over UDP. Packet delivery is
 // controlled by a deterministic coin flipper with the provided bit bias.

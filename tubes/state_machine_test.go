@@ -1,6 +1,12 @@
 package tubes
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/sirupsen/logrus"
+
+	"gotest.tools/assert"
+)
 
 /*
 Below is a high-level summary of the TCP-like state machine in tubes/reliable.go
@@ -204,6 +210,53 @@ func TestActiveClose(t *testing.T) {
 // Responder: handle peer FIN similarly
 func TestSimultaneousClose(t *testing.T) {
 	// TODO(dadrian)[2025-08-02]: Implement this test.
+}
+
+// TestFinalFINAckIsSentBeforeClose verifies that entering the closed state
+// cannot discard the ACK queued for the peer's FIN. The peer cannot leave
+// lastAck until it receives this packet.
+func TestFinalFINAckIsSentBeforeClose(t *testing.T) {
+	const attempts = 128
+	for range attempts {
+		log := logrus.New().WithField("test", t.Name())
+		s := newSender(log)
+		s.closed.Store(false)
+
+		initDone := make(chan struct{})
+		close(initDone)
+		r := &Reliable{
+			id:                1,
+			sender:            s,
+			recvWindow:        newReceiver(log),
+			sendQueue:         make(chan []byte, 1),
+			prioritySendQueue: make(chan []byte, 1),
+			tubeState:         finWait2,
+			closed:            make(chan struct{}),
+			initRecv:          make(chan struct{}),
+			initDone:          initDone,
+			sendDone:          make(chan struct{}),
+			log:               log,
+		}
+		go r.send()
+
+		err := r.receive(&frame{
+			frameNo: 1,
+			flags: frameFlags{
+				FIN: true,
+			},
+		})
+		assert.NilError(t, err)
+
+		select {
+		case raw := <-r.sendQueue:
+			pkt, err := fromBytes(raw)
+			assert.NilError(t, err)
+			assert.Check(t, pkt.flags.ACK)
+			assert.Equal(t, pkt.ackNo, uint32(1))
+		default:
+			t.Fatal("final FIN ACK was discarded while stopping the sender")
+		}
+	}
 }
 
 // TestMissingFINACKLastAckTimeout tests:

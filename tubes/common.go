@@ -15,6 +15,7 @@ var ErrMuxerStopping = errors.New("muxer is stopping")
 var ErrBadTubeState = errors.New("tube in bad state")
 
 var errFrameOutOfBounds = errors.New("received data frame out of receive window bounds") // +checklocksignore
+var errTooManyDuplicateACKs = errors.New("too many duplicate acknowledgements")          // +checklocksignore
 
 // TODO(hosono) create a config struct to pass to the muxer to set these things
 

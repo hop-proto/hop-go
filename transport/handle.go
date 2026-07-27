@@ -13,10 +13,13 @@ import (
 
 // Handle implements net.Conn and MsgConn for connections accepted by a Server.
 type Handle struct {
-	readLock sync.Mutex
+	readLock  sync.Mutex
+	writeLock sync.Mutex
 
-	underlying UDPLike                      // outgoing socket-like
-	recv       *common.DeadlineChan[[]byte] // incoming transport messages
+	underlying UDPLike // outgoing socket-like
+	// recv contains decrypted messages accepted by the Client or Server receive
+	// loop but not yet returned to this Handle's reader.
+	recv *common.DeadlineChan[[]byte]
 
 	// +checklocks:readLock
 	buf bytes.Buffer
@@ -41,8 +44,9 @@ func newHandleForSession(underlying UDPLike, ss *SessionState, leaf *certs.Certi
 	}
 }
 
-// IsClosed returns true if the handle is closed or in the process of closing.
-// Writes and reads to the handle return io.EOF if and only if IsClosed returns true
+// IsClosed reports whether the session close transition has occurred. Operations
+// that start after it returns true get io.EOF once buffered reads are drained;
+// an already in-flight write may still finish.
 func (c *Handle) IsClosed() bool {
 	c.ss.m.Lock()
 	defer c.ss.m.Unlock()
@@ -117,8 +121,9 @@ func (c *Handle) Read(b []byte) (int, error) {
 	return n, err
 }
 
-// WriteMsg writes b as a single packet. If b is too long, WriteMsg returns
-// ErrBufOverlow.
+// WriteMsg writes b as a single packet. A successful return means the configured
+// UDPLike transport accepted it, not that the peer received it. If b is too
+// long, WriteMsg returns ErrBufOverlow.
 func (c *Handle) WriteMsg(b []byte) error {
 	if len(b) > MaxPlaintextSize {
 		return ErrBufOverflow
@@ -126,9 +131,9 @@ func (c *Handle) WriteMsg(b []byte) error {
 	return c.send(MessageTypeTransport, b)
 }
 
-// Write implements io.Writer. It will split b into segments of length
-// MaxPlaintextLength and send them using WriteMsg. Each call to WriteMsg is
-// subject to the timeout.
+// Write implements io.Writer. It splits b into transport packets and returns
+// after the configured UDPLike transport accepts each packet; it does not wait
+// for peer receipt.
 func (c *Handle) Write(buf []byte) (int, error) {
 	b := append([]byte{}, buf...)
 	if len(b) <= MaxPlaintextSize {
@@ -153,35 +158,44 @@ func (c *Handle) Write(buf []byte) (int, error) {
 	return total, nil
 }
 
-// writeControl writes a control message to the remote host
-// TODO(hosono) fix lint error
-// nolint
-func (c *Handle) writeControlLocked(msg ControlMessage) error {
-	return c.ss.writePacketLocked(c.underlying, MessageTypeControl, []byte{byte(msg)}, c.ss.writeKey)
-}
-
 func (c *Handle) send(msgType MessageType, b []byte) error {
+	// Preserve packet write order without holding the session lock during
+	// socket I/O. Close only needs the session lock, so a blocked write cannot
+	// prevent it from completing.
+	c.writeLock.Lock()
+	defer c.writeLock.Unlock()
+
 	c.ss.m.Lock()
-	defer c.ss.m.Unlock()
 	if c.ss.handleState == closed {
+		c.ss.m.Unlock()
 		return io.EOF
 	}
-	err := c.ss.writePacketLocked(c.underlying, msgType, b, c.ss.writeKey)
+	pkt, err := c.ss.sealPacketLocked(msgType, b, c.ss.writeKey)
+	remoteAddr := c.ss.remoteAddr
+	c.ss.m.Unlock()
 	if err != nil {
-		// TODO(dadrian)[2023-09-08]: Is this necessary or correct?
 		go c.Close()
+		return err
 	}
-	return err
+
+	written, _, err := c.underlying.WriteMsgUDP(pkt, nil, remoteAddr)
+	if err != nil {
+		go c.Close()
+		return err
+	}
+	if written != len(pkt) {
+		// Should never happen for a datagram-oriented connection.
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 // Close closes the connection. Future operations on non-buffered data will return io.EOF.
 func (c *Handle) Close() error {
 	c.ss.m.Lock()
 	defer c.ss.m.Unlock()
-
-	c.recv.Close()
-
-	return c.ss.closeLocked()
+	err := c.ss.closeLocked()
+	return err
 }
 
 // FetchClientLeaf returns the certificate the client presented when setting up the connection
@@ -213,11 +227,9 @@ func (c *Handle) SetReadDeadline(t time.Time) error {
 	return c.recv.SetDeadline(t)
 }
 
-// SetWriteDeadline sets a deadline at which future read operations will stop
-// Pending writes will be canceled
+// SetWriteDeadline currently records no deadline. Writes remain subject to
+// writeLock and the configured underlying transport.
 func (c *Handle) SetWriteDeadline(_ time.Time) error {
-	// There is no actual write deadline because sends go out immediately, subject to locking.
-	//
 	// TODO(dadrian)[2023-09-08]: Somehow limit lock wait time to write deadline.
 	return nil
 }

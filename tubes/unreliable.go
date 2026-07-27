@@ -1,9 +1,9 @@
-// Package tubes implements the multiplexing of raw data into logical channels of a hop session
 package tubes
 
 import (
 	"io"
 	"net"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,24 +15,39 @@ import (
 
 // Unreliable implements UDP-like messages for Hop
 type Unreliable struct {
-	tType     TubeType
-	id        byte
+	tType TubeType
+	id    byte
+	// sendQueue hands encoded frames to the Muxer. A completed send does not
+	// imply that the frame has been written to the underlying transport.
 	sendQueue chan []byte
 
 	// Unreliable tubes can be in three states:
 	// created: Indicates the tube has been created and is waiting for the remote peer send back an initiate frame
 	// initiated: Indicates the tube is ready to read and write data
 	// closed: Indicates the tube is done reading and writing data
-	state        atomic.Value
-	initiated    chan struct{}
+	state atomic.Value
+	// lifecycleMu orders Close with initiation and packet admission. Producers
+	// recheck state while holding it, so FIN is last and late receives are
+	// rejected; Close separately joins the sender before publishing completion.
+	lifecycleMu sync.Mutex
+	// initiated publishes receipt of the peer's initiation frame.
+	initiated chan struct{}
+	// initiateDone publishes termination of the initiation producer.
 	initiateDone chan struct{}
-	senderDone   chan struct{}
-	closed       chan struct{}
+	// stopInitiate stops a locally initiated handshake without publishing Close
+	// completion early.
+	stopInitiate chan struct{}
+	// senderDone publishes that every queued frame was handed to the Muxer.
+	senderDone chan struct{}
+	// closed publishes completion of Close, including the sender drain.
+	closed chan struct{}
 
+	// recv contains frames accepted from the Muxer but not returned to a reader.
 	recv *common.DeadlineChan[[]byte]
+	// send contains messages accepted from writers but not handed to the Muxer.
 	send *common.DeadlineChan[[]byte]
 
-	frameNo atomic.Uint32
+	frameNo atomic.Uint32 // +checklocks:lifecycleMu
 
 	localAddr  net.Addr
 	remoteAddr net.Addr
@@ -52,9 +67,11 @@ var _ transport.MsgConn = &Unreliable{}
 // Unreliable tubes are tubes
 var _ Tube = &Unreliable{}
 
+// sender drains the local queue into the Muxer queue. senderDone only means the
+// frames were handed off; the Muxer sender owns actual transport writes.
 func (u *Unreliable) sender() {
 	for b := range u.send.C {
-		u.log.Trace("sending packet")
+		u.log.Trace("handing packet to muxer")
 		u.sendQueue <- b
 	}
 
@@ -85,21 +102,33 @@ func (u *Unreliable) initiate(req bool) {
 
 	// RESP init frames are generated in receiveInitiatePkt
 	if req {
-		notInit := true
 		ticker := time.NewTicker(initialRTT)
-		for notInit {
-			p := u.makeInitFrame(req)
-			u.sendQueue <- p.toBytes()
+		defer ticker.Stop()
+	initLoop:
+		for {
+			u.lifecycleMu.Lock()
+			switch u.state.Load() {
+			case initiated:
+				u.lifecycleMu.Unlock()
+				break initLoop
+			case created:
+				p := u.makeInitFrame(req)
+				u.sendQueue <- p.toBytes()
+				u.lifecycleMu.Unlock()
+			default:
+				u.lifecycleMu.Unlock()
+				close(u.senderDone)
+				return
+			}
 
 			select {
 			case <-ticker.C:
 				u.log.Info("init rto exceeded")
 			case <-u.initiated:
-			case <-u.closed:
+			case <-u.stopInitiate:
 				close(u.senderDone)
 				return
 			}
-			notInit = u.state.Load() == created
 		}
 	}
 
@@ -123,8 +152,10 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 	}
 
 	// Send a RESP packet in response to REQ packets
+	u.lifecycleMu.Lock()
+	defer u.lifecycleMu.Unlock()
 	if pkt.flags.REQ && u.state.Load() != closed {
-		u.log.Trace("sending RESP packet")
+		u.log.Trace("handing RESP packet to muxer")
 		p := u.makeInitFrame(false)
 		u.sendQueue <- p.toBytes()
 	}
@@ -133,6 +164,12 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 }
 
 func (u *Unreliable) receive(pkt *frame) error {
+	u.lifecycleMu.Lock()
+	defer u.lifecycleMu.Unlock()
+	if u.state.Load() == closed {
+		return ErrBadTubeState
+	}
+
 	select {
 	case u.recv.C <- pkt.data:
 	default:
@@ -188,8 +225,9 @@ func (u *Unreliable) WriteMsg(b []byte) (err error) {
 	return
 }
 
-// WriteMsgUDP implements implements the UDPLike interface
-// oob and addr are ignored
+// WriteMsgUDP queues one message for the Unreliable sender. It may return before
+// the message is handed to the Muxer or written to the transport. oob and addr
+// are ignored.
 func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
 	select {
 	case <-u.initiated:
@@ -197,6 +235,13 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 	case <-u.closed:
 		break
 	}
+
+	u.lifecycleMu.Lock()
+	defer u.lifecycleMu.Unlock()
+	if u.state.Load() == closed {
+		return 0, 0, io.EOF
+	}
+
 	dataLength := uint16(len(b))
 	if uint16(len(b)) > MaxFrameDataLength {
 		err = transport.ErrBufOverflow
@@ -228,35 +273,50 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 	u.log.WithFields(logrus.Fields{
 		"frameNo":    pkt.frameNo,
 		"dataLength": pkt.dataLength,
-	}).Trace("wrote packet")
+	}).Trace("queued packet")
 	return n, 0, err
 }
 
-// Close implements the net.Conn interface. Future io operations will return io.EOF
+// Close rejects new packets, places FIN after accepted writes, and waits until
+// the sender hands its queue to the Muxer. It does not wait for transport writes
+// or peer receipt. Future operations return io.EOF after buffered reads drain.
 func (u *Unreliable) Close() error {
+	u.lifecycleMu.Lock()
 	oldState := u.state.Swap(closed)
 	if oldState == closed {
+		u.lifecycleMu.Unlock()
 		return io.EOF
 	}
+	u.lifecycleMu.Unlock()
 
-	pkt := frame{
-		tubeID: u.id,
-		flags: frameFlags{
-			ACK:  false,
-			FIN:  true,
-			REQ:  false,
-			RESP: false,
-			REL:  false,
-		},
-
-		dataLength: 0,
-		frameNo:    u.frameNo.Load(),
-		data:       []byte{},
-		queued:     false,
+	if oldState == created {
+		close(u.stopInitiate)
 	}
-	u.frameNo.Add(1)
+	<-u.initiateDone
 
-	err := u.send.Send(pkt.toBytes())
+	u.lifecycleMu.Lock()
+	defer u.lifecycleMu.Unlock()
+
+	var err error
+	if oldState == initiated {
+		pkt := frame{
+			tubeID: u.id,
+			flags: frameFlags{
+				ACK:  false,
+				FIN:  true,
+				REQ:  false,
+				RESP: false,
+				REL:  false,
+			},
+
+			dataLength: 0,
+			frameNo:    u.frameNo.Load(),
+			data:       []byte{},
+			queued:     false,
+		}
+		u.frameNo.Add(1)
+		err = u.send.Send(pkt.toBytes())
+	}
 
 	u.send.Close()
 	u.recv.Close()

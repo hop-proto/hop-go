@@ -58,6 +58,8 @@ type sender struct {
 	// the time after which writes will expire
 	deadline time.Time
 
+	// sendQueue and prioritySendQueue contain frames admitted by the reliable
+	// state machine but not necessarily handed to the Muxer or transport.
 	sendQueue         chan *frame
 	prioritySendQueue chan *frame
 
@@ -184,9 +186,8 @@ func (s *sender) recvAck(ackNo uint32) (uint32, error) {
 	}
 
 	if s.senderWindow.duplicatedAckCounter > 100 {
-		// TODO (paul): make sure that this is the right way to terminate a connection
-		// Should not happen
-		s.Close()
+		// The Reliable owns lifecycle transitions and sender queue closure.
+		return 0, errTooManyDuplicateACKs
 	}
 
 	// to not apply on the first 20 ACKs as the network probing is inaccurate
@@ -375,9 +376,11 @@ func (s *sender) framesToSend(rto bool, startIndex int) int {
 	return numFrames
 }
 
-// Close stops the sender and causes future writes to return io.EOF
+// Close stops the sender and causes future writes to return io.EOF. Only the
+// owning Reliable's close transition may call it, after rejecting producers.
 func (s *sender) Close() error {
 	if s.closed.CompareAndSwap(false, true) {
+		s.RetransmitTicker.Stop()
 		close(s.sendQueue)
 		close(s.prioritySendQueue)
 

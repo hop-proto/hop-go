@@ -15,8 +15,10 @@ import (
 // SessionID is an IP-independent identifier of a tunnel.
 type SessionID [4]byte
 
-// SessionState contains the cryptographic state associated with a SessionID
-// after the successful completion of a handshake.
+// SessionState contains the cryptographic and lifecycle state associated with a
+// SessionID after a successful handshake. Its mutex orders packet processing
+// with closeLocked, so receive producers reject work before the Handle receive
+// queue is canceled.
 type SessionState struct {
 	sessionID SessionID
 
@@ -103,7 +105,7 @@ func (ss *SessionState) readCounter(b []byte) (count uint64) {
 	return
 }
 
-func (ss *SessionState) writePacketLocked(conn UDPLike, msgType MessageType, in []byte, key *[KeyLen]byte) error {
+func (ss *SessionState) sealPacketLocked(msgType MessageType, in []byte, key *[KeyLen]byte) ([]byte, error) {
 	length := HeaderLen + SessionIDLen + CounterLen + len(in) + TagLen
 	ss.rawWrite.Reset()
 	if ss.rawWrite.Cap() < length {
@@ -128,7 +130,7 @@ func (ss *SessionState) writePacketLocked(conn UDPLike, msgType MessageType, in 
 	// no nonce. The output has an overhead of TagLength.
 	aead, err := kravatte.NewSANSE(key[:])
 	if err != nil {
-		return err
+		return nil, err
 	}
 	buf := make([]byte, TagLen+len(in))
 	enc := aead.Seal(buf[:0], nil, in, ss.rawWrite.Bytes()[:AssociatedDataLen])
@@ -141,17 +143,8 @@ func (ss *SessionState) writePacketLocked(conn UDPLike, msgType MessageType, in 
 	}
 	ss.rawWrite.Write(buf)
 
-	b := ss.rawWrite.Bytes()
-	written, _, err := conn.WriteMsgUDP(b, nil, ss.remoteAddr)
-	if err != nil {
-		return err
-	}
-	if written != length {
-		// Should never happen
-		logrus.Panicf("WriteMsgUDP wrote %d, expected length %d", written, length)
-	}
 	ss.count++
-	return nil
+	return append([]byte(nil), ss.rawWrite.Bytes()...), nil
 }
 
 func (ss *SessionState) readPacketLocked(plaintext, pkt []byte, key *[KeyLen]byte) (int, MessageType, error) {
@@ -243,7 +236,9 @@ func (ss *SessionState) closeLocked() (err error) {
 	if ss.handleState == closed {
 		return nil
 	}
-	// TODO(dadrian)[2023-09-09]: Actually close. This is hard because sometimes
-	// the Server knows we're closing, and sometimes only the Handle knows.
+	ss.handleState = closed
+	if ss.handle != nil {
+		_ = ss.handle.recv.Close()
+	}
 	return nil
 }

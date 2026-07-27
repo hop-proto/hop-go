@@ -43,20 +43,24 @@ type Client struct {
 	wg    sync.WaitGroup
 	state atomic.Uint32
 
-	handshakeWg sync.WaitGroup
+	// handshakeDone closes after the elected Handshake caller stores its result.
+	// Closing it publishes err, hs, and ss to all concurrent waiters.
+	handshakeDone chan struct{}
 
 	underlyingConn UDPLike
 	dialAddr       *net.UDPAddr
 
-	err          error
-	handshakeErr error
-	hs           *HandshakeState
+	err error
+	hs  *HandshakeState
 
 	ss *SessionState
 
 	config ClientConfig
 
-	closeWg sync.WaitGroup
+	// closeDone closes after the elected Close caller stops all producers and
+	// stores closeErr. Later Close calls wait for that publication.
+	closeDone chan struct{}
+	closeErr  error
 }
 
 // IsClosed returns true if Close() has finished.
@@ -68,58 +72,40 @@ func (c *Client) IsClosed() bool {
 // must already be open. It is an error to call Handshake on a connection that
 // has already performed the portal handshake.
 func (c *Client) Handshake() error {
-	state := c.state.Load()
-	switch state {
-	case clientStateHandshaking:
-		// Wait for the handshake to finish, then return the cached error.
-		c.handshakeWg.Wait()
-		return c.handshakeErr
-	case clientStateOpen:
-		// If the client is open, it can't have had a handshake error.
-		return nil
-	case clientStateError:
-		return c.err
-	case clientStateClosing, clientStateClosed:
-		if c.hs != nil {
-			return nil
-		}
-		return io.EOF
-	}
-
-	// Only add to the semaphor if the first check indicates we might need to handshake.
-	c.handshakeWg.Add(1)
-	for !c.state.CompareAndSwap(clientStateCreated, clientStateHandshaking) {
-		state := c.state.Load()
-		switch state {
+	for {
+		switch c.state.Load() {
 		case clientStateCreated:
-			// Do nothing, try again
+			if !c.state.CompareAndSwap(clientStateCreated, clientStateHandshaking) {
+				continue
+			}
+
+			err := c.clientHandshakeLocked()
+			if err != nil {
+				// Store the error before publishing clientStateError so concurrent callers cannot observe an uninitialized result.
+				c.err = err
+				if c.state.CompareAndSwap(clientStateHandshaking, clientStateError) {
+					c.hs = nil
+					c.ss = nil
+				}
+			}
+			close(c.handshakeDone)
+
+			// Recheck after completion because Close may have changed the state while the handshake was running.
+			state := c.state.Load()
+			if state == clientStateClosing || state == clientStateClosed {
+				return io.EOF
+			}
+			return err
 		case clientStateHandshaking:
-			c.handshakeWg.Done()
-			c.handshakeWg.Wait()
-			return c.handshakeErr
+			<-c.handshakeDone
 		case clientStateOpen:
-			c.handshakeWg.Done()
 			return nil
 		case clientStateError:
 			return c.err
 		case clientStateClosing, clientStateClosed:
-			c.handshakeWg.Done()
-			if c.hs != nil {
-				return nil
-			}
 			return io.EOF
 		}
 	}
-	defer c.handshakeWg.Done()
-	logrus.Info("Handshake not complete. Completing handshake...")
-	c.handshakeErr = c.clientHandshakeLocked()
-	if c.handshakeErr != nil {
-		c.hs = nil
-		c.ss = nil
-		c.err = c.handshakeErr
-		c.state.Store(clientStateError)
-	}
-	return c.handshakeErr
 }
 
 func (c *Client) prepareCertificates() (leaf, intermediate []byte, err error) {
@@ -154,7 +140,7 @@ func (c *Client) setHSDeadline() {
 }
 
 func (c *Client) clientHandshakeLocked() error {
-	c.state.Store(clientStateHandshaking)
+	logrus.Info("Handshake not complete. Completing handshake...")
 	c.hs = new(HandshakeState)
 	c.hs.duplex.InitializeEmpty()
 
@@ -226,8 +212,11 @@ func (c *Client) clientHandshakeLocked() error {
 	// we should have a DialContext.
 	c.underlyingConn.SetReadDeadline(time.Time{})
 	c.ss.handle = newHandleForSession(c.underlyingConn, c.ss, c.config.Leaf, c.config.maxBufferedPackets())
-	c.state.Store(clientStateOpen)
 	c.wg.Add(1)
+	if !c.state.CompareAndSwap(clientStateHandshaking, clientStateOpen) {
+		c.wg.Done()
+		return io.EOF
+	}
 	go c.listen()
 
 	return nil
@@ -458,7 +447,6 @@ func (c *Client) beginPQHiddenHandshake(buf []byte) error {
 func (c *Client) listen() {
 	defer c.wg.Done()
 	ciphertext := make([]byte, 65535)
-	c.handshakeWg.Wait()
 	for c.state.Load() == clientStateOpen {
 		msgLen, _, _, addr, err := c.underlyingConn.ReadMsgUDP(ciphertext, nil)
 		if err != nil {
@@ -466,6 +454,7 @@ func (c *Client) listen() {
 				continue
 			}
 			logrus.Errorf("client: error reading packet %s", err)
+			continue
 		}
 		c.handleSessionMessage(addr, ciphertext[:msgLen])
 	}
@@ -484,6 +473,9 @@ func (c *Client) handleSessionMessage(addr *net.UDPAddr, msg []byte) error {
 	defer c.ss.m.Unlock()
 	if sessionID != c.ss.sessionID {
 		return ErrUnknownSession
+	}
+	if c.ss.handleState == closed {
+		return nil
 	}
 
 	// TODO(dadrian): Can we avoid this allocation?
@@ -520,7 +512,8 @@ func (c *Client) handleSessionMessage(addr *net.UDPAddr, msg []byte) error {
 	return nil
 }
 
-// Write implements net.Conn.
+// Write implements net.Conn. A successful return means the configured
+// underlying transport accepted each packet, not that the peer received it.
 func (c *Client) Write(b []byte) (int, error) {
 	if err := c.Handshake(); err != nil {
 		return 0, err
@@ -528,7 +521,8 @@ func (c *Client) Write(b []byte) (int, error) {
 	return c.ss.handle.Write(b)
 }
 
-// WriteMsg implements MsgConn. It send a single frame.
+// WriteMsg implements MsgConn. A successful return means the configured
+// underlying transport accepted the message, not that the peer received it.
 func (c *Client) WriteMsg(b []byte) error {
 	if err := c.Handshake(); err != nil {
 		return err
@@ -546,6 +540,13 @@ func (c *Client) ReadMsg(b []byte) (n int, err error) {
 		}
 	case clientStateError:
 		return 0, c.err
+	case clientStateClosing:
+		return 0, io.EOF
+	case clientStateClosed:
+		<-c.closeDone
+		if c.ss == nil || c.ss.handle == nil {
+			return 0, io.EOF
+		}
 	}
 	return c.ss.handle.ReadMsg(b)
 }
@@ -559,6 +560,13 @@ func (c *Client) Read(b []byte) (n int, err error) {
 		}
 	case clientStateError:
 		return 0, c.err
+	case clientStateClosing:
+		return 0, io.EOF
+	case clientStateClosed:
+		<-c.closeDone
+		if c.ss == nil || c.ss.handle == nil {
+			return 0, io.EOF
+		}
 	}
 	return c.ss.handle.Read(b)
 }
@@ -600,43 +608,39 @@ func (c *Client) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
-// Close immediately tears down the connection.
-// Future operations on non-buffered data will return io.EOF
+// Close tears down the underlying connection and waits for all Client-owned
+// workers. Future operations on non-buffered data return io.EOF.
 func (c *Client) Close() error {
-	c.closeWg.Add(1)
-	for !c.state.CompareAndSwap(clientStateOpen, clientStateClosing) {
-		cur := c.state.Load()
-		switch cur {
-		case clientStateCreated:
-			if c.state.CompareAndSwap(clientStateCreated, clientStateClosed) {
-				c.closeWg.Done()
-				return nil
+	var previous uint32
+	for {
+		previous = c.state.Load()
+		switch previous {
+		case clientStateClosing, clientStateClosed:
+			<-c.closeDone
+			return c.closeErr
+		default:
+			if c.state.CompareAndSwap(previous, clientStateClosing) {
+				goto closing
 			}
-		case clientStateHandshaking:
-			c.handshakeWg.Wait()
-		case clientStateClosing:
-			c.closeWg.Done()
-			c.closeWg.Wait()
-			return nil
-		case clientStateClosed:
-			c.closeWg.Done()
-			return nil
-		case clientStateError:
-			c.closeWg.Done()
-			return c.err
 		}
 	}
-	defer c.closeWg.Done()
-	// TODO(dadrian)[2024-04-07]: Document why this is correct, or fix it.
-	c.underlyingConn.SetReadDeadline(time.Now())
 
+closing:
+	// Closing the underlying connection is what guarantees that an in-flight
+	// handshake, read, or write cannot prevent Close from completing.
+	c.closeErr = c.underlyingConn.Close()
+
+	if previous == clientStateHandshaking {
+		<-c.handshakeDone
+	}
 	c.wg.Wait()
+	if c.ss != nil && c.ss.handle != nil {
+		_ = c.ss.handle.Close()
+	}
 
 	c.state.Store(clientStateClosed)
-	c.ss.handle.Close()
-	c.underlyingConn.Close()
-
-	return nil
+	close(c.closeDone)
+	return c.closeErr
 }
 
 // NewClient returns a Client configured as specified, using the underlying UDP
@@ -646,6 +650,8 @@ func NewClient(conn UDPLike, server *net.UDPAddr, config ClientConfig) *Client {
 		underlyingConn: conn,
 		dialAddr:       server,
 		config:         config,
+		handshakeDone:  make(chan struct{}),
+		closeDone:      make(chan struct{}),
 	}
 	return c
 }

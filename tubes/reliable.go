@@ -1,4 +1,3 @@
-// Package tubes implements the multiplexing of raw data into logical channels of a hop session
 package tubes
 
 import (
@@ -40,8 +39,10 @@ type Reliable struct {
 	localAddr  net.Addr
 	remoteAddr net.Addr
 	// +checklocks:l
-	sender            *sender
-	recvWindow        *receiver
+	sender     *sender
+	recvWindow *receiver
+	// Frames sent here have only been handed to the Muxer; the Muxer sender
+	// performs and publishes completion of the actual transport write.
 	sendQueue         chan []byte
 	prioritySendQueue chan []byte
 	// +checklocks:l
@@ -52,9 +53,14 @@ type Reliable struct {
 	lastFrameSent atomic.Uint32
 	unsend        uint16
 
-	closed   chan struct{}
+	// closed publishes completion of the lifecycle transition and sender drain.
+	closed chan struct{}
+	// initRecv publishes receipt of the peer's initiation frame.
 	initRecv chan struct{}
+	// initDone publishes termination of the initiation producer.
 	initDone chan struct{}
+	// sendDone publishes that all inner sender frames were handed to the Muxer.
+	// It does not mean that the Muxer wrote those frames to the transport.
 	sendDone chan struct{}
 	l        sync.Mutex
 	log      *logrus.Entry
@@ -69,7 +75,6 @@ var _ Tube = &Reliable{}
 // req: whether the tube is requesting to initiate a tube (true), or whether is respondding to an initiation request (false).
 func (r *Reliable) initiate(req bool) {
 	defer close(r.initDone)
-	notInit := true
 
 	if req {
 		p := initiateFrame{
@@ -87,28 +92,45 @@ func (r *Reliable) initiate(req bool) {
 			},
 		}
 		ticker := time.NewTicker(initialRTT)
-		for notInit {
-			r.sendQueue <- p.toBytes()
+		defer ticker.Stop()
+	initLoop:
+		for {
+			r.l.Lock()
+			switch r.tubeState {
+			case initiated:
+				r.l.Unlock()
+				break initLoop
+			case created:
+				r.sendQueue <- p.toBytes()
+				r.l.Unlock()
+			default:
+				r.l.Unlock()
+				return
+			}
+
 			select {
 			case <-ticker.C:
 				r.log.Info("init rto exceeded")
-				continue
 			case <-r.initRecv:
-				r.l.Lock()
-				notInit = r.tubeState == created
-				r.l.Unlock()
 			case <-r.closed:
 				return
 			}
 		}
 	} else {
-		<-r.initRecv
+		select {
+		case <-r.initRecv:
+		case <-r.closed:
+			return
+		}
 	}
 
-	go r.send()
-
-	r.l.Lock() // required for checklocks
+	r.l.Lock()
+	if r.tubeState != initiated {
+		r.l.Unlock()
+		return
+	}
 	r.sender.closed.Store(false)
+	go r.send()
 	r.l.Unlock()
 }
 
@@ -153,7 +175,7 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 			"ack":     pkt.flags.ACK,
 			"fin":     pkt.flags.FIN,
 			"dataLen": pkt.dataLength,
-		}).Trace("sent packet")
+		}).Trace("handed packet to muxer")
 	}
 }
 
@@ -177,16 +199,22 @@ func (r *Reliable) sendRetransmissionAck(lastFrameNo, ackNo uint32, tubeId byte)
 	r.prioritySendQueue <- rtrPkt.toBytes()
 }
 
-// send continuously reads packet from the sends and hands them to the muxer
+// send drains the Reliable sender queues into the Muxer queues. Closing
+// sendDone means every frame was handed off, not written to the transport.
 func (r *Reliable) send() {
 	var pkt *frame
-	ok := true
-	for ok {
+	sendQueue := r.sender.sendQueue                 // +checklocksignore accessing channels is safe
+	prioritySendQueue := r.sender.prioritySendQueue // +checklocksignore accessing channels is safe
+	for sendQueue != nil || prioritySendQueue != nil {
 		select {
 		// onTimeout sender
 		case <-r.sender.RetransmitTicker.C: // +checklocksignore accessing channels is safe
 
 			r.l.Lock()
+			if r.sender.closed.Load() {
+				r.l.Unlock()
+				continue
+			}
 
 			numFrames := r.sender.framesToSend(true, 0)
 
@@ -254,6 +282,10 @@ func (r *Reliable) send() {
 
 		case <-r.sender.senderWindow.windowOpen: // +checklocksignore accessing channels is safe
 			r.l.Lock()
+			if r.sender.closed.Load() {
+				r.l.Unlock()
+				continue
+			}
 			numFrames := r.sender.framesToSend(false, 0)
 			r.log.WithField("numFrames", numFrames).Trace("window open")
 
@@ -271,7 +303,7 @@ func (r *Reliable) send() {
 					windowFrame.Time = time.Now()
 					windowFrame.queued = true
 
-					safeSend(r.sender.sendQueue, windowFrame.frame)
+					r.sender.sendQueue <- windowFrame.frame
 
 					r.sender.unacked++
 
@@ -280,36 +312,28 @@ func (r *Reliable) send() {
 			}
 			r.l.Unlock()
 
-		case pkt, ok = <-r.sender.sendQueue: // +checklocksignore accessing channels is safe
+		case queuedPkt, ok := <-sendQueue: // +checklocksignore accessing channels is safe
 			if !ok {
-				break
+				sendQueue = nil
+				continue
 			}
 
 			// Do not block ACKs - Blocks frame transmission out of window open
+			pkt = queuedPkt
 			r.sendOneFrame(pkt, false)
 
-		case pkt, ok = <-r.sender.prioritySendQueue: // +checklocksignore accessing channels is safe
+		case queuedPkt, ok := <-prioritySendQueue: // +checklocksignore accessing channels is safe
 			if !ok {
-				break
+				prioritySendQueue = nil
+				continue
 			}
 
+			pkt = queuedPkt
 			r.sendOneFrame(pkt, true)
 		}
 	}
 	r.log.Debug("send ended")
 	close(r.sendDone)
-}
-
-// safeSend prevent to send a frame on a closed channel
-func safeSend(ch chan *frame, value *frame) (closed bool) {
-	defer func() {
-		if recover() != nil {
-			closed = true
-		}
-	}()
-
-	ch <- value
-	return false
 }
 
 // receive is called by the muxer for each new packet
@@ -348,7 +372,11 @@ func (r *Reliable) receive(pkt *frame) error {
 
 	// Pass the frame to the sender
 	if pkt.flags.ACK {
-		missingFrameNo, _ := r.sender.recvAck(pkt.ackNo)
+		missingFrameNo, ackErr := r.sender.recvAck(pkt.ackNo)
+		if ackErr != nil {
+			r.enterClosedState()
+			return ackErr
+		}
 		if missingFrameNo != 0 {
 			r.sender.m.Lock()
 			r.sendFrameByNumberLocked(missingFrameNo)
@@ -415,18 +443,20 @@ func (r *Reliable) enterClosedState() {
 	if r.tubeState == closed {
 		return
 	}
+	// Reject every producer before closing sender queues. This remains visible
+	// while the lifecycle lock is released to wait for the sender to drain.
+	r.tubeState = closed
 	if r.lastAckTimer != nil {
 		r.lastAckTimer.Stop()
 	}
-	r.sender.Close()
+	waitForSender := r.sender.Close() == nil
 	r.recvWindow.Close()
-	if r.tubeState != created {
+	if waitForSender {
 		r.l.Unlock()
 		<-r.sendDone
 		r.l.Lock()
 	}
 	close(r.closed)
-	r.tubeState = closed
 }
 
 func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
@@ -450,7 +480,10 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		r.recvWindow.m.Unlock()
 		r.log.Debug("INITIATED!")
 		r.tubeState = initiated
-		r.sender.recvAck(1)
+		if _, err := r.sender.recvAck(1); err != nil {
+			r.enterClosedState()
+			return err
+		}
 		close(r.initRecv)
 	}
 
@@ -489,7 +522,8 @@ func (r *Reliable) Read(b []byte) (n int, err error) {
 	return r.recvWindow.read(b)
 }
 
-// Write satisfies the net.Conn interface
+// Write queues b in the Reliable sender. It can return before the frame is
+// handed to the Muxer or written to the underlying transport.
 func (r *Reliable) Write(b []byte) (n int, err error) {
 	<-r.initDone
 	r.l.Lock()
@@ -534,7 +568,9 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 	return n, 0, 0, nil, e
 }
 
-// Close handles closing reliable tubes
+// Close initiates the Reliable FIN state machine after admitting the FIN to the
+// local sender. It does not wait for sender drain or peer acknowledgement; use
+// WaitForClose for lifecycle completion.
 func (r *Reliable) Close() (err error) {
 	select {
 	case <-r.initDone:
