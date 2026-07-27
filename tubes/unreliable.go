@@ -102,19 +102,24 @@ func (u *Unreliable) initiate(req bool) {
 
 	// RESP init frames are generated in receiveInitiatePkt
 	if req {
-		notInit := true
 		ticker := time.NewTicker(initialRTT)
 		defer ticker.Stop()
-		for notInit {
+	initLoop:
+		for {
 			u.lifecycleMu.Lock()
-			if u.state.Load() != created {
+			switch u.state.Load() {
+			case initiated:
+				u.lifecycleMu.Unlock()
+				break initLoop
+			case created:
+				p := u.makeInitFrame(req)
+				u.sendQueue <- p.toBytes()
+				u.lifecycleMu.Unlock()
+			default:
 				u.lifecycleMu.Unlock()
 				close(u.senderDone)
 				return
 			}
-			p := u.makeInitFrame(req)
-			u.sendQueue <- p.toBytes()
-			u.lifecycleMu.Unlock()
 
 			select {
 			case <-ticker.C:
@@ -124,7 +129,6 @@ func (u *Unreliable) initiate(req bool) {
 				close(u.senderDone)
 				return
 			}
-			notInit = u.state.Load() == created
 		}
 	}
 

@@ -75,7 +75,6 @@ var _ Tube = &Reliable{}
 // req: whether the tube is requesting to initiate a tube (true), or whether is respondding to an initiation request (false).
 func (r *Reliable) initiate(req bool) {
 	defer close(r.initDone)
-	notInit := true
 
 	if req {
 		p := initiateFrame{
@@ -94,22 +93,25 @@ func (r *Reliable) initiate(req bool) {
 		}
 		ticker := time.NewTicker(initialRTT)
 		defer ticker.Stop()
-		for notInit {
+	initLoop:
+		for {
 			r.l.Lock()
-			if r.tubeState != created {
+			switch r.tubeState {
+			case initiated:
+				r.l.Unlock()
+				break initLoop
+			case created:
+				r.sendQueue <- p.toBytes()
+				r.l.Unlock()
+			default:
 				r.l.Unlock()
 				return
 			}
-			r.sendQueue <- p.toBytes()
-			r.l.Unlock()
+
 			select {
 			case <-ticker.C:
 				r.log.Info("init rto exceeded")
-				continue
 			case <-r.initRecv:
-				r.l.Lock()
-				notInit = r.tubeState == created
-				r.l.Unlock()
 			case <-r.closed:
 				return
 			}
@@ -122,10 +124,13 @@ func (r *Reliable) initiate(req bool) {
 		}
 	}
 
-	go r.send()
-
-	r.l.Lock() // required for checklocks
+	r.l.Lock()
+	if r.tubeState != initiated {
+		r.l.Unlock()
+		return
+	}
 	r.sender.closed.Store(false)
+	go r.send()
 	r.l.Unlock()
 }
 
@@ -438,16 +443,15 @@ func (r *Reliable) enterClosedState() {
 	if r.tubeState == closed {
 		return
 	}
-	previousState := r.tubeState
 	// Reject every producer before closing sender queues. This remains visible
 	// while the lifecycle lock is released to wait for the sender to drain.
 	r.tubeState = closed
 	if r.lastAckTimer != nil {
 		r.lastAckTimer.Stop()
 	}
-	r.sender.Close()
+	waitForSender := r.sender.Close() == nil
 	r.recvWindow.Close()
-	if previousState != created {
+	if waitForSender {
 		r.l.Unlock()
 		<-r.sendDone
 		r.l.Lock()
