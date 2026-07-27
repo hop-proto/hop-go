@@ -12,10 +12,11 @@
 // the lifecycle mutex while waiting for the tube sender to drain, and actual
 // socket I/O belongs solely to the Muxer sender.
 //
-// Shutdown proceeds from producers to consumers. Tubes close and drain their
-// sender queues before the Muxer closes its queues. The Muxer sender then gets a
-// bounded drain period before the underlying connection is closed to stop the
-// receiver. This ordering normally writes the final reliable FIN acknowledgement
-// and ensures no goroutine can send on a closed queue; the bound prevents a stuck
-// transport write from deadlocking shutdown.
+// Shutdown proceeds from producers to consumers. Tubes reject new work, close
+// and drain their sender queues, and then the Muxer closes its queues. One
+// shutdown deadline bounds that entire chain: on expiry, closing the underlying
+// connection unblocks the Muxer sender, which drains queued handoffs so upstream
+// producers can exit. This ordering normally writes the final reliable FIN
+// acknowledgement, never sends on a closed queue, and cannot wait forever on a
+// stuck transport write.
 package tubes

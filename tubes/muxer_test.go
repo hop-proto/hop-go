@@ -2,6 +2,7 @@ package tubes
 
 import (
 	"net"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -178,6 +179,55 @@ func TestMuxerStopInterruptsBlockedSender(t *testing.T) {
 	case <-conn.writeCompleted:
 		t.Fatal("blocked write unexpectedly completed")
 	default:
+	}
+}
+
+// TestMuxerStopUnblocksTubeProducerOnBlockedWrite verifies that the forced
+// shutdown bound reaches upstream tube producers, not only the Muxer sender.
+func TestMuxerStopUnblocksTubeProducerOnBlockedWrite(t *testing.T) {
+	conn := newBlockingWriteMsgConn()
+	muxer := newMuxer(conn, time.Second, false, logrus.WithField("test", t.Name()))
+
+	tube, err := muxer.CreateUnreliableTube(common.ExecTube)
+	assert.NilError(t, err)
+	<-conn.writeStarted
+
+	err = tube.receiveInitiatePkt(&initiateFrame{
+		flags: frameFlags{RESP: true},
+	})
+	assert.NilError(t, err)
+	<-tube.initiateDone
+
+	err = tube.WriteMsg([]byte("queued behind blocked muxer write"))
+	assert.NilError(t, err)
+	deadline := time.Now().Add(time.Second)
+	for len(tube.send.C) != 0 && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+	assert.Equal(t, len(tube.send.C), 0, "tube sender did not consume queued message")
+
+	stopDone := make(chan stopResult, 1)
+	go func() {
+		sendErr, recvErr := muxer.Stop()
+		stopDone <- stopResult{sendErr: sendErr, recvErr: recvErr}
+	}()
+
+	select {
+	case result := <-stopDone:
+		assert.NilError(t, result.sendErr)
+		assert.NilError(t, result.recvErr)
+	case <-time.After(2 * muxerTimeout):
+		// Release the fake write so a broken Stop can clean up before the test
+		// fails rather than leaking its shutdown goroutines.
+		close(conn.releaseWrite)
+		<-stopDone
+		t.Fatal("Muxer.Stop deadlocked behind an unreliable tube producer")
+	}
+
+	select {
+	case <-conn.closed:
+	default:
+		t.Fatal("blocked transport was not closed")
 	}
 }
 

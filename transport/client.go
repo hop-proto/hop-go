@@ -43,6 +43,8 @@ type Client struct {
 	wg    sync.WaitGroup
 	state atomic.Uint32
 
+	// handshakeDone closes after the elected Handshake caller stores its result.
+	// Closing it publishes err, hs, and ss to all concurrent waiters.
 	handshakeDone chan struct{}
 
 	underlyingConn UDPLike
@@ -55,6 +57,8 @@ type Client struct {
 
 	config ClientConfig
 
+	// closeDone closes after the elected Close caller stops all producers and
+	// stores closeErr. Later Close calls wait for that publication.
 	closeDone chan struct{}
 	closeErr  error
 }
@@ -508,7 +512,8 @@ func (c *Client) handleSessionMessage(addr *net.UDPAddr, msg []byte) error {
 	return nil
 }
 
-// Write implements net.Conn.
+// Write implements net.Conn. A successful return means the configured
+// underlying transport accepted each packet, not that the peer received it.
 func (c *Client) Write(b []byte) (int, error) {
 	if err := c.Handshake(); err != nil {
 		return 0, err
@@ -516,7 +521,8 @@ func (c *Client) Write(b []byte) (int, error) {
 	return c.ss.handle.Write(b)
 }
 
-// WriteMsg implements MsgConn. It send a single frame.
+// WriteMsg implements MsgConn. A successful return means the configured
+// underlying transport accepted the message, not that the peer received it.
 func (c *Client) WriteMsg(b []byte) error {
 	if err := c.Handshake(); err != nil {
 		return err
@@ -602,8 +608,8 @@ func (c *Client) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
-// Close immediately tears down the connection.
-// Future operations on non-buffered data will return io.EOF
+// Close tears down the underlying connection and waits for all Client-owned
+// workers. Future operations on non-buffered data return io.EOF.
 func (c *Client) Close() error {
 	var previous uint32
 	for {

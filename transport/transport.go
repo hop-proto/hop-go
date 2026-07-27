@@ -15,8 +15,10 @@ import (
 // SessionID is an IP-independent identifier of a tunnel.
 type SessionID [4]byte
 
-// SessionState contains the cryptographic state associated with a SessionID
-// after the successful completion of a handshake.
+// SessionState contains the cryptographic and lifecycle state associated with a
+// SessionID after a successful handshake. Its mutex orders packet processing
+// with closeLocked, so receive producers reject work before the Handle receive
+// queue is canceled.
 type SessionState struct {
 	sessionID SessionID
 

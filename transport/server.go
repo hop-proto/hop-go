@@ -45,14 +45,20 @@ type Server struct {
 	// +checklocks:m
 	sessions map[SessionID]*SessionState
 
+	// pendingConnections contains established Handles published by the Serve
+	// receive loop but not yet returned by Accept. Close stops that producer
+	// before closing the queue.
 	pendingConnections chan *Handle
 
 	// +checklocks:cookieLock
-	cookieKey        [KeyLen]byte
-	cookieLock       sync.Mutex
+	cookieKey  [KeyLen]byte
+	cookieLock sync.Mutex
+	// stopCookieRotate is closed once by the shutdown owner.
 	stopCookieRotate chan struct{}
 
-	wg        sync.WaitGroup
+	wg sync.WaitGroup
+	// closeDone closes after all workers and session receive queues stop and
+	// closeErr is stored, publishing the result to later Close and Serve calls.
 	closeDone chan struct{}
 	closeErr  error
 }

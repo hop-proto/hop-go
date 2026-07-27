@@ -11,6 +11,10 @@ ifeq (, $(shell command -v "GOLANG_CHECKLOCKS"))
 	GOLANG_CHECKLOCKS_ERR = $(error install checklocks eith e.g. go install gvisor.dev/gvisor/tools/checklocks/cmd/checklocks@go)
 endif
 
+CONCURRENCY_TEST_COUNT ?= 10
+CONCURRENCY_TEST_PACKAGES := ./transport ./tubes ./hoptests
+CONCURRENCY_TEST_PROCS := 1 2 4
+
 .PHONY: vet
 vet: ## run go vet. Currently, this only checks for deadlocks
 vet:
@@ -41,6 +45,13 @@ debug:
 test: ## test. To run with trace logging, add "-tags debug" to the arguments
 test:
 	go test -race ./... -timeout 4m
+
+.PHONY: test-concurrency
+test-concurrency: ## stress concurrency-heavy packages under varied scheduler widths
+	@for procs in $(CONCURRENCY_TEST_PROCS); do \
+		echo "concurrency tests: GOMAXPROCS=$$procs count=$(CONCURRENCY_TEST_COUNT)"; \
+		GOMAXPROCS=$$procs go test -race -shuffle=on -count=$(CONCURRENCY_TEST_COUNT) $(CONCURRENCY_TEST_PACKAGES) || exit 1; \
+	done
 
 .PHONY: cred-gen
 cred-gen: ## generates credentials for container tests

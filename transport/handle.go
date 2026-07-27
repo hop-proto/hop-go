@@ -16,8 +16,10 @@ type Handle struct {
 	readLock  sync.Mutex
 	writeLock sync.Mutex
 
-	underlying UDPLike                      // outgoing socket-like
-	recv       *common.DeadlineChan[[]byte] // incoming transport messages
+	underlying UDPLike // outgoing socket-like
+	// recv contains decrypted messages accepted by the Client or Server receive
+	// loop but not yet returned to this Handle's reader.
+	recv *common.DeadlineChan[[]byte]
 
 	// +checklocks:readLock
 	buf bytes.Buffer
@@ -42,8 +44,9 @@ func newHandleForSession(underlying UDPLike, ss *SessionState, leaf *certs.Certi
 	}
 }
 
-// IsClosed returns true if the handle is closed or in the process of closing.
-// Writes and reads to the handle return io.EOF if and only if IsClosed returns true
+// IsClosed reports whether the session close transition has occurred. Operations
+// that start after it returns true get io.EOF once buffered reads are drained;
+// an already in-flight write may still finish.
 func (c *Handle) IsClosed() bool {
 	c.ss.m.Lock()
 	defer c.ss.m.Unlock()
@@ -118,8 +121,9 @@ func (c *Handle) Read(b []byte) (int, error) {
 	return n, err
 }
 
-// WriteMsg writes b as a single packet. If b is too long, WriteMsg returns
-// ErrBufOverlow.
+// WriteMsg writes b as a single packet. A successful return means the configured
+// UDPLike transport accepted it, not that the peer received it. If b is too
+// long, WriteMsg returns ErrBufOverlow.
 func (c *Handle) WriteMsg(b []byte) error {
 	if len(b) > MaxPlaintextSize {
 		return ErrBufOverflow
@@ -127,9 +131,9 @@ func (c *Handle) WriteMsg(b []byte) error {
 	return c.send(MessageTypeTransport, b)
 }
 
-// Write implements io.Writer. It will split b into segments of length
-// MaxPlaintextLength and send them using WriteMsg. Each call to WriteMsg is
-// subject to the timeout.
+// Write implements io.Writer. It splits b into transport packets and returns
+// after the configured UDPLike transport accepts each packet; it does not wait
+// for peer receipt.
 func (c *Handle) Write(buf []byte) (int, error) {
 	b := append([]byte{}, buf...)
 	if len(b) <= MaxPlaintextSize {
@@ -223,11 +227,9 @@ func (c *Handle) SetReadDeadline(t time.Time) error {
 	return c.recv.SetDeadline(t)
 }
 
-// SetWriteDeadline sets a deadline at which future read operations will stop
-// Pending writes will be canceled
+// SetWriteDeadline currently records no deadline. Writes remain subject to
+// writeLock and the configured underlying transport.
 func (c *Handle) SetWriteDeadline(_ time.Time) error {
-	// There is no actual write deadline because sends go out immediately, subject to locking.
-	//
 	// TODO(dadrian)[2023-09-08]: Somehow limit lock wait time to write deadline.
 	return nil
 }

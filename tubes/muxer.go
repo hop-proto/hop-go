@@ -42,6 +42,8 @@ type Tube interface {
 
 // Muxer handles delivering and sending tube messages
 type Muxer struct {
+	// tubeQueue contains remotely initiated tubes accepted by the receiver.
+	// Once Stop publishes muxerStopping, the receiver cannot add another tube.
 	tubeQueue chan Tube
 
 	idParity byte
@@ -52,18 +54,23 @@ type Muxer struct {
 	// +checklocks:m
 	unreliableTubes map[byte]*Unreliable
 
-	// All hop tubes write raw bytes for a tube packet to this golang chan.
+	// Tube producers hand encoded frames to these queues. A successful send only
+	// means the Muxer sender accepted the frame; senderErr publishes completion
+	// after all accepted frames have either been written or discarded on error.
 	sendQueue         chan []byte
 	prioritySendQueue chan []byte
 	state             atomic.Value
-	stopped           chan struct{}
-	underlying        transport.MsgConn
-	timeout           time.Duration
-	log               *logrus.Entry
+	// stopped is closed after Stop caches both worker results.
+	stopped    chan struct{}
+	underlying transport.MsgConn
+	timeout    time.Duration
+	log        *logrus.Entry
 
+	// senderErr receives once, after the sender has drained both send queues.
 	senderErr chan error
 	sendErr   error
 
+	// receiverErr receives once, after the receiver stops reading the transport.
 	receiverErr chan error
 	recvErr     error
 
@@ -320,6 +327,7 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 		state:        atomic.Value{},
 		initiated:    make(chan struct{}),
 		initiateDone: make(chan struct{}),
+		stopInitiate: make(chan struct{}),
 		senderDone:   make(chan struct{}),
 		closed:       make(chan struct{}),
 		log: m.log.WithFields(logrus.Fields{
@@ -366,9 +374,10 @@ func (m *Muxer) readMsg() (*frame, error) {
 
 }
 
-// sender reads data from the muxer's sendQueue and writes it to the
-// underlying MsgConn. If an error occurs while sending data, sender will call
-// m.Stop in a new goroutine and the error will be reported by m.Stop
+// sender accepts frames from the Muxer queues and writes them synchronously to
+// the underlying MsgConn. Receiving a frame is only a queue handoff; WriteMsg
+// completion is the point at which the transport has accepted it. If a write
+// fails, sender starts Stop and drains both queues so tube producers can exit.
 func (m *Muxer) sender() {
 	var err error
 	ok := true
@@ -422,8 +431,8 @@ func (m *Muxer) start() {
 func (m *Muxer) receiver() {
 	var err error
 
-	// When start finishes, it sends its error on this channel.
-	// m.Stop receives this error and passes it to the caller.
+	// When the receiver finishes, it sends its error on receiverErr. Stop
+	// receives that result before publishing shutdown completion.
 	defer func() {
 		// This case indicates that the muxer was stopped by m.Stop()
 		if m.state.Load() == muxerStopped {
@@ -501,11 +510,11 @@ func closeTubeHelper(t Tube, log *logrus.Entry, wg *sync.WaitGroup) {
 	}(t)
 }
 
-// Stop ensures all the muxer tubes are closed. Calls to Stop are idempotent.
-// If a call to Stop is make while another call to stop is ongoing, the second
-// call with block until the first call has finish. Stop returns two errors:
-// the first error is any error returned by the muxer sender and the second
-// any error returned by the muxer receiver.
+// Stop gracefully closes every tube and then the underlying transport. Its
+// bounded fallback may close the transport first to unblock that graceful
+// drain. Calls are idempotent; concurrent callers wait for the elected shutdown
+// owner to publish its result. Stop returns the sender error followed by the
+// receiver error.
 func (m *Muxer) Stop() (sendErr error, recvErr error) {
 	// This error indicates that the muxer got an ICMP Destination Unreachable packet.
 	// This happens when the other side of the connetion has been closed, so we
@@ -550,6 +559,11 @@ func (m *Muxer) Stop() (sendErr error, recvErr error) {
 		if m.state.Load() == muxerStopped {
 			return
 		}
+
+		// The graceful tube close may itself be blocked behind the Muxer sender.
+		// Close the transport first so sender can switch to draining its queues.
+		m.underlying.Close()
+
 		m.m.Lock()
 		for _, v := range m.reliableTubes {
 			go func(r *Reliable) {
