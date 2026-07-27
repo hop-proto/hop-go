@@ -570,11 +570,20 @@ func (m *Muxer) Stop() (sendErr error, recvErr error) {
 	close(m.sendQueue)
 	close(m.tubeQueue)
 
+	// Drain every queued tube frame before closing the transport. If a transport
+	// write is stuck, Close must interrupt it so shutdown cannot deadlock.
+	senderTimer := time.NewTimer(muxerTimeout)
+	select {
+	case m.sendErr = <-m.senderErr:
+		senderTimer.Stop()
+	case <-senderTimer.C:
+		m.underlying.Close()
+		m.sendErr = <-m.senderErr
+	}
 	m.underlying.Close()
 
-	// Cache error for future calls to Stop
+	// Cache errors for future calls to Stop.
 	m.recvErr = <-m.receiverErr
-	m.sendErr = <-m.senderErr
 	m.m.Lock()
 	defer m.m.Unlock()
 

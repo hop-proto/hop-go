@@ -1,4 +1,3 @@
-// Package tubes implements the multiplexing of raw data into logical channels of a hop session
 package tubes
 
 import (
