@@ -8,13 +8,14 @@
 //
 // Each Reliable's lifecycle mutex serializes state-machine transitions. Its
 // sender has a separate mutex for acknowledgements and retransmission state;
-// when both are needed, the Reliable mutex is acquired first. State transitions
-// release these locks before waiting on another goroutine or doing socket I/O.
+// when both are needed, the Reliable mutex is acquired first. Closing releases
+// the lifecycle mutex while waiting for the tube sender to drain, and actual
+// socket I/O belongs solely to the Muxer sender.
 //
 // Shutdown proceeds from producers to consumers. Tubes close and drain their
-// sender queues before the Muxer closes its queues; the Muxer sender then drains
-// those queues before the underlying connection is closed to stop the receiver.
-// This ordering ensures that the final reliable FIN acknowledgement is normally
-// written and that no goroutine can send on a closed queue. A bounded shutdown
-// timer closes the connection if a transport write is stuck.
+// sender queues before the Muxer closes its queues. The Muxer sender then gets a
+// bounded drain period before the underlying connection is closed to stop the
+// receiver. This ordering normally writes the final reliable FIN acknowledgement
+// and ensures no goroutine can send on a closed queue; the bound prevents a stuck
+// transport write from deadlocking shutdown.
 package tubes
