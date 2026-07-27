@@ -77,6 +77,7 @@ func (c *Client) Handshake() error {
 
 			err := c.clientHandshakeLocked()
 			if err != nil {
+				// Store the error before publishing clientStateError so concurrent callers cannot observe an uninitialized result.
 				c.err = err
 				if c.state.CompareAndSwap(clientStateHandshaking, clientStateError) {
 					c.hs = nil
@@ -85,6 +86,7 @@ func (c *Client) Handshake() error {
 			}
 			close(c.handshakeDone)
 
+			// Recheck after completion because Close may have changed the state while the handshake was running.
 			state := c.state.Load()
 			if state == clientStateClosing || state == clientStateClosed {
 				return io.EOF
