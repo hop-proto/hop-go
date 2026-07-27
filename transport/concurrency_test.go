@@ -476,15 +476,8 @@ func TestRaceBetweenCloseAndDeadlineOrIO(t *testing.T) {
 	assert.Check(t, h.IsClosed())
 }
 
-// TestStressHighConcurrency subjects the connection to high-volume, concurrent reads,
-// writes, deadlines, and closes to uncover subtle races.
-//
-// Steps:
-//  1. Use a large number of goroutines performing random operations (ReadMsg,
-//     WriteMsg, SetDeadline, Close).
-//  2. Run under go test -race with sufficient iterations.
-//
-// Expected: Stability under load with correct semantics.
+// TestStressHighConcurrency verifies that concurrent writes are serialized so
+// every successful write emits one packet with a unique counter.
 func TestStressHighConcurrency(t *testing.T) {
 	conn := newConcurrencyTestConn()
 	h := newConcurrencyTestHandle(conn, 1)
@@ -512,6 +505,8 @@ func TestStressHighConcurrency(t *testing.T) {
 	assert.NilError(t, h.Close())
 }
 
+// TestClientCloseInterruptsHandshake verifies that Close owns shutdown, closes
+// the underlying connection once, and unblocks an in-flight handshake.
 func TestClientCloseInterruptsHandshake(t *testing.T) {
 	conn := newConcurrencyTestConn()
 	_, verify := newTestServerConfig(t)
@@ -538,6 +533,8 @@ func TestClientCloseInterruptsHandshake(t *testing.T) {
 	assert.Equal(t, conn.closeN.Load(), int32(1))
 }
 
+// TestConcurrentHandshakeRunsOnce verifies that concurrent callers share one
+// handshake result and create exactly one server-side connection.
 func TestConcurrentHandshakeRunsOnce(t *testing.T) {
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	assert.NilError(t, err)
@@ -581,6 +578,8 @@ func TestConcurrentHandshakeRunsOnce(t *testing.T) {
 	assert.Equal(t, err, ErrTimeout, "concurrent callers performed more than one handshake")
 }
 
+// TestConcurrentClientCloseBeforeHandshake verifies that pre-handshake Close is
+// concurrency-safe, idempotent, and closes the underlying connection once.
 func TestConcurrentClientCloseBeforeHandshake(t *testing.T) {
 	conn := newConcurrencyTestConn()
 	client := NewClient(conn, conn.RemoteAddr().(*net.UDPAddr), ClientConfig{})
@@ -602,6 +601,8 @@ func TestConcurrentClientCloseBeforeHandshake(t *testing.T) {
 	assert.Check(t, errors.Is(err, io.EOF))
 }
 
+// TestServerServeCloseRace verifies that worker registration is synchronized
+// with Close, so racing Serve and Close cannot deadlock or close twice.
 func TestServerServeCloseRace(t *testing.T) {
 	for range 100 {
 		conn := newConcurrencyTestConn()
@@ -628,6 +629,8 @@ func TestServerServeCloseRace(t *testing.T) {
 	}
 }
 
+// TestConcurrentServerCloseUnblocksAccept verifies that concurrent Close calls
+// have one owner and unblock both Serve and Accept exactly once.
 func TestConcurrentServerCloseUnblocksAccept(t *testing.T) {
 	conn := newConcurrencyTestConn()
 	config, _ := newTestServerConfig(t)
