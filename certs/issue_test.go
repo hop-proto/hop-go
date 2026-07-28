@@ -38,7 +38,7 @@ func TestIssueSelfSigned(t *testing.T) {
 	}
 }
 
-func TestIssueLeafWithValidity(t *testing.T) {
+func TestIssueLeafAt(t *testing.T) {
 	rootKey := keys.GenerateNewSigningKeyPair()
 	root, err := SelfSignRoot(SigningIdentity(rootKey), rootKey)
 	assert.NilError(t, err)
@@ -50,13 +50,39 @@ func TestIssueLeafWithValidity(t *testing.T) {
 	assert.NilError(t, intermediate.ProvideKey((*[32]byte)(&intermediateKey.Private)))
 
 	leafKey := keys.GenerateNewX25519KeyPair()
-	leaf, err := IssueLeafWithValidity(intermediate, LeafIdentity(leafKey, RawStringName("short-lived")), time.Hour)
+	issuedAt := intermediate.IssuedAt
+	leaf, err := IssueLeafAt(
+		intermediate,
+		LeafIdentity(leafKey, RawStringName("short-lived")),
+		issuedAt,
+		time.Hour,
+	)
 	assert.NilError(t, err)
-	assert.Check(t, leaf.ExpiresAt.Sub(leaf.IssuedAt) >= time.Hour-time.Second)
-	assert.Check(t, leaf.ExpiresAt.Sub(leaf.IssuedAt) <= time.Hour+time.Second)
+	assert.Equal(t, leaf.IssuedAt, issuedAt)
+	assert.Equal(t, leaf.ExpiresAt, issuedAt.Add(time.Hour))
 	assert.NilError(t, VerifyParent(leaf, intermediate))
 
-	intermediate.ExpiresAt = time.Now().Add(-time.Second)
-	_, err = IssueLeafWithValidity(intermediate, LeafIdentity(leafKey), time.Hour)
-	assert.ErrorContains(t, err, "currently valid parent")
+	_, err = IssueLeafAt(intermediate, LeafIdentity(leafKey), intermediate.ExpiresAt, time.Hour)
+	assert.ErrorContains(t, err, "valid at issuance time")
+}
+
+func TestIssueLeafWithValidityUsesCurrentTime(t *testing.T) {
+	rootKey := keys.GenerateNewSigningKeyPair()
+	root, err := SelfSignRoot(SigningIdentity(rootKey), rootKey)
+	assert.NilError(t, err)
+	assert.NilError(t, root.ProvideKey((*[32]byte)(&rootKey.Private)))
+
+	intermediateKey := keys.GenerateNewSigningKeyPair()
+	intermediate, err := IssueIntermediate(root, SigningIdentity(intermediateKey))
+	assert.NilError(t, err)
+	assert.NilError(t, intermediate.ProvideKey((*[32]byte)(&intermediateKey.Private)))
+
+	before := time.Now()
+	leafKey := keys.GenerateNewX25519KeyPair()
+	leaf, err := IssueLeafWithValidity(intermediate, LeafIdentity(leafKey), time.Hour)
+	after := time.Now()
+	assert.NilError(t, err)
+	assert.Check(t, !leaf.IssuedAt.Before(before))
+	assert.Check(t, !leaf.IssuedAt.After(after))
+	assert.Equal(t, leaf.ExpiresAt, leaf.IssuedAt.Add(time.Hour))
 }
