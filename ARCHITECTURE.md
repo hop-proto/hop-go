@@ -52,8 +52,6 @@ transport layer, and provides reliable stream-oriented connections.
 
 ### Hop Remote Access
 
-_The structure of the Hop Application is subject to change, a lot!_
-
 The Hop app is implemented across several packages and attempts to be an SSH
 replacement. It uses the Hop Tubes layer. The client and server are in the
 `hopclient` and `hopserver` directories.
