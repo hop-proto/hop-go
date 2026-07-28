@@ -5,7 +5,7 @@ Hop is a transport and remote access protocol addressing many of SSH's shortcomi
 
 Among other functionalities, Hop proposes a cryptographically-mediated delegation scheme, native host identification based on lessons from TLS and ACME, client authentication for modern enterprise environments, and support for client roaming and intermittent connectivity.
 
-A detailed description of Hop design and requirements can be found in our original [paper](https://paul.flammarion.eu/document/hop.pdf), which will appear at [USENIX Security '26](https://www.usenix.org/conference/usenixsecurity26).
+A detailed description of Hop design and requirements can be found in our original [paper](https://paul.flammarion.eu/document/flammarion2026hop.pdf), which will appear at [USENIX Security '26](https://www.usenix.org/conference/usenixsecurity26).
 
 # Architecture
 
