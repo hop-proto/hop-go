@@ -31,6 +31,11 @@ type VerifyConfig struct {
 
 	// Can do additional verification in a call back.
 	AddVerifyCallback AdditionalVerifyCallback
+
+	// CurrentTime overrides the clock used for certificate validity checks.
+	// It is intended for deterministic tests; production callers should leave
+	// it zero to use the current time.
+	CurrentTime time.Time
 }
 
 // IdentityConfig associates a certificate chain with a Name.

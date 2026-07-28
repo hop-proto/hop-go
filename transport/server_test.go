@@ -56,7 +56,8 @@ func newTestServerConfig(t assert.TestingT) (*ServerConfig, *VerifyConfig) {
 		HandshakeTimeout: 5 * time.Second,
 	}
 	verify := VerifyConfig{
-		Store: certs.Store{},
+		Store:       certs.Store{},
+		CurrentTime: certificate.IssuedAt.Add(time.Second),
 	}
 	verify.Store.AddCertificate(root)
 	return &server, &verify

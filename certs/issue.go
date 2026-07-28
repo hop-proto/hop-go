@@ -18,20 +18,29 @@ const (
 	week = time.Hour * 7 * 24
 )
 
-// issue does the heavy lifting of issuing and signing
-func issue(parent *Certificate, child *Identity, certType CertificateType, duration time.Duration) (*Certificate, error) {
+// issue does the heavy lifting of issuing and signing.
+func issue(parent *Certificate, child *Identity, certType CertificateType, issuedAt time.Time, duration time.Duration) (*Certificate, error) {
 	if parent.Fingerprint == zero {
 		return nil, errors.New("issue requires SHA3Fingerprint to be set")
 	}
 	if parent.privateKey == nil {
 		return nil, errors.New("issue requires a private key")
 	}
-	now := time.Now()
+	if duration <= 0 {
+		return nil, errors.New("issue requires a positive duration")
+	}
+	if issuedAt.Before(parent.IssuedAt) || !issuedAt.Before(parent.ExpiresAt) {
+		return nil, errors.New("issue requires the parent to be valid at issuance time")
+	}
+	expiresAt := issuedAt.Add(duration)
+	if expiresAt.After(parent.ExpiresAt) {
+		expiresAt = parent.ExpiresAt
+	}
 	out := &Certificate{
 		Version:   Version,
 		Type:      certType,
-		IssuedAt:  time.Now(),
-		ExpiresAt: now.Add(week),
+		IssuedAt:  issuedAt,
+		ExpiresAt: expiresAt,
 		IDChunk: IDChunk{
 			Blocks: child.Names,
 		},
@@ -76,14 +85,24 @@ func issue(parent *Certificate, child *Identity, certType CertificateType, durat
 // key.
 //
 // TODO(dadrian): Do we need Authorization Indicator?
-//
-// TODO(dadrian): Should we just use XEdDSA so that we don't need to have two
-// different key types, in exchange for having to implement more cryptography?
 func IssueLeaf(parent *Certificate, child *Identity) (*Certificate, error) {
+	return IssueLeafWithValidity(parent, child, week)
+}
+
+// IssueLeafWithValidity issues a leaf Certificate for the requested validity
+// period at the current time. The certificate will never outlive its
+// intermediate parent.
+func IssueLeafWithValidity(parent *Certificate, child *Identity, validity time.Duration) (*Certificate, error) {
+	return IssueLeafAt(parent, child, time.Now(), validity)
+}
+
+// IssueLeafAt issues a leaf Certificate at issuedAt for the requested validity
+// period. The certificate will never outlive its intermediate parent.
+func IssueLeafAt(parent *Certificate, child *Identity, issuedAt time.Time, validity time.Duration) (*Certificate, error) {
 	if parent.Type != Intermediate {
 		return nil, errors.New("IssueLeaf requires the parent to be an intermediate")
 	}
-	return issue(parent, child, Leaf, week)
+	return issue(parent, child, Leaf, issuedAt, validity)
 }
 
 func selfSign(self *Identity, certificateType CertificateType, keyPair *keys.SigningKeyPair) (*Certificate, error) {
@@ -150,7 +169,7 @@ func IssueIntermediate(root *Certificate, intermediate *Identity) (*Certificate,
 	if root.Type != Root {
 		return nil, errors.New("IssueIntermediate requires the parent to be a root")
 	}
-	return issue(root, intermediate, Intermediate, time.Hour*24*366)
+	return issue(root, intermediate, Intermediate, time.Now(), time.Hour*24*366)
 }
 
 // SelfSignLeaf issues self-signed leaf certificate using only a key.
