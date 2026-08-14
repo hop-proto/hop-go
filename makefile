@@ -18,6 +18,7 @@ CONCURRENCY_TEST_PROCS := 1 2 4
 .PHONY: vet
 vet: ## run go vet. Currently, this only checks for deadlocks
 vet:
+	go run ./internal/checkblockinglocks ./tubes ./transport
 	go vet -vettool=$$HOME/go/bin/checklocks ./...
 
 .PHONY: lint

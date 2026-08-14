@@ -1,6 +1,7 @@
 package tubes
 
 import (
+	"errors"
 	"net"
 	"runtime"
 	"sync"
@@ -21,6 +22,9 @@ type blockingWriteMsgConn struct {
 	releaseWrite   chan struct{}
 	writeCompleted chan struct{}
 	closed         chan struct{}
+	reads          chan []byte
+	writes         chan []byte
+	writeErr       error
 
 	startOnce    sync.Once
 	completeOnce sync.Once
@@ -38,6 +42,8 @@ func newBlockingWriteMsgConn() *blockingWriteMsgConn {
 		releaseWrite:   make(chan struct{}),
 		writeCompleted: make(chan struct{}),
 		closed:         make(chan struct{}),
+		reads:          make(chan []byte, 16),
+		writes:         make(chan []byte, 16),
 	}
 }
 
@@ -79,24 +85,141 @@ func (c *blockingWriteMsgConn) SetWriteDeadline(time.Time) error {
 	return nil
 }
 
-func (c *blockingWriteMsgConn) ReadMsg([]byte) (int, error) {
-	<-c.closed
-	return 0, net.ErrClosed
+func (c *blockingWriteMsgConn) ReadMsg(b []byte) (int, error) {
+	select {
+	case msg := <-c.reads:
+		return copy(b, msg), nil
+	case <-c.closed:
+		return 0, net.ErrClosed
+	}
 }
 
-func (c *blockingWriteMsgConn) WriteMsg([]byte) error {
+func (c *blockingWriteMsgConn) WriteMsg(b []byte) error {
 	c.startOnce.Do(func() {
 		close(c.writeStarted)
 	})
 
 	select {
 	case <-c.releaseWrite:
+		c.writes <- append([]byte(nil), b...)
 		c.completeOnce.Do(func() {
 			close(c.writeCompleted)
 		})
-		return nil
+		return c.writeErr
 	case <-c.closed:
 		return net.ErrClosed
+	}
+}
+
+func TestMuxerSenderPrefersWaitingPriorityFrame(t *testing.T) {
+	conn := newBlockingWriteMsgConn()
+	close(conn.releaseWrite)
+	o := newOutbox()
+	// Buffer exactly one frame at each priority so both are waiting before the
+	// sender chooses. The queues remain owned by the Muxer under test.
+	o.normal = make(chan []byte, 1)
+	o.priority = make(chan []byte, 1)
+	muxer := &Muxer{
+		outbound:   o,
+		underlying: conn,
+		senderErr:  make(chan error, 1),
+		log:        logrus.WithField("test", t.Name()),
+	}
+	assert.NilError(t, o.enqueue(outboundFrame{bytes: []byte("data")}, nil))
+	assert.NilError(t, o.enqueue(outboundFrame{bytes: []byte("retransmission"), priority: true}, nil))
+	go muxer.sender()
+
+	assert.DeepEqual(t, <-conn.writes, []byte("retransmission"))
+	assert.DeepEqual(t, <-conn.writes, []byte("data"))
+	o.requestStop()
+	select {
+	case err := <-muxer.senderErr:
+		assert.NilError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("Muxer sender did not observe graceful stop")
+	}
+}
+
+func TestMuxerTransportFailureWakesBothQueuePriorities(t *testing.T) {
+	want := errors.New("injected transport write failure")
+	conn := newBlockingWriteMsgConn()
+	conn.writeErr = want
+	muxer := newMuxer(conn, 0, false, logrus.WithField("test", t.Name()))
+
+	assert.NilError(t, muxer.outbound.enqueue(outboundFrame{bytes: []byte("in flight")}, nil))
+	<-conn.writeStarted
+
+	started := make(chan struct{}, 2)
+	results := make(chan error, 2)
+	for _, priority := range []bool{false, true} {
+		go func() {
+			started <- struct{}{}
+			results <- muxer.outbound.enqueue(outboundFrame{bytes: []byte("waiting"), priority: priority}, nil)
+		}()
+	}
+	<-started
+	<-started
+	runtime.Gosched()
+	close(conn.releaseWrite)
+
+	for range 2 {
+		select {
+		case err := <-results:
+			assert.Assert(t, errors.Is(err, want))
+		case <-time.After(time.Second):
+			t.Fatal("transport failure did not wake both queue priorities")
+		}
+	}
+
+	stopDone := make(chan stopResult, 1)
+	go func() {
+		sendErr, recvErr := muxer.Stop()
+		stopDone <- stopResult{sendErr: sendErr, recvErr: recvErr}
+	}()
+	select {
+	case result := <-stopDone:
+		assert.Assert(t, errors.Is(result.sendErr, want))
+		assert.NilError(t, result.recvErr)
+	case <-time.After(time.Second):
+		t.Fatal("Muxer shutdown did not complete after transport failure")
+	}
+}
+
+func TestMuxerStopUnblocksFullRemoteTubeQueue(t *testing.T) {
+	conn := newBlockingWriteMsgConn()
+	muxer := newMuxer(conn, 0, false, logrus.WithField("test", t.Name()))
+	for range cap(muxer.tubeQueue) {
+		muxer.tubeQueue <- nil
+	}
+	conn.reads <- (&initiateFrame{
+		tubeID:   2,
+		tubeType: common.ExecTube,
+		flags:    frameFlags{REQ: true, REL: true},
+	}).toBytes()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		_, created := muxer.getTube(true, 2)
+		if created {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Muxer receiver did not reach the full remote-tube queue")
+		}
+		runtime.Gosched()
+	}
+
+	stopDone := make(chan stopResult, 1)
+	go func() {
+		sendErr, recvErr := muxer.Stop()
+		stopDone <- stopResult{sendErr: sendErr, recvErr: recvErr}
+	}()
+	select {
+	case result := <-stopDone:
+		assert.NilError(t, result.sendErr)
+		assert.NilError(t, result.recvErr)
+	case <-time.After(time.Second):
+		t.Fatal("Muxer.Stop deadlocked behind a full remote-tube queue")
 	}
 }
 
@@ -106,7 +229,7 @@ func TestMuxerStopDrainsSenderBeforeClosingUnderlying(t *testing.T) {
 	conn := newBlockingWriteMsgConn()
 	muxer := newMuxer(conn, time.Second, false, logrus.WithField("test", t.Name()))
 
-	muxer.sendQueue <- []byte("final reliable acknowledgement")
+	assert.NilError(t, muxer.outbound.enqueue(outboundFrame{bytes: []byte("final reliable acknowledgement")}, nil))
 	<-conn.writeStarted
 
 	stopDone := make(chan stopResult, 1)
@@ -153,7 +276,7 @@ func TestMuxerStopInterruptsBlockedSender(t *testing.T) {
 	conn := newBlockingWriteMsgConn()
 	muxer := newMuxer(conn, time.Second, false, logrus.WithField("test", t.Name()))
 
-	muxer.sendQueue <- []byte("blocked write")
+	assert.NilError(t, muxer.outbound.enqueue(outboundFrame{bytes: []byte("blocked write")}, nil))
 	<-conn.writeStarted
 
 	stopDone := make(chan stopResult, 1)
@@ -201,10 +324,10 @@ func TestMuxerStopUnblocksTubeProducerOnBlockedWrite(t *testing.T) {
 	err = tube.WriteMsg([]byte("queued behind blocked muxer write"))
 	assert.NilError(t, err)
 	deadline := time.Now().Add(time.Second)
-	for len(tube.send.C) != 0 && time.Now().Before(deadline) {
+	for tube.send.Len() != 0 && time.Now().Before(deadline) {
 		runtime.Gosched()
 	}
-	assert.Equal(t, len(tube.send.C), 0, "tube sender did not consume queued message")
+	assert.Equal(t, tube.send.Len(), 0, "tube sender did not consume queued message")
 
 	stopDone := make(chan stopResult, 1)
 	go func() {

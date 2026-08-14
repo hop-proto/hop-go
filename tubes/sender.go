@@ -58,10 +58,9 @@ type sender struct {
 	// the time after which writes will expire
 	deadline time.Time
 
-	// sendQueue and prioritySendQueue contain frames admitted by the reliable
-	// state machine but not necessarily handed to the Muxer or transport.
-	sendQueue         chan *frame
-	prioritySendQueue chan *frame
+	// done is closed by the owning Reliable after its lifecycle rejects every
+	// producer. It wakes the sender loop and blocked outbox admission.
+	done chan struct{}
 
 	m sync.Mutex
 
@@ -106,9 +105,8 @@ func newSender(log *logrus.Entry) *sender {
 			windowSize:           defaultWindowSize,
 			windowOpen:           make(chan struct{}, 1),
 		},
-		sendQueue:         make(chan *frame, 1024), // TODO(hosono) make this size 0
-		prioritySendQueue: make(chan *frame, 1024),
-		log:               log.WithField("sender", ""),
+		done: make(chan struct{}),
+		log:  log.WithField("sender", ""),
 	}
 }
 
@@ -341,16 +339,15 @@ func (s *sender) onLoss(ackNo uint32) uint32 {
 	return missingFrameNo
 }
 
-func (s *sender) sendEmptyPacket() {
+func (s *sender) emptyPacket() *frame {
 	if s.closed.Load() {
-		return
+		return nil
 	}
-	pkt := &frame{
+	return &frame{
 		dataLength: 0,
 		frameNo:    s.frameNo,
 		data:       []byte{},
 	}
-	s.sendQueue <- pkt
 }
 
 func (s *sender) framesToSend(rto bool, startIndex int) int {
@@ -381,8 +378,7 @@ func (s *sender) framesToSend(rto bool, startIndex int) int {
 func (s *sender) Close() error {
 	if s.closed.CompareAndSwap(false, true) {
 		s.RetransmitTicker.Stop()
-		close(s.sendQueue)
-		close(s.prioritySendQueue)
+		close(s.done)
 
 		return nil
 	}
@@ -415,23 +411,19 @@ func (s *sender) sendFin() error {
 
 	s.frameNo++
 
-	// To properly close the receiver
-	addToSendQueue := false
-
 	if len(s.frames) == 0 {
-		pkt.queued = true
-		s.unacked++
-		addToSendQueue = true
+		// Wake the Reliable sender below after the FIN is appended. The sender
+		// applies normal window ordering, so FIN cannot overtake accepted data.
+		select {
+		case s.senderWindow.windowOpen <- struct{}{}:
+		default:
+		}
 	}
 
 	s.frames = append(s.frames, struct {
 		*frame
 		time.Time
 	}{&pkt, time.Time{}})
-
-	if addToSendQueue {
-		s.sendQueue <- &pkt
-	}
 
 	return nil
 }

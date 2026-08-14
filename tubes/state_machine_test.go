@@ -2,6 +2,7 @@ package tubes
 
 import (
 	"testing"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -219,23 +220,24 @@ func TestFinalFINAckIsSentBeforeClose(t *testing.T) {
 	const attempts = 128
 	for range attempts {
 		log := logrus.New().WithField("test", t.Name())
+		outbound, recorded := newRecordingOutbox(t)
 		s := newSender(log)
 		s.closed.Store(false)
 
 		initDone := make(chan struct{})
 		close(initDone)
 		r := &Reliable{
-			id:                1,
-			sender:            s,
-			recvWindow:        newReceiver(log),
-			sendQueue:         make(chan []byte, 1),
-			prioritySendQueue: make(chan []byte, 1),
-			tubeState:         finWait2,
-			closed:            make(chan struct{}),
-			initRecv:          make(chan struct{}),
-			initDone:          initDone,
-			sendDone:          make(chan struct{}),
-			log:               log,
+			id:             1,
+			sender:         s,
+			recvWindow:     newReceiver(log),
+			outbound:       outbound,
+			tubeState:      finWait2,
+			closed:         make(chan struct{}),
+			closeRequested: make(chan struct{}),
+			initRecv:       make(chan struct{}),
+			initDone:       initDone,
+			sendDone:       make(chan struct{}),
+			log:            log,
 		}
 		go r.send()
 
@@ -248,12 +250,12 @@ func TestFinalFINAckIsSentBeforeClose(t *testing.T) {
 		assert.NilError(t, err)
 
 		select {
-		case raw := <-r.sendQueue:
-			pkt, err := fromBytes(raw)
+		case admitted := <-recorded:
+			pkt, err := fromBytes(admitted.bytes)
 			assert.NilError(t, err)
 			assert.Check(t, pkt.flags.ACK)
 			assert.Equal(t, pkt.ackNo, uint32(1))
-		default:
+		case <-time.After(time.Second):
 			t.Fatal("final FIN ACK was discarded while stopping the sender")
 		}
 	}

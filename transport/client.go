@@ -490,10 +490,7 @@ func (c *Client) handleSessionMessage(addr *net.UDPAddr, msg []byte) error {
 
 	switch mt {
 	case MessageTypeTransport:
-		select {
-		case c.ss.handle.recv.C <- plaintext:
-			break
-		default:
+		if !c.ss.handle.recv.TrySend(plaintext) {
 			logrus.Warnf("session %x: recv queue full, dropping packet", sessionID)
 		}
 	case MessageTypeControl:

@@ -59,6 +59,10 @@ func (c *ProbabalisticUDPMsgConn) WriteMsg(b []byte) (err error) {
 // coin flipper. A value of 0 sends all packets, while larger values drop more
 // packets. rel is true for reliable tubes and false for unreliable ones.
 func makeConn(bits int, rel bool, t testing.TB) (t1, t2 net.Conn, stop func(), r bool, err error) {
+	return makeConnWithTimeout(bits, rel, time.Second, t)
+}
+
+func makeConnWithTimeout(bits int, rel bool, timeout time.Duration, t testing.TB) (t1, t2 net.Conn, stop func(), r bool, err error) {
 	r = rel
 	var c1, c2 transport.MsgConn
 	c2Addr, err := net.ResolveUDPAddr("udp", ":7777")
@@ -78,7 +82,7 @@ func makeConn(bits int, rel bool, t testing.TB) (t1, t2 net.Conn, stop func(), r
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		muxer1 = newMuxer(c1, time.Second, false, logrus.WithFields(logrus.Fields{
+		muxer1 = newMuxer(c1, timeout, false, logrus.WithFields(logrus.Fields{
 			"muxer": "m1",
 			"test":  t.Name(),
 		}))
@@ -86,7 +90,7 @@ func makeConn(bits int, rel bool, t testing.TB) (t1, t2 net.Conn, stop func(), r
 	}()
 	go func() {
 		defer wg.Done()
-		muxer2 = newMuxer(c2, time.Second, true, logrus.WithFields(logrus.Fields{
+		muxer2 = newMuxer(c2, timeout, true, logrus.WithFields(logrus.Fields{
 			"muxer": "m2",
 			"test":  t.Name(),
 		}))
@@ -230,8 +234,6 @@ func lossyBasicIO(t *testing.T) {
 }
 
 func reliable(t *testing.T) {
-	logrus.SetLevel(logrus.TraceLevel)
-
 	t.Run("Close", func(t *testing.T) {
 		t.Run("Wait", func(t *testing.T) {
 			CloseTest(0, true, true, t)
@@ -252,7 +254,9 @@ func reliable(t *testing.T) {
 	})
 
 	f := func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
-		return makeConn(0, true, t)
+		// nettest owns operation deadlines and deliberately includes idle
+		// periods; an independent Muxer timeout changes its semantics.
+		return makeConnWithTimeout(0, true, 0, t)
 	}
 
 	mp := nettest.MakePipe(f)
@@ -265,8 +269,6 @@ func reliable(t *testing.T) {
 }
 
 func unreliable(t *testing.T) {
-	logrus.SetLevel(logrus.TraceLevel)
-
 	t.Run("Close", func(t *testing.T) {
 		t.Run("Wait", func(t *testing.T) {
 			CloseTest(0, false, true, t)
@@ -277,7 +279,7 @@ func unreliable(t *testing.T) {
 	})
 
 	f := func(t *testing.T) (c1, c2 net.Conn, stop func(), rel bool, err error) {
-		return makeConn(0, false, t)
+		return makeConnWithTimeout(0, false, 0, t)
 	}
 	mp := nettest.MakePipe(f)
 	t.Run("Nettest", func(t *testing.T) {

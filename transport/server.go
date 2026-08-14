@@ -487,10 +487,7 @@ func (s *Server) handleSessionMessage(addr *net.UDPAddr, msg []byte) error {
 
 	switch mt {
 	case MessageTypeTransport:
-		select {
-		case ss.handle.recv.C <- plaintext:
-			break
-		default:
+		if !ss.handle.recv.TrySend(plaintext) {
 			logrus.Warnf("session %x: recv queue full, dropping packet", sessionID)
 		}
 	case MessageTypeControl:
@@ -745,20 +742,17 @@ func (s *Server) Close() (err error) {
 	s.lifecycleMu.Lock()
 	for {
 		cur := serverState(s.state.Load())
-		switch cur {
-		case serverStateClosing, serverStateClosed:
+		if cur == serverStateClosing || cur == serverStateClosed {
 			s.lifecycleMu.Unlock()
 			<-s.closeDone
 			return s.closeErr
-		default:
-			if s.state.CompareAndSwap(uint32(cur), uint32(serverStateClosing)) {
-				s.lifecycleMu.Unlock()
-				goto closing
-			}
+		}
+		if s.state.CompareAndSwap(uint32(cur), uint32(serverStateClosing)) {
+			break
 		}
 	}
+	s.lifecycleMu.Unlock()
 
-closing:
 	// Closing the socket unblocks both the Serve read loop and any in-flight
 	// writes before we wait for workers or acquire per-session locks.
 	s.closeErr = s.udpConn.Close()
