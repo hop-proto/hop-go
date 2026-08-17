@@ -17,9 +17,9 @@ import (
 type Unreliable struct {
 	tType TubeType
 	id    byte
-	// sendQueue hands encoded frames to the Muxer. A completed send does not
-	// imply that the frame has been written to the underlying transport.
-	sendQueue chan []byte
+	// outbound is owned by the Muxer; Unreliable cannot access or close its raw
+	// queues.
+	outbound *outbox
 
 	// Unreliable tubes can be in three states:
 	// created: Indicates the tube has been created and is waiting for the remote peer send back an initiate frame
@@ -48,6 +48,8 @@ type Unreliable struct {
 	send *common.DeadlineChan[[]byte]
 
 	frameNo atomic.Uint32 // +checklocks:lifecycleMu
+	// +checklocks:lifecycleMu
+	finishFrame []byte
 
 	localAddr  net.Addr
 	remoteAddr net.Addr
@@ -67,16 +69,32 @@ var _ transport.MsgConn = &Unreliable{}
 // Unreliable tubes are tubes
 var _ Tube = &Unreliable{}
 
-// sender drains the local queue into the Muxer queue. senderDone only means the
-// frames were handed off; the Muxer sender owns actual transport writes.
+// sender drains messages admitted before Close and then admits FIN. It never
+// holds lifecycleMu while the Muxer outbox can block.
 func (u *Unreliable) sender() {
-	for b := range u.send.C {
+	defer close(u.senderDone)
+	for {
+		b, err := u.send.RecvQueued()
+		if err != nil {
+			break
+		}
 		u.log.Trace("handing packet to muxer")
-		u.sendQueue <- b
+		if err := u.outbound.enqueue(outboundFrame{bytes: b}, nil); err != nil {
+			go u.Close()
+			return
+		}
 	}
 
+	u.lifecycleMu.Lock()
+	finishFrame := u.finishFrame
+	u.lifecycleMu.Unlock()
+	if finishFrame != nil {
+		if err := u.outbound.enqueue(outboundFrame{bytes: finishFrame}, nil); err != nil {
+			go u.Close()
+			return
+		}
+	}
 	u.log.Debug("sender ended")
-	close(u.senderDone)
 }
 
 func (u *Unreliable) makeInitFrame(req bool) initiateFrame {
@@ -107,16 +125,18 @@ func (u *Unreliable) initiate(req bool) {
 	initLoop:
 		for {
 			u.lifecycleMu.Lock()
-			switch u.state.Load() {
+			state := u.state.Load()
+			u.lifecycleMu.Unlock()
+			switch state {
 			case initiated:
-				u.lifecycleMu.Unlock()
 				break initLoop
 			case created:
 				p := u.makeInitFrame(req)
-				u.sendQueue <- p.toBytes()
-				u.lifecycleMu.Unlock()
+				if err := u.outbound.enqueue(outboundFrame{bytes: p.toBytes()}, u.stopInitiate); err != nil {
+					close(u.senderDone)
+					return
+				}
 			default:
-				u.lifecycleMu.Unlock()
 				close(u.senderDone)
 				return
 			}
@@ -130,8 +150,25 @@ func (u *Unreliable) initiate(req bool) {
 				return
 			}
 		}
+	} else {
+		// The Muxer starts responder initiation before it dispatches the peer's
+		// request. Wait for that request instead of racing the receiver and
+		// permanently exiting the sender when this goroutine runs first.
+		select {
+		case <-u.initiated:
+		case <-u.stopInitiate:
+			close(u.senderDone)
+			return
+		}
 	}
 
+	u.lifecycleMu.Lock()
+	started := u.state.Load() == initiated
+	u.lifecycleMu.Unlock()
+	if !started {
+		close(u.senderDone)
+		return
+	}
 	go u.sender()
 }
 
@@ -147,32 +184,34 @@ func (u *Unreliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		"state":   u.state.Load(),
 	}).Debug("receiving initiate packet")
 
-	if u.state.CompareAndSwap(created, initiated) {
+	u.lifecycleMu.Lock()
+	if u.state.Load() == created {
+		u.state.Store(initiated)
 		close(u.initiated)
 	}
 
 	// Send a RESP packet in response to REQ packets
-	u.lifecycleMu.Lock()
-	defer u.lifecycleMu.Unlock()
+	var response []byte
 	if pkt.flags.REQ && u.state.Load() != closed {
 		u.log.Trace("handing RESP packet to muxer")
 		p := u.makeInitFrame(false)
-		u.sendQueue <- p.toBytes()
+		response = p.toBytes()
+	}
+	u.lifecycleMu.Unlock()
+
+	if response != nil {
+		return u.outbound.enqueue(outboundFrame{bytes: response}, u.stopInitiate)
 	}
 
 	return nil
 }
 
 func (u *Unreliable) receive(pkt *frame) error {
-	u.lifecycleMu.Lock()
-	defer u.lifecycleMu.Unlock()
 	if u.state.Load() == closed {
 		return ErrBadTubeState
 	}
 
-	select {
-	case u.recv.C <- pkt.data:
-	default:
+	if !u.recv.TrySend(pkt.data) {
 		return nil
 	}
 	if pkt.flags.FIN {
@@ -237,13 +276,14 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 	}
 
 	u.lifecycleMu.Lock()
-	defer u.lifecycleMu.Unlock()
 	if u.state.Load() == closed {
+		u.lifecycleMu.Unlock()
 		return 0, 0, io.EOF
 	}
 
 	dataLength := uint16(len(b))
 	if uint16(len(b)) > MaxFrameDataLength {
+		u.lifecycleMu.Unlock()
 		err = transport.ErrBufOverflow
 		return n, oobn, err
 	}
@@ -264,6 +304,7 @@ func (u *Unreliable) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int,
 		queued:     false,
 	}
 	u.frameNo.Add(1)
+	u.lifecycleMu.Unlock()
 
 	err = u.send.Send(pkt.toBytes())
 	if err != nil {
@@ -287,17 +328,6 @@ func (u *Unreliable) Close() error {
 		u.lifecycleMu.Unlock()
 		return io.EOF
 	}
-	u.lifecycleMu.Unlock()
-
-	if oldState == created {
-		close(u.stopInitiate)
-	}
-	<-u.initiateDone
-
-	u.lifecycleMu.Lock()
-	defer u.lifecycleMu.Unlock()
-
-	var err error
 	if oldState == initiated {
 		pkt := frame{
 			tubeID: u.id,
@@ -315,19 +345,22 @@ func (u *Unreliable) Close() error {
 			queued:     false,
 		}
 		u.frameNo.Add(1)
-		err = u.send.Send(pkt.toBytes())
+		u.finishFrame = pkt.toBytes()
 	}
+	u.lifecycleMu.Unlock()
 
-	u.send.Close()
-	u.recv.Close()
-
-	close(u.send.C)
+	if oldState == created {
+		close(u.stopInitiate)
+	}
+	_ = u.send.Close()
+	<-u.initiateDone
 
 	<-u.senderDone
 
+	_ = u.recv.Close()
 	close(u.closed)
 
-	return err
+	return nil
 }
 
 // LocalAddr implements net.Conn

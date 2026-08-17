@@ -109,12 +109,7 @@ func (r *receiver) processIntoBuffer() bool {
 		}
 	}
 	if oldLen > r.fragments.Len() {
-		select {
-		case r.dataReady.C <- struct{}{}:
-			break
-		default:
-			break
-		}
+		r.dataReady.TrySend(struct{}{})
 	}
 	return fin
 }

@@ -2,6 +2,7 @@ package tubes
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"sync"
@@ -38,28 +39,34 @@ type Reliable struct {
 	id         byte
 	localAddr  net.Addr
 	remoteAddr net.Addr
-	// +checklocks:l
+	// +checklocksignore
 	sender     *sender
 	recvWindow *receiver
-	// Frames sent here have only been handed to the Muxer; the Muxer sender
-	// performs and publishes completion of the actual transport write.
-	sendQueue         chan []byte
-	prioritySendQueue chan []byte
+	// outbound is owned by the Muxer. Reliable never accesses or closes its raw
+	// queues; every handoff is cancellation-aware.
+	outbound *outbox
 	// +checklocks:l
 	tubeState state
 	// +checklocks:l
 	lastAckTimer  *time.Timer
-	lastAckSent   atomic.Uint32
-	lastFrameSent atomic.Uint32
-	unsend        uint16
+	lastAckSent   atomic.Uint32 // +checklocksignore
+	lastFrameSent atomic.Uint32 // +checklocksignore
+	// +checklocks:l
+	unsend uint16
 
 	// closed publishes completion of the lifecycle transition and sender drain.
 	closed chan struct{}
+	// closeRequested is independently publishable and wakes initiation without
+	// acquiring l. Normal FIN processing continues until terminal close.
+	closeRequested     chan struct{}
+	closeRequestedOnce sync.Once
+	// +checklocks:l
+	closeStarted bool
 	// initRecv publishes receipt of the peer's initiation frame.
 	initRecv chan struct{}
 	// initDone publishes termination of the initiation producer.
 	initDone chan struct{}
-	// sendDone publishes that all inner sender frames were handed to the Muxer.
+	// sendDone publishes that all locally prepared sender frames were handed to the Muxer.
 	// It does not mean that the Muxer wrote those frames to the transport.
 	sendDone chan struct{}
 	l        sync.Mutex
@@ -96,15 +103,19 @@ func (r *Reliable) initiate(req bool) {
 	initLoop:
 		for {
 			r.l.Lock()
-			switch r.tubeState {
-			case initiated:
-				r.l.Unlock()
+			state := r.tubeState
+			r.l.Unlock()
+			if state == initiated {
 				break initLoop
-			case created:
-				r.sendQueue <- p.toBytes()
-				r.l.Unlock()
-			default:
-				r.l.Unlock()
+			}
+			if state != created {
+				return
+			}
+
+			if err := r.outbound.enqueue(outboundFrame{bytes: p.toBytes()}, r.closeRequested); err != nil {
+				if !errors.Is(err, io.EOF) {
+					r.closeFromOutboundFailure()
+				}
 				return
 			}
 
@@ -112,14 +123,20 @@ func (r *Reliable) initiate(req bool) {
 			case <-ticker.C:
 				r.log.Info("init rto exceeded")
 			case <-r.initRecv:
-			case <-r.closed:
+			case <-r.closeRequested:
+				r.l.Lock()
+				initiatedNow := r.tubeState == initiated
+				r.l.Unlock()
+				if initiatedNow {
+					break initLoop
+				}
 				return
 			}
 		}
 	} else {
 		select {
 		case <-r.initRecv:
-		case <-r.closed:
+		case <-r.closeRequested:
 			return
 		}
 	}
@@ -134,7 +151,8 @@ func (r *Reliable) initiate(req bool) {
 	r.l.Unlock()
 }
 
-func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
+// +checklocks:r.l
+func (r *Reliable) prepareFrameLocked(pkt *frame, retransmission bool) (outboundFrame, bool) {
 	ackNo := r.recvWindow.getAck()
 	lastFrameNo := r.lastFrameSent.Load()
 	lastAckNo := r.lastAckSent.Load()
@@ -155,15 +173,11 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 		(pkt.dataLength == 0 && (ackNo != lastAckNo || pkt.frameNo != lastFrameNo ||
 			retransmission || pkt.flags.FIN || pkt.flags.RESP))) || r.unsend == 10 { // based on best practices for TCP loss detection RFC5681 and RFC6675. Should be 3 but 10 has a better mitigation for spurious loss detection
 
-		if retransmission {
-			r.prioritySendQueue <- pkt.toBytes() // send in the reliable priority queue
-		} else {
-			r.sendQueue <- pkt.toBytes()
-		}
 		r.lastAckSent.Store(ackNo)
 		r.lastFrameSent.Store(pkt.frameNo)
 
 		r.unsend = 0
+		return outboundFrame{bytes: pkt.toBytes(), priority: retransmission}, true
 	} else {
 		r.unsend++
 	}
@@ -175,13 +189,15 @@ func (r *Reliable) sendOneFrame(pkt *frame, retransmission bool) {
 			"ack":     pkt.flags.ACK,
 			"fin":     pkt.flags.FIN,
 			"dataLen": pkt.dataLength,
-		}).Trace("handed packet to muxer")
+		}).Trace("prepared packet for muxer admission")
 	}
+	return outboundFrame{}, false
 }
 
 // Retransmission ACKs are extra packets to update the sender/receiver
-// on the last ackNo update. It uses the prioritySendQueue.
-func (r *Reliable) sendRetransmissionAck(lastFrameNo, ackNo uint32, tubeId byte) {
+// on the last ackNo update.
+// +checklocks:r.l
+func (r *Reliable) retransmissionAckLocked(lastFrameNo, ackNo uint32, tubeId byte) (outboundFrame, bool) {
 	rtrPkt := &frame{
 		frameNo: lastFrameNo,
 		data:    []byte{},
@@ -195,30 +211,32 @@ func (r *Reliable) sendRetransmissionAck(lastFrameNo, ackNo uint32, tubeId byte)
 		"Ack N°":   ackNo,
 	}).Trace("Retransmission of RTR ack")
 
-	// Uses the priority queue to retransmit faster
-	r.prioritySendQueue <- rtrPkt.toBytes()
+	return r.prepareFrameLocked(rtrPkt, true)
 }
 
-// send drains the Reliable sender queues into the Muxer queues. Closing
-// sendDone means every frame was handed off, not written to the transport.
+// send selects new data and retransmissions, then releases the lifecycle lock
+// before asking the Muxer outbox to admit them.
 func (r *Reliable) send() {
-	var pkt *frame
-	sendQueue := r.sender.sendQueue                 // +checklocksignore accessing channels is safe
-	prioritySendQueue := r.sender.prioritySendQueue // +checklocksignore accessing channels is safe
-	for sendQueue != nil || prioritySendQueue != nil {
+	defer func() {
+		r.log.Debug("send ended")
+		close(r.sendDone)
+	}()
+
+	for {
 		select {
-		// onTimeout sender
-		case <-r.sender.RetransmitTicker.C: // +checklocksignore accessing channels is safe
+		case <-r.sender.done:
+			return
+		case <-r.sender.RetransmitTicker.C:
 
 			r.l.Lock()
 			if r.sender.closed.Load() {
 				r.l.Unlock()
-				continue
+				return
 			}
 
 			numFrames := r.sender.framesToSend(true, 0)
-
 			rtoSent := false
+			outbound := make([]outboundFrame, 0, numFrames)
 
 			for i := 0; i < numFrames; i++ {
 				rtoFrame := &r.sender.frames[i]
@@ -242,7 +260,9 @@ func (r *Reliable) send() {
 					rtoFrame.queued = true
 				}
 
-				r.sendOneFrame(rtoFrame.frame, true)
+				if frame, ok := r.prepareFrameLocked(rtoFrame.frame, true); ok {
+					outbound = append(outbound, frame)
+				}
 
 				rtoSent = true
 			}
@@ -277,19 +297,25 @@ func (r *Reliable) send() {
 			}
 
 			r.sender.resetRetransmitTicker()
-
 			r.l.Unlock()
+			if err := r.admitOutbound(outbound, r.sender.done); err != nil {
+				if !errors.Is(err, io.EOF) {
+					r.closeFromOutboundFailure()
+				}
+				return
+			}
 
-		case <-r.sender.senderWindow.windowOpen: // +checklocksignore accessing channels is safe
+		case <-r.sender.senderWindow.windowOpen:
 			r.l.Lock()
 			if r.sender.closed.Load() {
 				r.l.Unlock()
-				continue
+				return
 			}
 			numFrames := r.sender.framesToSend(false, 0)
 			r.log.WithField("numFrames", numFrames).Trace("window open")
 
 			numQueued := 0
+			outbound := make([]outboundFrame, 0, numFrames)
 
 			for i := 0; i < len(r.sender.frames) && numQueued < numFrames; i++ {
 				windowFrame := &r.sender.frames[i]
@@ -302,44 +328,47 @@ func (r *Reliable) send() {
 
 					windowFrame.Time = time.Now()
 					windowFrame.queued = true
-
-					r.sender.sendQueue <- windowFrame.frame
-
 					r.sender.unacked++
+					if frame, ok := r.prepareFrameLocked(windowFrame.frame, false); ok {
+						outbound = append(outbound, frame)
+					}
 
 					numQueued++
 				}
 			}
 			r.l.Unlock()
-
-		case queuedPkt, ok := <-sendQueue: // +checklocksignore accessing channels is safe
-			if !ok {
-				sendQueue = nil
-				continue
+			if err := r.admitOutbound(outbound, r.sender.done); err != nil {
+				if !errors.Is(err, io.EOF) {
+					r.closeFromOutboundFailure()
+				}
+				return
 			}
-
-			// Do not block ACKs - Blocks frame transmission out of window open
-			pkt = queuedPkt
-			r.sendOneFrame(pkt, false)
-
-		case queuedPkt, ok := <-prioritySendQueue: // +checklocksignore accessing channels is safe
-			if !ok {
-				prioritySendQueue = nil
-				continue
-			}
-
-			pkt = queuedPkt
-			r.sendOneFrame(pkt, true)
 		}
 	}
-	r.log.Debug("send ended")
-	close(r.sendDone)
+}
+
+func (r *Reliable) admitOutbound(frames []outboundFrame, canceled <-chan struct{}) error {
+	for _, frame := range frames {
+		if err := r.outbound.enqueue(frame, canceled); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Reliable) closeFromOutboundFailure() {
+	go func() {
+		r.l.Lock()
+		defer r.l.Unlock()
+		r.enterClosedState()
+	}()
 }
 
 // receive is called by the muxer for each new packet
+//
+//nolint:gocyclo // The reliable protocol state machine is intentionally centralized here.
 func (r *Reliable) receive(pkt *frame) error {
 	r.l.Lock()
-	defer r.l.Unlock()
 
 	if common.Debug {
 		r.log.WithFields(logrus.Fields{
@@ -359,13 +388,17 @@ func (r *Reliable) receive(pkt *frame) error {
 				"state": r.tubeState,
 			}).Info("receive for tube in bad state")
 		}
-
+		r.l.Unlock()
 		return ErrBadTubeState
 	}
+	outbound := make([]outboundFrame, 0, 3)
+	closeAfterAdmission := false
 
 	if pkt.flags.RTR && !pkt.flags.ACK && pkt.dataLength > 0 {
 		newAck := r.recvWindow.getAck()
-		r.sendRetransmissionAck(pkt.ackNo, newAck, r.id)
+		if frame, ok := r.retransmissionAckLocked(pkt.ackNo, newAck, r.id); ok {
+			outbound = append(outbound, frame)
+		}
 	}
 
 	finProcessed, err := r.recvWindow.receive(pkt)
@@ -375,12 +408,18 @@ func (r *Reliable) receive(pkt *frame) error {
 		missingFrameNo, ackErr := r.sender.recvAck(pkt.ackNo)
 		if ackErr != nil {
 			r.enterClosedState()
+			r.l.Unlock()
 			return ackErr
 		}
 		if missingFrameNo != 0 {
 			r.sender.m.Lock()
-			r.sendFrameByNumberLocked(missingFrameNo)
+			missing := r.frameByNumberLocked(missingFrameNo)
 			r.sender.m.Unlock()
+			if missing != nil {
+				if frame, ok := r.prepareFrameLocked(missing, true); ok {
+					outbound = append(outbound, frame)
+				}
+			}
 		}
 	}
 
@@ -392,10 +431,10 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.log.Debug("got ACK of FIN packet. going from finWait1 to finWait2")
 		case closing:
 			r.log.Debug("got ACK of FIN packet. going from closing to closed")
-			r.enterClosedState()
+			closeAfterAdmission = true
 		case lastAck:
 			r.log.Debug("got ACK of FIN packet. going from lastAck to closed")
-			r.enterClosedState()
+			closeAfterAdmission = true
 		}
 	}
 
@@ -410,18 +449,42 @@ func (r *Reliable) receive(pkt *frame) error {
 			r.log.Debug("got FIN packet. going from finWait1 to closing")
 		case finWait2:
 			r.log.Debug("got FIN packet. going from finWait2 to closed")
-			r.sender.sendEmptyPacket()
-			r.enterClosedState()
+			if ack := r.sender.emptyPacket(); ack != nil {
+				if frame, ok := r.prepareFrameLocked(ack, false); ok {
+					outbound = append(outbound, frame)
+				}
+			}
+			closeAfterAdmission = true
 		}
-		if r.tubeState != closed {
+		if !closeAfterAdmission {
 			r.log.Trace("sending ACK of FIN")
-			r.sender.sendEmptyPacket()
+			if ack := r.sender.emptyPacket(); ack != nil {
+				if frame, ok := r.prepareFrameLocked(ack, false); ok {
+					outbound = append(outbound, frame)
+				}
+			}
 		}
 	}
 
 	// ACK every data packet
-	if pkt.dataLength > 0 && r.tubeState != closed && !pkt.flags.FIN {
-		r.sender.sendEmptyPacket()
+	if pkt.dataLength > 0 && !closeAfterAdmission && !pkt.flags.FIN {
+		if ack := r.sender.emptyPacket(); ack != nil {
+			if frame, ok := r.prepareFrameLocked(ack, false); ok {
+				outbound = append(outbound, frame)
+			}
+		}
+	}
+
+	if closeAfterAdmission {
+		r.enterClosedStateWithFrames(outbound)
+		r.l.Unlock()
+		return err
+	}
+	r.l.Unlock()
+
+	if admitErr := r.admitOutbound(outbound, r.sender.done); admitErr != nil && !errors.Is(admitErr, io.EOF) {
+		r.closeFromOutboundFailure()
+		return admitErr
 	}
 
 	return err
@@ -440,28 +503,43 @@ func (r *Reliable) enterLastAckState() {
 
 // +checklocks:r.l
 func (r *Reliable) enterClosedState() {
-	if r.tubeState == closed {
+	r.enterClosedStateWithFrames(nil)
+}
+
+// enterClosedStateWithFrames begins terminal shutdown while locked, releases
+// the lifecycle lock for reserved final-frame admission and sender completion,
+// then publishes close completion. Reserved frames (notably the final FIN ACK)
+// are admitted before sender cancellation can discard them.
+// +checklocks:r.l
+func (r *Reliable) enterClosedStateWithFrames(frames []outboundFrame) {
+	if r.closeStarted {
 		return
 	}
-	// Reject every producer before closing sender queues. This remains visible
-	// while the lifecycle lock is released to wait for the sender to drain.
+	r.closeStarted = true
 	r.tubeState = closed
+	if r.closeRequested != nil {
+		r.closeRequestedOnce.Do(func() {
+			close(r.closeRequested)
+		})
+	}
 	if r.lastAckTimer != nil {
 		r.lastAckTimer.Stop()
 	}
 	waitForSender := r.sender.Close() == nil
 	r.recvWindow.Close()
-	if waitForSender {
-		r.l.Unlock()
-		<-r.sendDone
-		r.l.Lock()
+	r.l.Unlock()
+	if len(frames) > 0 && r.outbound != nil {
+		_ = r.admitOutbound(frames, nil)
 	}
+	if waitForSender {
+		<-r.sendDone
+	}
+	r.l.Lock()
 	close(r.closed)
 }
 
 func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 	r.l.Lock()
-	defer r.l.Unlock()
 
 	if common.Debug {
 		r.log.WithFields(logrus.Fields{
@@ -482,11 +560,13 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 		r.tubeState = initiated
 		if _, err := r.sender.recvAck(1); err != nil {
 			r.enterClosedState()
+			r.l.Unlock()
 			return err
 		}
 		close(r.initRecv)
 	}
 
+	var response []byte
 	if pkt.flags.REQ && r.tubeState != closed {
 		p := initiateFrame{
 			tubeID:     r.id,
@@ -502,7 +582,17 @@ func (r *Reliable) receiveInitiatePkt(pkt *initiateFrame) error {
 				FIN:  false,
 			},
 		}
-		r.sendQueue <- p.toBytes()
+		response = p.toBytes()
+	}
+	r.l.Unlock()
+
+	if response != nil {
+		if err := r.outbound.enqueue(outboundFrame{bytes: response}, r.closeRequested); err != nil {
+			if !errors.Is(err, io.EOF) {
+				r.closeFromOutboundFailure()
+			}
+			return err
+		}
 	}
 
 	return nil
@@ -572,19 +662,20 @@ func (r *Reliable) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPA
 // local sender. It does not wait for sender drain or peer acknowledgement; use
 // WaitForClose for lifecycle completion.
 func (r *Reliable) Close() (err error) {
-	select {
-	case <-r.initDone:
-		break
-	case <-r.closed:
-		break
+	if r.closeRequested != nil {
+		r.closeRequestedOnce.Do(func() {
+			close(r.closeRequested)
+		})
 	}
+	<-r.initDone
 
 	r.l.Lock()
-	defer r.l.Unlock()
 
 	switch r.tubeState {
 	case created:
 		r.log.WithField("state", r.tubeState).Warn("tried to close tube in bad state")
+		r.enterClosedState()
+		r.l.Unlock()
 		return ErrBadTubeState
 	case initiated:
 		r.tubeState = finWait1
@@ -595,14 +686,16 @@ func (r *Reliable) Close() (err error) {
 		r.enterLastAckState()
 	default:
 		// In this case, Close() has already been called
+		r.l.Unlock()
 		return io.EOF
 	}
 
 	// Cancel all pending read and write operations
-	r.SetReadDeadline(time.Now())
+	r.recvWindow.dataReady.SetDeadline(time.Now())
 	r.sender.deadline = time.Now()
 
 	err = r.sender.sendFin()
+	r.l.Unlock()
 
 	return err
 }
@@ -675,7 +768,7 @@ func (r *Reliable) SetWriteDeadline(t time.Time) error {
 }
 
 // +checklocks:r.l
-func (r *Reliable) sendFrameByNumberLocked(frameNo uint32) {
+func (r *Reliable) frameByNumberLocked(frameNo uint32) *frame {
 	if common.Debug {
 		logrus.Debugf("Searching for frame %v to priority send it", frameNo)
 	}
@@ -683,27 +776,27 @@ func (r *Reliable) sendFrameByNumberLocked(frameNo uint32) {
 		if common.Debug {
 			logrus.Debugf("Frame list has less than %v frames", defaultWindowSize)
 		}
-		return
+		return nil
 	}
 	for i := 0; i < defaultWindowSize; i++ {
-		rtrFrameStruct := r.sender.frames[i]
+		rtrFrameStruct := &r.sender.frames[i]
 		if rtrFrameStruct.frameNo == frameNo && rtrFrameStruct.queued {
 			rtrFrameStruct.Time = time.Now()
-			r.sender.prioritySendQueue <- rtrFrameStruct.frame
 			if common.Debug {
 				logrus.Debugf("Frame %v found and prority sent", frameNo)
 			}
-			return
+			return rtrFrameStruct.frame
 		} else if rtrFrameStruct.frameNo > frameNo {
 			if common.Debug {
 				logrus.Debugf("Frame %v not found, frame number in the list are greater than the frameNo", frameNo)
 			}
-			return
+			return nil
 		}
 	}
 	if common.Debug {
 		logrus.Debugf("Frame %v not found in the frame list", frameNo)
 	}
+	return nil
 }
 
 // CanAcceptBytes is currently called every 10ms to copy data in the frames list

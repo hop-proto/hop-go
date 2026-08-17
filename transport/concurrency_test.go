@@ -335,8 +335,8 @@ func TestCloseUnblocksInFlightOperations(t *testing.T) {
 // Expected: Buffered messages are delivered; after exhaustion, reads return EOF.
 func TestBufferedDataReturnedAfterClose(t *testing.T) {
 	h := newConcurrencyTestHandle(newConcurrencyTestConn(), 2)
-	h.recv.C <- []byte("one")
-	h.recv.C <- []byte("two")
+	assert.Assert(t, h.recv.TrySend([]byte("one")))
+	assert.Assert(t, h.recv.TrySend([]byte("two")))
 	assert.NilError(t, h.Close())
 
 	buf := make([]byte, 3)

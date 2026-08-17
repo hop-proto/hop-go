@@ -54,19 +54,20 @@ type Muxer struct {
 	// +checklocks:m
 	unreliableTubes map[byte]*Unreliable
 
-	// Tube producers hand encoded frames to these queues. A successful send only
-	// means the Muxer sender accepted the frame; senderErr publishes completion
-	// after all accepted frames have either been written or discarded on error.
-	sendQueue         chan []byte
-	prioritySendQueue chan []byte
-	state             atomic.Value
+	// outbound is the only tube-to-Muxer admission path. Its queues are private
+	// to the Muxer sender and are never closed.
+	outbound *outbox
+	state    atomic.Value
+	// stopping is closed as soon as Stop wins lifecycle ownership. It wakes
+	// receiver-side admissions without waiting for shutdown completion.
+	stopping chan struct{}
 	// stopped is closed after Stop caches both worker results.
 	stopped    chan struct{}
 	underlying transport.MsgConn
 	timeout    time.Duration
 	log        *logrus.Entry
 
-	// senderErr receives once, after the sender has drained both send queues.
+	// senderErr receives once, after the sender stops or the transport write path fails.
 	senderErr chan error
 	sendErr   error
 
@@ -117,21 +118,21 @@ func newMuxer(msgConn transport.MsgConn, timeout time.Duration, isServer bool, l
 	}
 	state := atomic.Value{}
 	mux := &Muxer{
-		idParity:          idParity,
-		reliableTubes:     make(map[byte]*Reliable),
-		unreliableTubes:   make(map[byte]*Unreliable),
-		tubeQueue:         make(chan Tube, 128),
-		m:                 sync.Mutex{},
-		sendQueue:         make(chan []byte),
-		prioritySendQueue: make(chan []byte),
-		state:             state,
-		stopped:           make(chan struct{}),
-		underlying:        msgConn,
-		timeout:           timeout,
-		log:               log,
-		readBuf:           make([]byte, 65535),
-		receiverErr:       make(chan error),
-		senderErr:         make(chan error),
+		idParity:        idParity,
+		reliableTubes:   make(map[byte]*Reliable),
+		unreliableTubes: make(map[byte]*Unreliable),
+		tubeQueue:       make(chan Tube, 128),
+		m:               sync.Mutex{},
+		outbound:        newOutbox(),
+		state:           state,
+		stopping:        make(chan struct{}),
+		stopped:         make(chan struct{}),
+		underlying:      msgConn,
+		timeout:         timeout,
+		log:             log,
+		readBuf:         make([]byte, 65535),
+		receiverErr:     make(chan error, 1),
+		senderErr:       make(chan error, 1),
 	}
 
 	mux.state.Store(muxerRunning)
@@ -261,20 +262,20 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 		"tubeType": tType,
 	})
 	r := &Reliable{
-		id:                tubeID,
-		localAddr:         m.underlying.LocalAddr(),
-		remoteAddr:        m.underlying.RemoteAddr(),
-		tubeState:         created,
-		initRecv:          make(chan struct{}),
-		initDone:          make(chan struct{}),
-		sendDone:          make(chan struct{}),
-		closed:            make(chan struct{}, 1),
-		recvWindow:        newReceiver(tubeLog),
-		sender:            newSender(tubeLog),
-		sendQueue:         m.sendQueue,
-		prioritySendQueue: m.prioritySendQueue,
-		tType:             tType,
-		log:               tubeLog,
+		id:             tubeID,
+		localAddr:      m.underlying.LocalAddr(),
+		remoteAddr:     m.underlying.RemoteAddr(),
+		tubeState:      created,
+		initRecv:       make(chan struct{}),
+		initDone:       make(chan struct{}),
+		sendDone:       make(chan struct{}),
+		closed:         make(chan struct{}),
+		closeRequested: make(chan struct{}),
+		recvWindow:     newReceiver(tubeLog),
+		sender:         newSender(tubeLog),
+		outbound:       m.outbound,
+		tType:          tType,
+		log:            tubeLog,
 	}
 	r.lastAckSent.Store(0)
 	r.lastFrameSent.Store(0)
@@ -282,10 +283,6 @@ func (m *Muxer) makeReliableTubeWithID(tType TubeType, tubeID byte, req bool) (*
 	m.addTube(r)
 	go r.initiate(req)
 
-	if !req {
-		r.log.Debug("added tube to queue")
-		m.tubeQueue <- r
-	}
 	return r, nil
 }
 
@@ -319,7 +316,7 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 	tube := &Unreliable{
 		tType:        tType,
 		id:           tubeID,
-		sendQueue:    m.sendQueue,
+		outbound:     m.outbound,
 		localAddr:    m.underlying.LocalAddr(),
 		remoteAddr:   m.underlying.RemoteAddr(),
 		recv:         common.NewDeadlineChan[[]byte](maxBufferedPackets),
@@ -340,10 +337,6 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 	tube.state.Store(created)
 	go tube.initiate(req)
 
-	if !req {
-		tube.log.Debug("added tube to queue")
-		m.tubeQueue <- tube
-	}
 	return tube, nil
 }
 
@@ -351,11 +344,22 @@ func (m *Muxer) makeUnreliableTubeWithID(tType TubeType, tubeID byte, req bool) 
 // If the muxer stops, Accept will return a nil Tube and ErrMuxerStopping.
 // Otherwise, it will return a valid tube that is ready for use.
 func (m *Muxer) Accept() (Tube, error) {
-	tube, ok := <-m.tubeQueue
-	if !ok {
+	select {
+	case <-m.stopping:
+		return nil, ErrMuxerStopping
+	default:
+	}
+	select {
+	case tube := <-m.tubeQueue:
+		select {
+		case <-m.stopping:
+			return nil, ErrMuxerStopping
+		default:
+			return tube, nil
+		}
+	case <-m.stopping:
 		return nil, ErrMuxerStopping
 	}
-	return tube, nil
 }
 
 // readMsg reads a new packet from the underlying MsgConn. It then sets the timeout
@@ -374,49 +378,51 @@ func (m *Muxer) readMsg() (*frame, error) {
 
 }
 
-// sender accepts frames from the Muxer queues and writes them synchronously to
-// the underlying MsgConn. Receiving a frame is only a queue handoff; WriteMsg
-// completion is the point at which the transport has accepted it. If a write
-// fails, sender starts Stop and drains both queues so tube producers can exit.
+// sender is the sole receiver for outbox queues and the sole writer to the
+// underlying MsgConn. Failure aborts both admission priorities atomically.
 func (m *Muxer) sender() {
 	var err error
-	ok := true
-	var rawBytes []byte
-	for ok {
+	defer func() {
+		m.log.WithField("error", err).Debug("muxer sender stopped")
+		m.senderErr <- err
+	}()
+
+	for {
+		var rawBytes []byte
+		gotFrame := false
+
+		// Prefer priority traffic when it is already waiting without starving
+		// normal traffic when both arrive concurrently.
 		select {
-		// Priority send queue will have fewer packets and will be chosen pseudo randomly
-		// https://go.dev/ref/spec#Select_statements
-		case rawBytes, ok = <-m.prioritySendQueue:
-			if !ok {
-				break
-			}
-
-			err = m.underlying.WriteMsg(rawBytes)
-
-		case rawBytes, ok = <-m.sendQueue:
-			if !ok {
-				break
-			}
-
-			err = m.underlying.WriteMsg(rawBytes)
+		case rawBytes = <-m.outbound.priority:
+			gotFrame = true
+		default:
 		}
 
-		if err != nil {
-			m.log.Warnf("error in muxer sender. stopping muxer: %s", err)
-			// TODO(hosono) is it ok to stop the muxer here? Are the recoverable errors?
-			go m.Stop()
-			break
+		if !gotFrame {
+			select {
+			case <-m.outbound.aborted:
+				err = m.outbound.abortErr()
+				return
+			case <-m.outbound.stop:
+				return
+			case rawBytes = <-m.outbound.priority:
+				gotFrame = true
+			case rawBytes = <-m.outbound.normal:
+				gotFrame = true
+			}
 		}
-	}
 
-	// if we broke out of the loop, consume all packets so tubes can still close
-	for range m.sendQueue {
-	}
-	for range m.prioritySendQueue {
-	}
+		err = m.underlying.WriteMsg(rawBytes)
+		if err == nil {
+			continue
+		}
 
-	m.log.WithField("error", err).Debug("muxer sender stopped")
-	m.senderErr <- err
+		m.log.Warnf("error in muxer sender. stopping muxer: %s", err)
+		m.outbound.abort(err)
+		go m.Stop()
+		return
+	}
 }
 
 // start begins the sender and receiver goroutines
@@ -477,6 +483,14 @@ func (m *Muxer) receiver() {
 					m.m.Lock()
 					tube, _ = m.makeUnreliableTubeWithID(initFrame.tubeType, initFrame.tubeID, false)
 					m.m.Unlock()
+				}
+				if tube != nil {
+					tube.getLog().Debug("added tube to queue")
+					select {
+					case m.tubeQueue <- tube:
+					case <-m.stopping:
+						return
+					}
 				}
 			}
 		}
@@ -552,16 +566,18 @@ func (m *Muxer) Stop() (sendErr error, recvErr error) {
 	}
 
 	m.state.Store(muxerStopping)
+	close(m.stopping)
 	m.m.Unlock()
 
-	// If tubes do not correctly close after some time, assume they never will and force them to close.
-	time.AfterFunc(muxerTimeout, func() {
+	// If tubes do not correctly close after some time, abort admission before
+	// forcing lifecycle completion. This wakes both outbox priorities and any
+	// producer blocked behind a transport write.
+	fallback := time.AfterFunc(muxerTimeout, func() {
 		if m.state.Load() == muxerStopped {
 			return
 		}
 
-		// The graceful tube close may itself be blocked behind the Muxer sender.
-		// Close the transport first so sender can switch to draining its queues.
+		m.outbound.abort(ErrMuxerStopping)
 		m.underlying.Close()
 
 		m.m.Lock()
@@ -578,19 +594,19 @@ func (m *Muxer) Stop() (sendErr error, recvErr error) {
 
 	// Wait for all tubes to close
 	wg.Wait()
+	fallback.Stop()
 	m.state.Store(muxerStopped)
 
-	close(m.prioritySendQueue)
-	close(m.sendQueue)
-	close(m.tubeQueue)
+	m.outbound.requestStop()
 
-	// Drain every queued tube frame before closing the transport. If a transport
-	// write is stuck, Close must interrupt it so shutdown cannot deadlock.
+	// All tube producers have completed, so a graceful stop can terminate the
+	// sender without closing data queues. A blocked transport write is bounded.
 	senderTimer := time.NewTimer(muxerTimeout)
 	select {
 	case m.sendErr = <-m.senderErr:
 		senderTimer.Stop()
 	case <-senderTimer.C:
+		m.outbound.abort(ErrMuxerStopping)
 		m.underlying.Close()
 		m.sendErr = <-m.senderErr
 	}
