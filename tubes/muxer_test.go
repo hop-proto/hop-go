@@ -2,6 +2,7 @@ package tubes
 
 import (
 	"errors"
+	"io"
 	"net"
 	"runtime"
 	"sync"
@@ -34,6 +35,64 @@ type blockingWriteMsgConn struct {
 type stopResult struct {
 	sendErr error
 	recvErr error
+}
+
+// singleReadMsgConn returns one scripted message and then EOF. It lets receiver
+// tests exercise a complete dispatch iteration without starting a full Muxer or
+// leaving its receiver blocked on transport input.
+type singleReadMsgConn struct {
+	*blockingWriteMsgConn
+	message []byte
+	read    bool
+}
+
+func newSingleReadMsgConn(message []byte) *singleReadMsgConn {
+	return &singleReadMsgConn{
+		blockingWriteMsgConn: newBlockingWriteMsgConn(),
+		message:              message,
+	}
+}
+
+func (c *singleReadMsgConn) ReadMsg(b []byte) (int, error) {
+	if c.read {
+		return 0, io.EOF
+	}
+	c.read = true
+	return copy(b, c.message), nil
+}
+
+// gatedWriteMsgConn reports each selected frame before allowing WriteMsg to
+// return. While the Muxer sender is parked in WriteMsg, tests can
+// deterministically arrange waiting producers on the production unbuffered
+// outbox queues.
+type gatedWriteMsgConn struct {
+	*blockingWriteMsgConn
+	writeCalls chan []byte
+	release    chan struct{}
+}
+
+func newGatedWriteMsgConn() *gatedWriteMsgConn {
+	return &gatedWriteMsgConn{
+		blockingWriteMsgConn: newBlockingWriteMsgConn(),
+		writeCalls:           make(chan []byte),
+		release:              make(chan struct{}),
+	}
+}
+
+func (c *gatedWriteMsgConn) WriteMsg(b []byte) error {
+	written := append([]byte(nil), b...)
+	select {
+	case c.writeCalls <- written:
+	case <-c.closed:
+		return net.ErrClosed
+	}
+
+	select {
+	case <-c.release:
+		return nil
+	case <-c.closed:
+		return net.ErrClosed
+	}
 }
 
 func newBlockingWriteMsgConn() *blockingWriteMsgConn {
@@ -109,6 +168,141 @@ func (c *blockingWriteMsgConn) WriteMsg(b []byte) error {
 	case <-c.closed:
 		return net.ErrClosed
 	}
+}
+
+func TestMuxerReceiverIgnoresRemoteRequestWhileStopping(t *testing.T) {
+	tests := []struct {
+		name     string
+		reliable bool
+	}{
+		{name: "Unreliable"},
+		{name: "Reliable", reliable: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := (&initiateFrame{
+				tubeID:   2,
+				tubeType: common.ExecTube,
+				flags:    frameFlags{REQ: true, REL: test.reliable},
+			}).toBytes()
+			conn := newSingleReadMsgConn(request)
+			stopping := make(chan struct{})
+			close(stopping)
+			muxer := &Muxer{
+				reliableTubes:   make(map[byte]*Reliable),
+				unreliableTubes: make(map[byte]*Unreliable),
+				tubeQueue:       make(chan Tube, 1),
+				stopping:        stopping,
+				underlying:      conn,
+				log:             logrus.WithField("test", t.Name()),
+				readBuf:         make([]byte, 65535),
+				receiverErr:     make(chan error, 1),
+			}
+			muxer.state.Store(muxerStopping)
+
+			recovered := make(chan any, 1)
+			go func() {
+				defer func() {
+					recovered <- recover()
+				}()
+				muxer.receiver()
+			}()
+
+			select {
+			case panicValue := <-recovered:
+				if panicValue != nil {
+					t.Fatalf("Muxer receiver panicked on a remote request after stopping: %v", panicValue)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("Muxer receiver did not finish after its scripted input")
+			}
+
+			select {
+			case tube := <-muxer.tubeQueue:
+				t.Fatalf("Muxer receiver queued a tube after stopping: %#v", tube)
+			default:
+			}
+		})
+	}
+}
+
+func TestMuxerSenderDoesNotStarveNormalTraffic(t *testing.T) {
+	const maxConsecutivePriority = 8
+
+	conn := newGatedWriteMsgConn()
+	stopped := make(chan struct{})
+	close(stopped)
+	muxer := &Muxer{
+		outbound:   newOutbox(),
+		stopped:    stopped,
+		underlying: conn,
+		senderErr:  make(chan error, 1),
+		log:        logrus.WithField("test", t.Name()),
+	}
+	muxer.state.Store(muxerStopping)
+
+	var producers sync.WaitGroup
+	startProducer := func(frame outboundFrame, started chan<- struct{}) {
+		producers.Add(1)
+		go func() {
+			defer producers.Done()
+			started <- struct{}{}
+			_ = muxer.outbound.enqueue(frame, nil)
+		}()
+	}
+
+	go muxer.sender()
+	t.Cleanup(func() {
+		muxer.outbound.abort(errors.New("test cleanup"))
+		_ = conn.Close()
+		select {
+		case <-muxer.senderErr:
+		case <-time.After(time.Second):
+			t.Error("Muxer sender did not stop during cleanup")
+		}
+		producers.Wait()
+	})
+
+	primeStarted := make(chan struct{}, 1)
+	startProducer(outboundFrame{bytes: []byte("prime")}, primeStarted)
+	<-primeStarted
+	select {
+	case got := <-conn.writeCalls:
+		assert.DeepEqual(t, got, []byte("prime"))
+	case <-time.After(time.Second):
+		t.Fatal("Muxer sender did not select the priming frame")
+	}
+
+	// The sender is now blocked in the priming WriteMsg. Park one normal
+	// producer and enough priority producers to exceed the permitted burst.
+	producerCount := maxConsecutivePriority + 2
+	started := make(chan struct{}, producerCount)
+	startProducer(outboundFrame{bytes: []byte("normal")}, started)
+	for i := 0; i < producerCount-1; i++ {
+		startProducer(outboundFrame{bytes: []byte{byte(i)}, priority: true}, started)
+	}
+	for i := 0; i < producerCount; i++ {
+		<-started
+	}
+	// Every producer has reached its enqueue call while there is no outbox
+	// receiver. Yield until each has had an opportunity to park on its send.
+	for i := 0; i < producerCount; i++ {
+		runtime.Gosched()
+	}
+
+	for consecutivePriority := 0; consecutivePriority <= maxConsecutivePriority; consecutivePriority++ {
+		conn.release <- struct{}{}
+		select {
+		case got := <-conn.writeCalls:
+			if string(got) == "normal" {
+				return
+			}
+		case <-time.After(time.Second):
+			t.Fatal("Muxer sender did not select another waiting frame")
+		}
+	}
+
+	t.Fatalf("normal traffic was starved for more than %d consecutive priority frames", maxConsecutivePriority)
 }
 
 func TestMuxerSenderPrefersWaitingPriorityFrame(t *testing.T) {
